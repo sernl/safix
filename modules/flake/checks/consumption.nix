@@ -41,10 +41,15 @@
 # `safixBeforeCheckLinkTargets`; the sops-nix half of that pair fails if sops-nix
 # ever pins its own entry, which is the day this guard stops being needed.
 # `inert` is held by two independent gates — `mkIf cfg.enable` outside and
-# `sopsCfg.secrets != { }` on the preflight — so removing either alone leaves it
-# green and removing both turns `inert.preflight` red. That is the drill, and the
-# redundancy is deliberate: the inner gate is what covers a consumer who sets
-# `safix.enable = true` by hand over an empty resolution.
+# `sopsCfg.secrets != { }` on the preflight — so removing either alone leaves
+# `inert.preflight` green and removing both turns it red. That is the drill, and
+# the redundancy is deliberate: the inner gate is what covers a consumer who sets
+# `safix.enable = true` by hand over an empty resolution. `inert.identity`
+# separates them: it reads the ssh key path the fixture profile names, which only
+# the outer gate withholds, so dropping that gate alone turns it red.
+# Rewording `missingLibMessage` so it stops naming an option fails
+# `flakeWithoutLib.namesTheOptions` while `refuses` stays green, which is the
+# point of holding the two apart.
 # Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
 # dropping the ownership fields from the system materialization fails
 # `systemCarriesOwnership`.
@@ -415,11 +420,20 @@ in
                 ) == sortNames (builtins.attrNames moduleView);
 
               # A person who resolves nothing defines nothing.
+              #
+              # `identity` is the severe half. The fixture profile names an ssh
+              # key path, and sops-nix's own defaults for both fields are the
+              # empty ones, so these read as untouched only while the enable gate
+              # holds — dropping it puts the named path here.
               inert = {
                 secrets = inertProfile.config.sops.secrets;
                 preflight = inertProfile.config.home.activation ? safixIdentityPreflight;
                 unit = inertProfile.config.systemd.user.services ? sops-nix;
                 evaluates = builtins.isAttrs inertProfile.config.home.activation;
+                identity = {
+                  keyFile = inertProfile.config.sops.age.keyFile;
+                  sshKeyPaths = inertProfile.config.sops.age.sshKeyPaths;
+                };
               };
 
               # The user-scope half of the ownership asymmetry. The system half is
@@ -452,6 +466,10 @@ in
                 preflight = false;
                 unit = false;
                 evaluates = true;
+                identity = {
+                  keyFile = null;
+                  sshKeyPaths = [ ];
+                };
               };
 
               userScopeRefusesOwnership = true;
@@ -515,13 +533,22 @@ in
                   inherit hostname;
                 } == [ ];
 
-              # safix.flake pointed at something carrying no projection.
-              flakeWithoutLib =
-                fires
-                  (mkHome "ana" [
-                    config.flake.homeModules.default
-                    { safix.flake = { }; }
-                  ]).config.safix.lib;
+              # safix.flake pointed at something carrying no projection. The
+              # message is held beside the refusal, and read off the named
+              # string rather than off the throw, because `builtins.tryEval`
+              # reports that something fired and never what it said.
+              flakeWithoutLib = {
+                refuses =
+                  fires
+                    (mkHome "ana" [
+                      config.flake.homeModules.default
+                      { safix.flake = { }; }
+                    ]).config.safix.lib;
+                namesTheOptions = names [
+                  "safix.flake"
+                  "safix.lib"
+                ] [ homeCommon.missingLibMessage ];
+              };
 
               # Violations are reported together, by safix, naming the namespace
               # they belong to.
@@ -554,7 +581,10 @@ in
                 establishesNothing = true;
               };
               boundProfileIsQuiet = true;
-              flakeWithoutLib = true;
+              flakeWithoutLib = {
+                refuses = true;
+                namesTheOptions = true;
+              };
               violations = {
                 refuses = true;
                 message = true;

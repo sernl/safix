@@ -21,6 +21,22 @@ let
 
   scopeNoun = if scope == "system" then "system configuration" else "home-manager profile";
 
+  # Named rather than inline in the `throw` for the same reason as
+  # `violationMessage` below: what a consumer reads here is the whole value of
+  # the refusal, and a message assembled inside a `throw` is one no check can
+  # hold.
+  missingLibMessage = ''
+    safix: safix.flake was set to a value carrying no `safix.lib`.
+
+    safix.lib is published by flake-parts as the `safix` output of a flake that
+    imports inputs.safix.flakeModules.default. A flake that does not import it
+    has no safix outputs at all, which is the usual cause; passing something
+    other than a flake is the other.
+
+    Set safix.flake to your own flake — `inputs.self` from inside it — or set
+    safix.lib directly to the projection.
+  '';
+
   # Built by a named function rather than inline in the `throw` so that a check
   # can read what a consumer would see. `builtins.tryEval` reports that a throw
   # fired and never what it said, so a message assembled inside one is a message
@@ -45,7 +61,7 @@ let
     '';
 in
 {
-  inherit violationMessage;
+  inherit missingLibMessage violationMessage;
 
   # The options that read the same in either scope. The four arguments are what
   # the scopes disagree about, passed in rather than branched on, so a scope that
@@ -103,17 +119,7 @@ in
           if cfg.flake == null then
             null
           else
-            cfg.flake.safix.lib or (throw ''
-              safix: safix.flake was set to a value carrying no `safix.lib`.
-
-              safix.lib is published by flake-parts as the `safix` output of a
-              flake that imports inputs.safix.flakeModules.default. A flake that
-              does not import it has no safix outputs at all, which is the usual
-              cause; passing something other than a flake is the other.
-
-              Set safix.flake to your own flake — `inputs.self` from inside it —
-              or set safix.lib directly to the projection.
-            '');
+            cfg.flake.safix.lib or (throw missingLibMessage);
         defaultText = lib.literalExpression "config.safix.flake.safix.lib";
         description = ''
           The resolver projection safix derives from the declarations: the
