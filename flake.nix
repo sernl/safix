@@ -34,6 +34,7 @@
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/generators.nix
         ./modules/flake/checks/materialization.nix
+        ./modules/flake/checks/namespace.nix
         ./modules/flake/checks/policy.nix
         ./modules/flake/devshell.nix
         ./modules/flake/safix
