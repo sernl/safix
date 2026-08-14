@@ -49,7 +49,12 @@ in
   };
 
   config = lib.mkMerge [
-    { safix.secrets = common.resolvedFor { inherit cfg; target = config; }; }
+    {
+      safix.secrets = common.resolvedFor {
+        inherit cfg;
+        target = config;
+      };
+    }
 
     (lib.mkIf cfg.enable {
       assertions = common.assertionsFor cfg;

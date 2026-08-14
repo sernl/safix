@@ -70,7 +70,7 @@ in
           ana-alone = {
             mode = "0440";
             sopsKey = "ana_alone";
-            path = cfg: "${cfg.home}/.config/safix-fixture/ana-alone";
+            path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/ana-alone";
           };
 
           # Held by ana and granted onward, which is what gives ana and bo a

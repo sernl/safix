@@ -1,0 +1,447 @@
+# Holds the consumption modules to the wiring they replace, judged by evaluating
+# real profiles rather than the modules on their own.
+#
+# ── the equivalence ──
+# The claim is that a profile naming a person and a host establishes exactly what
+# the hand-written wiring establishes. So two home-manager configurations are
+# evaluated over one fixture fleet: one in the consumer form — import, `safix.lib`,
+# `safix.user`, `safix.hostname`, `safix.identity.sshKeyPaths` — and one wiring the
+# resolver into sops-nix directly, in the shape of the file the module replaces.
+# Both are read back through sops-nix's own option types, entry by entry and field
+# by field, so a field safix stopped emitting or started emitting shows up.
+#
+# ── the ordering ──
+# The preflight's failure message claims that nothing was linked. That claim is
+# entirely a claim about where the entry sorts, so the activation DAG of a real
+# profile is topologically sorted and the index held: safix's entry before
+# `checkLinkTargets`, sops-nix's own entry after it. The second half is the reason
+# the first exists and is asserted rather than described.
+#
+# ── which person appears at which scope ──
+# The system-scope configuration resolves bo rather than ana. ana's `ana-alone`
+# declares its path as a function of a home-manager configuration —
+# `cfg.home.homeDirectory` — so her set is materializable in a profile and not in
+# a system configuration. That is a property of that one declaration and the
+# `path`-is-a-function-of-the-consuming-configuration contract, not of safix, and
+# it is not assertable here: it surfaces as a missing attribute rather than a
+# `throw`, and `builtins.tryEval` catches only thrown and asserted errors.
+# `selectionIsScopeFree` carries the claim that survives — that what arrives at
+# either scope is exactly what the scope-free resolver selected — on each side.
+#
+# ── severity, one drill per claim ──
+# Pointing the module form at another person, another host, or the other scope
+# fails `equivalence`. Dropping a field from `materializeFor` fails it too, from
+# the other side, because the hand form goes through the same function and the
+# expected literal beside it does not.
+# Replacing `entryBefore [ "checkLinkTargets" ]` with a bare string fails
+# `ordering.safixBeforeCheckLinkTargets`; the sops-nix half of that pair fails if
+# sops-nix ever pins its own entry, which is the day this guard stops being needed.
+# Removing the `mkIf cfg.enable` gate fails `inert`, since an unresolving person
+# would then gain an activation entry and a unit.
+# Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
+# dropping the ownership fields from the system materialization fails
+# `systemCarriesOwnership`.
+# Making the module system merge duplicate declarations rather than refuse them
+# fails `safix-module-collision`, which is the fact the two export forms exist for.
+{
+  config,
+  inputs,
+  lib,
+  self,
+  ...
+}:
+let
+  hmLib = inputs.home-manager.lib;
+
+  # Two distinct store paths holding byte-identical content. `builtins.path`
+  # names them differently, which is the whole of what makes them distinct: the
+  # module system keys a path module on its path, so this is the minimal
+  # construction of "the same module, imported from two places".
+  copyOf =
+    name: path:
+    builtins.path {
+      inherit name path;
+    };
+
+  collisionA = copyOf "safix-collision-a" ./collision-fixture;
+  collisionB = copyOf "safix-collision-b" ./collision-fixture;
+
+  # sops-nix's own home-manager module, copied to a second store path. This is
+  # what a consumer pinning a different sops-nix revision produces, and it is
+  # measured against the real module rather than against the synthetic one above.
+  sopsHomeCopy = copyOf "sops-nix-home-copy" "${inputs.sops-nix}/modules/home-manager";
+
+in
+{
+  perSystem =
+    { pkgs, system, ... }:
+    let
+      safix = config.flake.safix.lib;
+      mkStructuralCheck = import ./mk-structural-check.nix pkgs;
+
+      # Whether a set of modules declares its options exactly once, judged by
+      # forcing one option's declaration. The forcing is what makes the claim: a
+      # duplicate declaration is not detected when the module list is built, only
+      # when the option it collides on is merged, so a probe that stopped at
+      # `evalModules` would report every list as fine.
+      #
+      # The modules under test are evaluated alone rather than inside their host
+      # module system, so `_module.check = false` admits their definitions of
+      # options their host would have declared. None of those are forced.
+      declaresOnce =
+        { modules, option }:
+        (builtins.tryEval (
+          let
+            evaluated = lib.evalModules {
+              modules = modules ++ [
+                { _module.check = false; }
+                { _module.args.pkgs = pkgs; }
+                { _module.args.utils = { }; }
+              ];
+            };
+          in
+          builtins.seq (lib.getAttrFromPath option evaluated.options).type true
+        )).success;
+
+      hostname = "workstation";
+
+      # Everything a home-manager profile needs before it is a profile at all,
+      # and nothing else. The username is the fixture person's, so
+      # `safix.user`'s default is exercised by omission in the module form.
+      baseProfile = user: {
+        home = {
+          username = user;
+          homeDirectory = "/home/${user}";
+          stateVersion = "24.05";
+        };
+      };
+
+      mkHome =
+        user: modules:
+        hmLib.homeManagerConfiguration {
+          inherit pkgs;
+          modules = [ (baseProfile user) ] ++ modules;
+        };
+
+      # The consumer form. `safix.user` is deliberately left to its default so
+      # that the default is under test alongside the rest.
+      moduleForm =
+        user:
+        mkHome user [
+          config.flake.homeModules.default
+          {
+            safix = {
+              lib = safix;
+              inherit hostname;
+              identity.sshKeyPaths = [ "/home/${user}/.ssh/agenix" ];
+            };
+          }
+        ];
+
+      # The wiring the module replaces, in the shape of the file it replaces:
+      # sops-nix imported directly, the identity set on sops-nix's own options,
+      # and the resolver called and assigned into `sops.secrets`.
+      handForm =
+        user:
+        mkHome user [
+          inputs.sops-nix.homeManagerModules.sops
+          (
+            { config, ... }:
+            {
+              sops = {
+                age.keyFile = null;
+                age.sshKeyPaths = [ "/home/${user}/.ssh/agenix" ];
+                secrets = safix.materialize {
+                  inherit user hostname;
+                  tags = [ ];
+                  scope = "user";
+                } config;
+              };
+            }
+          )
+        ];
+
+      # Every field of every entry as sops-nix's own option type resolved it,
+      # with the encrypted file reduced to its path within this flake's source
+      # so the comparison is not against a store hash.
+      viewOf =
+        secrets:
+        lib.mapAttrs (
+          _name: secret:
+          lib.filterAttrs (n: _: n != "_module" && n != "sopsFile") secret
+          // {
+            sopsFile = lib.removePrefix (toString self) (toString secret.sopsFile);
+          }
+        ) secrets;
+
+      moduleView = viewOf (moduleForm "ana").config.sops.secrets;
+      handView = viewOf (handForm "ana").config.sops.secrets;
+
+      # A person who resolves nothing on this host: cy records a recipient and
+      # holds no entry, so every audience excludes them.
+      inertProfile = moduleForm "cy";
+
+      activationOrder =
+        profile:
+        let
+          sorted = hmLib.hm.dag.topoSort profile.config.home.activation;
+        in
+        map (entry: entry.name) sorted.result;
+
+      anaOrder = activationOrder (moduleForm "ana");
+
+      indexOf = order: name: lib.lists.findFirstIndex (n: n == name) null order;
+
+      before =
+        order: a: b:
+        let
+          ia = indexOf order a;
+          ib = indexOf order b;
+        in
+        ia != null && ib != null && ia < ib;
+
+      fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
+
+      # bo declares ownership fields, which the user scope has no axis for.
+      boUserProfile = (moduleForm "bo").config.sops.secrets;
+
+      nixosFor =
+        user:
+        inputs.nixpkgs.lib.nixosSystem {
+          modules = [
+            config.flake.nixosModules.default
+            {
+              nixpkgs.hostPlatform = system;
+              networking.hostName = "server";
+              system.stateVersion = "24.05";
+              safix = {
+                lib = safix;
+                inherit user;
+              };
+            }
+          ];
+        };
+
+      systemView = viewOf (nixosFor "bo").config.sops.secrets;
+
+      sortNames = lib.sort (a: b: a < b);
+    in
+    {
+      # The NixOS half evaluates a system configuration, which only resolves on a
+      # Linux host platform; the home-manager half holds on every system safix
+      # supports.
+      checks =
+        lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          # Scope is a property of the module and of nothing a consumer declares,
+          # so one fleet reaches both, and the ownership axis the system scope has
+          # and the user scope does not is read off the arrival rather than
+          # restated.
+          safix-consumption-system = mkStructuralCheck {
+            name = "safix-consumption-system";
+            actual = {
+              established = sortNames (builtins.attrNames systemView);
+              systemCarriesOwnership = lib.getAttrs [
+                "owner"
+                "group"
+                "mode"
+              ] systemView.bo-service;
+              hostnameFromTheHost = (nixosFor "bo").config.safix.hostname;
+
+              # Selection is custody and custody has no scope: what arrives at the
+              # system scope is exactly what the scope-free resolver selected.
+              # The home side of the same claim is in `safix-consumption`.
+              selectionIsScopeFree =
+                sortNames (
+                  safix.resolveNames {
+                    user = "bo";
+                    hostname = "server";
+                    tags = [ ];
+                  }
+                ) == sortNames (builtins.attrNames systemView);
+            };
+            expected = {
+              established = [
+                "bo-service"
+                "ops-handover"
+                "ops-tooling"
+                "team-vault"
+              ];
+              systemCarriesOwnership = {
+                owner = "bo";
+                group = "staff";
+                mode = "0400";
+              };
+              hostnameFromTheHost = "server";
+              selectionIsScopeFree = true;
+            };
+          };
+        }
+        // {
+          # The fact both export forms exist for. Asserted about the module system
+          # rather than about safix, because that is where it lives, and about
+          # sops-nix's real module as well as a synthetic one, because the
+          # synthetic one could agree with a module system that had grown a
+          # special case for large modules.
+          safix-module-collision = mkStructuralCheck {
+            name = "safix-module-collision";
+            actual = {
+              samePathTwice = declaresOnce {
+                option = [
+                  "safixCollisionFixture"
+                  "thing"
+                ];
+                modules = [
+                  "${collisionA}/declaring-module.nix"
+                  "${collisionA}/declaring-module.nix"
+                ];
+              };
+              twoPaths = declaresOnce {
+                option = [
+                  "safixCollisionFixture"
+                  "thing"
+                ];
+                modules = [
+                  "${collisionA}/declaring-module.nix"
+                  "${collisionB}/declaring-module.nix"
+                ];
+              };
+
+              provisionerSamePathTwice = declaresOnce {
+                option = [
+                  "sops"
+                  "defaultSopsFormat"
+                ];
+                modules = [
+                  inputs.sops-nix.homeManagerModules.sops
+                  inputs.sops-nix.homeManagerModules.sops
+                ];
+              };
+              provisionerTwoPaths = declaresOnce {
+                option = [
+                  "sops"
+                  "defaultSopsFormat"
+                ];
+                modules = [
+                  inputs.sops-nix.homeManagerModules.sops
+                  "${sopsHomeCopy}/sops.nix"
+                ];
+              };
+            };
+            expected = {
+              samePathTwice = true;
+              twoPaths = false;
+              provisionerSamePathTwice = true;
+              provisionerTwoPaths = false;
+            };
+          };
+
+          safix-consumption = mkStructuralCheck {
+            name = "safix-consumption";
+            actual = {
+              # The consumer form and the wiring it replaces, entry by entry and
+              # field by field, through sops-nix's own option types.
+              equivalence = moduleView == handView;
+              established = sortNames (builtins.attrNames moduleView);
+              entry = moduleView.ana-alone;
+
+              # Selection is custody and custody has no scope: what arrived in the
+              # profile is exactly what the scope-free resolver selected.
+              selectionIsScopeFree =
+                sortNames (
+                  safix.resolveNames {
+                    user = "ana";
+                    inherit hostname;
+                    tags = [ ];
+                  }
+                ) == sortNames (builtins.attrNames moduleView);
+
+              # A person who resolves nothing defines nothing.
+              inert = {
+                secrets = inertProfile.config.sops.secrets;
+                preflight = inertProfile.config.home.activation ? safixIdentityPreflight;
+                unit = inertProfile.config.systemd.user.services ? sops-nix;
+                evaluates = builtins.isAttrs inertProfile.config.home.activation;
+              };
+
+              # The user-scope half of the ownership asymmetry. The system half is
+              # in `safix-consumption-system`, which only a Linux builder can
+              # evaluate.
+              userScopeRefusesOwnership = fires boUserProfile;
+            };
+
+            expected = {
+              equivalence = true;
+              established = [
+                "ana-alone"
+                "api-token"
+                "ops-handover"
+                "ops-tooling"
+                "team-vault"
+              ];
+              selectionIsScopeFree = true;
+              entry = {
+                format = "yaml";
+                key = "ana_alone";
+                mode = "0440";
+                name = "ana-alone";
+                path = "/home/ana/.config/safix-fixture/ana-alone";
+                sopsFile = "/secrets/safix/users/ana/secrets.yaml";
+              };
+
+              inert = {
+                secrets = { };
+                preflight = false;
+                unit = false;
+                evaluates = true;
+              };
+
+              userScopeRefusesOwnership = true;
+            };
+          };
+
+          safix-consumption-ordering = mkStructuralCheck {
+            name = "safix-consumption-ordering";
+            actual = {
+              present = builtins.elem "safixIdentityPreflight" anaOrder;
+
+              # The guarantee the preflight's own message rests on.
+              safixBeforeCheckLinkTargets = before anaOrder "safixIdentityPreflight" "checkLinkTargets";
+
+              # The reason it has to exist: sops-nix's entry is registered as a
+              # bare string, so it sorts wherever the DAG puts it, which is after
+              # the point at which a refusal would still be atomic.
+              provisionerAfterCheckLinkTargets = before anaOrder "checkLinkTargets" "sops-nix";
+
+              # Read, do not decrypt: the script names each configured identity and
+              # exits non-zero, and it invokes no decryptor. `runsTheDecryptor`
+              # matches the binary in the closure rather than the program's name,
+              # because the name appears in the remediation prose — which is the
+              # other claim here: the message narrows itself to what it checked
+              # rather than implying that a readable identity can open the files.
+              script =
+                let
+                  text = (moduleForm "ana").config.home.activation.safixIdentityPreflight.data;
+                in
+                {
+                  namesTheIdentity = lib.hasInfix "/home/ana/.ssh/agenix" text;
+                  refuses = lib.hasInfix "exit 1" text;
+                  runsTheDecryptor = lib.hasInfix "bin/sops-install-secrets" text;
+                  statesItsLimit = lib.hasInfix "readability" text && lib.hasInfix "not a recipient" text;
+                };
+            };
+
+            expected = {
+              present = true;
+              safixBeforeCheckLinkTargets = true;
+              provisionerAfterCheckLinkTargets = true;
+              script = {
+                namesTheIdentity = true;
+                refuses = true;
+                runsTheDecryptor = false;
+                statesItsLimit = true;
+              };
+            };
+          };
+        };
+    };
+}

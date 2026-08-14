@@ -135,41 +135,48 @@ let
   '';
 in
 {
-  options.safix = common.sharedOptions {
-    inherit cfg;
+  options.safix =
+    common.sharedOptions {
+      inherit cfg;
 
-    userDefault = config.home.username;
-    userDefaultText = lib.literalExpression "config.home.username";
+      userDefault = config.home.username;
+      userDefaultText = lib.literalExpression "config.home.username";
 
-    # Known only where home-manager is evaluated as a NixOS module, which is the
-    # only seam that hands a home-manager profile the host it is on. Standalone
-    # there is no honest default, so the assertion asks for one.
-    hostnameDefault = if osConfig == null then null else osConfig.networking.hostName;
-    hostnameDefaultText = lib.literalExpression "osConfig.networking.hostName, where home-manager is a NixOS module; null standalone";
-  }
-  // {
-    identityPreflight = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = ''
-        Whether to install the read-only identity check that sorts ahead of
-        `checkLinkTargets` and refuses the switch when no configured identity is
-        present and readable.
+      # Known only where home-manager is evaluated as a NixOS module, which is the
+      # only seam that hands a home-manager profile the host it is on. Standalone
+      # there is no honest default, so the assertion asks for one.
+      hostnameDefault =
+        if osConfig == null || !(osConfig ? networking) then null else osConfig.networking.hostName;
+      hostnameDefaultText = lib.literalExpression "osConfig.networking.hostName, where home-manager is a NixOS module; null standalone";
+    }
+    // {
+      identityPreflight = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether to install the read-only identity check that sorts ahead of
+          `checkLinkTargets` and refuses the switch when no configured identity is
+          present and readable.
 
-        On by default. It exists because sops-nix's own entry sorts after
-        `linkGeneration` and `reloadSystemd`, where a refusal is no longer
-        atomic, and because its entry cannot be pinned earlier — it restarts a
-        unit those two steps materialize.
+          On by default. It exists because sops-nix's own entry sorts after
+          `linkGeneration` and `reloadSystemd`, where a refusal is no longer
+          atomic, and because its entry cannot be pinned earlier — it restarts a
+          unit those two steps materialize.
 
-        It checks presence and readability and nothing further. It does not
-        decrypt, so a secret declared here but absent from the sops file still
-        fails later, in sops-install-secrets.
-      '';
+          It checks presence and readability and nothing further. It does not
+          decrypt, so a secret declared here but absent from the sops file still
+          fails later, in sops-install-secrets.
+        '';
+      };
     };
-  };
 
   config = lib.mkMerge [
-    { safix.secrets = common.resolvedFor { inherit cfg; target = config; }; }
+    {
+      safix.secrets = common.resolvedFor {
+        inherit cfg;
+        target = config;
+      };
+    }
 
     (lib.mkIf cfg.enable {
       assertions = common.assertionsFor cfg;

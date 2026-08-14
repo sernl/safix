@@ -53,8 +53,10 @@
 
       # The configuration an entry's `path` is a function of, standing in for the
       # consumer's own. Both scopes are handed the same one, so a difference
-      # between them is a difference safix made.
-      fixtureCfg.home = "/home/ana";
+      # between them is a difference safix made. Its shape is the one a real
+      # home-manager configuration has, so the fixture's `path` function is the
+      # expression a consumer would actually write.
+      fixtureCfg.home.homeDirectory = "/home/ana";
 
       materializedFor =
         user: hostname: scope:
