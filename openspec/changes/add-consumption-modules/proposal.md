@@ -22,10 +22,16 @@ The acceptance test is that the file above becomes roughly four lines with behav
 ## What Changes
 
 - Two new module outputs, each declaring a `safix.*` namespace inside the module system it serves, exactly as sops-nix declares `sops.*`: `homeModules.default` for a home-manager profile and `nixosModules.default` for a system configuration.
-- The namespace is consumption only. `safix.user`, `safix.hostname`, `safix.tags`, `safix.identity.*` and `safix.enable` all name *which already-declared secrets arrive here*; none of them declares a secret, a recipient, or an audience. Custody stays at `flake.safix.*`, where the declarations of every user are visible at once, because a single profile cannot compute an audience and `.sops.yaml` is repository-global.
-- The identity semantics the source repository paid for become the module's, with the guard in the same commit as the sentence describing it. `safix.identity.keyFile` defaults to null because sops-nix treats a set-but-missing key file as fatal, and `home.activation.safixIdentityPreflight` sorts before `checkLinkTargets` so a machine without a usable identity refuses the switch while refusing is still atomic.
-- Both modules ship in two forms, and the reason is a hard fact about the nix module system rather than a taste: importing two distinct copies of one declaring module is an evaluation error, not a no-op. `homeModules.default` imports sops-nix for a consumer who has not; `homeModules.safix` declares the same namespace and imports nothing, for a consumer who already has sops-nix in their tree at a revision of their own choosing. `nixosModules` mirrors both.
-- Resolver refusals surface as safix's own evaluation errors. A custody violation is reported by this module naming the declarations that broke, not as a stack trace from inside the provisioner's manifest generation.
+- The namespace is consumption only.
+  `safix.user`, `safix.hostname`, `safix.tags`, `safix.identity.*` and `safix.enable` all name *which already-declared secrets arrive here*; none of them declares a secret, a recipient, or an audience.
+  Custody stays at `flake.safix.*`, where the declarations of every user are visible at once, because a single profile cannot compute an audience and `.sops.yaml` is repository-global.
+- The identity semantics the source repository paid for become the module's, with the guard in the same commit as the sentence describing it.
+  `safix.identity.keyFile` defaults to null because sops-nix treats a set-but-missing key file as fatal, and `home.activation.safixIdentityPreflight` sorts before `checkLinkTargets` so a machine without a usable identity refuses the switch while refusing is still atomic.
+- Both modules ship in two forms, and the reason is a hard fact about the nix module system rather than a taste: importing two distinct copies of one declaring module is an evaluation error, not a no-op.
+  `homeModules.default` imports sops-nix for a consumer who has not; `homeModules.safix` declares the same namespace and imports nothing, for a consumer who already has sops-nix in their tree at a revision of their own choosing.
+  `nixosModules` mirrors both.
+- Resolver refusals surface as safix's own evaluation errors.
+  A custody violation is reported by this module naming the declarations that broke, not as a stack trace from inside the provisioner's manifest generation.
 - An empty resolved set is a no-op module: nothing defined, no activation entry, no unit.
 
 Not in scope: any edit to `<dotfiles>`; any change to the custody namespace, the resolver, the policy renderer, or the CLI; darwin-specific arrival beyond what sops-nix already handles; and a system-scope preflight guard, because no atomic refusal point has been demonstrated at system activation and this change does not describe guarantees it has not built.
