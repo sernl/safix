@@ -154,6 +154,11 @@ None of it is portable.
 It becomes a hook option — a consumer-supplied script or function that `adduser` invokes with the new user's name and recipient after the safix-owned scaffolding is written, whose absence means `adduser` simply does less.
 A hook rather than a plugin interface because the surface is one call with two arguments, and the source repository's implementation is the proof that one call is enough.
 
+Three details settled during the port.
+`--host` survives as a flag whose only effect is to reach the hook as further arguments, and it is refused with the reason when no hook is configured, because a hostname silently discarded is worse than one that says where it would have gone.
+The hook runs after safix's own commit rather than before it, so that whatever the hook writes stays uncommitted and safix's single-intent commit names only what safix did; a hook that wants its work committed commits it.
+And the scaffold is written to `safix/users/<name>.nix`, a path under a directory of safix's own rather than a guess at the consumer's tree — declarations merge from anywhere, so the file resolves identically wherever it is moved to, and the epilogue says so.
+
 ### D10. Both scopes are served, from one declaration
 
 sops-nix has a NixOS module and a home-manager module, and a resolved entry materializes into either.
@@ -208,5 +213,6 @@ Byte-identical is the gate, because it is the one comparison that proves no audi
 
 Should the dev-only inputs move out of this flake before the first consumer arrives, and if so into a `dev/` sub-flake or behind `follows` guidance alone?
 
-Is the `adduser` hook one call, or does the source repository's implementation reveal a second call site once it is rewritten against the hook?
-This resolves during the port rather than before it, and D9 commits to one call until it does not.
+Resolved during the port: the `adduser` hook is one call.
+Rewriting the source repository's host attachment against it revealed no second call site — the identifier allocation, the account module and the imports edit all sit after the same point in the sequence and take the same two facts, so they compose inside one hook body rather than needing a second hook to hang off.
+D9 records the three details that settled with it.

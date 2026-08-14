@@ -46,21 +46,21 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 
 ## 5. The command
 
-- [ ] 5.1 Port `<dotfiles>/modules/flake/secrets/sops_recipients.py` and `sops_keys.py`, which read a file's recipients and its populated keys without decrypting
-- [ ] 5.2 Port `<dotfiles>/modules/flake/secrets/home-secret.sh` to `modules/flake/safix/safix.sh`, renaming the program and the evaluation attributes it reads, and keeping the subcommand set
-- [ ] 5.3 Port the command's self-test from `<dotfiles>/modules/flake/secrets/home-secret-selftest.sh`, rebasing every fixture onto keys minted in a scratch directory at test time
-- [ ] 5.4 Confirm the self-test creates its own encrypted fixtures from its own keys and copies no ciphertext from anywhere
-- [ ] 5.5 Package the command with its runtime tools pinned into its closure, and run shellcheck over the script as part of the build
-- [ ] 5.6 Rewrite the help text: keep the recorded absences of the upload, export, and import verbs and the reasons for them, and drop the framing that explains them as a correspondence to another tool
-- [ ] 5.7 Verify: the self-test passes, and a value set through `set` and read back through `get` round-trips byte-for-byte including trailing-newline handling
+- [x] 5.1 Port `<dotfiles>/modules/flake/secrets/sops_recipients.py` and `sops_keys.py`, which read a file's recipients and its populated keys without decrypting
+- [x] 5.2 Port `<dotfiles>/modules/flake/secrets/home-secret.sh` to `modules/flake/safix/safix.sh`, renaming the program and the evaluation attributes it reads, and keeping the subcommand set
+- [x] 5.3 Port the command's self-test from `<dotfiles>/modules/flake/secrets/home-secret-selftest.sh`, rebasing every fixture onto keys minted in a scratch directory at test time
+- [x] 5.4 Confirm the self-test creates its own encrypted fixtures from its own keys and copies no ciphertext from anywhere
+- [x] 5.5 Package the command with its runtime tools pinned into its closure, and run shellcheck over the script as part of the build
+- [x] 5.6 Rewrite the help text: keep the recorded absences of the upload, export, and import verbs and the reasons for them, and drop the framing that explains them as a correspondence to another tool
+- [x] 5.7 Verify: the self-test passes, and a value set through `set` and read back through `get` round-trips byte-for-byte including trailing-newline handling
 
 ## 6. Onboarding narrows and the hook appears
 
-- [ ] 6.1 Strip host attachment from `adduser`: the identifier allocation, the per-host account module, the host imports edit, and the refusal of hosts lacking a particular module
-- [ ] 6.2 Keep the recipient shape check and the refusal of a recipient requiring physical interaction, with the reason stated in the message
-- [ ] 6.3 Add the hook option: a consumer-supplied invocation receiving the new person's name and recipient, called after the safix-owned scaffolding is written
-- [ ] 6.4 Confirm `adduser` with no hook configured succeeds and its output names what it did and did not do
-- [ ] 6.5 Verify: an onboarding run in a scratch repository writes the person's declarations, regenerates the policy with their anchor and no rule, and mints nothing
+- [x] 6.1 Strip host attachment from `adduser`: the identifier allocation, the per-host account module, the host imports edit, and the refusal of hosts lacking a particular module
+- [x] 6.2 Keep the recipient shape check and the refusal of a recipient requiring physical interaction, with the reason stated in the message
+- [x] 6.3 Add the hook option: a consumer-supplied invocation receiving the new person's name and recipient, called after the safix-owned scaffolding is written
+- [x] 6.4 Confirm `adduser` with no hook configured succeeds and its output names what it did and did not do
+- [x] 6.5 Verify: an onboarding run in a scratch repository writes the person's declarations, regenerates the policy with their anchor and no rule, and mints nothing
 
 ## 7. Materialization into both scopes
 
