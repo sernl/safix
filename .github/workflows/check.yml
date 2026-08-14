@@ -1,0 +1,42 @@
+# Runs the flake's own check surface on every push and pull request.
+#
+# This file is inert until the repository has a remote: nothing here has run
+# yet, because nothing here has been pushed. It activates on the first push to
+# a GitHub remote, and the first run is therefore also the first evidence that
+# the checks pass anywhere other than the machine they were written on.
+#
+# `nix flake check` builds every check rather than only evaluating them, which
+# is the point: the command's self-tests drive the real sops, the real age and
+# the real git against a throwaway repository, and evaluation alone would prove
+# nothing about them.
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+
+      - name: nix flake check
+        run: nix flake check --print-build-logs
