@@ -899,8 +899,35 @@ let
       carried // privately // inbound
     );
 
+  # Named rather than inline in the `throw` below so that a check can read what a
+  # caller sees, and so that this refusal and `safix`'s own `refuse_unknown_user`
+  # stay the same sentence: the command and a profile reach the same declarations
+  # by different routes, and a person told two different things about one mistake
+  # has to work out that they are one mistake.
+  unknownUserMessage =
+    users: user:
+    ''
+      safix: '${user}' is not a declared user of flake.safix.users.
+
+      Declared users:
+    ''
+    + lib.concatMapStrings (u: "  - ${u}\n") (sortNames (builtins.attrNames users))
+    + ''
+
+      A profile selects with safix.user, which at user scope defaults to the
+      profile's own username, so an account name that differs from the
+      declaration key arrives here. Name one of the above, or declare this one in
+      flake.safix.users.
+    '';
+
   # Deny-wins resolution of one user's effective secrets for one host, over the
   # union of the three sources.
+  #
+  # The membership guard is first because every path into this file goes through
+  # here — the two consumption modules by way of `materializeFor`, and any direct
+  # `safix.lib` call — and an unguarded selection reports `attribute '<u>'
+  # missing` against a line of this file rather than the option that named a
+  # person nobody declared.
   selectFor =
     {
       users,
@@ -910,48 +937,51 @@ let
       hostname,
       tags,
     }:
-    let
-      profile = users.${user};
-      sources = sourcesOf { inherit users catalogue user; };
-
-      perTagSets = field: map (t: profile.perTag.${t}.${field} or { }) tags;
-
-      addSet = mergeSets (
-        [
-          (lib.mapAttrs (_n: s: s.override) sources)
-          (profile.perHost.${hostname}.add or { })
-        ]
-        ++ perTagSets "add"
-      );
-
-      omitSet = mergeSets ([ (profile.perHost.${hostname}.omit or { }) ] ++ perTagSets "omit");
-
-      forceSet = mergeSets ([ (profile.perHost.${hostname}.force or { }) ] ++ perTagSets "force");
-
-      selected = (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet;
-    in
-    lib.mapAttrs (
-      name: override:
+    if !(users ? ${user}) then
+      throw (unknownUserMessage users user)
+    else
       let
-        entry = applyOverride (
-          if sources ? ${name} then
-            sources.${name}.base
-          else
-            catalogueEntry catalogue user "perHost/perTag" name
-        ) override;
+        profile = users.${user};
+        sources = sourcesOf { inherit users catalogue user; };
 
-        # A name reaching the scope from nowhere else is this user's own; a name
-        # from a grant carries its owner, whose sharedWith is what widens the
-        # audience, so both parties derive the same file.
-        owner = sources.${name}.owner or user;
+        perTagSets = field: map (t: profile.perTag.${t}.${field} or { }) tags;
+
+        addSet = mergeSets (
+          [
+            (lib.mapAttrs (_n: s: s.override) sources)
+            (profile.perHost.${hostname}.add or { })
+          ]
+          ++ perTagSets "add"
+        );
+
+        omitSet = mergeSets ([ (profile.perHost.${hostname}.omit or { }) ] ++ perTagSets "omit");
+
+        forceSet = mergeSets ([ (profile.perHost.${hostname}.force or { }) ] ++ perTagSets "force");
+
+        selected = (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet;
       in
-      if isShared users catalogue user name && !(profile.carries ? ${name}) then
-        throw "safix placement: flake.safix.users.${user} resolves '${name}' on '${hostname}' through a perHost or perTag selection, but flake.safix.catalogue.${name} is shared and derives its audience from carries; one file serves every host, so a host-scoped selection would leave them reading a file they are not encrypted to. Name it in flake.safix.users.${user}.carries instead, and use perHost/perTag omit where a host should not resolve it"
-      else if entry.sopsFile != null then
-        throw "safix placement: flake.safix.users.${user} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${owner}.sharedWith instead"
-      else
-        entry // { sopsFile = root + "/${audienceFileOf (audienceOf users catalogue owner name)}"; }
-    ) selected;
+      lib.mapAttrs (
+        name: override:
+        let
+          entry = applyOverride (
+            if sources ? ${name} then
+              sources.${name}.base
+            else
+              catalogueEntry catalogue user "perHost/perTag" name
+          ) override;
+
+          # A name reaching the scope from nowhere else is this user's own; a name
+          # from a grant carries its owner, whose sharedWith is what widens the
+          # audience, so both parties derive the same file.
+          owner = sources.${name}.owner or user;
+        in
+        if isShared users catalogue user name && !(profile.carries ? ${name}) then
+          throw "safix placement: flake.safix.users.${user} resolves '${name}' on '${hostname}' through a perHost or perTag selection, but flake.safix.catalogue.${name} is shared and derives its audience from carries; one file serves every host, so a host-scoped selection would leave them reading a file they are not encrypted to. Name it in flake.safix.users.${user}.carries instead, and use perHost/perTag omit where a host should not resolve it"
+        else if entry.sopsFile != null then
+          throw "safix placement: flake.safix.users.${user} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${owner}.sharedWith instead"
+        else
+          entry // { sopsFile = root + "/${audienceFileOf (audienceOf users catalogue owner name)}"; }
+      ) selected;
 
   # The scoped view materialized into the shape the secret provisioner's option
   # tree takes. Split into a second application because `path` is a function of
@@ -1060,5 +1090,6 @@ in
     sourcesOf
     selectFor
     materializeFor
+    unknownUserMessage
     ;
 }

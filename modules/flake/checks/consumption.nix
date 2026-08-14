@@ -68,6 +68,10 @@
 # user scope defaults that option to the profile's own username and every
 # imported-but-unconfigured profile would then be refused. The pair is the
 # claim: a state that is silent and a state that must stay silent.
+# Removing the membership guard from `selectFor` fails
+# `undeclaredUser.refuses`, and only that field: the profile still fails
+# either way, but as `attribute 'zed' missing` against a line of resolve.nix,
+# which `fires` over safix's own option does not catch and no message names.
 # Pointing the second collision copy at the first's path fails `twoPaths`, which
 # is the drill for the check that the export shape rests on: it is only evidence
 # while the two paths really are two.
@@ -341,6 +345,16 @@ in
       identityGivenProfile = bareProfile "ana" [
         { safix.identity.sshKeyPaths = [ "/home/ana/.ssh/agenix" ]; }
       ];
+
+      # A person nobody declared. `safix.user` defaults to the profile's own
+      # username, so this is what any operating-system account whose name
+      # differs from its declaration key produces, and the identity is named so
+      # that this fixture tests one thing.
+      undeclaredUserProfile = bareProfile "zed" [
+        { safix.identity.sshKeyPaths = [ "/home/zed/.ssh/agenix" ]; }
+      ];
+
+      resolve = import ../safix/resolve.nix { inherit lib; };
 
       homeCommon = import ../../consume/common.nix {
         inherit lib;
@@ -704,6 +718,25 @@ in
                 withIdentity = sortNames (builtins.attrNames identityGivenProfile.config.safix.secrets);
               };
 
+              # A person nobody declared. Held here as well as in
+              # `safix-custody` because the two say different things: that one
+              # says the resolver refuses, and this one says the refusal reaches
+              # a profile through the module rather than surfacing as a missing
+              # attribute against a line of resolve.nix.
+              undeclaredUser = {
+                refuses = fires undeclaredUserProfile.config.safix.secrets;
+                namesTheDeclaredUsers =
+                  names
+                    [
+                      "'zed' is not a declared user of flake.safix.users"
+                      "safix.user"
+                      "  - ana\n"
+                      "  - bo\n"
+                      "  - cy\n"
+                    ]
+                    [ (resolve.unknownUserMessage config.flake.safix.users "zed") ];
+              };
+
               # Violations are reported together, by safix, naming the namespace
               # they belong to.
               violations = {
@@ -754,6 +787,10 @@ in
                   "ops-tooling"
                   "team-vault"
                 ];
+              };
+              undeclaredUser = {
+                refuses = true;
+                namesTheDeclaredUsers = true;
               };
               violations = {
                 refuses = true;

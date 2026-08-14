@@ -67,6 +67,11 @@
 # `legalSecretNameMessages` does not move under that drill and must not: it is
 # what says a predicate tightened to catch a traversal has not also started
 # refusing a leading digit, an underscore, or a single-character name.
+# Removing the membership guard from `selectFor` fails `undeclaredUserFires`
+# and `undeclaredUserMessage`. `fires` moves under that drill and is not
+# redundant with the message: without the guard the selection dies as
+# `attribute 'zed' missing` against a line of resolve.nix, which names no
+# declaration and no option, and which `builtins.tryEval` does not catch.
 # Scoping `violations` to the user under resolution rather than to the whole
 # record fails `dormantMessages` and `dormantFiresForOthers`: the broken
 # declaration belongs to a user no fixture resolves, which is the shape a
@@ -699,6 +704,17 @@
           legalSecretNameMessages = violationsOf legalSecretNames;
           legalSecretNameResolves = !(fires (resolvesFor legalSecretNames "ana"));
 
+          # Selecting for a person nobody declared. This is not a violation of
+          # the declarations — they may be entirely well-formed — but of the
+          # selection made against them, so it is refused where the selection
+          # happens rather than added to the list `violations` returns. Both
+          # halves are asserted: that the selection refuses, and what the
+          # refusal says, which is the whole of its value. The message is read
+          # off the named function because `builtins.tryEval` reports that
+          # something fired and never what it said.
+          undeclaredUserFires = fires (selectsFor legalSecretNames "zed");
+          undeclaredUserMessage = resolve.unknownUserMessage legalSecretNames "zed";
+
           # audienceFileOf has to be injective. Two audiences reaching one file
           # would give that file a single recipient rule naming one audience's
           # recipients while holding the other audience's secrets, and
@@ -913,6 +929,19 @@
           unsafeCarriedNameMessages = [
             "flake.safix.users.ana.carries names '../shared-token', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
           ];
+
+          undeclaredUserFires = true;
+          undeclaredUserMessage = ''
+            safix: 'zed' is not a declared user of flake.safix.users.
+
+            Declared users:
+              - ana
+
+            A profile selects with safix.user, which at user scope defaults to the
+            profile's own username, so an account name that differs from the
+            declaration key arrives here. Name one of the above, or declare this one in
+            flake.safix.users.
+          '';
 
           legalSecretNameMessages = [ ];
           legalSecretNameResolves = true;

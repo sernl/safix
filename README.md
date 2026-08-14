@@ -385,6 +385,9 @@ A profile that imports the module and sets nothing at all is a no-op, and so is 
 The last two are told apart by whether a definition for `safix.user` or `safix.hostname` exists, never by its value — at user scope that option defaults to the profile's own username, so every profile has a value for it.
 `safix-consumption-refusals` holds both directions, which is what stops the refusal from swallowing the no-op.
 
+Naming a person no `flake.safix.users` entry declares refuses as well, listing the declared users.
+That refusal sits in the resolver rather than in either module, so a direct `safix.lib` call and the `safix` command reach the same sentence the profile does — and it is likelier than it looks, since `safix.user` defaults to the profile's own username and an account name need not match its declaration key.
+
 ### Which of the two forms to import
 
 Each module ships twice.
