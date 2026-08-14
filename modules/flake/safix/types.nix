@@ -244,12 +244,18 @@ let
       owner = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Owning account of the decrypted file, or null to leave it to the provisioner. Only system scope has an ownership axis.";
+        description = ''
+          Owning account of the decrypted file, or null to leave it to the
+          provisioner. Only system scope has an ownership axis; the user-scope
+          materialization refuses an entry that sets this rather than dropping
+          it, because a dropped ownership field reads afterwards as an ownership
+          claim that was honoured.
+        '';
       };
       group = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Owning group of the decrypted file, or null to leave it to the provisioner. Only system scope has an ownership axis.";
+        description = "Owning group of the decrypted file, or null to leave it to the provisioner. Refused by the user-scope materialization on the same ground as `owner`.";
       };
       shared = lib.mkOption {
         type = lib.types.bool;
