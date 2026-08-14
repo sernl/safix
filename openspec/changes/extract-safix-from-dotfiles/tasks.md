@@ -26,8 +26,8 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 - [x] 2.3 Port the algebra from `<dotfiles>/modules/flake/secrets/_resolve.nix` into `modules/flake/safix/resolve.nix`, substituting the namespace throughout, until the suite from 2.1 is green
 - [x] 2.4 Confirm every refusal message names a path in safix's namespace and no message names an option path belonging to any consumer
 - [x] 2.5 Confirm the resolver takes the two records as arguments rather than reading configuration, which is what lets the suite exercise its error paths against synthetic fleets
-- [ ] 2.6 Port the generator suite from `<dotfiles>/modules/flake/secrets/generators.test.nix` under the same keep-synthetic rule, and make it green
-- [ ] 2.7 Verify: every refusal enumerated in design.md D8 has a test that asserts it fires, and each such test fails when the corresponding guard is disabled
+- [x] 2.6 Port the generator suite from `<dotfiles>/modules/flake/secrets/generators.test.nix` under the same keep-synthetic rule, and make it green
+- [x] 2.7 Verify: every refusal enumerated in design.md D8 has a test that asserts it fires, and each such test fails when the corresponding guard is disabled
 
 ## 3. Recipient policy renderer
 
