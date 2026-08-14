@@ -12,6 +12,7 @@ Add the input, import the module, declare a person.
 
 ```nix
 {
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
   inputs.flake-parts.url = "github:hercules-ci/flake-parts";
   inputs.safix.url = "github:you/safix";
 
