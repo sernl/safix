@@ -205,5 +205,3 @@ Should the dev-only inputs move out of this flake before the first consumer arri
 
 Is the `adduser` hook one call, or does the source repository's implementation reveal a second call site once it is rewritten against the hook?
 This resolves during the port rather than before it, and D9 commits to one call until it does not.
-
-Is MIT the license the operator wants, or is a copyleft licence a better fit for a package whose value is its refusals?
