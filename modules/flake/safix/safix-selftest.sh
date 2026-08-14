@@ -1523,6 +1523,11 @@ test_adduser_refusals() {
 
   # A hardware recipient, refused for what it cannot do rather than for its
   # shape: it is a well-formed recipient and activation still cannot use it.
+  #
+  # Synthetic, and only the `age1yubikey1` prefix is load-bearing — the refusal
+  # fires on that and never reaches the bech32 check, so no plausible-looking
+  # suffix is needed and none is used. A recipient copied from a real card would
+  # name a real device.
   bash "$SAFIX_SH" adduser cy \
     age1yubikey1fixture000000000000000000000000000000000000000000000000000 \
     --yes >/dev/null 2>&1 \
