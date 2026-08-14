@@ -41,7 +41,10 @@ let
   materialize = args: resolve.materializeFor (bound args);
 in
 {
-  imports = [ ./options.nix ];
+  imports = [
+    ./options.nix
+    ./package.nix
+  ];
 
   options.flake.safix = {
     extraGovernedFiles = lib.mkOption {

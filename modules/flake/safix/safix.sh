@@ -1527,21 +1527,27 @@ load_onboarding_hook() {
 }
 
 refuse_host_without_hook() {
-  {
-    printf '%s: --host was given and flake.safix.onboardingHook is unset.\n\n' "$PROG"
-    printf 'safix scaffolds a person'\''s custody declaration and regenerates the\n'
-    printf 'recipient policy. Attaching an account on a host is not one of those:\n'
-    printf 'allocating an identifier, writing a per-host account module and editing\n'
-    printf 'that host'\''s imports are all properties of one consumer'\''s module tree,\n'
-    printf 'and safix has no way to know its shape.\n\n'
-    printf 'Set the hook, which receives the name, the recipient and every --host\n'
-    printf 'given, and runs after the scaffolding is committed:\n\n'
-    printf '    flake.safix.onboardingHook = '\'\''\n'
-    printf '      name="$1"; recipient="$2"; shift 2\n'
-    printf '      for host in "$@"; do ... ; done\n'
-    printf '    '\'\'';\n\n'
-    printf 'Or drop --host: onboarding without it succeeds, having done less.\n'
-  } >&2
+  cat >&2 <<EOF
+$PROG: --host was given and flake.safix.onboardingHook is unset.
+
+safix scaffolds a person's custody declaration and regenerates the recipient
+policy. Attaching an account on a host is not one of those: allocating an
+identifier, writing a per-host account module and editing that host's imports
+are all properties of one consumer's module tree, and safix has no way to know
+its shape.
+
+Set the hook, which receives the name, the recipient and every --host given,
+and runs after the scaffolding is committed:
+
+    flake.safix.onboardingHook = ''
+      name="\$1"
+      recipient="\$2"
+      shift 2
+      for host in "\$@"; do ... ; done
+    '';
+
+Or drop --host: onboarding without it succeeds, having done less.
+EOF
   exit 1
 }
 

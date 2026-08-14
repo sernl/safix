@@ -35,9 +35,9 @@ def recipients_of(text):
 
     A file with no `sops:` block reports the sentinel rather than raising: a
     governed path holding one is either plaintext someone committed by mistake
-    or ciphertext from a store with a different metadata shape, and both must be
-    reported against the audience rather than crashing the reader that was
-    asked to inspect them.
+    or ciphertext from a store with a different metadata shape, and both
+    must be reported against the audience rather than crashing the reader
+    that was asked to inspect them.
     """
     document = yaml.safe_load(text)
     metadata = document.get("sops") if isinstance(document, dict) else None
