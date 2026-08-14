@@ -73,7 +73,7 @@ in
       # The configuration an entry's `path` is a function of. A fixture stands in
       # for the consumer's own config here, which is the whole reason `path` is a
       # function: safix cannot know the shape of the tree it lands in.
-      fixtureCfg.home = "/home/ana";
+      fixtureCfg.home.homeDirectory = "/home/ana";
 
       materializations = {
         ana-user = safix.materialize {
@@ -104,7 +104,7 @@ in
         users.ana.private.api-token.generator.runtimeInputs = [ "opensll" ];
       };
       collidingPaths = perturbed {
-        users.ana.private.api-token.path = cfg: "${cfg.home}/.config/safix-fixture/ana-alone";
+        users.ana.private.api-token.path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/ana-alone";
       };
 
       plan = policy.plan users catalogue;
