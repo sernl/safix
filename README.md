@@ -397,9 +397,12 @@ Each module ships twice.
 Import the second if you already import sops-nix anywhere in that profile, because importing two distinct copies of one option-declaring module is not a merge and not a warning:
 
 ```
-error: The option `sops.defaultSopsFormat' in `/nix/store/…-sops-nix-a/modules/home-manager/sops.nix'
-       is already declared in `/nix/store/…-sops-nix-b/modules/home-manager/sops.nix'.
+error: The option `sops.secrets' in `/nix/store/…-sops-nix-b/modules/home-manager/sops.nix'
+       is already declared in `/nix/store/…-sops-nix-a/modules/home-manager/sops.nix'.
 ```
+
+Which option the error names is a property of the evaluation rather than of the defect, so read the block as illustrative.
+A duplicate declaration is detected when an option is merged, not when the module list is built, so it is reported against whichever of the colliding declarations the configuration forces first — `sops.secrets` for a home-manager profile, `sops.gnupg.home` for a NixOS configuration.
 
 `safix-module-collision` holds that fact, against sops-nix's real module rather than a synthetic one, which is why the choice is offered as two imports rather than as an option: `imports` cannot depend on configuration, so no flag could repair it after the fact.
 A consumer whose `sops-nix` input `follows` safix's resolves to one store path and is safe either way.
