@@ -64,39 +64,39 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 
 ## 7. Materialization into both scopes
 
-- [ ] 7.1 Write the user-scope materialization against the secret provisioner's user-scope module, from the resolved entries
-- [ ] 7.2 Write the system-scope materialization against the same provisioner's system-scope module, carrying the ownership fields the user scope refuses
-- [ ] 7.3 Confirm one declaration materializes into both without any field naming a scope
-- [ ] 7.4 Verify: a fixture configuration of each scope builds, and the entry's mode, path, and key are identical in both
+- [x] 7.1 Write the user-scope materialization against the secret provisioner's user-scope module, from the resolved entries
+- [x] 7.2 Write the system-scope materialization against the same provisioner's system-scope module, carrying the ownership fields the user scope refuses
+- [x] 7.3 Confirm one declaration materializes into both without any field naming a scope
+- [x] 7.4 Verify: a fixture configuration of each scope builds, and the entry's mode, path, and key are identical in both
 
 ## 8. Checks, each with a severity drill
 
 Every check below gets a perturbation that must turn it red.
 A check that has never failed has not been shown to be able to.
 
-- [ ] 8.1 Policy drift: the committed policy differs from the generated one. Drill: edit one recipient in the committed file and confirm the check names the regenerating command
-- [ ] 8.2 Rule shape: every pattern is start-anchored, extension-terminated, and one directory level. Drill: strip the anchor, then replace the single-level wildcard with an unrestricted one, and confirm each perturbation fails independently and names the rule
-- [ ] 8.3 No catch-all: the policy contains no rule matching an unconstrained path. Drill: add one and confirm the check fails
-- [ ] 8.4 Path collision: two entries claiming one on-disk path. Drill: point a second entry at an occupied path and confirm the check fails naming both
-- [ ] 8.5 Runtime tool resolution: every generator's declared tools resolve against the package set. Drill: misspell one and confirm the build fails naming the generator
-- [ ] 8.6 Custody refusals: each refusal in design.md D8 has a check. Drill: for each, construct the offending fixture and confirm evaluation fails naming the declaration
-- [ ] 8.7 Audience separator: the separator joining a shared audience's members lies outside the name alphabet. Drill: change it to a character the alphabet admits and confirm the check fails
-- [ ] 8.8 Namespace isolation: no module in this repository reads an option path outside safix's namespace. Drill: add such a read and confirm the check fails naming the file
-- [ ] 8.9 Register every check in the flake's check surface and confirm each appears in `nix flake show`
+- [x] 8.1 Policy drift: the committed policy differs from the generated one. Drill: edit one recipient in the committed file and confirm the check names the regenerating command
+- [x] 8.2 Rule shape: every pattern is start-anchored, extension-terminated, and one directory level. Drill: strip the anchor, then replace the single-level wildcard with an unrestricted one, and confirm each perturbation fails independently and names the rule
+- [x] 8.3 No catch-all: the policy contains no rule matching an unconstrained path. Drill: add one and confirm the check fails
+- [x] 8.4 Path collision: two entries claiming one on-disk path. Drill: point a second entry at an occupied path and confirm the check fails naming both
+- [x] 8.5 Runtime tool resolution: every generator's declared tools resolve against the package set. Drill: misspell one and confirm the build fails naming the generator
+- [x] 8.6 Custody refusals: each refusal in design.md D8 has a check. Drill: for each, construct the offending fixture and confirm evaluation fails naming the declaration
+- [x] 8.7 Audience separator: the separator joining a shared audience's members lies outside the name alphabet. Drill: change it to a character the alphabet admits and confirm the check fails
+- [x] 8.8 Namespace isolation: no module in this repository reads an option path outside safix's namespace. Drill: add such a read and confirm the check fails naming the file
+- [x] 8.9 Register every check in the flake's check surface and confirm each appears in `nix flake show`
 
 ## 9. Documentation
 
-- [ ] 9.1 Grow the README from `<dotfiles>/docs/notes/development/home-secret-guide.md`, keeping the mental model, the private-versus-carried-versus-shared explanations, the generator narrative, and the placement-versus-custody distinction; substitute the namespace and drop the fleet-specific file table
-- [ ] 9.2 Write the worked adapter example: a consumer with its own user registry projecting it onto safix's user records
-- [ ] 9.3 Document the onboarding sequence end to end, with the operator's part and the person's part separated, and the disclosure about independent custody placed where the choice is made
-- [ ] 9.4 State the non-negotiable opinions as a section of their own, each with the failure it prevents
-- [ ] 9.5 Confirm no statement in the README describes a guarantee whose enforcing code is not already in this repository
-- [ ] 9.6 Replace the README's status section, which says the implementation is not here yet
+- [x] 9.1 Grow the README from `<dotfiles>/docs/notes/development/home-secret-guide.md`, keeping the mental model, the private-versus-carried-versus-shared explanations, the generator narrative, and the placement-versus-custody distinction; substitute the namespace and drop the fleet-specific file table
+- [x] 9.2 Write the worked adapter example: a consumer with its own user registry projecting it onto safix's user records
+- [x] 9.3 Document the onboarding sequence end to end, with the operator's part and the person's part separated, and the disclosure about independent custody placed where the choice is made
+- [x] 9.4 State the non-negotiable opinions as a section of their own, each with the failure it prevents
+- [x] 9.5 Confirm no statement in the README describes a guarantee whose enforcing code is not already in this repository
+- [x] 9.6 Replace the README's status section, which says the implementation is not here yet
 
 ## 10. Verification, build and evaluate only
 
-- [ ] 10.1 `nix flake check` green on the working platform, with every check from section 8 present
-- [ ] 10.2 The command's self-test green
-- [ ] 10.3 A scratch consumer flake, declaring two people and four secrets across four separate files, evaluates to the expected audiences, placements, and policy
-- [ ] 10.4 Confirm no file in this repository contains an encrypted value, and no file contains a recipient belonging to anyone
-- [ ] 10.5 Confirm the source repository is byte-identical to its state at the start of this change
+- [x] 10.1 `nix flake check` green on the working platform, with every check from section 8 present
+- [x] 10.2 The command's self-test green
+- [x] 10.3 A scratch consumer flake, declaring two people and four secrets across four separate files, evaluates to the expected audiences, placements, and policy
+- [x] 10.4 Confirm no file in this repository contains an encrypted value, and no file contains a recipient belonging to anyone
+- [x] 10.5 Confirm the source repository is byte-identical to its state at the start of this change
