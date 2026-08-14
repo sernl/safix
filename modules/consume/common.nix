@@ -59,9 +59,46 @@ let
       evaluation, where the trace names the provisioner and not the declaration
       that broke.
     '';
+
+  # User scope only, and named here rather than in ./home.nix for the same
+  # reason as the two above: a check can read a string off this file without
+  # evaluating a module, and a message assembled inside a `throw` is one nothing
+  # can hold. It names the user scope literally because there is no system-scope
+  # counterpart — sops-nix's NixOS module defaults `sops.age.sshKeyPaths` to the
+  # ed25519 keys of `config.services.openssh.hostKeys`, so a system
+  # configuration that names no identity usually still has one.
+  noIdentityMessage =
+    { cfg, resolved }:
+    ''
+      safix: ${toString (builtins.length (builtins.attrNames resolved))} secret(s) resolve for ${cfg.user} on ${cfg.hostname}, and this
+      home-manager profile names no decryption identity.
+
+      Name one:
+
+        safix.identity.sshKeyPaths = [ "/home/${cfg.user}/.ssh/id_ed25519" ];
+
+      or set safix.identity.keyFile to an age key file this machine holds.
+
+      Neither has a default at user scope, and that is not an omission.
+      sops-nix's home-manager module has no identity of its own to fall back on:
+      its NixOS module defaults sops.age.sshKeyPaths to the ed25519 keys of
+      config.services.openssh.hostKeys, and a person is not a host, so there is
+      no per-user equivalent to take. safix cannot supply one either — where a
+      person's key lives is a property of how their machine was provisioned, and
+      a keyFile that is set and turns out to be absent is fatal inside
+      sops-install-secrets rather than skipped, so a guessed default would abort
+      activation on every machine that lacks the path.
+
+      Set safix.enable = false to keep the declarations and suppress their
+      arrival here.
+
+      safix refuses first so that the refusal names these two options. The next
+      thing to refuse would be sops-nix's own key-source assertion, which names
+      its five and neither of safix's.
+    '';
 in
 {
-  inherit missingLibMessage violationMessage;
+  inherit missingLibMessage violationMessage noIdentityMessage;
 
   # The options that read the same in either scope. The four arguments are what
   # the scopes disagree about, passed in rather than branched on, so a scope that

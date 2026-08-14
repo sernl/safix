@@ -66,6 +66,14 @@ let
 
   guardedIdentities = requiredIdentities ++ sufficientIdentities;
 
+  # Whether anything at all can open a file here. safix's own two options rather
+  # than `sops.age.*`, because safix defines those from these and reading them
+  # back while `safix.secrets` is being forced is a cycle: `safix.enable`
+  # defaults to whether this resolved, and the definitions are gated on it.
+  # `sops.gnupg.*` is safe to read and is read, because safix defines none of it
+  # and a gnupg source decrypts on its own.
+  hasIdentity = cfg.identity.keyFile != null || cfg.identity.sshKeyPaths != [ ] || hasGnupgSource;
+
   note =
     identity: state: lib.escapeShellArg "${identity.path}  (${state}) — declared by ${identity.origin}";
 
@@ -172,10 +180,27 @@ in
 
   config = lib.mkMerge [
     {
-      safix.secrets = common.resolvedFor {
-        inherit cfg;
-        target = config;
-      };
+      # A `throw` rather than an assertion, and the difference is the whole
+      # point. sops-nix's key-source assertion sits inside its
+      # `mkIf (cfg.secrets != { })`, so collecting the assertion list forces
+      # `sops.secrets`, which forces this — and home-manager collects every
+      # failed assertion and prints them together, so an assertion here would
+      # arrive beside sops-nix's rather than instead of it. Throwing while
+      # `safix.secrets` is forced pre-empts the collection entirely.
+      # `safix-consumption-refusals` holds both halves, and holds them off a
+      # profile evaluated without home-manager's assertion wrapper, since a
+      # profile evaluated with it cannot tell whose refusal fired.
+      safix.secrets =
+        let
+          resolved = common.resolvedFor {
+            inherit cfg;
+            target = config;
+          };
+        in
+        if resolved != { } && !hasIdentity then
+          throw (common.noIdentityMessage { inherit cfg resolved; })
+        else
+          resolved;
 
       # Outside the enable gate deliberately. Each of these fires exactly when
       # the resolution is empty for want of the option it names, which is when

@@ -50,6 +50,13 @@
 # Rewording `missingLibMessage` so it stops naming an option fails
 # `flakeWithoutLib.namesTheOptions` while `refuses` stays green, which is the
 # point of holding the two apart.
+# Dropping the user-scope identity refusal fails `noIdentity.refuses` and
+# nothing else, and only because that field is read off a profile evaluated
+# without home-manager's assertion wrapper: a wrapped profile refuses under the
+# drill too, on sops-nix's key-source assertion, which is the defect the refusal
+# exists to pre-empt rather than evidence of it. Making the refusal
+# unconditional instead — throwing whenever anything resolved — leaves
+# `noIdentity.refuses` green and fails `noIdentity.withIdentity`.
 # Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
 # dropping the ownership fields from the system materialization fails
 # `systemCarriesOwnership`.
@@ -258,6 +265,58 @@ in
         inherit hostname;
         tags = [ ];
       };
+
+      # safix's own module and sops-nix's own module, evaluated without
+      # home-manager's assertion wrapper.
+      #
+      # The wrapper is what makes this instrument necessary rather than
+      # fussy. `homeManagerConfiguration` forces `config.assertions` on any
+      # access to `config` and throws every failed one together, so a profile
+      # evaluated through it reports that something refused and never which
+      # module refused — sops-nix's key-source assertion and safix's identity
+      # refusal are one observation there, and `builtins.tryEval` reports
+      # neither's text. Forcing safix's own option here makes the refusal
+      # safix's by construction.
+      #
+      # `_module.check = false` admits the home-manager option paths the module
+      # defines and this evaluation does not declare; none of them are forced.
+      bareProfile =
+        user: extra:
+        lib.evalModules {
+          modules = [
+            ../../consume/home.nix
+            inputs.sops-nix.homeManagerModules.sops
+            {
+              options.home = {
+                username = lib.mkOption { type = lib.types.str; };
+                homeDirectory = lib.mkOption { type = lib.types.str; };
+              };
+              config._module = {
+                check = false;
+                args.pkgs = pkgs;
+              };
+            }
+            {
+              home = {
+                username = user;
+                homeDirectory = "/home/${user}";
+              };
+              safix = {
+                lib = safix;
+                inherit hostname;
+              };
+            }
+          ]
+          ++ extra;
+        };
+
+      # The state the README's three-line user-scope form used to produce: a
+      # person whose declarations resolve, on a profile that names no identity.
+      identityFreeProfile = bareProfile "ana" [ ];
+
+      identityGivenProfile = bareProfile "ana" [
+        { safix.identity.sshKeyPaths = [ "/home/ana/.ssh/agenix" ]; }
+      ];
 
       homeCommon = import ../../consume/common.nix {
         inherit lib;
@@ -553,6 +612,35 @@ in
                     [ homeCommon.missingLibMessage ];
               };
 
+              # A profile whose declarations resolve and which names no
+              # identity. `refuses` is read off the bare instrument rather than
+              # off a home-manager profile deliberately: the profile refuses
+              # either way — sops-nix's key-source assertion fires when safix's
+              # throw does not — so a `fires` over the wrapped profile is green
+              # under the drill that removes safix's guard. Forcing safix's own
+              # option is what attributes the refusal, and `withIdentity` is
+              # what says the guard reads the identity rather than refusing
+              # every profile that resolves anything.
+              noIdentity = {
+                refuses = fires identityFreeProfile.config.safix.secrets;
+                namesTheOptions =
+                  names
+                    [
+                      "safix.identity.keyFile"
+                      "safix.identity.sshKeyPaths"
+                    ]
+                    [
+                      (homeCommon.noIdentityMessage {
+                        cfg = {
+                          user = "ana";
+                          inherit hostname;
+                        };
+                        resolved.ana-alone = { };
+                      })
+                    ];
+                withIdentity = sortNames (builtins.attrNames identityGivenProfile.config.safix.secrets);
+              };
+
               # Violations are reported together, by safix, naming the namespace
               # they belong to.
               violations = {
@@ -587,6 +675,17 @@ in
               flakeWithoutLib = {
                 refuses = true;
                 namesTheOptions = true;
+              };
+              noIdentity = {
+                refuses = true;
+                namesTheOptions = true;
+                withIdentity = [
+                  "ana-alone"
+                  "api-token"
+                  "ops-handover"
+                  "ops-tooling"
+                  "team-vault"
+                ];
               };
               violations = {
                 refuses = true;

@@ -34,7 +34,7 @@ That is the flake half.
 `flake.safix.lib` now holds the audiences, the placements, the generated policy text and the check builders, and `packages.safix` is the command.
 Put `safix` in your devshell and run `safix fix` once to write `.sops.yaml`, then `safix set ana-token`.
 
-The profile half is an import and three lines, in whichever module system ana's secrets are to arrive in.
+The profile half is an import and four lines, in whichever module system ana's secrets are to arrive in.
 
 ```nix
 # ana's home-manager profile
@@ -45,10 +45,14 @@ The profile half is an import and three lines, in whichever module system ana's 
   safix.flake = inputs.self;
   safix.user = "ana";
   safix.hostname = "workstation";
+  safix.identity.sshKeyPaths = [ "/home/ana/.ssh/id_ed25519" ];
 }
 ```
 
-Every secret ana resolves on that host is now established there, and `nixosModules.default` is the same three lines for a system configuration.
+Every secret ana resolves on that host is now established there.
+
+`nixosModules.default` is the first three of those lines for a system configuration.
+The fourth is the user scope's alone: sops-nix's NixOS module defaults its age identity to the ed25519 keys of `config.services.openssh.hostKeys`, and its home-manager module has no per-person equivalent to fall back on, so a profile that resolves secrets and names no identity refuses at evaluation rather than establishing them.
 See [Establishing secrets in a profile](#establishing-secrets-in-a-profile) for the rest of the surface, including which of the two module forms to import.
 
 Declarations merge, so the flake block above can live in its own file imported alongside a hundred others; safix reads no path, no filename and no directory structure to find them.
@@ -361,8 +365,8 @@ Both modules declare the same options, and none of them can add a secret, a reci
 | `safix.user` | `config.home.username`; none at system scope | which `flake.safix.users` entry this profile serves |
 | `safix.hostname` | `osConfig.networking.hostName`; `config.networking.hostName` at system scope | which host to resolve on, since `perHost` and `perTag` select by it |
 | `safix.tags` | `[ ]` | the tags this host carries, against which `perTag` selects |
-| `safix.identity.keyFile` | `null` | an age key file this machine decrypts with |
-| `safix.identity.sshKeyPaths` | `[ ]` | ssh private keys this machine decrypts with |
+| `safix.identity.keyFile` | `null`; at user scope one of these two is required | an age key file this machine decrypts with |
+| `safix.identity.sshKeyPaths` | `[ ]`; at user scope one of these two is required | ssh private keys this machine decrypts with |
 | `safix.enable` | whether anything resolved | the gate the whole module sits behind |
 | `safix.identityPreflight` | `true` | user scope only: install the activation guard below |
 | `safix.secrets` | read-only | what resolved, in the shape `sops.secrets` takes |
@@ -408,6 +412,11 @@ The resolver's refusals surface as safix's own evaluation errors, listing every 
 `sops-install-secrets` treats a set-but-unreadable key file as fatal, and skips a missing ssh key path with a line to stderr, so a non-null default would abort activation on every machine that happens to lack the path.
 Both identity options are defined onto `sops.age.*` at normal priority, so a `mkDefault` elsewhere in your tree loses to safix and a plain definition conflicts loudly — the alternative would let a base module's XDG default silently replace the null and re-arm the abort.
 `sshKeyPaths` is defined only when you name it, so the system scope keeps sops-nix's own default of the host's ed25519 keys.
+
+At user scope there is no such default to keep, and naming one of the two is therefore not optional.
+A profile whose declarations resolve and which names neither refuses at evaluation, with a message naming both options and stating why neither can be defaulted for a person.
+It refuses before sops-nix's own key-source assertion is reached, which is the whole reason it exists: that assertion names its own five options and neither of safix's.
+`safix-consumption-refusals` holds the refusal, and holds it off a profile evaluated without home-manager's assertion wrapper — a wrapped profile refuses either way, and reports that something refused rather than which module did.
 
 At user scope, safix installs `home.activation.safixIdentityPreflight`.
 It reads the configured identity, checks each path for presence and readability, and refuses the switch when none is usable; it decrypts nothing.
