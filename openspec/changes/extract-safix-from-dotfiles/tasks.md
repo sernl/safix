@@ -31,11 +31,11 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 
 ## 3. Recipient policy renderer
 
-- [ ] 3.1 Port the policy suite from `<dotfiles>/modules/flake/secrets/sops-yaml.test.nix`, keeping the structured-plan claims and dropping the claims that hold a particular fleet's committed file
-- [ ] 3.2 Port the renderer from `<dotfiles>/modules/flake/secrets/_sops-yaml.nix` into `modules/flake/safix/policy.nix`, keeping the split between the structured plan and the rendered text
-- [ ] 3.3 Rewrite the generated file's header: keep the one-rule-per-audience explanation, the anchoring rationale, and the revocation-is-not-retroactive statement; replace the agenix and clan examples of what a wide rule would capture with the general statement that a wide rule captures encrypted material this package did not place
-- [ ] 3.4 Name the regenerating command as `safix fix` in the header, and confirm the check that holds the committed file to the generated one names the same command in its failure
-- [ ] 3.5 Verify: rendering a fixture fleet of three people, one of whom shares one secret with another, produces exactly three rules and the expected anchors
+- [x] 3.1 Port the policy suite from `<dotfiles>/modules/flake/secrets/sops-yaml.test.nix`, keeping the structured-plan claims and dropping the claims that hold a particular fleet's committed file
+- [x] 3.2 Port the renderer from `<dotfiles>/modules/flake/secrets/_sops-yaml.nix` into `modules/flake/safix/policy.nix`, keeping the split between the structured plan and the rendered text
+- [x] 3.3 Rewrite the generated file's header: keep the one-rule-per-audience explanation, the anchoring rationale, and the revocation-is-not-retroactive statement; replace the agenix and clan examples of what a wide rule would capture with the general statement that a wide rule captures encrypted material this package did not place
+- [x] 3.4 Name the regenerating command as `safix fix` in the header, and confirm the check that holds the committed file to the generated one names the same command in its failure
+- [x] 3.5 Verify: rendering a fixture fleet of three people, one of whom shares one secret with another, produces exactly three rules and the expected anchors
 
 ## 4. Flake module wiring
 
