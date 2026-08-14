@@ -62,6 +62,12 @@
 # `systemCarriesOwnership`.
 # Moving the wiring assertions back inside the enable gate fails
 # `unaddressed.refuses`, which is the whole reason they sit outside it.
+# Dropping the flakeless refusal fails `flakeless.refuses` and
+# `flakeless.namesTheOption`. Widening it — conditioning it on `cfg.user` rather
+# than on a definition of it — leaves both green and fails `unwired`, since the
+# user scope defaults that option to the profile's own username and every
+# imported-but-unconfigured profile would then be refused. The pair is the
+# claim: a state that is silent and a state that must stay silent.
 # Pointing the second collision copy at the first's path fails `twoPaths`, which
 # is the drill for the check that the export shape rests on: it is only evidence
 # while the two paths really are two.
@@ -241,6 +247,15 @@ in
       # a no-op rather than become a demand.
       unwiredProfile = mkHome "ana" [ config.flake.homeModules.default ];
 
+      # A profile that names a person and is bound to nothing, which is what
+      # omitting `safix.flake` produces. It is the state that used to be silent:
+      # `safix.lib` null makes every other assertion vacuously true and the
+      # resolved set empty, so the profile built and established nothing.
+      flakelessProfile = mkHome "ana" [
+        config.flake.homeModules.default
+        { safix.user = "ana"; }
+      ];
+
       # The messages a mis-wired profile prints. Read off the pure function
       # rather than off an evaluated profile, because home-manager's
       # `homeManagerConfiguration` collects failed assertions and throws the
@@ -248,7 +263,7 @@ in
       # `config.assertions` left. The evaluated profile carries the other half of
       # the claim — that it refuses at all — through `fires`.
       failedMessages =
-        common: cfg: map (a: a.message) (lib.filter (a: !a.assertion) (common.assertionsFor cfg));
+        common: args: map (a: a.message) (lib.filter (a: !a.assertion) (common.assertionsFor args));
 
       # The module's own view of a projection that reports violations. The list
       # is substituted rather than produced by breaking the fleet, because the
@@ -293,7 +308,16 @@ in
               };
               config._module = {
                 check = false;
-                args.pkgs = pkgs;
+                args = {
+                  inherit pkgs;
+
+                  # Standalone home-manager has no host configuration, which is
+                  # the case this instrument stands in for. It is named because
+                  # the module system supplies every formal argument of a path
+                  # module from `_module.args`, so a formal with a default is
+                  # still an error when forced and unnamed.
+                  osConfig = null;
+                };
               };
             }
             {
@@ -554,9 +578,12 @@ in
                 refuses = fires unaddressedProfile.config.sops.secrets;
                 namesTheOption = names [ "safix.hostname" ] (
                   failedMessages homeCommon {
-                    lib = safix;
-                    user = "ana";
-                    hostname = null;
+                    configured = true;
+                    cfg = {
+                      lib = safix;
+                      user = "ana";
+                      hostname = null;
+                    };
                   }
                 );
               };
@@ -566,30 +593,66 @@ in
               # username, and here there is no person to default from.
               unnamedPerson = names [ "safix.user" ] (
                 failedMessages systemCommon {
-                  lib = safix;
-                  user = null;
-                  hostname = "server";
+                  configured = true;
+                  cfg = {
+                    lib = safix;
+                    user = null;
+                    hostname = "server";
+                  };
                 }
               );
 
               # A profile that imports the module and says nothing is a no-op,
-              # not a demand.
+              # not a demand. This is the half the flakeless refusal below must
+              # not swallow: both have a null `safix.lib`, and only a definition
+              # of `safix.user` or `safix.hostname` separates them.
               unwired = {
                 quiet =
                   failedMessages homeCommon {
-                    lib = null;
-                    user = null;
-                    hostname = null;
+                    configured = false;
+                    cfg = {
+                      lib = null;
+                      user = null;
+                      hostname = null;
+                    };
                   } == [ ];
                 establishesNothing = unwiredProfile.config.sops.secrets == { };
+                enable = unwiredProfile.config.safix.enable;
+              };
+
+              # Configured and bound to nothing: `safix.flake` omitted. The
+              # profile refuses rather than building an empty resolution in
+              # silence, and the message names the option that supplies the
+              # binding.
+              flakeless = {
+                refuses = fires flakelessProfile.config.sops.secrets;
+                namesTheOption =
+                  names
+                    [
+                      "safix.flake"
+                      "safix.lib"
+                    ]
+                    (
+                      failedMessages homeCommon {
+                        configured = true;
+                        cfg = {
+                          lib = null;
+                          user = "ana";
+                          hostname = null;
+                        };
+                      }
+                    );
               };
 
               # A correctly bound profile asserts nothing.
               boundProfileIsQuiet =
                 failedMessages homeCommon {
-                  lib = safix;
-                  user = "ana";
-                  inherit hostname;
+                  configured = true;
+                  cfg = {
+                    lib = safix;
+                    user = "ana";
+                    inherit hostname;
+                  };
                 } == [ ];
 
               # safix.flake pointed at something carrying no projection. The
@@ -670,6 +733,11 @@ in
               unwired = {
                 quiet = true;
                 establishesNothing = true;
+                enable = false;
+              };
+              flakeless = {
+                refuses = true;
+                namesTheOption = true;
               };
               boundProfileIsQuiet = true;
               flakeWithoutLib = {

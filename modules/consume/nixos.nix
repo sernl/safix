@@ -23,6 +23,7 @@
 # provisioner only when it is set.
 {
   config,
+  options,
   lib,
   ...
 }:
@@ -59,7 +60,15 @@ in
       # the resolution is empty for want of the option it names, which is when
       # `enable` defaults to false — so an assertion inside the gate would be a
       # refusal that only speaks once the mistake has already been repaired.
-      assertions = common.assertionsFor cfg;
+      #
+      # `configured` is read off `options` rather than off `cfg` because
+      # `safix.hostname` defaults to this configuration's own hostname and is
+      # therefore never null: the value cannot tell a consumer's selection from
+      # the module's own default, and only a definition can.
+      assertions = common.assertionsFor {
+        inherit cfg;
+        configured = common.wasSet options.safix.user || common.wasSet options.safix.hostname;
+      };
     }
 
     (lib.mkIf cfg.enable {

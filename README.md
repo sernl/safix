@@ -375,9 +375,15 @@ Both modules declare the same options, and none of them can add a secret, a reci
 A profile receives `config`, `lib`, `pkgs` and whatever its evaluator put in `extraSpecialArgs` or `specialArgs`; requiring a particular name there would make your evaluation seam part of safix's interface, which is the same assumption safix refuses to make about your user registry.
 So it is named once, and pointing it at something that carries no `safix.lib` fails with a message naming the option.
 
-Standalone home-manager cannot derive a hostname — `osConfig` exists only where home-manager is evaluated as a NixOS module — so `safix.hostname` is the fourth line there.
+Standalone home-manager cannot derive a hostname — `osConfig` exists only where home-manager is evaluated as a NixOS module — so `safix.hostname` is the fourth line there, and the identity below is the fifth.
+
+Three states follow from what is set, and each is refused or ignored deliberately.
 A profile bound to declarations but missing a person or a host refuses at evaluation, naming the option that is unset, and defines nothing in the meantime.
-A profile that imports the module and sets nothing is a no-op, and so is one whose person resolves nothing on that host: no secrets, no identity, no activation entry, no unit.
+A profile that names a person or a host and is bound to nothing — `safix.flake` omitted and `safix.lib` never set — refuses as well, naming `safix.flake`.
+That state is refused rather than tolerated because a null `safix.lib` empties the resolved set and makes every other refusal here vacuously true, so the profile would otherwise build, establish nothing, and report nothing.
+A profile that imports the module and sets nothing at all is a no-op, and so is one whose person resolves nothing on that host: no secrets, no identity, no activation entry, no unit.
+The last two are told apart by whether a definition for `safix.user` or `safix.hostname` exists, never by its value — at user scope that option defaults to the profile's own username, so every profile has a value for it.
+`safix-consumption-refusals` holds both directions, which is what stops the refusal from swallowing the no-op.
 
 ### Which of the two forms to import
 

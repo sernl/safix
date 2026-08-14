@@ -37,6 +37,31 @@ let
     safix.lib directly to the projection.
   '';
 
+  # A profile that names a person or a host and is bound to nothing. Without
+  # this the state is silent rather than wrong: `safix.lib` null makes every
+  # assertion below vacuously true and `resolvedFor` return the empty set, so
+  # `enable` defaults to false and the profile establishes nothing, reports
+  # nothing, and looks exactly like a profile whose person holds nothing here.
+  flakelessMessage = ''
+    safix: this ${scopeNoun} names a person or a host and is bound to no
+    declarations, so it resolves nothing and would establish nothing.
+
+    safix.lib is null. It defaults from safix.flake, which is the one thing a
+    module cannot derive: a ${scopeNoun} receives `config`, `lib`, `pkgs` and
+    whatever its evaluator put in `extraSpecialArgs` or `specialArgs`, and
+    requiring a particular name there would make every consumer's evaluation
+    seam part of safix's interface. So it is named once:
+
+      safix.flake = inputs.self;
+
+    Set safix.lib directly instead where the projection reaches this
+    ${scopeNoun} by another route.
+
+    Importing the module and setting nothing at all stays a no-op. This fires
+    only because a person or a host was named, which asks for a resolution
+    there is nothing to resolve against.
+  '';
+
   # Built by a named function rather than inline in the `throw` so that a check
   # can read what a consumer would see. `builtins.tryEval` reports that a throw
   # fired and never what it said, so a message assembled inside one is a message
@@ -96,9 +121,29 @@ let
       thing to refuse would be sops-nix's own key-source assertion, which names
       its five and neither of safix's.
     '';
+  # Whether a consumer wrote a definition for an option, rather than the
+  # option's own default standing in for one.
+  #
+  # `option.isDefined` cannot answer this and reads true for every option here:
+  # the module system injects `mkOptionDefault opt.default` into the definition
+  # list before merging, so a declared default is a definition by the time
+  # `isDefined` is computed. The priority does answer it — that injected
+  # definition carries `mkOptionDefault`'s priority, and anything a consumer
+  # writes is numerically lower, which is what `highestPrio` reports. The
+  # constant is read off `lib` rather than written as 1500 so that the two
+  # cannot drift apart.
+  optionDefaultPriority = (lib.mkOptionDefault null).priority;
+
+  wasSet = option: option.highestPrio < optionDefaultPriority;
 in
 {
-  inherit missingLibMessage violationMessage noIdentityMessage;
+  inherit
+    missingLibMessage
+    flakelessMessage
+    violationMessage
+    noIdentityMessage
+    wasSet
+    ;
 
   # The options that read the same in either scope. The four arguments are what
   # the scopes disagree about, passed in rather than branched on, so a scope that
@@ -286,27 +331,40 @@ in
         inherit scope;
       } target;
 
-  # The wiring mistakes that are cheap to name exactly. Each fires only once the
-  # profile has been bound at all, so importing the module and setting nothing
-  # stays a no-op rather than becoming a demand.
-  assertionsFor = cfg: [
-    {
-      assertion = cfg.lib == null || cfg.user != null;
-      message = ''
-        safix: this ${scopeNoun} is bound to a set of declarations but names no person.
+  # The wiring mistakes that are cheap to name exactly.
+  #
+  # `configured` is whether the consumer wrote a definition for `safix.user` or
+  # `safix.hostname` — the module's own `options`, not `cfg`, since both carry
+  # defaults a consumer never wrote and the user scope's is never null. It is
+  # the only signal that separates the three states a null `safix.lib` covers:
+  # imported and unconfigured, which must stay a no-op; configured and bound,
+  # which resolves; and configured and flakeless, which is the one below. Each
+  # scope computes it in its own file, so this one needs no module system of its
+  # own.
+  assertionsFor =
+    { cfg, configured }:
+    [
+      {
+        assertion = cfg.lib != null || !configured;
+        message = flakelessMessage;
+      }
+      {
+        assertion = cfg.lib == null || cfg.user != null;
+        message = ''
+          safix: this ${scopeNoun} is bound to a set of declarations but names no person.
 
-        Set safix.user to the flake.safix.users entry this profile serves.
-      '';
-    }
-    {
-      assertion = cfg.lib == null || cfg.hostname != null;
-      message = ''
-        safix: this ${scopeNoun} is bound to a set of declarations but names no host.
+          Set safix.user to the flake.safix.users entry this profile serves.
+        '';
+      }
+      {
+        assertion = cfg.lib == null || cfg.hostname != null;
+        message = ''
+          safix: this ${scopeNoun} is bound to a set of declarations but names no host.
 
-        Resolution is host-scoped — flake.safix.users.<u>.perHost and .perTag
-        select by host — so there is no set to resolve without one. Set
-        safix.hostname.
-      '';
-    }
-  ];
+          Resolution is host-scoped — flake.safix.users.<u>.perHost and .perTag
+          select by host — so there is no set to resolve without one. Set
+          safix.hostname.
+        '';
+      }
+    ];
 }

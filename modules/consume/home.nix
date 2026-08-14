@@ -26,6 +26,7 @@
 # comment.
 {
   config,
+  options,
   lib,
   pkgs,
   osConfig ? null,
@@ -206,7 +207,15 @@ in
       # the resolution is empty for want of the option it names, which is when
       # `enable` defaults to false — so an assertion inside the gate would be a
       # refusal that only speaks once the mistake it reports has been repaired.
-      assertions = common.assertionsFor cfg;
+      #
+      # `configured` is read off `options` rather than off `cfg` because
+      # `safix.user` defaults to this profile's own username and is therefore
+      # never null: on this scope the value cannot tell a consumer's selection
+      # from the module's own default, and only a definition can.
+      assertions = common.assertionsFor {
+        inherit cfg;
+        configured = common.wasSet options.safix.user || common.wasSet options.safix.hostname;
+      };
     }
 
     (lib.mkIf cfg.enable {
