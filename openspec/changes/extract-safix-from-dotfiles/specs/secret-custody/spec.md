@@ -1,6 +1,6 @@
 ## Purpose
 
-Who can read a secret: the user record under `flake.secrets.users`, the audience algebra over carrying, private declaration and outbound sharing, the placement scopes that adjust where a secret lands without changing who owns it, the refusals that make an incoherent custody claim an evaluation error, and the limits of revocation.
+Who can read a secret: the user record under `flake.safix.users`, the audience algebra over carrying, private declaration and outbound sharing, the placement scopes that adjust where a secret lands without changing who owns it, the refusals that make an incoherent custody claim an evaluation error, and the limits of revocation.
 
 ## ADDED Requirements
 

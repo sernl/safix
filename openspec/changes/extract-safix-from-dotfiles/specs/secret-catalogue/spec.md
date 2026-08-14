@@ -1,6 +1,6 @@
 ## Purpose
 
-What a secret is as a declaration: the entry vocabulary under `flake.secrets.catalogue`, the alphabet a name may be drawn from, the property that makes declarations scatterable across a consumer's tree, and the placement questions an entry is deliberately unable to answer.
+What a secret is as a declaration: the entry vocabulary under `flake.safix.catalogue`, the alphabet a name may be drawn from, the property that makes declarations scatterable across a consumer's tree, and the placement questions an entry is deliberately unable to answer.
 
 ## ADDED Requirements
 

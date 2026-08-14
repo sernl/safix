@@ -33,12 +33,17 @@ Any new capability: this port adds none, and a feature that looks obvious during
 
 ## Decisions
 
-### D1. The namespace is `flake.secrets`, with `catalogue` and `users` beneath it
+### D1. The namespace is `flake.safix`, with `catalogue` and `users` beneath it
 
-`flake.secrets.catalogue.<name>` holds what a secret is: `mode`, `path`, `shared`, `generator`, `sopsKey`.
-`flake.secrets.users.<u>` holds who holds what: `recipient`, `recoveryRecipients`, `carries`, `private`, `sharedWith`, `perHost`, `perTag`.
+`flake.safix.catalogue.<name>` holds what a secret is: `mode`, `path`, `shared`, `generator`, `sopsKey`.
+`flake.safix.users.<u>` holds who holds what: `recipient`, `recoveryRecipients`, `carries`, `private`, `sharedWith`, `perHost`, `perTag`.
 
-`catalogue` rather than the bare `flake.secrets.<name>` because the second slot has to exist beside it, and a namespace whose top level is half free-form names and half reserved words is a namespace where adding a reserved word is a breaking change.
+`safix` rather than the generic `secrets` because a flake-parts option tree is a shared namespace with no registry behind it, and a top-level `flake.secrets` is exactly the name a second module reaching for the obvious word would also claim.
+A collision there is not a merge, it is two packages disagreeing about what an attribute means with the module system unable to tell them apart.
+Naming the namespace after the package also keeps three things in step that a reader has to hold together anyway: the package is safix, the command is `safix`, and the options are `flake.safix.*`.
+The cost is four more characters at every declaration site, which is the site that matters and is where the verbosity is paid; it buys a name that cannot be claimed out from under a consumer.
+
+`catalogue` rather than the bare `flake.safix.<name>` because the second slot has to exist beside it, and a namespace whose top level is half free-form names and half reserved words is a namespace where adding a reserved word is a breaking change.
 `users` rather than `holders` or `principals` because the thing being named is a person with a key, and inventing a word for it buys nothing but a glossary entry.
 
 The recipient fields lose their `age` prefix and their `meta.` parent.
@@ -52,15 +57,15 @@ There is no `aggregates`, no `access`, no uid, no shell, no home directory, no g
 This is the decoupling: a consumer's user record and safix's user record are different objects that happen to share a name, and safix never reaches into the consumer's.
 
 The consequence is a small duplication that is deliberate.
-A consumer with its own users writes `flake.secrets.users` entries whose names match theirs, and something has to keep the two sets in step.
+A consumer with its own users writes `flake.safix.users` entries whose names match theirs, and something has to keep the two sets in step.
 That something is the adapter, and it is the consumer's code.
 
 ### D3. The adapter is a projection the consumer owns, and safix ships none
 
-An adapter is one `lib.mapAttrs` from the consumer's registry into `flake.secrets.users`, plus whatever field renaming their vocabulary needs.
+An adapter is one `lib.mapAttrs` from the consumer's registry into `flake.safix.users`, plus whatever field renaming their vocabulary needs.
 safix ships no adapter, not even for the originating repository, because an adapter shipped upstream is upstream taking a position on a downstream's option tree, and the next consumer's tree will differ.
 
-What safix does ship is the guarantee that makes an adapter sufficient: `flake.secrets.users` is a plain mergeable attrset option with no defaults derived from anything outside it, so a module that sets it from a `mapAttrs` and a module that sets it by hand are indistinguishable to the resolver.
+What safix does ship is the guarantee that makes an adapter sufficient: `flake.safix.users` is a plain mergeable attrset option with no defaults derived from anything outside it, so a module that sets it from a `mapAttrs` and a module that sets it by hand are indistinguishable to the resolver.
 The originating repository's adapter is the first one written and is written in that repository, in a change of its own, after this port lands.
 
 The reverse direction — safix reading a consumer's registry through a configurable option path — is rejected.
@@ -98,7 +103,7 @@ Every `path_regex` matches exactly one directory level — `[^/]*`, never `.*` �
 
 There is no catch-all rule and the generator emits none.
 An unmatched path must fail closed with sops's own no-matching-creation-rules error.
-A new person is a new `flake.secrets.users` entry with a recipient, and that is what produces their rule.
+A new person is a new `flake.safix.users` entry with a recipient, and that is what produces their rule.
 
 One directory level rather than one literal filename is deliberate: it lets a file placed beside a person's secrets ride the same custody instead of being stranded with no rule at all.
 That is the only part of the source repository's runtime-extract convention that survives the port, and it survives as a property of the rule shape rather than as a convention safix knows about.
@@ -175,9 +180,9 @@ The test suites therefore construct their own encrypted files where they need on
 
 ## Risks / Trade-offs
 
-The namespace is a guess made once.
-`flake.secrets` is short and unqualified, and a consumer may already use it.
-The alternative — `flake.safix` — is collision-proof and reads worse at every declaration site, which is the site that matters. Accepted, with the collision recorded as an open question rather than dismissed.
+The namespace is a decision made once and expensive to revisit, since every consumer declaration names it.
+`flake.safix` reads longer at every declaration site than the generic `flake.secrets` would, and the verbosity is real and permanent.
+Accepted, because the alternative trades a permanent small cost for an unbounded one: a generic top-level name is claimable by any other flake-parts module reaching for the same obvious word, and the module system surfaces that as a type conflict on an attribute neither package agrees about rather than as a name clash a consumer can rename their way out of.
 
 The adapter is real work a consumer must do before they hold a single secret, and safix ships none to copy.
 The mitigation is documentation: the README grows a worked adapter example, and the originating repository's adapter, once written, is referenceable.
@@ -193,13 +198,10 @@ Accepted for now, recorded as an open question, since the standard mitigations �
 
 Nothing migrates in this change.
 The originating repository keeps its own copy and continues to serve its own secrets, untouched.
-Its adapter is a later change in that repository, whose shape is: write `flake.secrets.users` from the existing user registry, write `flake.secrets.catalogue` from the existing catalogue, verify that the generated policy is byte-identical to the committed one before deleting anything, and only then remove the local copy.
+Its adapter is a later change in that repository, whose shape is: write `flake.safix.users` from the existing user registry, write `flake.safix.catalogue` from the existing catalogue, verify that the generated policy is byte-identical to the committed one before deleting anything, and only then remove the local copy.
 Byte-identical is the gate, because it is the one comparison that proves no audience moved.
 
 ## Open Questions
-
-Does `flake.secrets` collide with anything in the wild, and is the collision risk worth trading for `flake.safix`?
-The answer wanted is evidence from consumers rather than a preference.
 
 Should the dev-only inputs move out of this flake before the first consumer arrives, and if so into a `dev/` sub-flake or behind `follows` guidance alone?
 

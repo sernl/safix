@@ -16,7 +16,7 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 - [ ] 1.3 Keep the field that names an encrypted file, as the field the resolver refuses by name, and rewrite its description onto safix's own placement story
 - [ ] 1.4 Add the ownership fields the system scope needs, defaulting to unset, and document that the user-scope materialization refuses rather than drops them
 - [ ] 1.5 Rewrite every option description that explains itself by reference to `clan vars`, keeping the substantive facts and dropping the correspondence framing
-- [ ] 1.6 Declare `flake.secrets.catalogue` and `flake.secrets.users` in `modules/flake/safix/options.nix`, both as plain mergeable attribute sets with no default derived from outside the namespace
+- [ ] 1.6 Declare `flake.safix.catalogue` and `flake.safix.users` in `modules/flake/safix/options.nix`, both as plain mergeable attribute sets with no default derived from outside the namespace
 - [ ] 1.7 Verify: a scratch flake importing the module declares one secret in each of two separate files and evaluates to one record
 
 ## 2. Resolution algebra
