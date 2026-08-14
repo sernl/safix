@@ -39,10 +39,10 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 
 ## 4. Flake module wiring
 
-- [ ] 4.1 Port `<dotfiles>/modules/flake/secrets/lib.nix` into `modules/flake/safix/default.nix`, exposing the resolution helpers, the audience map, the placement map, the recipient map, the generator plan, the name pattern, and the policy text
-- [ ] 4.2 Drop the helper that enumerates already-committed encrypted files by reading a fixed directory of the consumer's tree; replace it with a computation over the audiences the declarations imply, plus an option through which a consumer names extra files it wants governed
-- [ ] 4.3 Export the module as a flake output a consumer imports, and confirm importing it into a scratch flake that declares nothing evaluates green and produces an empty policy with no catch-all
-- [ ] 4.4 Verify: `nix flake check --no-build` green
+- [x] 4.1 Port `<dotfiles>/modules/flake/secrets/lib.nix` into `modules/flake/safix/default.nix`, exposing the resolution helpers, the audience map, the placement map, the recipient map, the generator plan, the name pattern, and the policy text
+- [x] 4.2 Drop the helper that enumerates already-committed encrypted files by reading a fixed directory of the consumer's tree; replace it with a computation over the audiences the declarations imply, plus an option through which a consumer names extra files it wants governed
+- [x] 4.3 Export the module as a flake output a consumer imports, and confirm importing it into a scratch flake that declares nothing evaluates green and produces an empty policy with no catch-all
+- [x] 4.4 Verify: `nix flake check --no-build` green
 
 ## 5. The command
 

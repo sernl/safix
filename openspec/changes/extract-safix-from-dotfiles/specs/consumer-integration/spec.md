@@ -73,6 +73,35 @@ Any further action — attaching an account on a host, allocating an identifier,
 - **THEN** it records that host account attachment, identifier allocation, and refusing hosts that lack a particular module are consumer concerns
 - **AND** the reason is stated: those idioms are properties of one consumer's module tree
 
+### Requirement: The governed file set is computed, with a consumer-named extension
+
+The set of encrypted files the package governs SHALL be computed from the audiences the declarations imply.
+A consumer SHALL be able to name further files it wants governed, and the set the re-wrapping command acts on SHALL be the union of the two.
+
+#### Scenario: The required half is derived, not discovered
+
+- **WHEN** the governed set is computed
+- **THEN** it follows from the audiences the declarations imply
+- **AND** no directory of the consumer's tree is read to find it, because a tree layout is not the package's to assume
+
+#### Scenario: A file no declaration implies
+
+- **WHEN** a consumer holds an encrypted file that rides an existing rule but that no declaration names
+- **THEN** it names that file through the extension option
+- **AND** the file then appears in the set the re-wrapping command acts on
+
+#### Scenario: The union is what the command re-wraps
+
+- **WHEN** the re-wrapping command acts on the governed set
+- **THEN** that set is the union of the derived half and the consumer-named half
+- **AND** narrowing it to the derived half alone is a defect, since a file left out of it is a file a change of audience reaches for every other file and not for that one
+
+#### Scenario: Naming a file does not create a rule for it
+
+- **WHEN** a consumer names a path no rule matches
+- **THEN** no rule is emitted for it
+- **AND** encryption against that path still fails closed, because a rule comes from a user record with a recipient and from nothing else
+
 ### Requirement: One declaration serves both system and user scope
 
 A resolved entry SHALL be materializable into either the system-scope or the user-scope form the secret provisioner accepts, from the same declaration.
