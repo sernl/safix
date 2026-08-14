@@ -608,6 +608,12 @@ in
               # the point at which a refusal would still be atomic.
               provisionerAfterCheckLinkTargets = before anaOrder "checkLinkTargets" "sops-nix";
 
+              # The stronger fact home.nix's non-atomicity prose rests on: the
+              # provisioner runs after the generation is linked and after the
+              # systemd daemon reload, so a failure there is loud but late.
+              provisionerAfterLinkGeneration = before anaOrder "linkGeneration" "sops-nix";
+              provisionerAfterReloadSystemd = before anaOrder "reloadSystemd" "sops-nix";
+
               # Read, do not decrypt: the script names each configured identity and
               # exits non-zero, and it invokes no decryptor. `runsTheDecryptor`
               # matches the binary in the closure rather than the program's name,
@@ -630,6 +636,8 @@ in
               present = true;
               safixBeforeCheckLinkTargets = true;
               provisionerAfterCheckLinkTargets = true;
+              provisionerAfterLinkGeneration = true;
+              provisionerAfterReloadSystemd = true;
               script = {
                 namesTheIdentity = true;
                 refuses = true;

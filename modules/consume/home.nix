@@ -91,7 +91,7 @@ let
     ${toString (builtins.length (lib.attrNames sopsCfg.secrets))} secret(s) resolve for ${config.home.username} here, and sops-nix has no
     other way to decrypt them.
 
-    Home activation stopped at its first entry. This check sorts ahead of
+    Home activation stopped before anything was applied. This check sorts ahead of
     checkLinkTargets, so no home file was linked, no user package installed, no
     user unit restarted and no secret written; the previous home generation is
     the one still in place.
