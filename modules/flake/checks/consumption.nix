@@ -544,10 +544,13 @@ in
                       config.flake.homeModules.default
                       { safix.flake = { }; }
                     ]).config.safix.lib;
-                namesTheOptions = names [
-                  "safix.flake"
-                  "safix.lib"
-                ] [ homeCommon.missingLibMessage ];
+                namesTheOptions =
+                  names
+                    [
+                      "safix.flake"
+                      "safix.lib"
+                    ]
+                    [ homeCommon.missingLibMessage ];
               };
 
               # Violations are reported together, by safix, naming the namespace

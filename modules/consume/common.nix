@@ -115,11 +115,7 @@ in
 
       lib = mkOption {
         type = types.nullOr types.raw;
-        default =
-          if cfg.flake == null then
-            null
-          else
-            cfg.flake.safix.lib or (throw missingLibMessage);
+        default = if cfg.flake == null then null else cfg.flake.safix.lib or (throw missingLibMessage);
         defaultText = lib.literalExpression "config.safix.flake.safix.lib";
         description = ''
           The resolver projection safix derives from the declarations: the
