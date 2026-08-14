@@ -31,9 +31,10 @@
     inputs@{ flake-parts, sops-nix, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [
+        # x86_64-darwin is absent because the pinned nixpkgs (26.11) dropped
+        # the platform; listing it makes `nix flake show` fail on evaluation.
         "aarch64-darwin"
         "aarch64-linux"
-        "x86_64-darwin"
         "x86_64-linux"
       ];
 
