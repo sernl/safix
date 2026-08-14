@@ -65,6 +65,39 @@ in
       '';
     };
 
+    onboardingHook = lib.mkOption {
+      type = lib.types.nullOr lib.types.lines;
+      default = null;
+      example = ''
+        name="$1"
+        recipient="$2"
+        shift 2
+        for host in "$@"; do
+          printf 'attach %s on %s\n' "$name" "$host"
+        done
+      '';
+      description = ''
+        A shell fragment `safix adduser` runs after the person's declaration and
+        the regenerated policy are committed, receiving their name as `$1`,
+        their recipient as `$2`, and every `--host` given as `$3` onward. It
+        runs with the repository root as its working directory.
+
+        Everything onboarding does beyond writing a custody record is here.
+        Attaching an account on a host, allocating an identifier, editing a
+        host's module imports: each is a property of one consumer's module tree,
+        and safix has no way to know its shape, so it passes the two facts it
+        does know and makes no assumption about what happens next.
+
+        Whatever the hook writes is left uncommitted, so safix's own commit
+        names only what safix did. A non-zero exit is reported and not
+        interpreted.
+
+        Unset is a supported configuration: `adduser` succeeds without it,
+        having done less. `--host` is refused while it is unset, because there
+        is nothing for a hostname to reach.
+      '';
+    };
+
     lib = lib.mkOption {
       type = lib.types.attrs;
       readOnly = true;
