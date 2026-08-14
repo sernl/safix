@@ -213,6 +213,55 @@ in
       # bo declares ownership fields, which the user scope has no axis for.
       boUserProfile = (moduleForm "bo").config.sops.secrets;
 
+      names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
+
+      # A profile bound to declarations and given no host. Standalone
+      # home-manager cannot derive one, so this is the mistake a consumer
+      # actually makes.
+      unaddressedProfile = mkHome "ana" [
+        config.flake.homeModules.default
+        { safix.lib = safix; }
+      ];
+
+      # A profile that imports the module and says nothing else, which must stay
+      # a no-op rather than become a demand.
+      unwiredProfile = mkHome "ana" [ config.flake.homeModules.default ];
+
+      # The messages a mis-wired profile prints. Read off the pure function
+      # rather than off an evaluated profile, because home-manager's
+      # `homeManagerConfiguration` collects failed assertions and throws the
+      # whole configuration, so a profile whose assertion fires has no readable
+      # `config.assertions` left. The evaluated profile carries the other half of
+      # the claim — that it refuses at all — through `fires`.
+      failedMessages =
+        common: cfg: map (a: a.message) (lib.filter (a: !a.assertion) (common.assertionsFor cfg));
+
+      # The module's own view of a projection that reports violations. The list
+      # is substituted rather than produced by breaking the fleet, because the
+      # claim under test belongs to the module — that it reports all of them,
+      # itself — and not to the resolver, which has its own drills.
+      brokenBinding = {
+        lib = safix // {
+          violations = [
+            "flake.safix.users.ana.sharedWith names 'dz', which is not a declared user"
+            "flake.safix.users.bo.recipient is null"
+          ];
+        };
+        user = "ana";
+        inherit hostname;
+        tags = [ ];
+      };
+
+      homeCommon = import ../../consume/common.nix {
+        inherit lib;
+        scope = "user";
+      };
+
+      systemCommon = import ../../consume/common.nix {
+        inherit lib;
+        scope = "system";
+      };
+
       nixosFor =
         user:
         inputs.nixpkgs.lib.nixosSystem {
@@ -404,6 +453,106 @@ in
               };
 
               userScopeRefusesOwnership = true;
+            };
+          };
+
+          # Every refusal a mis-wired profile can produce, held as a message rather
+          # than as a failure: what a consumer sees is the whole value of these,
+          # and `builtins.tryEval` reports that something threw and never what it
+          # said.
+          safix-consumption-refusals = mkStructuralCheck {
+            name = "safix-consumption-refusals";
+            actual = {
+              # Bound and unaddressed: the profile refuses, and the message names
+              # the option that is unset. The assertion has to sit outside the
+              # enable gate for this to happen at all — an unset host is exactly
+              # what produces the empty resolution that turns `enable` off.
+              unaddressed = {
+                refuses = fires unaddressedProfile;
+                namesTheOption = names [ "safix.hostname" ] (
+                  failedMessages homeCommon {
+                    lib = safix;
+                    user = "ana";
+                    hostname = null;
+                  }
+                );
+              };
+
+              # The system scope's own unset-person case, which the home scope
+              # cannot have: there `safix.user` defaults from the profile's
+              # username, and here there is no person to default from.
+              unnamedPerson = names [ "safix.user" ] (
+                failedMessages systemCommon {
+                  lib = safix;
+                  user = null;
+                  hostname = "server";
+                }
+              );
+
+              # A profile that imports the module and says nothing is a no-op,
+              # not a demand.
+              unwired = {
+                quiet =
+                  failedMessages homeCommon {
+                    lib = null;
+                    user = null;
+                    hostname = null;
+                  } == [ ];
+                establishesNothing = unwiredProfile.config.sops.secrets == { };
+              };
+
+              # A correctly bound profile asserts nothing.
+              boundProfileIsQuiet =
+                failedMessages homeCommon {
+                  lib = safix;
+                  user = "ana";
+                  inherit hostname;
+                } == [ ];
+
+              # safix.flake pointed at something carrying no projection.
+              flakeWithoutLib =
+                fires
+                  (mkHome "ana" [
+                    config.flake.homeModules.default
+                    { safix.flake = { }; }
+                  ]).config.safix.lib;
+
+              # Violations are reported together, by safix, naming the namespace
+              # they belong to.
+              violations = {
+                refuses = fires (
+                  homeCommon.resolvedFor {
+                    cfg = brokenBinding;
+                    target = { };
+                  }
+                );
+                message =
+                  names
+                    [
+                      "safix"
+                      "flake.safix.users.ana.sharedWith names 'dz'"
+                      "flake.safix.users.bo.recipient is null"
+                    ]
+                    [ (homeCommon.violationMessage brokenBinding) ];
+              };
+            };
+
+            expected = {
+              unaddressed = {
+                refuses = true;
+                namesTheOption = true;
+              };
+              unnamedPerson = true;
+              unwired = {
+                quiet = true;
+                establishesNothing = true;
+              };
+              boundProfileIsQuiet = true;
+              flakeWithoutLib = true;
+              violations = {
+                refuses = true;
+                message = true;
+              };
             };
           };
 

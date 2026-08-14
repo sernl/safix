@@ -176,11 +176,15 @@ in
         inherit cfg;
         target = config;
       };
+
+      # Outside the enable gate deliberately. Each of these fires exactly when
+      # the resolution is empty for want of the option it names, which is when
+      # `enable` defaults to false — so an assertion inside the gate would be a
+      # refusal that only speaks once the mistake it reports has been repaired.
+      assertions = common.assertionsFor cfg;
     }
 
     (lib.mkIf cfg.enable {
-      assertions = common.assertionsFor cfg;
-
       sops = {
         secrets = cfg.secrets;
 

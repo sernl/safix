@@ -20,8 +20,33 @@ let
   inherit (lib) mkOption types;
 
   scopeNoun = if scope == "system" then "system configuration" else "home-manager profile";
+
+  # Built by a named function rather than inline in the `throw` so that a check
+  # can read what a consumer would see. `builtins.tryEval` reports that a throw
+  # fired and never what it said, so a message assembled inside one is a message
+  # nothing can hold.
+  violationMessage =
+    cfg:
+    ''
+      safix: the declarations this ${scopeNoun} is bound to do not resolve.
+
+      safix.user = ${cfg.user}, safix.hostname = ${cfg.hostname}, scope = ${scope}
+
+    ''
+    + lib.concatMapStrings (v: "  - ${v}\n") cfg.lib.violations
+    + ''
+
+      Every one of these is a statement about flake.safix.* in the flake
+      safix.flake names, and none of them is repairable from here. They are
+      reported together, and by safix, because the resolver would otherwise
+      raise the first of them from inside the secret provisioner's own
+      evaluation, where the trace names the provisioner and not the declaration
+      that broke.
+    '';
 in
 {
+  inherit violationMessage;
+
   # The options that read the same in either scope. The four arguments are what
   # the scopes disagree about, passed in rather than branched on, so a scope that
   # cannot derive a default says so in its own file.
@@ -215,24 +240,7 @@ in
     if cfg.lib == null || cfg.user == null || cfg.hostname == null then
       { }
     else if cfg.lib.violations != [ ] then
-      throw (
-        ''
-          safix: the declarations this profile is bound to do not resolve.
-
-          safix.user = ${cfg.user}, safix.hostname = ${cfg.hostname}, scope = ${scope}
-
-        ''
-        + lib.concatMapStrings (v: "  - ${v}\n") cfg.lib.violations
-        + ''
-
-          Every one of these is a statement about flake.safix.* in the flake
-          safix.flake names, and none of them is repairable from here. They are
-          reported together, and by safix, because the resolver would otherwise
-          raise the first of them from inside the secret provisioner's own
-          evaluation, where the trace names the provisioner and not the
-          declaration that broke.
-        ''
-      )
+      throw (violationMessage cfg)
     else
       cfg.lib.materialize {
         inherit (cfg) user hostname tags;
