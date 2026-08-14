@@ -188,20 +188,29 @@ flake.safix.users.ana.private.upstream-api-key.generator = {
 A multi-output generator mints related values together, each with its own mode.
 
 ```nix
-flake.safix.users.ana.private.deploy-key = {
-  mode = "0600";
-  generator = {
-    files.deploy-key-pub.mode = "0444";
-    runtimeInputs = [ "openssl" "jq" ];
-    script = ''
-      key=$(openssl genpkey -algorithm ed25519)
-      pub=$(printf '%s' "$key" | openssl pkey -pubout)
-      jq -n --arg k "$key" --arg p "$pub" '{"deploy-key": $k, "deploy-key-pub": $p}'
-    '';
+flake.safix.users.ana.private = {
+  deploy-key = {
+    mode = "0600";
+    generator = {
+      files = [ "deploy-key-pub" ];
+      runtimeInputs = [
+        "openssl"
+        "jq"
+      ];
+      script = ''
+        key=$(openssl genpkey -algorithm ed25519)
+        pub=$(printf '%s' "$key" | openssl pkey -pubout)
+        jq -n --arg k "$key" --arg p "$pub" '{"deploy-key": $k, "deploy-key-pub": $p}'
+      '';
+    };
   };
+
+  deploy-key-pub.mode = "0444";
 };
 ```
 
+Each name a generator writes is a registry entry in its own right, carrying its own mode, path and key; `files` only records which generator produces it.
+An entry named there may not carry a generator of its own and may not be named by a second generator, both refused at evaluation, because two producers for one value is a race whose winner is whichever ran last.
 Both keys land in one commit, because a keypair split across two commits is an incoherent state.
 A `validation` script receives the candidate value on stdin and refuses the write on a non-zero exit.
 
