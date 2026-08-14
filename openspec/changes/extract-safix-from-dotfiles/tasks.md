@@ -11,13 +11,13 @@ Sections 1 through 4 port the evaluation half, and each ports its test suite bef
 
 ## 1. Vocabulary under the new namespace
 
-- [ ] 1.1 Port the type definitions from `<dotfiles>/modules/flake/secrets/_types.nix` into `modules/flake/safix/types.nix`, renaming the entry, override, scope, grant, and profile types onto safix's namespace
-- [ ] 1.2 Drop the `backend`, `alsoProvisionedBy`, and `rekeyFile` fields with the enum behind them; record in the commit message that they were a completed retirement's revert path in the source repository and have nothing to point at here
-- [ ] 1.3 Keep the field that names an encrypted file, as the field the resolver refuses by name, and rewrite its description onto safix's own placement story
-- [ ] 1.4 Add the ownership fields the system scope needs, defaulting to unset, and document that the user-scope materialization refuses rather than drops them
-- [ ] 1.5 Rewrite every option description that explains itself by reference to `clan vars`, keeping the substantive facts and dropping the correspondence framing
-- [ ] 1.6 Declare `flake.safix.catalogue` and `flake.safix.users` in `modules/flake/safix/options.nix`, both as plain mergeable attribute sets with no default derived from outside the namespace
-- [ ] 1.7 Verify: a scratch flake importing the module declares one secret in each of two separate files and evaluates to one record
+- [x] 1.1 Port the type definitions from `<dotfiles>/modules/flake/secrets/_types.nix` into `modules/flake/safix/types.nix`, renaming the entry, override, scope, grant, and profile types onto safix's namespace
+- [x] 1.2 Drop the `backend`, `alsoProvisionedBy`, and `rekeyFile` fields with the enum behind them; record in the commit message that they were a completed retirement's revert path in the source repository and have nothing to point at here
+- [x] 1.3 Keep the field that names an encrypted file, as the field the resolver refuses by name, and rewrite its description onto safix's own placement story
+- [x] 1.4 Add the ownership fields the system scope needs, defaulting to unset, and document that the user-scope materialization refuses rather than drops them
+- [x] 1.5 Rewrite every option description that explains itself by reference to `clan vars`, keeping the substantive facts and dropping the correspondence framing
+- [x] 1.6 Declare `flake.safix.catalogue` and `flake.safix.users` in `modules/flake/safix/options.nix`, both as plain mergeable attribute sets with no default derived from outside the namespace
+- [x] 1.7 Verify: a scratch flake importing the module declares one secret in each of two separate files and evaluates to one record
 
 ## 2. Resolution algebra
 

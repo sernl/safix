@@ -30,7 +30,13 @@
 
       imports = [
         ./modules/flake/devshell.nix
+        ./modules/flake/safix
         ./modules/flake/treefmt.nix
       ];
+
+      # The module a consumer imports. This flake imports it too, so the checks
+      # exercise the same module a consumer gets rather than a second copy that
+      # agrees with it by inspection.
+      flake.flakeModules.default = ./modules/flake/safix;
     };
 }

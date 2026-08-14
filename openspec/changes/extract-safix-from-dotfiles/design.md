@@ -36,7 +36,7 @@ Any new capability: this port adds none, and a feature that looks obvious during
 ### D1. The namespace is `flake.safix`, with `catalogue` and `users` beneath it
 
 `flake.safix.catalogue.<name>` holds what a secret is: `mode`, `path`, `shared`, `generator`, `sopsKey`.
-`flake.safix.users.<u>` holds who holds what: `recipient`, `recoveryRecipients`, `carries`, `private`, `sharedWith`, `perHost`, `perTag`.
+`flake.safix.users.<u>` holds who holds what: `recipient`, `recoveryRecipients`, `carries`, `private`, `sharedWith`, `perHost`, `perTag`, and the `recipientNote` D2 accounts for separately.
 
 `safix` rather than the generic `secrets` because a flake-parts option tree is a shared namespace with no registry behind it, and a top-level `flake.secrets` is exactly the name a second module reaching for the obvious word would also claim.
 A collision there is not a merge, it is two packages disagreeing about what an attribute means with the module system unable to tell them apart.
@@ -54,6 +54,8 @@ The `age` prefix went with a `backend` field that admitted a second answer; sops
 
 The record is seven fields and every one of them is about who can read what.
 There is no `aggregates`, no `access`, no uid, no shell, no home directory, no group membership.
+An eighth field, `recipientNote`, sits beside them and is not one of them: it holds the prose the generated policy emits above that person's key, and it is called out separately rather than folded into the seven precisely because it decides nothing about who can read what.
+It exists because the generated file may not be hand-edited, so what a key is — which device holds the private half, what converts to it — has nowhere else to live.
 This is the decoupling: a consumer's user record and safix's user record are different objects that happen to share a name, and safix never reaches into the consumer's.
 
 The consequence is a small duplication that is deliberate.
@@ -117,7 +119,8 @@ Rotation cannot be automatic on revoke, and nothing may pretend otherwise.
 A nix evaluation sees only the audience that is declared, never the audience that used to be, so no rebuild can detect a removal.
 `safix fix` re-wraps each governed file's data key to the audience now declared, which aligns ciphertext with policy and is explicitly not revocation.
 
-This statement belongs on the `recipient`, `recoveryRecipients` and `sharedWith` option descriptions, in the generated policy file's header, and in `safix --help`, because those are the three places a person is standing when the fact becomes relevant.
+This statement belongs on the `recipient` and `sharedWith` option descriptions, in the generated policy file's header, and in `safix --help`, because those are the places a person is standing when the fact becomes relevant.
+`recoveryRecipients` is not one of them: adding or removing a recovery identity of one's own custody is not the narrowing this statement is about, and repeating it there would dilute it at the two option sites where the choice actually is made.
 `safix check` does report a shrunk audience as needing rotation rather than a re-wrap, and it derives that from the file's own recipient stanzas — an extra recipient who is no longer in the audience — so no state file records the former audience.
 
 ### D8. Custody refusals are evaluation errors, and each one names the declaration
