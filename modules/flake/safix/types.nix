@@ -239,7 +239,7 @@ let
         type = lib.types.nullOr (lib.types.functionTo lib.types.str);
         default = null;
         description = "Where the decrypted value is written, as a function of the configuration materializing it. null takes the provisioner's own default, which is a function of the name and so cannot collide.";
-        example = lib.literalExpression ''cfg: "''${cfg.xdg.configHome}/linear/credentials.toml"'';
+        example = lib.literalExpression ''cfg: "''${cfg.xdg.configHome}/example-app/credentials.toml"'';
       };
       owner = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
