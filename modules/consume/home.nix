@@ -193,6 +193,10 @@ in
         age.sshKeyPaths = lib.mkIf (cfg.identity.sshKeyPaths != [ ]) cfg.identity.sshKeyPaths;
       };
 
+      # The second condition is not redundant with the `mkIf cfg.enable` this
+      # sits inside: `enable` can be set by hand over an empty resolution, and a
+      # profile with nothing to decrypt must not gain an entry that refuses on
+      # behalf of nothing.
       home.activation.safixIdentityPreflight = lib.mkIf (
         cfg.identityPreflight && sopsCfg.secrets != { } && guardedIdentities != [ ]
       ) (lib.hm.dag.entryBefore [ "checkLinkTargets" ] identityPreflight);

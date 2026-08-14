@@ -28,21 +28,29 @@
 # `selectionIsScopeFree` carries the claim that survives — that what arrives at
 # either scope is exactly what the scope-free resolver selected — on each side.
 #
-# ── severity, one drill per claim ──
-# Pointing the module form at another person, another host, or the other scope
-# fails `equivalence`. Dropping a field from `materializeFor` fails it too, from
-# the other side, because the hand form goes through the same function and the
-# expected literal beside it does not.
+# ── severity, one drill per claim, each observed red ──
+# A module that establishes anything other than what the resolver selected — the
+# drill filters one name out of `sops.secrets` — fails `equivalence`, `established`
+# and `selectionIsScopeFree` together.
+# `equivalence` alone is deliberately not the whole of it, and the drill that shows
+# why is dropping `key` from `materializeFor`: both forms call that function, so
+# they still agree, and what goes red is the `entry` literal beside them, which was
+# written independently and reads sops-nix's own default for the field that
+# vanished. The pair is the claim; either alone is half of it.
 # Replacing `entryBefore [ "checkLinkTargets" ]` with a bare string fails
-# `ordering.safixBeforeCheckLinkTargets`; the sops-nix half of that pair fails if
-# sops-nix ever pins its own entry, which is the day this guard stops being needed.
-# Removing the `mkIf cfg.enable` gate fails `inert`, since an unresolving person
-# would then gain an activation entry and a unit.
+# `safixBeforeCheckLinkTargets`; the sops-nix half of that pair fails if sops-nix
+# ever pins its own entry, which is the day this guard stops being needed.
+# `inert` is held by two independent gates — `mkIf cfg.enable` outside and
+# `sopsCfg.secrets != { }` on the preflight — so removing either alone leaves it
+# green and removing both turns `inert.preflight` red. That is the drill, and the
+# redundancy is deliberate: the inner gate is what covers a consumer who sets
+# `safix.enable = true` by hand over an empty resolution.
 # Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
 # dropping the ownership fields from the system materialization fails
 # `systemCarriesOwnership`.
-# Making the module system merge duplicate declarations rather than refuse them
-# fails `safix-module-collision`, which is the fact the two export forms exist for.
+# Pointing the second collision copy at the first's path fails `twoPaths`, which
+# is the drill for the check that the export shape rests on: it is only evidence
+# while the two paths really are two.
 {
   config,
   inputs,
