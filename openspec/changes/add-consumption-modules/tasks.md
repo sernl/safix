@@ -93,9 +93,26 @@ No sentence describing a guarantee is written before the code enforcing it exist
 - [x] 9.3 Document the identity contract, the activation guard, exactly what it guarantees, and the system-scope asymmetry with its reason
 - [x] 9.4 Verify: every guarantee stated in the README names a check in this repository that holds it
 
-## 10. Verification
+## 10. Refusals that name the declaration that broke
 
-- [x] 10.1 `openspec validate add-consumption-modules --strict`
-- [x] 10.2 `nix flake check` green
-- [x] 10.3 `rg` the whole tree for any real fleet identifier and confirm none
-- [x] 10.4 Confirm no file under `<dotfiles>` was modified
+Three defects of one class, found by adversarial review after section 9: the consumption path failed without naming what a consumer would have to change.
+
+- [x] 10.1 Refuse a user-scope profile whose resolved set is non-empty and which configures no identity source, with a message naming both identity options, why neither can be defaulted for a person, and the one-line fix
+
+  A `throw` while the resolved set is forced rather than an assertion beside the provisioner's, and the difference was measured rather than assumed.
+  The provisioner's key-source assertion sits inside its own `mkIf (secrets != { })`, so collecting the assertion list forces the resolved set, which forces this.
+  An assertion beside it was constructed and observed: the profile framework collects every failed assertion and prints them together, so the consumer read both messages.
+  A throw pre-empts the collection entirely, and the consumer reads safix's alone.
+- [x] 10.2 Hold that refusal off a profile evaluated without the profile framework's assertion wrapper, since a wrapped profile refuses under the drill that removes the guard too — on the provisioner's assertion, which is the defect rather than evidence against it
+- [x] 10.3 Refuse a profile that names a person or a host while its binding is null, naming the option that supplies the binding, and keep an imported-and-unconfigured profile fully inert
+- [x] 10.4 Discriminate on whether a definition exists rather than on the option's value; `isDefined` cannot answer it, because the module system injects the declared default into the definition list before merging, so read the definition priority instead
+- [x] 10.5 Guard the resolver's selection with a membership refusal listing the declared users, placed where the module path and every direct projection call reach it, mirroring the command's own unknown-user refusal
+- [x] 10.6 Reword the README so the four-line user-scope form evaluates, the option table stops presenting the identity as optional at user scope, the third binding state is documented beside the two already there, and the collision illustration is illustrative rather than falsifiable
+- [x] 10.7 Verify: each new check drilled red and restored green — the identity guard removed (`noIdentity.refuses` alone), the identity guard made unconditional (`noIdentity.withIdentity`), the flakeless refusal dropped (`flakeless`), the flakeless refusal widened to the option's value (`unwired`), and the membership guard removed (`undeclaredUser*` in two check files)
+
+## 11. Verification
+
+- [x] 11.1 `openspec validate add-consumption-modules --strict`
+- [x] 11.2 `nix flake check` green
+- [x] 11.3 `rg` the whole tree for any real fleet identifier and confirm none
+- [x] 11.4 Confirm no file under `<dotfiles>` was modified

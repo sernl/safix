@@ -113,6 +113,24 @@ A custody violation SHALL be reported by this package, in full, rather than as t
 - **THEN** evaluation fails listing every violation
 - **AND** the failure names this package rather than arising from inside the provisioner's own evaluation
 
+#### Scenario: Configured but bound to nothing
+
+- **WHEN** a profile names a person or a host and no binding to a consumer's declarations was set
+- **THEN** evaluation fails naming the option that supplies the binding
+- **AND** the two states are told apart by whether a definition exists, never by its value, since each scope defaults one of those options to something it can derive
+
+#### Scenario: Imported and unconfigured stays a no-op
+
+- **WHEN** a profile imports the module and sets nothing of the namespace at all
+- **THEN** evaluation succeeds, the enable flag is off, and nothing is established
+- **AND** no refusal is raised, so an inert import and a mis-wired one do not look alike
+
+#### Scenario: A person nobody declared
+
+- **WHEN** a profile, or a direct call to the resolver, selects a person the user records do not declare
+- **THEN** evaluation fails naming that person and listing the declared users
+- **AND** the refusal belongs to the resolver, so a profile, a direct call and the command reach one message rather than three
+
 ### Requirement: The identity contract carries the provisioner's fatality semantics
 
 The module SHALL default the key-file identity to unset, and SHALL document at the option that the provisioner treats a set-but-unreadable key file as fatal while a missing ssh key path is skipped with a warning.
@@ -128,6 +146,18 @@ The module SHALL default the key-file identity to unset, and SHALL document at t
 - **WHEN** a profile names ssh key paths or a key file
 - **THEN** the provisioner's corresponding options carry exactly those values
 - **AND** they are defined at a priority that overrides a default set elsewhere in the consumer's tree
+
+#### Scenario: A user-scope profile that resolves secrets and names no identity
+
+- **WHEN** a home-manager profile's resolved set is non-empty and no identity source is configured
+- **THEN** evaluation fails with this package's own message, naming both identity options and stating why neither can be defaulted at that scope
+- **AND** it fails before the provisioner's own key-source assertion is reached, which names the provisioner's options and none of this package's
+
+#### Scenario: The refusal is attributable
+
+- **WHEN** the refusal above is held by a check
+- **THEN** it is read off a profile evaluated without the profile framework's assertion collection
+- **AND** the reason is recorded: a profile evaluated with it refuses either way, and reports that something refused rather than which module did
 
 ### Requirement: A user-scope profile refuses the switch before anything is linked when no identity is usable
 
