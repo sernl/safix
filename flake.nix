@@ -29,6 +29,7 @@
       ];
 
       imports = [
+        ./modules/flake/checks/custody.nix
         ./modules/flake/devshell.nix
         ./modules/flake/safix
         ./modules/flake/treefmt.nix
