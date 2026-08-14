@@ -30,11 +30,28 @@ Add the input, import the module, declare a person.
 }
 ```
 
-That is the whole integration.
+That is the flake half.
 `flake.safix.lib` now holds the audiences, the placements, the generated policy text and the check builders, and `packages.safix` is the command.
 Put `safix` in your devshell and run `safix fix` once to write `.sops.yaml`, then `safix set ana-token`.
 
-Declarations merge, so the block above can live in its own file imported alongside a hundred others; safix reads no path, no filename and no directory structure to find them.
+The profile half is an import and three lines, in whichever module system ana's secrets are to arrive in.
+
+```nix
+# ana's home-manager profile
+{ inputs, ... }:
+{
+  imports = [ inputs.safix.homeModules.default ];
+
+  safix.flake = inputs.self;
+  safix.user = "ana";
+  safix.hostname = "workstation";
+}
+```
+
+Every secret ana resolves on that host is now established there, and `nixosModules.default` is the same three lines for a system configuration.
+See [Establishing secrets in a profile](#establishing-secrets-in-a-profile) for the rest of the surface, including which of the two module forms to import.
+
+Declarations merge, so the flake block above can live in its own file imported alongside a hundred others; safix reads no path, no filename and no directory structure to find them.
 
 ## The one mental model
 
@@ -324,29 +341,89 @@ safix's own modules are held to that by the `safix-namespace` check: one read of
 
 Secrets are then declared against the projected names, and the two records stay independent — a person can exist in your registry and hold nothing here, or hold secrets here without your registry knowing.
 
-## Materializing into a profile
+## Establishing secrets in a profile
 
-One declaration serves both scopes, and nothing in it names which.
+Custody is declared once, at flake level, where every user is visible at the same time.
+Arrival is declared per profile, in the module system that profile is written in, through a `safix.*` namespace that sits beside sops-nix's `sops.*` and can select but never declare.
 
-```nix
-# a home-manager module, with the flake reachable through extraSpecialArgs
-{ config, flake, ... }:
-{
-  imports = [ inputs.sops-nix.homeManagerModules.sops ];
+That split is forced rather than stylistic.
+An audience is a function of every user's declarations at once — one person's `sharedWith` widens the file another person reads — and `.sops.yaml` is a single repository-global file the sops CLI reads off disk.
+A machine's module system sees one machine, so it can compute neither.
 
-  sops.secrets = flake.safix.lib.materialize {
-    user = config.home.username;
-    hostname = "workstation";   # whatever your module knows the host as
-    tags = [ ];
-    scope = "user";
-  } config;
-}
+### The option surface
+
+Both modules declare the same options, and none of them can add a secret, a recipient, a grant, or an audience.
+
+| option | default | what it is |
+|---|---|---|
+| `safix.flake` | `null` | your own flake — `inputs.self` — from which `safix.lib` is read |
+| `safix.lib` | from `safix.flake` | the resolver projection, settable directly if your flake reaches the profile some other way |
+| `safix.user` | `config.home.username`; none at system scope | which `flake.safix.users` entry this profile serves |
+| `safix.hostname` | `osConfig.networking.hostName`; `config.networking.hostName` at system scope | which host to resolve on, since `perHost` and `perTag` select by it |
+| `safix.tags` | `[ ]` | the tags this host carries, against which `perTag` selects |
+| `safix.identity.keyFile` | `null` | an age key file this machine decrypts with |
+| `safix.identity.sshKeyPaths` | `[ ]` | ssh private keys this machine decrypts with |
+| `safix.enable` | whether anything resolved | the gate the whole module sits behind |
+| `safix.identityPreflight` | `true` | user scope only: install the activation guard below |
+| `safix.secrets` | read-only | what resolved, in the shape `sops.secrets` takes |
+
+`safix.flake` is the one thing a module cannot derive.
+A profile receives `config`, `lib`, `pkgs` and whatever its evaluator put in `extraSpecialArgs` or `specialArgs`; requiring a particular name there would make your evaluation seam part of safix's interface, which is the same assumption safix refuses to make about your user registry.
+So it is named once, and pointing it at something that carries no `safix.lib` fails with a message naming the option.
+
+Standalone home-manager cannot derive a hostname — `osConfig` exists only where home-manager is evaluated as a NixOS module — so `safix.hostname` is the fourth line there.
+A profile bound to declarations but missing a person or a host refuses at evaluation, naming the option that is unset, and defines nothing in the meantime.
+A profile that imports the module and sets nothing is a no-op, and so is one whose person resolves nothing on that host: no secrets, no identity, no activation entry, no unit.
+
+### Which of the two forms to import
+
+Each module ships twice.
+`homeModules.default` and `nixosModules.default` import sops-nix along with safix, for a tree that has not got it.
+`homeModules.safix` and `nixosModules.safix` declare the same namespace and import nothing, for a tree that already imports sops-nix at a revision of its own.
+
+Import the second if you already import sops-nix anywhere in that profile, because importing two distinct copies of one option-declaring module is not a merge and not a warning:
+
+```
+error: The option `sops.defaultSopsFormat' in `/nix/store/…-sops-nix-a/modules/home-manager/sops.nix'
+       is already declared in `/nix/store/…-sops-nix-b/modules/home-manager/sops.nix'.
 ```
 
-The system scope is the same call with `scope = "system"`, against `inputs.sops-nix.nixosModules.sops`.
-The mode, the path and the key are identical in both; the system scope additionally carries `owner` and `group`, and the user scope refuses an entry that sets them rather than dropping it, because the user-scope provisioner has no ownership axis and a dropped ownership field reads afterwards as an ownership claim that was honoured.
+`safix-module-collision` holds that fact, against sops-nix's real module rather than a synthetic one, which is why the choice is offered as two imports rather than as an option: `imports` cannot depend on configuration, so no flag could repair it after the fact.
+A consumer whose `sops-nix` input `follows` safix's resolves to one store path and is safe either way.
+
+### One declaration, both scopes
+
+The mode, the path and the key are identical in both scopes, and nothing in a declaration names one.
+The system scope additionally carries `owner` and `group`; the user scope refuses an entry that sets them rather than dropping it, because the user-scope provisioner has no ownership axis and a dropped ownership field reads afterwards as an ownership claim that was honoured.
 
 Two entries resolving onto one path are refused for either scope, since whichever declaration activates second unlinks the first's output.
+
+What is scope-specific is not the declaration but the configuration an entry's `path` is a function of: a `path` written as `cfg: "${cfg.home.homeDirectory}/…"` is a home-manager expression and will not materialize into a system configuration.
+
+The resolver's refusals surface as safix's own evaluation errors, listing every violation at once, rather than as the first of them raised from inside sops-nix's manifest generation.
+
+### The identity, and the guard
+
+`safix.identity.keyFile` defaults to null, and that default is not a preference.
+`sops-install-secrets` treats a set-but-unreadable key file as fatal, and skips a missing ssh key path with a line to stderr, so a non-null default would abort activation on every machine that happens to lack the path.
+Both identity options are defined onto `sops.age.*` at normal priority, so a `mkDefault` elsewhere in your tree loses to safix and a plain definition conflicts loudly — the alternative would let a base module's XDG default silently replace the null and re-arm the abort.
+`sshKeyPaths` is defined only when you name it, so the system scope keeps sops-nix's own default of the host's ed25519 keys.
+
+At user scope, safix installs `home.activation.safixIdentityPreflight`.
+It reads the configured identity, checks each path for presence and readability, and refuses the switch when none is usable; it decrypts nothing.
+It sorts `entryBefore [ "checkLinkTargets" ]`, which is what makes the refusal atomic: no home file linked, no user package installed, no user unit restarted, no secret written.
+
+That ordering is the whole of the guarantee, and it is held by `safix-consumption-ordering`, which topologically sorts a real profile's activation DAG.
+The same check holds the other half of the pair: sops-nix's own entry sorts *after* `checkLinkTargets`, which is why the guard exists.
+sops-nix registers it as a bare string, so home-manager treats it as `entryAnywhere` and it lands after `linkGeneration` and `reloadSystemd`; pinning it earlier is not available as a fix, because the unit it restarts is materialized by `linkGeneration` and made visible by `reloadSystemd`, so an early restart aborts on the first switch that introduces sops and thereafter restarts the previous generation's unit with no signal.
+
+The guard is narrower than it sounds, twice over, and its own failure message says so.
+Where home activation runs as a NixOS host's `home-manager-<user>.service`, systemd starts that unit after system activation has already switched the system generation, so a system switch is not undone by the refusal — only that user's home generation is held back.
+And presence and readability are all that were checked: a key that exists and is readable but is not a recipient of these files still fails later, in `sops-install-secrets`.
+
+The system scope installs no such guard, and that asymmetry is deliberate.
+No atomic refusal point at NixOS activation has been demonstrated, and safix does not document a guarantee that no code enforces.
+The failure is also rarer there, because sops-nix's system-scope default identity is the host key.
 
 ## The checks safix hands you
 
@@ -407,7 +484,10 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the resolution algebra | `modules/flake/safix/resolve.nix` |
 | the recipient policy renderer | `modules/flake/safix/policy.nix` |
 | the checks a consumer instantiates | `modules/flake/safix/checks.nix` |
-| the module a consumer imports | `modules/flake/safix/default.nix` |
+| the flake module a consumer imports | `modules/flake/safix/default.nix` |
+| the consumption options both scopes share | `modules/consume/common.nix` |
+| the home-manager module and its activation guard | `modules/consume/home.nix` |
+| the NixOS module | `modules/consume/nixos.nix` |
 | the command | `modules/flake/safix/safix.sh` |
 | recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand |
 | encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/` |
@@ -416,7 +496,7 @@ The option reference lives on the types themselves; this document is the narrati
 
 ## Status
 
-The evaluation half, the command, the exported checks and the materializations are here and green under `nix flake check`.
+The evaluation half, the command, the exported checks, the materializations and the two consumption modules are here and green under `nix flake check`.
 The repository has no remote yet, so the GitHub Actions workflow in `.github/workflows/` has never run; it activates on the first push.
 
 ## License
