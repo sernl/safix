@@ -15,6 +15,7 @@
 let
   resolve = import ./resolve.nix { inherit lib; };
   policy = import ./policy.nix { inherit lib; };
+  checks = import ./checks.nix { inherit lib; };
 
   cfg = config.flake.safix;
 
@@ -201,5 +202,23 @@ in
         inherit committed;
         generated = policy.render cfg.users cfg.catalogue;
       };
+
+    # Every check safix has to offer, over the declarations this flake carries,
+    # as an attrset a consumer assigns straight into `perSystem.checks`. The two
+    # optional arguments are the ones safix cannot derive: the committed policy
+    # file to compare the generated one against, and the materializations that
+    # only the consumer's own configurations produce.
+    #
+    # ../checks calls the same builders with fleets written beside them, so a
+    # claim asserted there is asserted about the function a consumer runs rather
+    # than about a second copy of it.
+    mkChecks =
+      pkgs: args:
+      checks.mkChecks pkgs (
+        {
+          inherit (cfg) users catalogue;
+        }
+        // args
+      );
   };
 }

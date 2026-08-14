@@ -190,6 +190,23 @@ let
     the generated file.
   '';
 
+  # The comparison itself, as a script taking the committed file and the
+  # generated one. A script rather than a fragment inlined in the builder below
+  # because a drill has to be able to run these bytes over a perturbed committed
+  # file and watch them fail. A drill that re-implemented the comparison would
+  # prove that its own copy fails, which is not the claim.
+  driftScript =
+    pkgs:
+    pkgs.writeShellScript "safix-policy-drift" ''
+      set -eu
+      if ! diff -u "$1" "$2"; then
+        cat >&2 <<'SAFIX_DRIFT'
+      ${driftMessage}
+      SAFIX_DRIFT
+        exit 1
+      fi
+    '';
+
   # The check that holds a consumer's committed policy to the generated one.
   # Built here rather than in the consumer's tree so that the failure and the
   # header name one command.
@@ -210,12 +227,7 @@ let
         meta.description = "structural check: safix-policy-drift";
       }
       ''
-        if ! diff -u "$committedTextPath" "$generatedTextPath"; then
-          cat >&2 <<'SAFIX_DRIFT'
-        ${driftMessage}
-        SAFIX_DRIFT
-          exit 1
-        fi
+        ${driftScript pkgs} "$committedTextPath" "$generatedTextPath"
         touch "$out"
       '';
 in
@@ -225,6 +237,7 @@ in
     renderPlan
     render
     driftMessage
+    driftScript
     mkDriftCheck
     regenerateCommand
     ;
