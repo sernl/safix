@@ -48,6 +48,8 @@
 # Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
 # dropping the ownership fields from the system materialization fails
 # `systemCarriesOwnership`.
+# Moving the wiring assertions back inside the enable gate fails
+# `unaddressed.refuses`, which is the whole reason they sit outside it.
 # Pointing the second collision copy at the first's path fails `twoPaths`, which
 # is the drill for the check that the export shape rests on: it is only evidence
 # while the two paths really are two.
@@ -468,7 +470,11 @@ in
               # enable gate for this to happen at all — an unset host is exactly
               # what produces the empty resolution that turns `enable` off.
               unaddressed = {
-                refuses = fires unaddressedProfile;
+                # The access is narrow on purpose. `fires` over the whole
+                # configuration would be tautologically true: deep-forcing a
+                # home-manager configuration reaches options no fixture profile
+                # defines, and would report a refusal on every profile.
+                refuses = fires unaddressedProfile.config.sops.secrets;
                 namesTheOption = names [ "safix.hostname" ] (
                   failedMessages homeCommon {
                     lib = safix;
