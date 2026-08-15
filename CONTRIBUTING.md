@@ -40,23 +40,33 @@ nix build .#checks.x86_64-linux.safix-set-new
 
 ## The fixture fleet
 
-The shell runtime's checks drive the real `sops`, the real `age` and the real `git` against a throwaway repository built from scratch each run.
-`modules/flake/safix/safix-selftest.sh` is that recipe, and it is the one to copy from rather than a second one to write.
-It takes a mode as its only argument:
+The checks drive the real `sops`, the real `age` and the real `git` against a throwaway repository built from scratch each run.
+`crates/safix/tests/harness/mod.rs` is that recipe, and it is the one to copy from rather than a second one to write.
 
-```
-SAFIX_SH=modules/flake/safix/safix.sh nix develop -c bash modules/flake/safix/safix-selftest.sh set-new
-```
+Every test builds a `Fixture`, which:
 
-What it does, in the order it matters:
-
-- Makes a scratch directory with `mktemp -d` and removes it on exit.
-- Mints an age identity into that directory with `age-keygen`, and derives a second recipient for the shared audience so that "the audience is two people" is a claim a file encrypted to one key would fail.
+- Makes a scratch directory and removes it on every exit path, including a panicking one.
+  It is mode 700 and on tmpfs, verified as tmpfs at runtime rather than assumed, because a value staged on a disk-backed `/tmp` outlives the directory being removed.
+  A platform without one refuses unless `SAFIX_TEST_DISK_STAGING=1` says you accept disk-backed staging.
+- Mints an age identity into that directory with `age-keygen`, and a second recipient for the shared audience so that "the audience is two people" is a claim a file encrypted to one key would fail.
 - Writes a fixture `.sops.yaml` reproducing the two properties the command depends on: rules anchored with `^` and ending in `\.yaml$`, and no catch-all, so an unruled path fails closed exactly as it does in a real tree.
-- Stubs `nix` only, because a flake evaluation is what a sandbox cannot do. `sops` is never stubbed: a check that stands a stub in for the backend stays green over a command calling something the tree no longer contains.
+- Stubs `nix` only, because a flake evaluation is what a sandbox cannot do, and the stub asserts the attribute path it was asked for.
+  `sops` is never stubbed: a check that stands a stub in for the backend stays green over a command calling something the tree no longer contains.
 
-The rust runtime's differential harness reuses that fleet.
-Its job is to run both runtimes over it and compare four channels; what "compare" means for each is defined in `openspec/changes/rewrite-runtime-in-rust/design.md`, decision D7, and it is worth reading before touching the harness.
+## Running one test locally
+
+The suite is ordinary `cargo test`, so one test is one filter:
+
+```
+nix develop -c cargo test --test write_path set_new_creates_the_file_through_the_creation_rules
+```
+
+The target names are the files under `crates/safix/tests/`, and each named check runs exactly one of their tests — `modules/flake/checks/cli.nix` maps mode to target and test name, and `modules/flake/checks/single-runtime.nix` maps the four claims that were never comparisons to whole targets.
+To run what a check runs, from the check's name, read the mapping there.
+
+Two things about running it outside a build sandbox are worth knowing.
+A terminal is one: the command reads a value from `/dev/tty` when it can open one, so the harness detaches runs whose value arrives on standard input into their own session with `setsid`, and a run that found your terminal would wait at a prompt the test never answers.
+`strace` is the other: `crates/safix/tests/syscall_proof.rs` needs it, and it is in the devshell for that reason.
 
 ## Working on the rust half
 
