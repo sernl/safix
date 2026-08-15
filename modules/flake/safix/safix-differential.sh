@@ -610,6 +610,13 @@ normalize_run() { # <repo> <file>...
       sed -i "s/$hash/<commit-$index>/g" "$file"
       index=$((index + 1))
     done
+    # sops writes its own log lines through a logger that stamps them to the
+    # second. Two correct runs of `fix` straddle a second boundary whenever they
+    # are slow enough to, so the stamp is a property of the clock rather than of
+    # either runtime, and comparing it compares how busy the machine was. The
+    # substitution is anchored to the start of a line and to sops' own format, so
+    # a stamp anywhere else — inside a value, inside a refusal — still differs.
+    sed -i -E 's|^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} |<time> |' "$file"
     if [ -n "${NORMALIZE_KEYS:-}" ]; then
       sed -i -E 's/age1[02-9ac-hj-np-z]{58}/<recipient>/g' "$file"
     fi

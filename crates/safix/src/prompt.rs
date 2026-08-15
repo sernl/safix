@@ -2,7 +2,7 @@
 //!
 //! This is the one place a terminal is touched, and it is in the command rather
 //! than in the library for that reason. What it produces is a
-//! [`Secret`](safix_core::Secret): the bytes go from the terminal into the
+//! [`Secret`]: the bytes go from the terminal into the
 //! buffer that type owns and out of it only down a pipe, so there is no
 //! intermediate `String` for a panic message or a log line to pick up.
 //!
