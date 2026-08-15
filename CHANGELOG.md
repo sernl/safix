@@ -69,6 +69,17 @@ What is retained: the pipe requirement is modified rather than deleted.
   It does not close in general: a `--regenerate` cascade still commits per generator.
 - `checks.safix-public-no-rule`, matching every generated creation rule against every public path.
   The public store's shape also joins `catchAllProbes`, so a rule reaching it fails two checks that ask different questions.
+- `flake.safix.bridge`: the declared relationship between a clan var and a safix entry.
+  One `clanFlake` per consumer, and `mappings.<id>` naming a clan machine, generator and file, a safix user and name, and a direction.
+  Direction is written as its endpoints — `clan-to-safix` or `safix-to-clan` — rather than as `import` or `export`, because `clan vars export` moves values out of clan and `safix export` moves them in, so a direction spelled with either word means opposite things depending on which tool the reader has in mind.
+  Evaluation refuses five mistakes that are local to the consumer and claims nothing about the clan half, which lives in another flake.
+- `safix import` and `safix export`, one per direction, acting on every mapping of theirs or on the one named.
+  Each mapping is reported as unchanged, updated, absent at source, or refused with its reason; a refused mapping does not stop the others and the run exits non-zero.
+  An imported value is written by the same path a hand-supplied value takes, so it acquires the recipient-drift refusal, the staged write and rename, and a commit naming the mapping and the direction.
+  An exported value is written by `clan vars set` with the value on standard input, and clan commits it in clan's own repository.
+- Both verbs read both sides before writing either, and an agreeing mapping is not written and not committed.
+  For export the comparison is load-bearing rather than an optimisation: clan's write is unconditional and its `age` backend re-encrypts an unchanged value into fresh ciphertext, so without it every run would commit in the clan repository for every mapping, forever, each diff decrypting to what it decrypted to before.
+- Refusal codes `safix::mapping_wrong_direction`, `safix::source_has_no_value`, `safix::source_unreadable` and `safix::generator_definition_drifted`, alongside `safix::clan_unavailable`, `safix::clan_pipe_missing`, `safix::clan_var_unknown`, `safix::clan_command_failed`, `safix::unknown_mapping` and `safix::no_clan_flake`.
 - Refusal codes `safix::staging_not_memory_backed`, `safix::staging_unusable`, `safix::generator_output_missing`, `safix::no_editor`, `safix::public_not_editable` and `safix::editor_failed`.
 
 ### Changed — breaking
@@ -97,14 +108,39 @@ What is retained: the pipe requirement is modified rather than deleted.
 
 ### Not adopted
 
-- clan's `validationHash`.
+- clan's `validationHash`, as a thing safix computes, records or writes.
   It answers "has the definition changed such that this value is stale"; safix's `validation` answers "is this candidate acceptable before it is written".
   Neither subsumes the other, and safix writes into git, so the failure to prevent is a bad value reaching a committed file rather than a stale one persisting.
   `validation` is unchanged: the candidate arrives on standard input and `$out_name` names the output under judgement.
+  What safix does do with clan's is *ask about it*: `safix export` refuses a mapping whose clan-side generator clan already considers stale, and it establishes that by running `clan vars check --generator` rather than by reading the hash clan recorded, which is a file in clan's store.
+  Nothing in the runtime writes that record.
+  See "The bridge" below for why the refusal exists at all.
 - clan's generator sandbox.
   clan runs a script inside `sandbox_cmd` with the staging root as the only writable path and refuses when sandboxing is unavailable.
   Adopting it is a second material change to what a generator may do, would break a generator that reaches the network, and is separable from the interface change.
   Whether it becomes its own 0.2 change or is deliberately out of scope is an open question for the operator.
+
+### The bridge, and the two decisions it turned on
+
+The operator's requirement was bidirectional and explicit: values move from clan into safix and from safix into clan, top to bottom and bottom to top.
+Two questions gated it, and both are answered here rather than left to be inferred from the code.
+
+*clan is reached only through clan's own command, in both directions.*
+The brief specified that import decrypt clan material with the operator's admin identity, and that is not what shipped.
+This fleet's clan sets `secretStore = "age"`, so "decrypt clan material" would have meant implementing clan's age backend — its directory scheme, its recipient sidecars, its stanza type — inside safix: a second decryption path for a store safix does not own, whose layout is versioned by someone else, and which would silently support that one backend and no other.
+Symmetric delegation costs one thing, which is that a consumer without clan-cli cannot import either, and that is arguably correct because a consumer with no clan has nothing to import from.
+The runtime reads, writes, encrypts, decrypts and parses none of clan's stored files, and `safix-bridge-transfer` drives a clan that records what it was handed rather than asserting this from the shape of the code.
+
+*An export into a generator clan already considers stale is refused, not written.*
+clan records a validation per generator and regenerates when the recorded one no longer matches the definition.
+`clan vars set` does not update that record, so changing a clan-side generator's definition and then running a routine `clan vars generate` silently replaces whatever was exported.
+The hazard is that it is triggered by editing a nix file rather than by running a command, and that `clan vars get` keeps returning the old value in the meantime — both confirmed against a real clan rather than inferred.
+So `safix export` asks clan whether the generator is stale and refuses when it is, naming both remedies: bring clan's side back into agreement, or declare the mapping `clan-to-safix` instead, which is the right shape when clan's generator is the producer.
+There is no flag that exports anyway, because safix has nowhere to record that a var is externally supplied and a flag would turn a refusal into a silent loss.
+
+One requirement was deleted rather than implemented.
+The bridge surface once required evaluation to refuse a `safix-to-clan` mapping whose source entry had "neither a generator nor a declared value", and that has no referent: an entry declares where a value lives rather than that one is there, so at evaluation a hand-set entry before its first write and one after it are the same declaration, and refusing on it would refuse the ordinary export.
+It is replaced by a run-time refusal — export refuses when the source key is absent from the source file, naming `safix set` and `safix generate` — and the evaluation-time silence is still asserted, beside it, as its sibling.
 
 ### Removed
 

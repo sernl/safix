@@ -333,6 +333,8 @@ $ safix fix        # regenerate .sops.yaml and re-wrap files to match declaratio
 $ safix set NAME   # write one value (hidden prompt, confirmed, committed)
 $ safix get NAME   # read one value to stdout
 $ safix generate   # mint whatever has a recipe
+$ safix import     # pull declared clan vars into safix
+$ safix export     # push declared safix values into clan
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
 ```
@@ -340,9 +342,10 @@ $ safix adduser    # run by the operator: scaffold a person
 Think of `check` and `fix` as `git status` and `git add` for secret policy.
 The nix declarations are intent, the encrypted files are reality, `check` diffs the two, and `fix` reconciles what is reconcilable and names what needs a human.
 
-`upload`, `export`, and `import` do not exist here, and `safix --help` records why.
-Activation already delivers what an upload would.
-Export and import serve a migration between backends that safix does not have, and a plaintext export tree outlives the migration that justified it.
+`upload` does not exist here, and `safix --help` records why: activation already delivers what an upload would.
+
+`import` and `export` are not a plaintext dump and restore.
+They move one declared mapping at a time across the clan boundary — see "The bridge to clan" below — and nothing here writes a plaintext tree, because such a tree outlives the migration that justified it.
 
 ## Onboarding a person, end to end
 
@@ -509,6 +512,51 @@ And presence and readability are all that were checked: a key that exists and is
 The system scope installs no such guard, and that asymmetry is deliberate.
 No atomic refusal point at NixOS activation has been demonstrated, and safix does not document a guarantee that no code enforces.
 The failure is also rarer there, because sops-nix's system-scope default identity is the host key.
+
+## The bridge to clan
+
+If your fleet also runs [clan](https://clan.lol), values can move between clan's vars and safix's entries in either direction.
+The relationship is declared rather than passed as arguments, because a bridge is a standing relationship and a declaration is diffable, repeatable, checkable and enumerable where a remembered command line is none of those.
+
+```nix
+{
+  flake.safix.bridge.clanFlake = ./.;
+
+  flake.safix.bridge.mappings.ntfy-token = {
+    direction = "clan-to-safix";
+    clan = { machine = "sundog"; generator = "ntfy"; file = "token"; };
+    safix = { user = "ana"; name = "ntfy-token"; };
+  };
+}
+```
+
+Then `safix import` moves every `clan-to-safix` mapping and `safix export` every `safix-to-clan` one; naming a mapping narrows the run to it.
+
+Direction is written as its endpoints rather than as `import` or `export`, and that is not pedantry.
+`clan vars export` moves values *out of* clan; `safix export` moves them *into* clan.
+Both words are correct relative to the tool that says them, and a declaration is read by someone with no tool in hand to be relative to.
+The verbs stay `import` and `export` because they sit on safix's own command line, where safix is the frame every other verb already assumes.
+
+**clan stays the authority on its own store.**
+Every read is `clan vars get` and every write is `clan vars set`, run as subprocesses with the value on a pipe.
+safix reads, writes, encrypts, decrypts and parses none of clan's stored files, in either direction, so the bridge works over `sops`, `age`, `password-store` and whatever clan adds, with no code here.
+The cost is that a consumer without clan-cli cannot import either — which is arguably correct, since a consumer with no clan has nothing to import from.
+
+**Both verbs converge.**
+Each reads both sides and compares before writing either, so a mapping whose two sides agree is not written and not committed and a second run changes nothing.
+On the export side that comparison is load-bearing rather than an optimisation: clan's write is unconditional and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run would commit in the clan repository for every mapping.
+
+An imported value goes through the same path a hand-typed one takes, so it acquires the recipient-drift refusal, the staged write and the rename, and lands as its own commit naming the mapping and the direction and never the value.
+
+Half of every mapping lives in another flake, so evaluation refuses only what is local to you: an unresolvable safix side, an import target a generator also produces, two mappings writing one target, one pair of endpoints declared in both directions, and mappings with no `clanFlake` to reach.
+It claims nothing about the clan side.
+A clan side that does not resolve is refused when a transfer reaches it, in clan's own words, naming the machine, the generator and the file.
+
+Two refusals belong to export alone.
+A source entry that holds no value is refused rather than exported as nothing — a question evaluation cannot answer, because an entry declares where a value lives rather than that one is there.
+And a mapping whose clan-side generator clan already considers outdated is refused, because clan records a validation per generator and its next routine `clan vars generate` would replace whatever was exported without saying so.
+There is no option that exports anyway: safix has nowhere to record that a var is externally supplied, so the flag would turn a refusal into a silent loss.
+The refusal names both remedies — bring clan's side back into agreement, or declare the mapping `clan-to-safix`, which is the right shape when clan's generator is the producer.
 
 ## The checks safix hands you
 

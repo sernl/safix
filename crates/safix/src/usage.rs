@@ -346,17 +346,17 @@ open, and only minting a new value revokes it. `safix fix` re-wraps each
 governed file's data key to the audience now declared, which aligns ciphertext
 with policy and is explicitly not revocation.
 
-\u{2500}\u{2500} verbs that do not exist here, and why \u{2500}\u{2500}
+\u{2500}\u{2500} what import and export are, and are not \u{2500}\u{2500}
+These two move values across the clan boundary, one declared mapping at a time.
+They are not a plaintext dump and restore. Writing every value out as a tree
+serves migrating between backends, and that tree outlives the migration that
+made it, on a disk \u{2014} which is the shape this command exists to avoid. There
+is nothing here that writes one.
+
+\u{2500}\u{2500} one verb that does not exist here, and why \u{2500}\u{2500}
   upload   a tool that pushes generated values to a machine over ssh exists
            because the machine does not evaluate the flake holding them. A
            profile served from this repository does: activation is what delivers
            a value, through sops-nix reading the committed file. There is
            nothing for an upload to do that a rebuild does not already do.
-
-  export   writing every value out as a plaintext tree serves migrating between
-  import   backends. Both directions exist here as `get` and `set`, one name at
-           a time and never as a tree \u{2014} there is one backend and the migration
-           those two serve is the one this does not have. A plaintext tree is
-           also a thing that outlives the migration that made it, on a disk,
-           which is the shape this command exists to avoid.
 ";
