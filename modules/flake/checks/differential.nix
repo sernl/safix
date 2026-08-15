@@ -67,7 +67,7 @@
         pkgs.runCommand name { nativeBuildInputs = harness; } ''
           export HOME="$PWD"
           SAFIX_SH=${../safix/safix.sh} \
-          SAFIX_RS=${config.packages.safix-rs}/bin/safix \
+          SAFIX_RS=${config.packages.safix}/bin/safix \
             bash ${../safix/safix-differential.sh} ${mode}
           touch "$out"
         '';
@@ -166,16 +166,14 @@
       # reads asks nothing; one whose output another reads announces the whole
       # downstream set before the first commit, and the answer is drilled both
       # ways as well as given in advance.
-      checks.safix-differential-regenerate =
-        differential "safix-differential-regenerate" "regenerate";
+      checks.safix-differential-regenerate = differential "safix-differential-regenerate" "regenerate";
 
       # What `generate` refuses about a declaration and about what a script
       # printed: no generator, an empty value, a script that exited non-zero, a
       # validation that rejected the candidate, a multi-output script that
       # printed something other than a JSON object, a prompt nobody answered,
       # and a dependency with no value yet.
-      checks.safix-differential-genrefuse =
-        differential "safix-differential-genrefuse" "genrefuse";
+      checks.safix-differential-genrefuse = differential "safix-differential-genrefuse" "genrefuse";
 
       # Minting an identity. Not a byte comparison of the value — two correct
       # runs mint two different identities — so each side is held to the
@@ -200,8 +198,6 @@
       # the value did NOT take; this shows the one it did, for both runtimes, and
       # carries its own drill: a runtime writing a value to a regular file has to
       # be caught, and caught by the pipe assertion rather than incidentally.
-      checks.safix-differential-strace = onLinuxOnly (
-        differential "safix-differential-strace" "strace"
-      );
+      checks.safix-differential-strace = onLinuxOnly (differential "safix-differential-strace" "strace");
     };
 }

@@ -1,10 +1,16 @@
-# Builds ./safix.sh and exposes it as a package and as a devshell command.
+# Builds ./safix.sh and exposes it as `packages.safix-sh`.
 #
-# A package rather than a script declared inline in the devshell: the runtime
-# dependencies are pinned into the closure instead of inherited from whatever
-# PATH the caller happens to have, which is how a backend goes missing from
-# under a tool. The build also runs shellcheck over the script, so a check that
-# builds this package is also the one that lints it.
+# This is no longer what an operator runs — `packages.safix` is the rust binary —
+# and it is kept because it is the oracle every `safix-differential-*` mode
+# compares that binary against. Retiring it would retire the evidence that the
+# two agree, so it stays in the tree, built and linted, and is what those checks
+# drive as `SAFIX_SH`.
+#
+# A package rather than a script declared inline: the runtime dependencies are
+# pinned into the closure instead of inherited from whatever PATH the caller
+# happens to have, which is how a backend goes missing from under a tool. The
+# build also runs shellcheck over the script, so a check that builds this package
+# is also the one that lints it.
 #
 # The content half is deliberately unable to alter the policy: `set` and
 # `generate` write through sops, which reads recipients from the file's own
@@ -18,8 +24,10 @@
     let
       readers = import ./readers.nix { inherit pkgs; };
 
-      safix = pkgs.writeShellApplication {
-        name = "safix";
+      safix-sh = pkgs.writeShellApplication {
+        # Installed under its own name rather than as `safix`, so that having
+        # both in one profile is not a collision over one path.
+        name = "safix-sh";
         runtimeInputs = [
           # `keygen` mints an identity with it; nothing else here runs age.
           pkgs.age
@@ -39,13 +47,10 @@
           pkgs.util-linux
         ];
         text = builtins.readFile ./safix.sh;
-        meta.description = "The whole lifecycle of one secret, by name and never by file (set | get | list | generate | check | fix | keygen | adduser)";
+        meta.description = "The shell runtime the rust one is compared against; not what ships";
       };
     in
     {
-      # A package and not a devshell entry, because this module is the one a
-      # consumer imports and their devshell is theirs. It is exposed here so
-      # that the command they run is built from the same declarations it reads.
-      packages.safix = safix;
+      packages.safix-sh = safix-sh;
     };
 }

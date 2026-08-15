@@ -1,12 +1,13 @@
 # Builds the rust workspace and carries every promise the rust half makes as a
 # check of this flake.
 #
-# `packages.safix` is deliberately not touched here. The shell runtime is what
-# ships for the whole of the rewrite, and the rust binary is exposed beside it as
-# `packages.safix-rs`; the two swap only when a differential harness has compared
-# every subcommand's stdout, standard error, exit code and effect on the
-# repository. Until then a partially-ported runtime cannot become what a consumer
-# runs by accident.
+# `packages.safix` is this binary. It became this binary when the differential
+# harness had compared every subcommand the shell runtime has against it on
+# standard output, standard error, exit code and effect on the repository, with
+# the two divergences it did find recorded rather than reconciled — see
+# `modules/flake/checks/differential.nix` and the CHANGELOG. The shell runtime
+# stays in the tree as `packages.safix-sh`, because it is what those modes
+# compare against: retiring the oracle would retire the evidence.
 #
 # The advisory scan is a check of its own rather than a fourth `cargo-deny`
 # section. The advisory database is a network resource and the build sandbox has
@@ -60,19 +61,20 @@
       };
     in
     {
-      packages.safix-rs = craneLib.buildPackage (
+      packages.safix = craneLib.buildPackage (
         withArtifacts
         // {
           # The tests are their own check, so the package build does not run
           # them twice.
           doCheck = false;
 
-          meta.description = "The safix runtime in rust — not yet what ships; see openspec/changes/rewrite-runtime-in-rust";
+          meta.description = "The whole lifecycle of one secret, by name and never by file (set | get | list | generate | check | fix | keygen | adduser)";
+          meta.mainProgram = "safix";
         }
       );
 
       checks = {
-        safix-rs-build = config.packages.safix-rs;
+        safix-rs-build = config.packages.safix;
 
         safix-rs-test = craneLib.cargoTest withArtifacts;
 
