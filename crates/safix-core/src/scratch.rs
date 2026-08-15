@@ -21,6 +21,7 @@
 use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// How much is written at a time when overwriting a scratch file.
@@ -73,14 +74,80 @@ pub fn keep_dirs() {
     with_registry(|registry| registry.dirs.clear());
 }
 
+/// The lock a sweep must hold, and that an in-flight subprocess holds against
+/// it.
+fn quiescent() -> &'static Mutex<()> {
+    static QUIESCENT: OnceLock<Mutex<()>> = OnceLock::new();
+    QUIESCENT.get_or_init(|| Mutex::new(()))
+}
+
+/// The status an interrupted run is to end with, once one has been asked for.
+static INTERRUPTED_WITH: AtomicI32 = AtomicI32::new(0);
+
+/// Nothing is swept while this is held.
+///
+/// Held across each `sops` invocation, and it is what makes an interruption
+/// mean the same thing here as it does in `modules/flake/safix/safix.sh`. Bash
+/// runs a trap between commands, so a `SIGINT` arriving while `sops` is writing
+/// the candidate document is acted on only once `sops` has been waited on —
+/// never while it still has the file open. A sweep from a handler thread has no
+/// such discipline of its own, so it borrows this one.
+#[must_use]
+pub fn quiet() -> Quiet {
+    Quiet(Some(
+        quiescent().lock().unwrap_or_else(PoisonError::into_inner),
+    ))
+}
+
+/// The guard [`quiet`] returns.
+pub struct Quiet(Option<std::sync::MutexGuard<'static, ()>>);
+
+impl std::fmt::Debug for Quiet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Quiet")
+    }
+}
+
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        self.0.take();
+    }
+}
+
+/// Record that this run has been asked to stop, and with which status.
+///
+/// The first request wins: a second signal arriving while the first is waiting
+/// for a subprocess does not change what the run will exit with.
+pub fn interrupt(status: i32) {
+    let _ = INTERRUPTED_WITH.compare_exchange(0, status, Ordering::SeqCst, Ordering::Relaxed);
+}
+
+/// The status a run has been asked to stop with, if it has.
+///
+/// A write checks this immediately after every subprocess it waits on, which is
+/// where bash's own trap would have run. Reaching it means the run stops before
+/// it renames anything into place, so an interruption during encryption leaves
+/// the target file as it was and nothing in the history.
+#[must_use]
+pub fn interrupted() -> Option<i32> {
+    match INTERRUPTED_WITH.load(Ordering::SeqCst) {
+        0 => None,
+        status => Some(status),
+    }
+}
+
 /// Shred every registered file and remove every registered directory that is
 /// still empty.
+///
+/// Waits for any in-flight subprocess first — see [`quiet`] — so a sweep never
+/// removes a file something else still holds open and is about to write to.
 ///
 /// Best-effort throughout: a file that is already gone, a directory that has
 /// since been filled, and a path that cannot be opened are all left alone. This
 /// runs on the way out of a failed run and from a signal handler, and a failure
 /// here must not mask the failure that led to it.
 pub fn cleanup() {
+    let _quiet = quiet();
     let (files, dirs, floor) = with_registry(|registry| {
         (
             std::mem::take(&mut registry.files),

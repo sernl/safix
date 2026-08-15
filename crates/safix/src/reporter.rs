@@ -247,6 +247,13 @@ mod tests {
 
     /// The library's refusals, which an embedder also receives.
     fn runtime_refusals() -> Vec<(&'static str, Refusal)> {
+        let mut all = read_path_refusals();
+        all.extend(write_path_refusals());
+        all
+    }
+
+    /// The refusals reachable from `list`, `get` and `check`.
+    fn read_path_refusals() -> Vec<(&'static str, Refusal)> {
         vec![
             (
                 "not_a_repository",
@@ -337,6 +344,18 @@ mod tests {
                     status: " M secrets/safix/users/ana/secrets.yaml".into(),
                 }),
             ),
+            (
+                "secret_unreadable",
+                Refusal::Runtime(Error::SecretRead {
+                    cause: io::Error::from(io::ErrorKind::UnexpectedEof),
+                }),
+            ),
+        ]
+    }
+
+    /// The refusals reachable from `set` and `fix`.
+    fn write_path_refusals() -> Vec<(&'static str, Refusal)> {
+        vec![
             ("no_value_read", Refusal::Runtime(Error::NoValueRead)),
             (
                 "no_confirmation_read",
@@ -397,12 +416,6 @@ mod tests {
                 Refusal::Runtime(Error::SopsCreateFailed {
                     file: "secrets/safix/users/ana/secrets.yaml".into(),
                     output: "Failed to get the data key: no key could be obtained".into(),
-                }),
-            ),
-            (
-                "secret_unreadable",
-                Refusal::Runtime(Error::SecretRead {
-                    cause: io::Error::from(io::ErrorKind::UnexpectedEof),
                 }),
             ),
         ]

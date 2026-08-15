@@ -115,14 +115,37 @@ pub fn run(
                 "{relative} does not exist yet; creating it through sops so the creation rules apply."
             ),
         );
-        workspace
-            .sops()
-            .create_empty_document(workspace.root(), &relative, &key, &candidate)?;
+        {
+            let _quiet = scratch::quiet();
+            workspace.sops().create_empty_document(
+                workspace.root(),
+                &relative,
+                &key,
+                &candidate,
+            )?;
+        }
+        if let Some(status) = scratch::interrupted() {
+            return Ok(status);
+        }
     }
 
     let value = source.read(user, name)?;
-    let status = workspace.sops().set_key(&candidate, &key, &value)?;
+    if let Some(status) = scratch::interrupted() {
+        return Ok(status);
+    }
+
+    let status = {
+        let _quiet = scratch::quiet();
+        workspace.sops().set_key(&candidate, &key, &value)?
+    };
     if status != 0 {
+        return Ok(status);
+    }
+    // Where bash's `trap ... INT` would have run: after the foreground child was
+    // waited on and before the next command, which here is the rename. A run
+    // that reached this having been interrupted stops with nothing renamed and
+    // nothing committed, and the guard sweeps the candidate on the way out.
+    if let Some(status) = scratch::interrupted() {
         return Ok(status);
     }
 

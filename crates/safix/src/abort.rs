@@ -48,12 +48,18 @@ pub fn catch_signals() {
         // The first signal is the last: the sweep runs and the process ends, so
         // this reads one and never comes back for a second.
         let first = signals.forever().next();
-        safix_core::scratch::cleanup();
-        std::process::exit(if first == Some(SIGINT) {
+        let status = if first == Some(SIGINT) {
             INTERRUPTED
         } else {
             TERMINATED
-        });
+        };
+        // Announced before the sweep, because the sweep waits for whatever
+        // subprocess is in flight and the run's own thread checks this the
+        // moment that subprocess is waited on. Whichever of the two reaches the
+        // exit first, the status and the swept state are the same.
+        safix_core::scratch::interrupt(status);
+        safix_core::scratch::cleanup();
+        std::process::exit(status);
     });
 }
 
