@@ -45,6 +45,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -255,8 +256,7 @@ impl Fixture {
     /// it grants.
     pub fn write_policy(&self, shared_anchors: &[&str]) {
         let mut policy = String::from("keys:\n");
-        policy.push_str(&format!("  - &ana {}\n", self.ana));
-        policy.push_str(&format!("  - &bo {}\n", self.bo));
+        write!(policy, "  - &ana {}\n  - &bo {}\n", self.ana, self.bo).unwrap();
         policy.push_str(&rules_block(shared_anchors));
         std::fs::write(self.repo.join(".sops.yaml"), policy).unwrap();
         std::fs::write(self.work.join("rules.txt"), rules_block(&["ana", "bo"])).unwrap();
@@ -299,10 +299,10 @@ impl Fixture {
     /// it — prompts and dependencies in one name space, hyphens mapped to
     /// underscores — so a change to that mapping on one side and not the other
     /// fails here.
-    pub fn seed_generator(&mut self, name: &str, file: &str, outputs: &[&str], record: Value) {
+    pub fn seed_generator(&mut self, name: &str, file: &str, outputs: &[&str], record: &Value) {
         self.placements["ana"][name] = json!({
             "file": file, "key": name, "origin": "private",
-            "owner": "ana", "shared": false, "generator": record,
+            "owner": "ana", "shared": false, "generator": record.clone(),
         });
 
         let mut inputs = serde_json::Map::new();
@@ -392,23 +392,29 @@ impl Fixture {
 
     /// One invocation, with nothing on standard input.
     pub fn run(&self, arguments: &[&str]) -> Run {
-        self.invoke(arguments, None, Reporter::Plain)
+        self.invoke(arguments, None, Reporter::Plain, &[])
     }
 
     /// One invocation, with the given bytes on standard input.
     pub fn run_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(arguments, Some(stdin), Reporter::Plain)
+        self.invoke(arguments, Some(stdin), Reporter::Plain, &[])
     }
 
     /// One invocation under the graphical reporter, which is where a refusal's
     /// code is rendered.
     pub fn run_graphical(&self, arguments: &[&str]) -> Run {
-        self.invoke(arguments, None, Reporter::Graphical)
+        self.invoke(arguments, None, Reporter::Graphical, &[])
     }
 
     /// One invocation under the graphical reporter, with standard input.
     pub fn run_graphical_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(arguments, Some(stdin), Reporter::Graphical)
+        self.invoke(arguments, Some(stdin), Reporter::Graphical, &[])
+    }
+
+    /// One invocation with something in its environment the fixture does not
+    /// set — a backend that fails, a temporary directory of its own.
+    pub fn run_env(&self, arguments: &[&str], stdin: Option<&str>, extra: &[(&str, &str)]) -> Run {
+        self.invoke(arguments, stdin, Reporter::Plain, extra)
     }
 
     /// `set`, with the value typed twice as the prompt asks for it.
@@ -447,7 +453,13 @@ impl Fixture {
         finish(child, None)
     }
 
-    fn invoke(&self, arguments: &[&str], stdin: Option<&str>, reporter: Reporter) -> Run {
+    fn invoke(
+        &self,
+        arguments: &[&str],
+        stdin: Option<&str>,
+        reporter: Reporter,
+        extra: &[(&str, &str)],
+    ) -> Run {
         let mut command = match (stdin, detached()) {
             (Some(_), Some(setsid)) => {
                 let mut command = Command::new(setsid);
@@ -458,6 +470,9 @@ impl Fixture {
         };
         command.args(arguments);
         self.environment(&mut command, reporter);
+        for (name, value) in extra {
+            command.env(name, value);
+        }
         command.stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -478,10 +493,16 @@ impl Fixture {
             .env("SOPS_AGE_KEY_FILE", &self.key_file)
             .env("SAFIX_REPO_ROOT", &self.repo)
             .env("SAFIX_NIX", NIX_STUB)
-            .env("SAFIX_FIXTURE_PLACEMENTS", self.work.join("placements.json"))
+            .env(
+                "SAFIX_FIXTURE_PLACEMENTS",
+                self.work.join("placements.json"),
+            )
             .env("SAFIX_FIXTURE_AUDIENCES", self.work.join("audiences.json"))
             .env("SAFIX_FIXTURE_GOVERNED", self.work.join("governed.json"))
-            .env("SAFIX_FIXTURE_RECIPIENTS", self.work.join("recipients.json"))
+            .env(
+                "SAFIX_FIXTURE_RECIPIENTS",
+                self.work.join("recipients.json"),
+            )
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
             .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"));
@@ -629,7 +650,7 @@ impl Fixture {
         let plain = self.work.join("plain.yaml");
         let mut text = String::new();
         for key in keys {
-            text.push_str(&format!("{key}: \"fixture-value-for-{key}\"\n"));
+            writeln!(text, "{key}: \"fixture-value-for-{key}\"").unwrap();
         }
         std::fs::write(&plain, text).unwrap();
         if let Some(parent) = self.repo.join(relative).parent() {
@@ -681,6 +702,19 @@ impl Fixture {
             .env("SOPS_AGE_KEY_FILE", &self.key_file);
         let encrypted = capture_bytes(&mut command);
         std::fs::write(self.repo.join(relative), encrypted).unwrap();
+    }
+
+    /// Re-wrap a file to the creation rule that covers it, which is what
+    /// `safix fix` runs.
+    pub fn updatekeys(&self, relative: &str) {
+        let mut command = Command::new("sops");
+        command
+            .arg("updatekeys")
+            .arg("-y")
+            .arg(relative)
+            .current_dir(&self.repo)
+            .env("SOPS_AGE_KEY_FILE", &self.key_file);
+        run_to_success(&mut command, "re-wrapping the drifted file");
     }
 
     /// The two people the fixture policy anchors, declared as `adduser` writes
@@ -749,7 +783,7 @@ fn rules_block(shared_anchors: &[&str]) -> String {
     rules.push_str("  - path_regex: ^secrets/safix/shared/ana,bo/[^/]*\\.yaml$\n");
     rules.push_str("    key_groups:\n      - age:\n");
     for anchor in shared_anchors {
-        rules.push_str(&format!("          - *{anchor}\n"));
+        writeln!(rules, "          - *{anchor}").unwrap();
     }
     rules
 }
@@ -849,7 +883,9 @@ fn finish(mut child: Child, stdin: Option<&str>) -> Run {
         let _ = pipe.flush();
         drop(pipe);
     }
-    let output = child.wait_with_output().expect("the command did not finish");
+    let output = child
+        .wait_with_output()
+        .expect("the command did not finish");
     Run {
         code: output.status.code(),
         stdout: output.stdout,
@@ -895,13 +931,11 @@ fn search(root: &Path, needle: &str) -> Option<PathBuf> {
     let mut found = Vec::new();
     collect(root, &mut found, &|_| true);
     found.into_iter().find(|path| {
-        std::fs::read(path)
-            .map(|bytes| {
-                bytes
-                    .windows(needle.len())
-                    .any(|window| window == needle.as_bytes())
-            })
-            .unwrap_or(false)
+        std::fs::read(path).is_ok_and(|bytes| {
+            bytes
+                .windows(needle.len())
+                .any(|window| window == needle.as_bytes())
+        })
     })
 }
 

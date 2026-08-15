@@ -115,7 +115,9 @@ fn eval(arguments: &[String]) -> ! {
         ));
     };
     let Some((root, attribute)) = reference.split_once('#') else {
-        refuse(&format!("'{reference}' is not a <flake>#<attribute> reference"));
+        refuse(&format!(
+            "'{reference}' is not a <flake>#<attribute> reference"
+        ));
     };
     let expected_root = environment("SAFIX_REPO_ROOT");
     if root != expected_root {
@@ -168,7 +170,11 @@ fn policy_text(root: &Path) -> String {
                 .and_then(|rest| rest.strip_suffix("\";"))
         });
         if let Some(recipient) = recipient {
-            policy.push_str(&format!("  - &{user} {recipient}\n"));
+            policy.push_str("  - &");
+            policy.push_str(user);
+            policy.push(' ');
+            policy.push_str(recipient);
+            policy.push('\n');
         }
     }
     policy.push_str(&read(Path::new(&environment("SAFIX_FIXTURE_RULES"))));

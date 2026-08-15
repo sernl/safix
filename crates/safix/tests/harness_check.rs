@@ -69,7 +69,10 @@ fn the_evaluator_stub_refuses_an_attribute_the_runtime_does_not_name() {
         .arg(format!("{}#safix.lib.placementz", fixture.repo.display()))
         .env("SAFIX_REPO_ROOT", &fixture.repo);
     let refused = probe.output().unwrap();
-    assert!(!refused.status.success(), "a renamed attribute was answered");
+    assert!(
+        !refused.status.success(),
+        "a renamed attribute was answered"
+    );
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("unexpected attribute"),
         "the stub does not say which attribute it refused"
