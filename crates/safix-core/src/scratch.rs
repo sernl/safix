@@ -285,6 +285,23 @@ impl Drop for Guard {
     }
 }
 
+/// The lock a test holds while it depends on the registry's contents.
+///
+/// [`cleanup`] drains a process-wide registry and sweeps everything in it, so a
+/// test that calls it removes the live staging root of any test running beside
+/// it. That is the correct behaviour — a signal handler must reach every
+/// registered path, whichever code path made it — and it is why the registry is
+/// process-wide in the first place. What it costs is that the tests which
+/// depend on the registry's contents cannot run concurrently, so they take this
+/// rather than the module being made thread-local for their sake.
+#[cfg(test)]
+pub(crate) fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +312,7 @@ mod tests {
     /// for the tests' sake — the process-wide registry is the thing under test.
     #[test]
     fn the_lifecycle_shreds_files_and_removes_only_the_directories_it_made() {
+        let _exclusive = exclusive();
         let root = std::env::temp_dir().join(format!("safix-scratch-{}", std::process::id()));
         let made = root.join("deep").join("audience");
         let kept = root.join("kept");

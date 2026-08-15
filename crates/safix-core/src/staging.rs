@@ -361,6 +361,7 @@ mod tests {
     fn a_root_is_private_and_its_files_are_owner_only() {
         use std::os::unix::fs::PermissionsExt as _;
 
+        let _exclusive = crate::scratch::exclusive();
         let Ok(staging) = Staging::establish(false) else {
             return;
         };
@@ -381,6 +382,7 @@ mod tests {
 
     #[test]
     fn two_roots_do_not_collide() {
+        let _exclusive = crate::scratch::exclusive();
         let (Ok(first), Ok(second)) = (Staging::establish(false), Staging::establish(false)) else {
             return;
         };
@@ -389,6 +391,7 @@ mod tests {
 
     #[test]
     fn dropping_the_guard_removes_the_tree() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(staging) = Staging::establish(false) else {
             return;
         };
@@ -422,6 +425,7 @@ mod tests {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let outcome = std::panic::catch_unwind(move || {
+            let _exclusive = crate::scratch::exclusive();
             let Ok(staging) = Staging::establish(false) else {
                 return;
             };

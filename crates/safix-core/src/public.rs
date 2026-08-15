@@ -120,3 +120,71 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+
+    use super::{LEAF, PREFIX, is_public_path};
+
+    /// The alphabet `resolve.nix` admits a user, audience member or secret name
+    /// from, plus the separator a shared audience's directory is joined with.
+    const NAME: &str = "[a-z0-9][a-z0-9_-]{0,7}";
+
+    /// What `resolve.nix` builds a public path out of, restated here.
+    ///
+    /// A second implementation on purpose: the runtime never builds one — every
+    /// path it acts on comes from the resolver on
+    /// [`crate::model::Placement::public`] — so what the properties below are
+    /// about is that the *predicate* agrees with the shape, whichever of the two
+    /// layouts produced it.
+    fn public_path(audience: &[String], name: &str) -> String {
+        let where_ = if audience.len() == 1 {
+            format!("users/{}", audience.join(""))
+        } else {
+            format!("shared/{}", audience.join(","))
+        };
+        format!("{PREFIX}{where_}/{name}/{LEAF}")
+    }
+
+    proptest! {
+        /// Every path the layout produces is recognised as public.
+        #[test]
+        fn every_layout_path_is_recognised(
+            audience in proptest::collection::vec(NAME, 1..4),
+            name in NAME,
+        ) {
+            prop_assert!(is_public_path(&public_path(&audience, &name)));
+        }
+
+        /// No path under the ciphertext prefix ever is.
+        ///
+        /// This is the separability the store's location was chosen for: an
+        /// exclusion, a backup policy or a search scoped to one tree reaches
+        /// nothing in the other, whatever the names inside them are.
+        #[test]
+        fn no_ciphertext_path_is_recognised(
+            audience in proptest::collection::vec(NAME, 1..4),
+            name in NAME,
+        ) {
+            let ciphertext = format!("secrets/safix/users/{}/{name}.yaml", audience.join(""));
+            prop_assert!(!is_public_path(&ciphertext));
+            prop_assert!(!ciphertext.starts_with(PREFIX));
+            prop_assert!(!public_path(&audience, &name).starts_with("secrets/"));
+        }
+
+        /// The leaf is what makes a path public, not the prefix alone. A file
+        /// dropped beside a value — an editor's backup, a note — is not one.
+        #[test]
+        fn a_sibling_of_a_value_is_not_a_value(
+            audience in proptest::collection::vec(NAME, 1..4),
+            name in NAME,
+            sibling in "[a-z]{1,6}",
+        ) {
+            prop_assume!(sibling != LEAF);
+            let beside = public_path(&audience, &name)
+                .replace(&format!("/{LEAF}"), &format!("/{sibling}"));
+            prop_assert!(!is_public_path(&beside));
+        }
+    }
+}

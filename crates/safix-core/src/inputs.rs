@@ -282,6 +282,7 @@ mod tests {
 
     #[test]
     fn a_prompt_is_a_file_the_script_may_read_twice() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, true) else {
             return;
         };
@@ -302,6 +303,7 @@ mod tests {
 
     #[test]
     fn a_prompts_directory_is_absent_and_unnamed_when_none_are_declared() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
@@ -312,6 +314,7 @@ mod tests {
 
     #[test]
     fn an_ambient_prompts_variable_does_not_reach_a_generator_that_declares_none() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
@@ -338,6 +341,7 @@ mod tests {
 
     #[test]
     fn the_working_directory_is_the_root_holding_the_three_directories() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, true) else {
             return;
         };
@@ -347,6 +351,7 @@ mod tests {
 
     #[test]
     fn an_output_is_read_back_byte_for_byte_including_a_trailing_newline() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
@@ -372,6 +377,7 @@ mod tests {
 
     #[test]
     fn a_missing_output_refuses_and_names_what_was_produced() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
@@ -394,6 +400,7 @@ mod tests {
 
     #[test]
     fn a_name_reaching_outside_the_root_is_refused_before_anything_is_written() {
+        let _exclusive = crate::scratch::exclusive();
         let Ok(tree) = Tree::establish(false, true) else {
             return;
         };

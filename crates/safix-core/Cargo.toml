@@ -29,10 +29,10 @@ serde_norway.workspace = true
 # discipline is sequential, so the feature list is the three that fan-out needs
 # and nothing that would make reaching for it elsewhere convenient.
 tokio = { workspace = true, features = ["rt-multi-thread", "process", "sync"] }
-# The pipe a generator's input travels down, and the one flag that has to come
-# off a descriptor for the script to inherit it. A safe wrapper over what would
-# otherwise be `unsafe` in a crate that forbids it; nothing here opens a
-# terminal or catches a signal, which stay the command's.
+# `statfs`, which is how the staging root asks the kernel whether a mount is
+# memory-backed rather than inferring it from the path's name. A safe wrapper
+# over what would otherwise be `unsafe` in a crate that forbids it; nothing here
+# opens a terminal or catches a signal, which stay the command's.
 rustix.workspace = true
 # The one regular expression this runtime evaluates, and it is not one of ours:
 # `adduser` holds a name to the alphabet `flake.safix.lib.nameRegex` publishes,
