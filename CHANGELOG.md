@@ -10,7 +10,8 @@ Two surfaces are versioned, and they are not versioned by the same thing.
 The `safix-core` library's public interface is what [semantic versioning](https://semver.org/spec/v2.0.0.html) governs.
 While the major version is `0`, a breaking change to that interface moves the minor version.
 
-The `safix` command's behaviour — its subcommands, its exit codes, and the wording of its refusals — is governed by the differential harness described in `openspec/changes/rewrite-runtime-in-rust/design.md` rather than by the version number.
+The `safix` command's behaviour — its subcommands, its exit codes, and the wording of its refusals — is governed by `crates/safix/tests/` and the refusal snapshots rather than by the version number.
+It was governed by the differential harness while a second runtime existed; that harness is described in `openspec/changes/rewrite-runtime-in-rust/design.md` and its retirement in `openspec/changes/rust-only-runtime/`.
 A refusal's prose is a tested string, so it changes when a test changes, and the changelog records it either way.
 
 The nix half — `flake.safix.*`, the flake module, and the consumption modules — is the option surface consumers write against.
@@ -117,29 +118,36 @@ Keeping the oracle alive would not have preserved that fact; it would have produ
 
 ### Known differences
 
-- The shell runtime's `list` renders in the placement document's own key order, while everything else in either runtime renders sorted.
-  The two coincide over `nix eval --json`, which emits every attribute set sorted, and the harness asserts its own fixture is in that order.
-- The `list` table is aligned by character count where `column -t` aligns by display width.
-  Every field but a generator's description is drawn from the resolver's alphabet, so the two part company only over a non-ASCII description.
-- A governed path holding something that is not a YAML document is reported by neither runtime's key reader.
-  The recipient half of the report does speak about it.
-- The rust runtime has one refusal the shell has no counterpart for: a nix half declaring a field this runtime does not read.
-  Every schema it reads denies unknown fields, where the shell runtime's `jq` expressions select the fields they know and ignore the rest.
-- `safix --version` prints the package name and version and exits zero; the shell runtime reaches its unknown-subcommand refusal and exits 1.
+These were the places the two runtimes were deliberately pinned apart rather than held to agreeing.
+They are decisions, not observations, so they outlive the comparison that recorded them.
+Each is stated as what this runtime does, with the behaviour it diverged from named as history and the check that holds it today named where one does.
+
+- `list` renders sorted, as everything else in this runtime does.
+  The shell runtime rendered in the placement document's own key order; the two coincided over `nix eval --json`, which emits every attribute set sorted.
+  `safix-get-list` asserts the rows and the order.
+- The `list` table is aligned by character count.
+  The shell runtime piped through `column -t`, which aligns by display width; every field but a generator's description is drawn from the resolver's alphabet, so the two parted company only over a non-ASCII description.
+  `safix-get-list` asserts the column offsets.
+- A governed path holding something that is not a YAML document is not reported by the key reader; the recipient half of the report does speak about it.
+  This was true of both runtimes and is a property of reading a document's shape without decrypting it.
+- A nix half declaring a field this runtime does not read is refused.
+  Every schema it reads denies unknown fields, where the shell runtime's `jq` expressions selected the fields they knew and ignored the rest — so a field added on the nix side reaches a refusal here rather than a reader that keeps working while answering an older question.
+  The refusal's rendering is held by the `nix_schema_mismatch` snapshot.
+- `safix --version` prints the package name and version on standard output and exits zero.
+  The shell runtime reached its unknown-subcommand refusal and exited 1.
   A strictly wider surface rather than a different answer to a question both were asked, and the convention for a compiled binary.
-  `safix-differential-unknown` pins it: the check fails if the oracle ever acquires a `--version`, or if the rust runtime stops printing one.
-- `fix` without `--yes` cannot be confirmed in the shell runtime.
-  It drives its re-wrap loop with `done < <(jq -r '.managed[]' ...)`, so `sops updatekeys` inherits the pipe carrying the governed file names and reads its confirmation from there: the answer to one file's prompt is the next file's name, which is never `y`.
-  The rust runtime hands `sops` the run's own standard input.
-  `safix-differential-converge` pins the difference and asserts that neither re-wraps anything when no answer is available.
-- The shell runtime has no response to `SIGINT` during `set`.
-  At a prompt, `bash` restarts a `read` the interrupt returned from and defers its `trap 'exit 130' INT` while the stream stays open, so the run keeps waiting; during encryption, a non-interactive `bash` waiting for a foreground command ignores `SIGINT` outright, so the run writes, commits and exits zero.
-  The rust runtime exits 130 in both, having swept the candidate document and written nothing.
-  `safix-differential-abort` asserts both oracle behaviours, so an oracle that later acquires a response fails the check rather than quietly making the drills comparable.
-- A git that exits non-zero ends the shell runtime with git's own status and nothing of its own on standard error, because it runs under `set -e`.
-  The rust runtime makes the same failure a refusal like any other: `safix: git <arguments> failed`, and exit 1 whatever git exited with.
-  The extra line names the subcommand that stopped the run, which git's own message — about a lock file — does not, and exit 1 is what this binary's contract says a refusal is.
-  `safix-differential-write` pins it under two different git statuses, so the check fails if the oracle stops passing git's status through or acquires a refusal of its own, and asserts what both still agree on: the value written, the file staged, and nothing committed.
-- Reading the two entries from a *seekable* standard input differs between the runtimes, and the harness feeds a pipe for that reason.
-  The shell runtime re-opens `/dev/stdin` for each read, which yields another handle on a pipe and a fresh description at offset zero on a regular file — so over a file its confirmation is the first line read a second time, and the double entry stops checking anything.
-  The rust runtime reads the two entries sequentially in both cases.
+  `safix-integration` asserts it; `safix-differential-unknown`, which pinned it before, went with the oracle.
+- `fix` without `--yes` hands `sops updatekeys` the run's own standard input, so its confirmation is answerable.
+  The shell runtime drove its re-wrap loop with `done < <(jq -r '.managed[]' ...)`, so `sops` inherited the pipe carrying the governed file names and read its confirmation from there: the answer to one file's prompt was the next file's name, which is never `y`.
+  What is asserted today is the convergence rather than the interactive confirmation — `safix-governed-extras` runs `fix --yes` and holds `check` to having nothing left to report.
+  The interactive path is exercised by no check; that is a gap this change did not close.
+- `SIGINT` and `SIGTERM` during `set` exit 130 and 143, having swept the candidate document and written nothing.
+  The shell runtime responded to neither: at a prompt, `bash` restarted the `read` the interrupt returned from and deferred its `trap 'exit 130' INT` while the stream stayed open, so the run kept waiting; during encryption, a non-interactive `bash` waiting for a foreground command ignored `SIGINT` outright, so the run wrote, committed and exited zero.
+  `safix-abort-residue` holds all four windows, and `safix-abort` holds the two the behavioural suite covered.
+- A git that exits non-zero is a refusal like any other: `safix: git <arguments> failed`, and exit 1 whatever git exited with.
+  The shell runtime ran under `set -e` and exited with git's own status, saying nothing of its own.
+  The extra line names the subcommand that stopped the run, which git's own message — about a lock file — does not.
+  The refusal's rendering is held by the `git_command_failed` snapshot; `safix-differential-write`, which drove it under two git statuses end to end, went with the oracle, and no check drives it end to end today.
+- The two entries are read sequentially from standard input, whether it is a pipe or a regular file.
+  The shell runtime re-opened `/dev/stdin` for each read, which yields another handle on a pipe but a fresh description at offset zero on a regular file — so over a file its confirmation was the first line read a second time, and the double entry stopped checking anything.
+  The checks feed a pipe, so the seekable case is exercised by no check; it was a property of the retired runtime's re-opening and this runtime has no such branch.
