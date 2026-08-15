@@ -83,6 +83,18 @@ pub fn shim() -> &'static str {
         .as_str()
 }
 
+/// The clan the bridge tests delegate across.
+pub fn clan_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        located(
+            "SAFIX_TEST_CLAN_STUB",
+            env!("CARGO_BIN_EXE_safix-clan-stub"),
+        )
+    })
+    .as_str()
+}
+
 /// Where one of the three programs the suite drives is.
 ///
 /// `CARGO_BIN_EXE_*` is an absolute path fixed when the test was compiled, and
@@ -193,6 +205,7 @@ pub struct Fixture {
     placements: Value,
     audiences: Value,
     genplan: Value,
+    bridge: Value,
     extras: Vec<String>,
 }
 
@@ -259,6 +272,12 @@ impl Fixture {
                     "recipients": [ana, bo],
                 },
             }),
+            // A consumer who has never heard of clan evaluates exactly this,
+            // and every test that does not declare a mapping drives it: the
+            // bridge verbs have to be silent about an empty bridge rather than
+            // refuse, and that is asserted by every other test's fixture being
+            // this one.
+            bridge: json!({ "clanFlake": null, "mappings": [] }),
             genplan: json!({
                 "ana": { "order": [], "outputs": {}, "inputs": {} },
                 "bo":  { "order": [], "outputs": {}, "inputs": {} },
@@ -401,6 +420,85 @@ impl Fixture {
         std::fs::write(self.work.join("hook.json"), hook.to_string()).unwrap();
     }
 
+    /// Declare one bridge mapping, as `flake.safix.bridge` resolves it.
+    ///
+    /// The shape is the one `modules/flake/safix/default.nix` projects: the
+    /// clan flake once for the consumer, and one record per mapping carrying
+    /// the attribute name it was declared under. Built rather than pasted, so a
+    /// field added on the nix side has to be added here too and the fixture
+    /// cannot drift into answering an older schema.
+    pub fn seed_mapping(
+        &mut self,
+        id: &str,
+        direction: &str,
+        clan: (&str, &str, &str),
+        safix: (&str, &str),
+    ) {
+        let (machine, generator, file) = clan;
+        let (user, name) = safix;
+        self.bridge["clanFlake"] = json!(self.repo.to_string_lossy());
+        self.bridge["mappings"].as_array_mut().unwrap().push(json!({
+            "id": id,
+            "direction": direction,
+            "clan": { "machine": machine, "generator": generator, "file": file },
+            "safix": { "user": user, "name": name },
+        }));
+        self.write_fixtures();
+    }
+
+    /// Where the stubbed clan keeps its store, its spool and its switches.
+    pub fn clan_spool(&self) -> PathBuf {
+        self.work.join("clan-spool")
+    }
+
+    /// What the stubbed clan holds for one var, if it holds anything.
+    ///
+    /// Read out of the stub's own layout rather than clan's, which is the point
+    /// of the stub having one: a runtime that reached past the command would
+    /// find nothing here, because there is nothing shaped like clan's store to
+    /// find.
+    pub fn clan_holds(&self, machine: &str, id: &str) -> Option<String> {
+        std::fs::read_to_string(
+            self.clan_spool()
+                .join("store")
+                .join(machine)
+                .join(id.replace('/', "%")),
+        )
+        .ok()
+    }
+
+    /// Put a value into the stubbed clan without going through safix.
+    pub fn clan_seed(&self, machine: &str, id: &str, value: &str) {
+        let directory = self.clan_spool().join("store").join(machine);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(id.replace('/', "%")), value).unwrap();
+    }
+
+    /// One line of what the stubbed clan recorded, or the empty string.
+    pub fn clan_recorded(&self, name: &str) -> String {
+        std::fs::read_to_string(self.clan_spool().join(name)).unwrap_or_default()
+    }
+
+    /// How many times clan was asked to write.
+    ///
+    /// The number convergence is a claim about. clan's write is unconditional
+    /// and commits what it wrote, so "the second run changed nothing" is only
+    /// true if this does not move.
+    pub fn clan_writes(&self) -> u64 {
+        self.clan_recorded("writes").trim().parse().unwrap_or(0)
+    }
+
+    /// The environment a bridge run needs: the stubbed clan, and its spool.
+    pub fn clan_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("SAFIX_CLAN".to_owned(), clan_stub().to_owned()),
+            (
+                "SAFIX_CLAN_STUB_SPOOL".to_owned(),
+                self.clan_spool().to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
     /// Write every fixture document the stubbed evaluator answers with.
     ///
     /// `governedFiles` is computed here from the audiences and the extras, as
@@ -434,6 +532,7 @@ impl Fixture {
         write_json(&self.work.join("placements.json"), &self.placements);
         write_json(&self.work.join("audiences.json"), &self.audiences);
         write_json(&self.work.join("genplan.json"), &self.genplan);
+        write_json(&self.work.join("bridge.json"), &self.bridge);
         write_json(&self.work.join("recipients.json"), &recipients);
         write_json(&self.work.join("governed.json"), &governed);
         if !self.work.join("hook.json").exists() {
@@ -726,6 +825,7 @@ impl Fixture {
                 self.work.join("recipients.json"),
             )
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
+            .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
             .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"))
             // The two the developer's own shell almost certainly sets. A test

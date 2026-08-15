@@ -32,6 +32,14 @@ path = "tests/support/nix-stub.rs"
 name = "safix-test-shim"
 path = "tests/support/shim.rs"
 
+# The clan the bridge tests delegate to. Permitted where stubbing sops is not,
+# and the file states why: sops is what safix's claims are about, clan is a
+# boundary safix delegates across, and what is under test is the delegation. It
+# records what it was handed so the claims can be asserted rather than assumed.
+[[bin]]
+name = "safix-clan-stub"
+path = "tests/support/clan-stub.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true
