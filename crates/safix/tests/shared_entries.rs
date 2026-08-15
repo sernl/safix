@@ -16,6 +16,8 @@
 
 mod harness;
 
+use std::path::Path;
+
 use harness::{ANA_FILE, Fixture, SHARED_FILE};
 
 /// One value, one file, one key, for every carrier: written by one of them and
@@ -67,7 +69,11 @@ fn both_carriers_resolve_one_file_and_read_one_value() {
     let holders: Vec<String> = fixture
         .git(&["ls-files", "--", "secrets"])
         .lines()
-        .filter(|path| path.ends_with(".yaml"))
+        .filter(|path| {
+            Path::new(path)
+                .extension()
+                .is_some_and(|kind| kind == "yaml")
+        })
         .filter(|path| {
             fixture
                 .read(path)

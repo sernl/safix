@@ -24,6 +24,14 @@ path = "src/main.rs"
 name = "safix-nix-stub"
 path = "tests/support/nix-stub.rs"
 
+# The perturbations the residue and drill checks put in the runtime's way: a
+# sops that records what it was handed, a sops that waits, and a wrapper that
+# damages one channel on purpose. Rust for the same reason the stub is: each
+# decides whether an assertion is shown to fail.
+[[bin]]
+name = "safix-test-shim"
+path = "tests/support/shim.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true

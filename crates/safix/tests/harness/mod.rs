@@ -62,10 +62,13 @@ pub const ANA_FILE: &str = "secrets/safix/users/ana/secrets.yaml";
 pub const SHARED_FILE: &str = "secrets/safix/shared/ana,bo/secrets.yaml";
 
 /// The built binary under test.
-const SAFIX: &str = env!("CARGO_BIN_EXE_safix");
+pub const SAFIX: &str = env!("CARGO_BIN_EXE_safix");
 
 /// The evaluator the suite answers with.
 const NIX_STUB: &str = env!("CARGO_BIN_EXE_safix-nix-stub");
+
+/// The shim the residue and drill checks put in the runtime's way.
+pub const SHIM: &str = env!("CARGO_BIN_EXE_safix-test-shim");
 
 /// What a run left on each stream, and what it exited with.
 pub struct Run {
@@ -392,29 +395,52 @@ impl Fixture {
 
     /// One invocation, with nothing on standard input.
     pub fn run(&self, arguments: &[&str]) -> Run {
-        self.invoke(arguments, None, Reporter::Plain, &[])
+        self.invoke(SAFIX, arguments, None, Reporter::Plain, &[])
     }
 
     /// One invocation, with the given bytes on standard input.
     pub fn run_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(arguments, Some(stdin), Reporter::Plain, &[])
+        self.invoke(SAFIX, arguments, Some(stdin), Reporter::Plain, &[])
     }
 
     /// One invocation under the graphical reporter, which is where a refusal's
     /// code is rendered.
     pub fn run_graphical(&self, arguments: &[&str]) -> Run {
-        self.invoke(arguments, None, Reporter::Graphical, &[])
+        self.invoke(SAFIX, arguments, None, Reporter::Graphical, &[])
     }
 
     /// One invocation under the graphical reporter, with standard input.
     pub fn run_graphical_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(arguments, Some(stdin), Reporter::Graphical, &[])
+        self.invoke(SAFIX, arguments, Some(stdin), Reporter::Graphical, &[])
     }
 
     /// One invocation with something in its environment the fixture does not
     /// set — a backend that fails, a temporary directory of its own.
     pub fn run_env(&self, arguments: &[&str], stdin: Option<&str>, extra: &[(&str, &str)]) -> Run {
-        self.invoke(arguments, stdin, Reporter::Plain, extra)
+        self.invoke(SAFIX, arguments, stdin, Reporter::Plain, extra)
+    }
+
+    /// One invocation of a program standing in for the binary, which is how a
+    /// drill puts a deliberately damaged runtime in its place.
+    pub fn run_program(
+        &self,
+        program: &str,
+        arguments: &[&str],
+        stdin: Option<&str>,
+        extra: &[(&str, &str)],
+    ) -> Run {
+        self.invoke(program, arguments, stdin, Reporter::Plain, extra)
+    }
+
+    /// The temporary directory a run stages in, which is where a value must
+    /// never be found afterwards.
+    pub fn tmpdir(&self) -> PathBuf {
+        self.work.join("tmp")
+    }
+
+    /// A path under the fixture's scratch directory, for a spool a shim writes.
+    pub fn scratch(&self, name: &str) -> PathBuf {
+        self.work.join(name)
     }
 
     /// `set`, with the value typed twice as the prompt asks for it.
@@ -436,25 +462,60 @@ impl Fixture {
         command
     }
 
-    /// A run left to block, so a caller can interrupt it.
+    /// A run interrupted in one of the windows it has.
     ///
-    /// Standard input is a pipe nobody writes to, which is what keeps the prompt
-    /// waiting; `timeout` sends the signal, because it sends it to the process
-    /// it spawned rather than to a session.
-    pub fn interrupt_after(&self, seconds: &str, signal: &str, arguments: &[&str]) -> Run {
+    /// Standard input is a pipe this process keeps the write end of, so a read
+    /// that is not answered blocks rather than seeing end of input — the
+    /// difference between a run that was interrupted and one that ran out of
+    /// input, which exit differently and must not be confused. `timeout` sends
+    /// the signal because it sends it to the process it spawned;
+    /// `--preserve-status` is what lets the runtime's own 130 or 143 be
+    /// observed rather than timeout's 124.
+    pub fn interrupt_after(
+        &self,
+        seconds: &str,
+        signal: &str,
+        arguments: &[&str],
+        feed: &str,
+        extra: &[(&str, &str)],
+    ) -> Run {
+        let (reader, writer) = rustix::pipe::pipe().expect("could not open a pipe");
         let mut command = Command::new("timeout");
-        command.arg("-s").arg(signal).arg(seconds).arg(SAFIX);
+        command
+            .arg("--preserve-status")
+            .arg("-s")
+            .arg(signal)
+            .arg(seconds)
+            .arg(SAFIX);
         command.args(arguments);
         self.environment(&mut command, Reporter::Plain);
-        command.stdin(Stdio::piped());
+        for (name, value) in extra {
+            command.env(name, value);
+        }
+        command.stdin(Stdio::from(reader));
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
         let child = command.spawn().expect("could not spawn the command");
-        finish(child, None)
+
+        let mut held = std::fs::File::from(writer);
+        if !feed.is_empty() {
+            held.write_all(feed.as_bytes()).unwrap();
+            held.flush().unwrap();
+        }
+        let output = child
+            .wait_with_output()
+            .expect("the command did not finish");
+        drop(held);
+        Run {
+            code: output.status.code(),
+            stdout: output.stdout,
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
     }
 
     fn invoke(
         &self,
+        program: &str,
         arguments: &[&str],
         stdin: Option<&str>,
         reporter: Reporter,
@@ -463,10 +524,10 @@ impl Fixture {
         let mut command = match (stdin, detached()) {
             (Some(_), Some(setsid)) => {
                 let mut command = Command::new(setsid);
-                command.arg("-w").arg(SAFIX);
+                command.arg("-w").arg(program);
                 command
             }
-            _ => Command::new(SAFIX),
+            _ => Command::new(program),
         };
         command.args(arguments);
         self.environment(&mut command, reporter);
@@ -846,6 +907,21 @@ fn permit_owner_only(path: &Path) {
 /// This process's user, for a staging directory nobody else can enter.
 fn user_id() -> String {
     capture(Command::new("id").arg("-u"))
+}
+
+/// The sops a shim stands in front of, found the way the runtime finds it.
+///
+/// A shim that resolved `sops` by name would find itself, because the fixture
+/// puts it on the runtime's `PATH` under that name.
+pub fn real_sops() -> String {
+    std::env::var_os("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|directory| directory.join("sops"))
+                .find(|candidate| candidate.is_file())
+        })
+        .map(|path| path.display().to_string())
+        .expect("sops is not on PATH")
 }
 
 /// `setsid`, when this process has a controlling terminal and so would hand one

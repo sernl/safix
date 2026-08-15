@@ -515,10 +515,10 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
     let fixture = Fixture::new();
 
     // A SIGINT while the prompt is waiting. Standard input is a pipe nobody
-    // writes to, so the read blocks until the signal arrives.
-    fixture
-        .interrupt_after("2", "INT", &["set", "ana", "wifi-psk"])
-        .expect_refusal("the interrupted run");
+    // writes to, so the read blocks until the signal arrives, and the exit
+    // status is what tells an interrupted run from one that ran out of input.
+    let interrupted = fixture.interrupt_after("2", "INT", &["set", "ana", "wifi-psk"], "", &[]);
+    assert_eq!(interrupted.code, Some(130), "the run was not interrupted");
 
     assert!(
         !fixture.exists(SHARED_FILE),
