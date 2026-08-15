@@ -14,6 +14,22 @@
 { lib, ... }:
 let
   types = import ./types.nix { inherit lib; };
+  bridge = import ./bridge.nix { inherit lib; };
+
+  # One consumer bridges one clan. Two definitions of a scalar cannot both
+  # survive into a list for `violationsOf` to count, so this refusal is a merge
+  # that throws rather than a message in that family — it is the one bridge rule
+  # whose evidence is gone by the time the resolver could look at it.
+  oneClanFlake = lib.types.path // {
+    merge =
+      loc: defs:
+      if builtins.length defs > 1 then
+        throw "safix bridge: flake.safix.bridge.clanFlake is declared ${toString (builtins.length defs)} times, in ${
+          lib.concatMapStringsSep " and " (d: toString d.file) defs
+        }. One consumer bridges one clan."
+      else
+        lib.types.path.merge loc defs;
+  };
 in
 {
   options.flake.safix = {
@@ -44,6 +60,59 @@ in
         consumer with its own users writes a projection from theirs into this one;
         the two are different objects that happen to share a name.
       '';
+    };
+
+    bridge = {
+      clanFlake = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr oneClanFlake;
+        example = lib.literalExpression "./.";
+        description = ''
+          The clan this consumer bridges to, as the flake reference clan's own
+          command takes for `--flake`.
+
+          Declared once for the consumer rather than once per mapping. A
+          consumer with two clans is not a case this supports, and declaring a
+          second one is refused rather than resolved by taking the first.
+        '';
+      };
+
+      mappings = lib.mkOption {
+        default = { };
+        type = lib.types.attrsOf bridge.mapping;
+        example = lib.literalExpression ''
+          {
+            ntfy-token = {
+              direction = "clan-to-safix";
+              clan = {
+                machine = "sundog";
+                generator = "ntfy";
+                file = "token";
+              };
+              safix = {
+                user = "ana";
+                name = "ntfy-token";
+              };
+            };
+          }
+        '';
+        description = ''
+          Every standing relationship between a clan var and a safix entry.
+
+          The attribute name is the mapping's own identifier. It appears in
+          reports, in commit messages and in refusals, and it is not derived
+          from either endpoint — a name taken from one side reads wrongly in a
+          sentence about the other.
+
+          Evaluation refuses a mapping whose safix side does not resolve, whose
+          import target a generator also produces, which writes a target another
+          mapping also writes, or which pairs one set of endpoints in both
+          directions. It refuses nothing about the clan side: that half lives in
+          another flake, and a clan side that does not resolve is refused when a
+          transfer reaches the mapping, naming the machine, the generator and
+          the file.
+        '';
+      };
     };
   };
 }

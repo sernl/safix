@@ -20,6 +20,7 @@
 let
   resolve = import ./resolve.nix { inherit lib; };
   policy = import ./policy.nix { inherit lib; };
+  bridge = import ./bridge.nix { inherit lib; };
 
   # The one shell every message-bearing check runs: it fails while the file it
   # is handed has any line in it. Exposed so a drill runs these bytes rather
@@ -119,6 +120,22 @@ let
       name = "safix-generator-tools";
       subject = "safix generators: a declared generator names a runtime tool nixpkgs does not have.";
       messages = generatorToolMessages pkgs users catalogue;
+    };
+
+  # ── the bridge ──
+  # Only the half of each mapping that lives in the consumer's own flake. The
+  # clan half is not checked here and cannot be: it lives in another flake, and
+  # the only thing that can answer whether it resolves is clan itself.
+  bridgeMessages =
+    users: catalogue: bridgeRecord:
+    bridge.violationsOf users catalogue bridgeRecord;
+
+  mkBridgeCheck =
+    pkgs: users: catalogue: bridgeRecord:
+    mkMessageCheck pkgs {
+      name = "safix-bridge-refusals";
+      subject = "safix bridge: these mappings break rules evaluation refuses on.";
+      messages = bridgeMessages users catalogue bridgeRecord;
     };
 
   # ── the shape of a generated rule ──
@@ -357,8 +374,13 @@ let
       catalogue ? { },
       committedPolicy ? null,
       materializations ? { },
+      bridge ? {
+        clanFlake = null;
+        mappings = { };
+      },
     }:
     {
+      safix-bridge-refusals = mkBridgeCheck pkgs users catalogue bridge;
       safix-custody-refusals = mkCustodyCheck pkgs users catalogue;
       safix-generator-tools = mkGeneratorToolCheck pkgs users catalogue;
       safix-rule-shape = mkRuleShapeCheck pkgs users catalogue;
@@ -381,6 +403,8 @@ in
     refuseScript
     mkMessageCheck
     custodyMessages
+    bridgeMessages
+    mkBridgeCheck
     generatorsDeclaredIn
     generatorToolMessages
     ruleShapeMessages
