@@ -212,10 +212,6 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
             }),
         );
 
-        // Compared against what was there before rather than against emptiness:
-        // `/dev/shm` is shared with everything else running as this user, so a
-        // root another process holds in flight is not this run's residue.
-        let roots_before = fixture.staging_roots();
         let run = fixture.interrupt_after("2", signal, &["generate", "ana", "slow"], "", &[]);
 
         assert_eq!(
@@ -230,9 +226,8 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
             before,
             "a generator interrupted by SIG{signal} committed"
         );
-        let left = fixture.staging_roots();
-        assert_eq!(
-            left, roots_before,
+        assert!(
+            fixture.staging_roots().is_empty(),
             "a generator interrupted by SIG{signal} left a staging root"
         );
         assert_pristine(&fixture, &before, "CANARY-mid-generation");
