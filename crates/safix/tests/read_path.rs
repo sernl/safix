@@ -1,0 +1,174 @@
+//! What `get`, `list` and `check` report, and what they must never render.
+//!
+//! `get`'s standard output is the value and nothing else, which is what makes it
+//! pipeable; `list` reports where every name lives without rendering one; and
+//! `check` judges the union of files the declarations imply and the files the
+//! consumer named, which are different claims and are reported differently.
+
+// A test's failure is the point; see the note at the head of `harness/mod.rs`.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::too_many_lines
+)]
+
+mod harness;
+
+use harness::{ANA_FILE, Fixture, SHARED_FILE};
+
+/// A value round-trips byte for byte, and `list` says where each name lives
+/// without saying what it is.
+#[test]
+fn get_round_trips_a_value_and_list_reports_where_it_lives() {
+    let fixture = Fixture::new();
+    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password"]);
+    fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
+
+    let read = fixture.run(&["get", "ana", "api-token"]).expect_success("get");
+    assert_eq!(
+        read.stdout,
+        b"fixture-value-for-api-token",
+        "get did not round-trip the fixture value"
+    );
+
+    // Byte for byte, including the absence of a trailing newline: a value stored
+    // exactly as typed comes back exactly as stored, and a stream that gained a
+    // newline on the way out would still match a line-wise comparison. Nothing
+    // but the value reaches standard output, which is what lets a pipe carry the
+    // secret alone.
+    fixture
+        .set("ana", "mail-password", "CANARY-round-trip")
+        .expect_success("the round-trip set");
+    let read = fixture
+        .run(&["get", "ana", "mail-password"])
+        .expect_success("get");
+    assert_eq!(read.stdout, b"CANARY-round-trip", "not byte-identical");
+
+    // A secret shared from another owner resolves to the shared file for the
+    // recipient too, so both parties read one file.
+    let read = fixture
+        .run(&["get", "ana", "wifi-psk"])
+        .expect_success("get on a granted secret");
+    assert_eq!(read.stdout, b"fixture-value-for-wifi-psk");
+
+    // The default user is $USER when it is a declared user.
+    let read = fixture.run(&["get", "api-token"]).expect_success("get");
+    assert_eq!(read.stdout, b"fixture-value-for-api-token");
+
+    let listing = fixture.run(&["list", "ana"]).expect_success("list");
+    let table = listing.output();
+    assert_eq!(
+        row(&table, "NAME"),
+        vec!["NAME", "ORIGIN", "SHARED", "GENERATOR", "KEY", "FILE"],
+        "list does not head the SHARED and GENERATOR columns"
+    );
+    // ORIGIN says how the name reached this user and SHARED says whether the
+    // entry is one value. A secret granted through sharedWith is shared in the
+    // first sense and not in the second, so the two columns disagree here.
+    assert_eq!(
+        row(&table, "api-token"),
+        vec!["api-token", "carries", "-", "-", "api-token", ANA_FILE],
+    );
+    assert_eq!(
+        row(&table, "wifi-psk"),
+        vec!["wifi-psk", "shared", "-", "-", "wifi-psk", SHARED_FILE],
+    );
+    // An entry may be read under a key that is not its name, and the KEY column
+    // is what tells an operator which.
+    assert_eq!(
+        row(&table, "aliased-secret"),
+        vec![
+            "aliased-secret",
+            "private",
+            "-",
+            "-",
+            "custom-key",
+            ANA_FILE
+        ],
+    );
+    listing.silent_about("fixture-value-for");
+}
+
+/// The governed set is the union of what the declarations imply and what the
+/// consumer named, and the two halves are judged differently.
+///
+/// A file named through `extraGovernedFiles` rides an existing rule and no
+/// declaration places a secret in it, so its keys are unclaimed by construction
+/// and must not be reported — while its stanzas are still held to the rule that
+/// covers it, which is exactly what `fix` re-wraps it to.
+#[test]
+fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
+    let mut fixture = Fixture::new();
+    fixture.seed_declarations();
+    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password", "custom-key"]);
+
+    let extra = "secrets/safix/users/ana/ops-tooling.yaml";
+    fixture.govern_extra(extra);
+    fixture.make_sops_file(extra, &["shared-tooling-token"]);
+
+    // In step with its rule, it is not a finding of any kind. Reporting its keys
+    // as unclaimed would be a finding no declaration could ever resolve — not
+    // naming them is what naming the file in extraGovernedFiles means.
+    let report = fixture.run(&["check"]);
+    report.silent_about(extra);
+    report.silent_about("shared-tooling-token");
+
+    // Drifted from the rule that covers it, it is drift in exactly the sense a
+    // required file's would be.
+    let stranger = fixture.new_recipient();
+    fixture.encrypt_to(
+        extra,
+        &[&fixture.ana, &stranger],
+        "shared-tooling-token: \"fixture-value-for-tooling\"\n",
+    );
+    fixture.git(&["add", "--", extra]);
+    fixture.git(&[
+        "commit",
+        "-q",
+        "-m",
+        "fixture: the extra file drifted from the rule that covers it",
+    ]);
+
+    let report = fixture.run(&["check"]);
+    assert_eq!(report.code, Some(1), "check did not report the drift");
+    report.says(&format!(
+        "{extra} is not encrypted to the audience declared for it"
+    ));
+    report.says(&stranger);
+
+    // `fix` re-wraps it, which is the whole reason the union exists: driving the
+    // re-wrap from the declared half alone would leave a consumer-named file
+    // encrypted to whoever it was encrypted to when it was written.
+    fixture
+        .run(&["fix", "--yes"])
+        .expect_success("fix over the governed set");
+    assert!(
+        !fixture.read(extra).contains(&stranger),
+        "fix did not re-wrap the consumer-named file"
+    );
+
+    // A path no rule's directory covers is its own finding: naming a file
+    // creates no rule for it.
+    let unruled = "secrets/safix/users/cy/stranded.yaml";
+    fixture.govern_extra(unruled);
+    fixture.encrypt_to(
+        unruled,
+        &[&fixture.ana],
+        "shared-tooling-token: \"fixture-value-for-tooling\"\n",
+    );
+    let report = fixture.run(&["check"]);
+    assert_eq!(report.code, Some(1), "check did not report the unruled path");
+    report.says("no creation rule's directory covers it");
+}
+
+/// One row of a rendered table, split into its cells.
+fn row<'a>(table: &'a str, name: &str) -> Vec<&'a str> {
+    table
+        .lines()
+        .find(|line| line.split_whitespace().next() == Some(name))
+        .unwrap_or_else(|| panic!("no row for {name} in:\n{table}"))
+        .split_whitespace()
+        .collect()
+}
