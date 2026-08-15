@@ -162,54 +162,11 @@ impl Secret {
         Ok(Self::from_slice(exact))
     }
 
-    /// The members of the JSON object this value holds, each a value of its own.
-    ///
-    /// [`None`] when the bytes are not a JSON object, which is the refusal a
-    /// multi-output generator gets for printing something else. A member that is
-    /// a JSON string becomes its unescaped bytes and any other member becomes
-    /// its compact JSON text, which is what `jq -j '.[$k]'` prints for each and
-    /// therefore what the shell runtime stores.
-    ///
-    /// # What this does not zero
-    ///
-    /// The parse goes through `serde_json`, whose intermediate `Value` and its
-    /// allocations are not zeroed: a multi-output generator's plaintext is in
-    /// this process's heap in a form nothing here reclaims, until the allocator
-    /// reuses it. The value that comes back is zeroed on drop; the intermediate
-    /// is not, and no claim is made that it is. The shell runtime pipes the same
-    /// document through `jq`, which puts it in a second process's heap instead,
-    /// so this is narrower rather than clean.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::SecretRead`] if the bytes are not valid JSON at all.
-    pub fn json_members(&self) -> Result<Option<std::collections::BTreeMap<String, Self>>> {
-        let parsed: serde_json::Value =
-            serde_json::from_slice(self.0.expose_secret()).map_err(|cause| Error::SecretRead {
-                cause: io::Error::other(cause.to_string()),
-            })?;
-
-        let serde_json::Value::Object(members) = parsed else {
-            return Ok(None);
-        };
-
-        let mut split = std::collections::BTreeMap::new();
-        for (name, member) in members {
-            let rendered = Zeroizing::new(match member {
-                serde_json::Value::String(text) => text.into_bytes(),
-                other => other.to_string().into_bytes(),
-            });
-            split.insert(name, Self::from_slice(&rendered));
-        }
-        Ok(Some(split))
-    }
-
     /// A value from bytes already in hand.
     ///
     /// Private, and it stays private: the type's whole discipline is that a
     /// value enters through a stream, so a constructor taking bytes is one this
-    /// module may use to split a document it has just read and nothing outside
-    /// it may reach.
+    /// module may use and nothing outside it may reach.
     fn from_slice(bytes: &[u8]) -> Self {
         Self(SecretSlice::new(Box::from(bytes)))
     }
@@ -240,27 +197,6 @@ impl Secret {
     pub fn write_json_to<W: Write>(&self, sink: &mut W) -> io::Result<()> {
         let text = Zeroizing::new(String::from_utf8_lossy(self.0.expose_secret()).into_owned());
         serde_json::to_writer(sink, text.as_str()).map_err(io::Error::other)
-    }
-
-    /// One trailing newline off a single-line value, and nothing off a
-    /// multi-line one.
-    ///
-    /// `openssl rand -base64 32` and every other echo-shaped one-liner ends in a
-    /// newline it did not mean, and storing it would put a stray byte in every
-    /// consumer; an OpenSSH private key ends in a newline it did mean, and
-    /// taking it off produces a file `ssh` refuses to load. The two are
-    /// distinguishable — after removing the final newline a single-line value
-    /// has none left — so they are distinguished rather than settled one way.
-    #[must_use]
-    pub fn without_echoed_newline(self) -> Self {
-        let bytes = self.0.expose_secret();
-        let Some(body) = bytes.strip_suffix(b"\n") else {
-            return self;
-        };
-        if body.contains(&b'\n') {
-            return self;
-        }
-        Self::from_slice(body)
     }
 
     /// Whether two values are the same, without branching on where they differ.
@@ -669,72 +605,6 @@ mod tests {
         let expected = input.clone();
         input.extend_from_slice(b"EOF\n");
         assert_eq!(until_eof(&input), expected);
-    }
-
-    #[test]
-    fn only_a_single_line_value_loses_its_trailing_newline() {
-        let of = |bytes: &[u8]| {
-            Secret::read_from(&mut Cursor::new(bytes.to_vec())).expect("a cursor can be read")
-        };
-        let bytes_of = |secret: Secret| {
-            let mut sink = Vec::new();
-            secret
-                .write_to(&mut sink)
-                .expect("writing a vec cannot fail");
-            sink
-        };
-        assert_eq!(
-            bytes_of(of(b"one-liner\n").without_echoed_newline()),
-            b"one-liner"
-        );
-        assert_eq!(
-            bytes_of(of(b"-----BEGIN-----\nbody\n").without_echoed_newline()),
-            b"-----BEGIN-----\nbody\n"
-        );
-        assert_eq!(
-            bytes_of(of(b"no newline").without_echoed_newline()),
-            b"no newline"
-        );
-        assert_eq!(bytes_of(of(b"\n").without_echoed_newline()), b"");
-    }
-
-    #[test]
-    fn the_members_of_a_json_object_come_back_as_values_of_their_own() {
-        let document = Secret::read_from(&mut Cursor::new(
-            br#"{"key": "a value\nwith a newline", "count": 3}"#.to_vec(),
-        ))
-        .expect("a cursor can be read");
-        let members = document
-            .json_members()
-            .expect("the document is valid json")
-            .expect("the document is an object");
-        assert_eq!(members.keys().collect::<Vec<_>>(), ["count", "key"]);
-
-        let mut sink = Vec::new();
-        members
-            .get("key")
-            .expect("the member is present")
-            .write_to(&mut sink)
-            .expect("writing a vec cannot fail");
-        assert_eq!(sink, b"a value\nwith a newline");
-
-        let mut counted = Vec::new();
-        members
-            .get("count")
-            .expect("the member is present")
-            .write_to(&mut counted)
-            .expect("writing a vec cannot fail");
-        assert_eq!(counted, b"3");
-    }
-
-    #[test]
-    fn a_document_that_is_not_an_object_is_reported_as_none_and_one_that_is_not_json_fails() {
-        let of = |bytes: &[u8]| {
-            Secret::read_from(&mut Cursor::new(bytes.to_vec())).expect("a cursor can be read")
-        };
-        assert!(of(b"[1, 2]").json_members().unwrap().is_none());
-        assert!(of(b"\"a string\"").json_members().unwrap().is_none());
-        assert!(of(b"not json at all").json_members().is_err());
     }
 
     #[test]

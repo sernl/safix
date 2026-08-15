@@ -206,9 +206,13 @@ pub enum InputKind {
 
 /// One entry of a generator's script-facing name space.
 ///
-/// The map key is the identifier the script addresses — `$in_<key>` — and
-/// [`PlanInput::name`] is the declared name it was derived from, which is the
-/// one a refusal quotes and the one a dependency is resolved by.
+/// The map key is the declared name, and so is [`PlanInput::name`]: the
+/// hyphen-to-underscore mapping the descriptor interface needed went with it,
+/// because a prompt is now addressed as `$prompts/<name>` and a dependency as
+/// `$in/<generator>/<name>` — two directories rather than one shell name space,
+/// so a prompt and a dependency of the same name no longer collide. The field is
+/// kept beside the key so that this runtime quotes the resolver's own spelling
+/// in a refusal rather than trusting a map key to be one.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanInput {
