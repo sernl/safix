@@ -486,7 +486,23 @@ impl Fixture {
     /// Named by the prefix `staging.rs` gives them. A run that shredded its root
     /// leaves none, and one that did not leaves a directory holding plaintext.
     pub fn staging_roots(&self) -> Vec<PathBuf> {
-        let Ok(entries) = std::fs::read_dir(&self.work) else {
+        let mut found = self.roots_under(&self.work);
+        // The default locations too, because a run this fixture did not point at
+        // its own directory stages in one of these, and a leftover there is the
+        // same defect.
+        for shared in ["/dev/shm", "/run/user"] {
+            found.extend(self.roots_under(Path::new(shared)));
+        }
+        found
+    }
+
+    /// Staging roots this process made, directly under one directory.
+    ///
+    /// Filtered to this process's own identifier, because `/dev/shm` is shared
+    /// with everything else running as this user and another test's root in
+    /// flight is not this run's residue.
+    fn roots_under(&self, directory: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(directory) else {
             return Vec::new();
         };
         entries

@@ -177,3 +177,64 @@ fn assert_pristine(fixture: &Fixture, before: &str, value: &str) {
         panic!("the interrupted run left the value in {}", path.display());
     }
 }
+
+/// A signal while a generator's script is running leaves no staging root.
+///
+/// The window the 0.2 contract opened, and the one it is worth having a drill
+/// for: from the moment the staging root is created until the run returns, a
+/// directory on tmpfs holds every input and every output in the clear. `Drop`
+/// covers a return, an error and a panic; a signal is not any of those, and the
+/// only thing that covers it is the registration made *before* the directory
+/// exists, swept from the handler.
+///
+/// The script sleeps so the signal has somewhere to land, and writes its output
+/// first so the root is populated when it does — a sweep that skipped a
+/// non-empty directory would pass over exactly the case this exists for.
+///
+/// Both signals, because they take different paths out: `SIGINT` exits 130 and
+/// `SIGTERM` exits 143, and the sweep is what they share.
+#[test]
+fn a_signal_during_a_generator_leaves_no_staging_root() {
+    for (signal, status) in [("INT", 130), ("TERM", 143)] {
+        let mut fixture = Fixture::new();
+        let before = fixture.head();
+
+        fixture.seed_generator(
+            "slow",
+            ANA_FILE,
+            &[],
+            &serde_json::json!({
+                "dependencies": [], "description": null,
+                "files": {}, "prompts": {}, "share": false,
+                "runtimeInputs": [],
+                "script": "printf 'CANARY-mid-generation' > \"$out/slow\"; sleep 30",
+                "validation": null,
+            }),
+        );
+
+        // Compared against what was there before rather than against emptiness:
+        // `/dev/shm` is shared with everything else running as this user, so a
+        // root another process holds in flight is not this run's residue.
+        let roots_before = fixture.staging_roots();
+        let run = fixture.interrupt_after("2", signal, &["generate", "ana", "slow"], "", &[]);
+
+        assert_eq!(
+            run.code,
+            Some(status),
+            "a generator interrupted by SIG{signal} exited {:?}\n{}",
+            run.code,
+            run.combined()
+        );
+        assert_eq!(
+            fixture.head(),
+            before,
+            "a generator interrupted by SIG{signal} committed"
+        );
+        let left = fixture.staging_roots();
+        assert_eq!(
+            left, roots_before,
+            "a generator interrupted by SIG{signal} left a staging root"
+        );
+        assert_pristine(&fixture, &before, "CANARY-mid-generation");
+    }
+}

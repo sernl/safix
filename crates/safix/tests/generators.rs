@@ -308,7 +308,10 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
             .expect_success("staging under the acknowledgement");
         assert_eq!(fixture.value(ANA_FILE, "staged"), "staged");
         assert!(
-            fixture.staging_roots().is_empty(),
+            fixture
+                .staging_roots()
+                .iter()
+                .all(|root| !root.starts_with(fixture.work_dir())),
             "an acknowledged disk-backed run left its staging root behind"
         );
     } else {
