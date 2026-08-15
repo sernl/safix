@@ -557,3 +557,45 @@ fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     )?;
     Ok(ExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{VERBS, usage};
+
+    /// Every subcommand is in the scaffold, in the order the table declares them.
+    ///
+    /// [`VERBS`] says this in a doc comment and nothing held it to it. A verb
+    /// added to the table alone is dispatchable and is named by the
+    /// unknown-subcommand refusal — [`expected_verbs`](super::expected_verbs)
+    /// derives that sentence from the table — while being absent from the one
+    /// page an operator is shown. No snapshot reads both, so every snapshot in
+    /// the tree stays green over exactly that drift.
+    ///
+    /// The order is asserted for the reason the table's own doc gives: a list in
+    /// a different order from the help is a second answer to the question the
+    /// help already answers.
+    #[test]
+    fn every_verb_is_in_the_scaffold_in_the_order_the_table_declares_them() {
+        let mut previous: Option<(usize, &str)> = None;
+        for verb in VERBS {
+            let name = verb.name;
+            // The listing line rather than the bare word: `fix` and `set` are
+            // English, and the scaffold's prose says both before it is done.
+            let listing = format!("safix {name}");
+            let found = usage::SCAFFOLD.find(&listing);
+            assert!(
+                found.is_some(),
+                "`{name}` is a subcommand and the usage scaffold never lists it"
+            );
+            let at = found.unwrap();
+            if let Some((earlier, earlier_name)) = previous {
+                assert!(
+                    at > earlier,
+                    "the scaffold lists `{name}` before `{earlier_name}` and the table \
+                     declares them the other way round"
+                );
+            }
+            previous = Some((at, name));
+        }
+    }
+}
