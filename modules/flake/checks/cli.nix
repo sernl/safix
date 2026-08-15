@@ -28,6 +28,22 @@
 # does when handed a drifted file, judged against a fixture.
 #
 # ── severity: proven by perturbation, one drill per claim ──
+# Each drill below names a perturbation and the check whose claim it breaks.
+# They were established against the runtime that was under test when each mode
+# was written, and they survive the port because what they perturb is the claim
+# rather than the language: the assertion that catches a dropped `--idempotent`
+# is the same assertion whichever runtime dropped it. Where a drill named a
+# construct only the shell runtime had, it is recast below in terms of the claim
+# it broke.
+#
+# The drills observed red during this change are the four single-runtime checks'
+# own, recorded beside the tests that carry them: the interrupt inside sops in
+# `abort_residue.rs`, the plaintext write to a regular file in
+# `syscall_proof.rs`, and the five channel mutations in `channel_drills.rs`,
+# which is the severity evidence for every check on this page — an assertion
+# nobody has watched fail is not evidence, and those five are what show that
+# each channel these checks read can fail.
+#
 # Passing `sops set` without `--idempotent` fails `set-existing` on the
 # byte-identity of a re-run. The drill only bites because the check waits out a
 # second first: sops stamps `lastmodified` at one-second resolution and reuses an
@@ -43,16 +59,16 @@
 # fails `set-existing`, which reads the aliased entry back under the key the
 # declarations name and finds nothing there.
 # Writing the created document straight to its final path instead of to the
-# scratch file fails `refusals`: sops emits nothing and exits non-zero when no
-# creation rule matches, so the redirection leaves an empty unruled file beside
-# the others — which is the state the anchoring note in the generated policy
-# exists to prevent.
-# Removing the EXIT trap fails `abort` on the scratch file and the audience
-# directory an interrupted run leaves behind. Removing `trap 'exit 130' INT`
-# alone does not move any claim here, and is kept regardless: bash happens to run
-# the EXIT trap when a script dies of an unhandled SIGINT, so what the explicit
-# routing buys is that the shredder runs by construction rather than by that
-# behaviour.
+# candidate file fails `refusals`: sops emits nothing and exits non-zero when no
+# creation rule matches, so the write leaves an empty unruled file beside the
+# others — which is the state the anchoring note in the generated policy exists
+# to prevent.
+# Leaking the sweep that runs on the way out fails `abort` on the scratch file
+# and the audience directory an interrupted run leaves behind. In the shell
+# runtime that sweep was an EXIT trap and the drill removed it; here it is the
+# scratch registry's guard, and the claim is the same one. What the explicit
+# signal handling buys is unchanged too: the sweep runs by construction rather
+# than by a property of the interpreter.
 # Dropping the dirty-target guard fails `refusals`, which hand-edits the target
 # and then finds the edit accepted; dropping the mid-rebase and mid-merge guard
 # fails the same check, which is the state where a partial commit means something
@@ -108,41 +124,17 @@
 { ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { config, pkgs, ... }:
     let
-      readers = import ../safix/readers.nix { inherit pkgs; };
+      integration = import ./integration.nix { inherit pkgs; };
 
-      # Real sops, age and git; `column` for the `list` table. bash is explicit
-      # because the driver and the command are both driven as `bash <script>`
-      # rather than executed through their shebangs.
-      harness = [
-        pkgs.age
-        pkgs.bash
-        pkgs.coreutils
-        pkgs.findutils
-        pkgs.git
-        pkgs.gnugrep
-        pkgs.gnused
-        pkgs.jq
-        # For `nix-instantiate --parse` alone, which is what holds the nix
-        # `adduser` generates to being nix. Parsing needs no store and no
-        # daemon, so it is available where an evaluation is not; the `nix` the
-        # command itself reaches for stays the stub, because it is named through
-        # SAFIX_NIX rather than found on PATH.
-        pkgs.nix
-        pkgs.sops
-        readers.sops-recipients-of
-        readers.sops-keys-of
-        pkgs.util-linux
-      ];
-
-      selftest =
-        name: mode:
-        pkgs.runCommand name { nativeBuildInputs = harness; } ''
-          export HOME="$PWD"
-          SAFIX_SH=${../safix/safix.sh} bash ${../safix/safix-selftest.sh} ${mode}
-          touch "$out"
-        '';
+      # One mode, one test of the compiled suite. The attribute names are the
+      # ones this file has always had, so a consumer's CI keeps running the check
+      # it configured; what changed is the subject, which is now the shipped
+      # binary held to a literal rather than a shell script held to a fixture.
+      mode =
+        name: target: test:
+        integration.runOne config.checks.safix-integration name target test;
     in
     {
       # A file the declarations place a secret in but that nobody has run sops
@@ -150,13 +142,17 @@
       # recipients; the value round-trips under the resolved key; and the file
       # is committed on its own under a message naming the secret and never the
       # value.
-      checks.safix-set-new = selftest "safix-set-new" "set-new";
+      checks.safix-set-new =
+        mode "safix-set-new" "write_path"
+          "set_new_creates_the_file_through_the_creation_rules";
 
       # One key moves and the rest of the file comes through byte-identical,
       # compared by digest rather than by value. A re-run of the same value is
       # byte-identical and commits nothing; a different value rotates that key
       # alone; an entry whose `sopsKey` differs from its name lands under the key.
-      checks.safix-set-existing = selftest "safix-set-existing" "set-existing";
+      checks.safix-set-existing =
+        mode "safix-set-existing" "write_path"
+          "set_existing_moves_one_key_and_leaves_the_others_byte_identical";
 
       # Every refusal, and each one for its own reason: an undeclared name, a
       # path with no creation rule, an undeclared user, a placement outside
@@ -164,7 +160,9 @@
       # or mid-merge, and an unrecognised subcommand. None may resolve itself by
       # choosing a destination, and none may name an option path outside safix's
       # namespace.
-      checks.safix-refusals = selftest "safix-refusals" "refusals";
+      checks.safix-refusals =
+        mode "safix-refusals" "write_path"
+          "refusals_each_have_their_own_code_and_leave_the_tree_alone";
 
       # A file whose recipients have drifted from the audience declared for it
       # is refused before the rename, in both directions — an identity the
@@ -172,16 +170,22 @@
       # by — and the refusal leaves HEAD, the ciphertext and the tree exactly as
       # it found them. Once `sops updatekeys` repairs the drift the same set goes
       # through and commits.
-      checks.safix-recipient-drift = selftest "safix-recipient-drift" "recipient-drift";
+      checks.safix-recipient-drift =
+        mode "safix-recipient-drift" "write_path"
+          "recipient_drift_is_refused_before_anything_is_written";
 
       # Another path's staged change survives the run staged and uncommitted, and
       # does not make an idempotent re-run commit.
-      checks.safix-staged-bystander = selftest "safix-staged-bystander" "staged-bystander";
+      checks.safix-staged-bystander =
+        mode "safix-staged-bystander" "write_path"
+          "a_staged_bystander_survives_the_run_and_does_not_make_it_commit";
 
       # A SIGINT at the prompt and a backend that fails after the value was read.
       # Neither may leave a partial file, a scratch file, a created directory, or
       # the value anywhere on disk including $TMPDIR.
-      checks.safix-abort = selftest "safix-abort" "abort";
+      checks.safix-abort =
+        mode "safix-abort" "write_path"
+          "an_aborted_run_leaves_no_file_no_scratch_and_no_value";
 
       # `get` round-trips a value by digest, for a secret of the user's own and
       # for one shared from another owner, and resolves the same file for both
@@ -189,7 +193,9 @@
       # included, and nothing but the value reaches standard output. `list`
       # reports each name against the file serving it and the key it is read
       # under, and renders no value.
-      checks.safix-get-list = selftest "safix-get-list" "get-list";
+      checks.safix-get-list =
+        mode "safix-get-list" "read_path"
+          "get_round_trips_a_value_and_list_reports_where_it_lives";
 
       # A generator with no inputs mints and commits; one with a prompt reads it
       # unechoed and derives from it; one with a dependency runs after the
@@ -197,13 +203,17 @@
       # descriptor; one with several outputs writes both, in different files, in
       # one commit. A second bulk run mints nothing, and --regenerate rotates its
       # target while a neighbouring key's ciphertext comes through byte-identical.
-      checks.safix-generate = selftest "safix-generate" "generate";
+      checks.safix-generate =
+        mode "safix-generate" "generators"
+          "generate_mints_in_dependency_order_and_commits_each_generator";
 
       # Every way a run is refused: a name with no generator, empty output, a
       # script that exits non-zero, a candidate the validation rejects, and a
       # multi-output script printing the wrong keys. None leaves a value, a
       # commit, or a scratch file, and a partial keypair is never written.
-      checks.safix-generate-refusals = selftest "safix-generate-refusals" "generate-refusals";
+      checks.safix-generate-refusals =
+        mode "safix-generate-refusals" "generators"
+          "generate_refusals_each_have_their_own_code_and_write_nothing";
 
       # What one generator's process may see of another's. A script that reads
       # standard input to end of input does not eat the answer to a later
@@ -211,7 +221,9 @@
       # descriptors one running first sees — every input descriptor carries a
       # decrypted value, so one surviving the generator it was opened for is
       # plaintext in a process that never declared it.
-      checks.safix-generate-isolation = selftest "safix-generate-isolation" "generate-isolation";
+      checks.safix-generate-isolation =
+        mode "safix-generate-isolation" "generators"
+          "one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another";
 
       # `--regenerate` of a named generator carries everything downstream of it.
       # The set is listed in dependency order and confirmed first; declining
@@ -219,14 +231,18 @@
       # the value that was just minted rather than of the one it replaced; a
       # generator that reads none of it is not re-run; and --yes answers the
       # confirmation in advance.
-      checks.safix-generate-cascade = selftest "safix-generate-cascade" "generate-cascade";
+      checks.safix-generate-cascade =
+        mode "safix-generate-cascade" "generators"
+          "a_rotation_carries_its_downstream_set_and_nothing_else";
 
       # The union `fix` acts on, from both sides. A consumer-named file in step
       # with the rule that covers it is not a finding of any kind; the same file
       # drifted from that rule is reported and re-wrapped; and a named path no
       # rule's directory covers is reported as such, because naming a file
       # creates no rule for it.
-      checks.safix-governed-extras = selftest "safix-governed-extras" "governed-extras";
+      checks.safix-governed-extras =
+        mode "safix-governed-extras" "read_path"
+          "a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations";
 
       # Declaring a person writes one custody record and commits exactly that
       # and the regenerated policy — not a bystander staged alongside it. The
@@ -236,7 +252,9 @@
       # declarations as they stood without them. They hold nothing, so their key
       # is an anchor with no rule. Nothing is minted, the output says as much,
       # and redeclaring is refused.
-      checks.safix-adduser = selftest "safix-adduser" "adduser";
+      checks.safix-adduser =
+        mode "safix-adduser" "custody"
+          "adduser_commits_the_scaffold_and_the_policy_that_saw_it";
 
       # Every refusal, each for its own reason: a name outside the alphabet, a
       # name carrying a path separator, a malformed recipient, an over-long one,
@@ -246,7 +264,9 @@
       # activation identity, and its refusal has to name recoveryRecipients —
       # where a card does belong — or the operator is told only that their key is
       # unwelcome.
-      checks.safix-adduser-refusals = selftest "safix-adduser-refusals" "adduser-refusals";
+      checks.safix-adduser-refusals =
+        mode "safix-adduser-refusals" "custody"
+          "adduser_refusals_leave_the_tree_as_they_found_it";
 
       # Host attachment reaches a consumer through the hook or not at all.
       # `--host` with no hook configured is refused naming the hook and saying
@@ -254,23 +274,31 @@
       # name, the recipient and every host, and runs after safix's commit has
       # landed, so what it writes is left uncommitted and safix's message names
       # only what safix did.
-      checks.safix-adduser-hook = selftest "safix-adduser-hook" "adduser-hook";
+      checks.safix-adduser-hook =
+        mode "safix-adduser-hook" "custody"
+          "host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit";
 
       # A shared entry is one value: both carriers' placements name one file and
       # one key, one of them mints, the other reads back what was minted, and
       # exactly one file in the repository holds the key.
-      checks.safix-shared-placement = selftest "safix-shared-placement" "shared-placement";
+      checks.safix-shared-placement =
+        mode "safix-shared-placement" "shared_entries"
+          "both_carriers_resolve_one_file_and_read_one_value";
 
       # A carrier dropped from a shared entry is a revocation, and `check` says
       # so: it names the file still holding the value, names the person who can
       # open it, offers a new value as the remedy, and states that `fix` will not
       # revoke. The finding arrives once, not also as an unclaimed value.
-      checks.safix-shared-shrink = selftest "safix-shared-shrink" "shared-shrink";
+      checks.safix-shared-shrink =
+        mode "safix-shared-shrink" "shared_entries"
+          "a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person";
 
       # Flipping an entry to shared over values already present is reported as a
       # migration rather than a disclosure, because every reader of the copy left
       # behind is still in the audience — and the choice of which per-carrier
       # value survives is left to the operator.
-      checks.safix-shared-flip = selftest "safix-shared-flip" "shared-flip";
+      checks.safix-shared-flip =
+        mode "safix-shared-flip" "shared_entries"
+          "a_flip_to_shared_over_existing_values_is_reported_as_a_migration";
     };
 }

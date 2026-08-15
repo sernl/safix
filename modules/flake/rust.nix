@@ -82,9 +82,7 @@
         # because the integration suite needs backends this derivation has no
         # reason to carry, and a fast check over the pure logic is worth keeping
         # separable from one that mints keys and runs sops.
-        safix-rs-test = craneLib.cargoTest (
-          withArtifacts // { cargoTestExtraArgs = "--lib --bins"; }
-        );
+        safix-rs-test = craneLib.cargoTest (withArtifacts // { cargoTestExtraArgs = "--lib --bins"; });
 
         # The integration suite: compiled once, run whole, and left in the output
         # so that every check naming one behavioural mode runs one test of this
