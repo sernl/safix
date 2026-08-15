@@ -22,11 +22,10 @@ A change to it is a breaking change whether or not any rust changed.
 
 - `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it.
   Both forbid unsafe code.
-  The read paths are ported: `list`, `get` and `check`.
-  So are the two write paths that change no declaration: `set` and `fix`.
+  Every subcommand is ported: the read paths `list`, `get` and `check`, the write paths `set` and `fix`, the generator graph behind `generate`, and the two that touch custody itself, `keygen` and `adduser`.
 - `Secret`, a plaintext value that zeroes on drop, is constructible only by reading a stream, and implements none of `Debug`, `Display`, `serde::Serialize`, `From<String>` or `From<&str>`.
   Those five absences are `const` assertions over a compile-time probe rather than sentences, so adding any of them fails the build.
-- `packages.safix-rs`, the rust binary, and the checks `safix-rs-build`, `safix-rs-test`, `safix-rs-clippy`, `safix-rs-fmt`, `safix-rs-deny` and `safix-rs-audit`.
+- The checks `safix-rs-build`, `safix-rs-test`, `safix-rs-clippy`, `safix-rs-fmt`, `safix-rs-deny` and `safix-rs-audit`.
 - The nix half read as types: placements, audiences, governed files and recipients, each denying unknown fields, so a field added on the nix side reaches a refusal rather than a reader that keeps working while answering an older question.
 - The two ciphertext readers in rust, answering which recipients a document names and which keys it holds without decrypting it.
   The python helpers stay where they are: they are the oracle the rust ones are judged against.
@@ -40,18 +39,40 @@ A change to it is a breaking change whether or not any rust changed.
 - `fix`, which regenerates `.sops.yaml` from the declarations and then re-wraps each governed file to it, in that order because re-wrapping first re-wraps to a policy about to change.
   Without `--yes` it runs one file at a time with `sops` holding the operator's own streams; with `--yes` it re-wraps several at once under a semaphore, bounded by `SAFIX_FIX_CONCURRENCY` (default 4), replaying each file's output in the order the declarations name the files.
   Setting that bound to `1` returns the `--yes` path to inheriting the streams.
-- The differential harness, and the checks `safix-differential-clean`, `-missing`, `-drift`, `-orphan`, `-unknown`, `-norule`, `-write`, `-refuse`, `-guard`, `-converge`, `-abort`, `-pipes` and `-drills`.
+- `generate`, which walks the topological order `flake.safix.lib.generatorPlan` computes, one generator at a time.
+  Each prompt and each dependency reaches the script as `$in_<name>`, holding the path of an inherited read-only descriptor: a prompt travels down a pipe a thread feeds and a dependency down the one `sops` writes into, so neither value is ever a file.
+  The close-on-exec flag comes off the read end alone, immediately before the spawn, and the parent drops its own copy immediately after — which is what keeps a generator that ignores a dependency from blocking the `sops` feeding it.
+  The walk is sequential rather than fanned out over independent branches: a prompt is read from one standard input, the commits are the plan's order rather than the scheduler's, and a process spawned between the handover and the exec would inherit what the generator was given.
+  One output takes the script's standard output with one echo-shaped trailing newline removed from a single-line value; several take a JSON object keyed by output name, and all of a generator's outputs land in one commit.
+  `--regenerate` carries the whole downstream set, lists it, and asks before the first commit rather than after the last.
+- `keygen`, which appends an age identity to the file sops reads identities from and never truncates it, prints the public half alone, and refuses to mint for anybody but the caller without `--for-someone-else`.
+- `adduser`, which writes one custody record, regenerates the policy that declaration implies, and commits the two — staging the scaffold before the regeneration, because a flake evaluation sees the files git knows about and would otherwise write the policy of a tree without the person just declared.
+  The recipient's shape is checked and nothing else; a recipient needing a card, a PIN and a touch is refused for this field because activation decrypts non-interactively.
+  Everything past the declaration reaches `flake.safix.onboardingHook`, and no hook configured is a supported configuration.
+- `safix --version`, which the shell runtime has no answer for; see "Known differences".
+- The differential harness, and the checks `safix-differential-clean`, `-missing`, `-drift`, `-orphan`, `-unknown`, `-norule`, `-write`, `-refuse`, `-guard`, `-converge`, `-abort`, `-pipes`, `-generate`, `-regenerate`, `-genrefuse`, `-keygen`, `-adduser` and `-drills`.
   Each drives the shell runtime and the rust runtime over one fixture fleet and compares standard output byte for byte, standard error byte for byte under the plain reporter, exit codes as numbers, and the repository through one projection applied to both sides.
   `-drills` is what keeps the rest honest: it mutates the rust side once per channel and fails unless each mutation is caught by the channel that exists to catch it.
   `-abort` and `-pipes` are not comparisons and say so: the first holds an interrupted write to leaving nothing behind, the second reads the `sops` process' own command line and environment and holds the value to travelling down a pipe and no other way.
-  The write-path comparisons add three assertions to the four channels — no candidate document left beside a target, no key disturbed that `set` was not asked to write, and two substitutions each carrying its own proof, for a side's own commit hash and its own repository root.
+  The write-path comparisons add three assertions to the four channels — no candidate document left beside a target, no key disturbed that `set` was not asked to write, and two substitutions each carrying its own proof, for a side's own commits and its own repository root.
+  The commit substitution is positional over that side's own history, because `generate` commits once per generator and a single marker would let a runtime name the wrong one of its own commits and still compare equal.
+  `-keygen` is not a byte comparison either: two correct runs mint two different identities, so each side is held to the property — one identity appended, the file readable by its owner alone, its public half printed and its private half not, the repository untouched — and only the rendering is compared with the recipient normalized away.
+- `safix-differential-strace`, linux only, which runs one `set` and one `generate` under `strace -f -y` and holds every `write` carrying a fixture value to a descriptor `strace` resolves as a pipe.
+  Where `-pipes` shows the two routes the value did not take, this shows the one it did, for both runtimes.
+  It carries its own drill: a runtime that writes a value to a regular file has to be caught, and caught by the pipe assertion rather than incidentally by the residue sweep.
+  It is linux only because it needs `ptrace`; on other platforms the attribute is a derivation that says it observed nothing.
+
+### Changed
+
+- `packages.safix` is the rust binary.
+  The shell runtime becomes `packages.safix-sh`, installed under that name so that holding both in one profile is not a collision over one path.
+  It is kept in the tree, built and linted, because it is the oracle every `safix-differential-*` mode compares against: retiring it would retire the evidence that the two agree.
 
 ### Unchanged, deliberately
 
-- `packages.safix` still builds `modules/flake/safix/safix.sh`.
-  The rust binary is not what ships.
-  `generate`, `keygen` and `adduser` are not ported and refuse rather than approximating; the general usage text is the shell's and is not reproduced by a binary implementing five of eight subcommands.
-  Each takes over only after the differential harness has compared it against the shell runtime on standard output, standard error, exit code and effect on the repository.
+- The nix half.
+  `flake.safix.*`, the resolution algebra, the recipient policy renderer and the consumption modules are the consumer-facing option surface and were never in scope; what was replaced is the runtime.
+- `modules/flake/safix/sops_recipients.py` and `sops_keys.py`, for the same reason `safix-sh` is kept: they are what the rust readers were judged against.
 
 ### Known differences
 
@@ -62,6 +83,10 @@ A change to it is a breaking change whether or not any rust changed.
 - A governed path holding something that is not a YAML document is reported by neither runtime's key reader.
   The recipient half of the report does speak about it.
 - The rust runtime has one refusal the shell has no counterpart for: a nix half declaring a field this runtime does not read.
+  Every schema it reads denies unknown fields, where the shell runtime's `jq` expressions select the fields they know and ignore the rest.
+- `safix --version` prints the package name and version and exits zero; the shell runtime reaches its unknown-subcommand refusal and exits 1.
+  A strictly wider surface rather than a different answer to a question both were asked, and the convention for a compiled binary.
+  `safix-differential-unknown` pins it: the check fails if the oracle ever acquires a `--version`, or if the rust runtime stops printing one.
 - `fix` without `--yes` cannot be confirmed in the shell runtime.
   It drives its re-wrap loop with `done < <(jq -r '.managed[]' ...)`, so `sops updatekeys` inherits the pipe carrying the governed file names and reads its confirmation from there: the answer to one file's prompt is the next file's name, which is never `y`.
   The rust runtime hands `sops` the run's own standard input.

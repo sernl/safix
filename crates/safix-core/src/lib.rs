@@ -16,19 +16,25 @@
 //! # The shape of a run
 //!
 //! [`Workspace`] is one run's view of one repository: it finds the repository,
-//! evaluates the four attributes of `flake.safix.lib` the runtime reads, and
+//! evaluates the attributes of `flake.safix.lib` the runtime reads, and
 //! resolves a name to the file and key holding it. [`check`] is the drift
 //! report over that view. [`sops`] and [`git`] are the two subprocess drivers,
 //! and [`Secret`] is what a decrypted value comes back as.
 //!
-//! # What is implemented today
+//! # What is here
 //!
-//! The read paths — the placement resolution behind `list`, the decryption
-//! behind `get`, and the four-part report behind `check`. The write paths and
-//! the generator graph are not ported, and the shell runtime remains what the
-//! flake's `safix` package builds. The migration is gated on a differential
-//! harness rather than scheduled; see
-//! `openspec/changes/rewrite-runtime-in-rust/`.
+//! One module per subcommand that does more than read: [`set`] writes one typed
+//! value, [`fix`] converges the policy and the ciphertext onto the
+//! declarations, [`generate`] walks the generator graph, [`keygen`] mints an
+//! identity, and [`adduser`] declares a person. [`inputs`] is how a generator's
+//! values reach its script, and [`scratch`] is what an aborted write must not
+//! leave behind.
+//!
+//! Every one of them was compared against `modules/flake/safix/safix.sh` by the
+//! differential harness before it shipped — standard output, standard error,
+//! exit code and effect on the repository, over one fixture fleet. That shell
+//! runtime is still in the tree as the oracle those comparisons run against;
+//! see `openspec/changes/rewrite-runtime-in-rust/`.
 
 pub mod adduser;
 pub mod check;

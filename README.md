@@ -509,9 +509,9 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the consumption options both scopes share | `modules/consume/common.nix` |
 | the home-manager module and its activation guard | `modules/consume/home.nix` |
 | the NixOS module | `modules/consume/nixos.nix` |
-| the command | `modules/flake/safix/safix.sh` |
-| the runtime as a library, in rust — not yet what ships | `crates/safix-core/` |
-| the rust command, exposed as `packages.safix-rs` | `crates/safix/` |
+| the runtime as a library | `crates/safix-core/` |
+| the command, exposed as `packages.safix` | `crates/safix/` |
+| the shell runtime the rust one is compared against, exposed as `packages.safix-sh` | `modules/flake/safix/safix.sh` |
 | recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand |
 | encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/` |
 
@@ -522,13 +522,15 @@ The option reference lives on the types themselves; this document is the narrati
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are here and green under `nix flake check`.
 The repository has no remote yet, so the GitHub Actions workflow in `.github/workflows/` has never run; it activates on the first push.
 
-The runtime is being rewritten in rust, and `packages.safix` is not affected by that yet.
-`crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built as `packages.safix-rs` and checked six ways under `nix flake check`.
-It implements five of the eight subcommands: the read paths `list`, `get` and `check`, and the two write paths that change no declaration, `set` and `fix`.
-`generate`, `keygen` and `adduser` refuse rather than approximate.
-The nix half is not in scope and does not move; what is being replaced is `safix.sh` and the three python helpers.
-Each subcommand transfers only after a differential harness has compared it against the shell runtime on standard output, standard error, exit code and effect on the repository, and `packages.safix` stays the shell script until the last one has.
-The harness has found three places where the two runtimes differ for reasons in `bash` rather than in safix — an interactive `fix` whose confirmation is answered by its own file list, a `SIGINT` the shell runtime never acts on during a `set`, and a double entry that stops checking anything over a seekable standard input — and each is asserted where it was found rather than reconciled; the changelog's "Known differences" records them.
+The runtime is rust, and `packages.safix` is that binary.
+`crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — checked six ways under `nix flake check`.
+It implements all eight subcommands: the read paths `list`, `get` and `check`, the two write paths `set` and `fix`, the generator graph behind `generate`, and the two that touch custody itself, `keygen` and `adduser`.
+The nix half was never in scope and did not move; what was replaced is `safix.sh` and the two python helpers, which remain in the tree as `packages.safix-sh` and its readers because they are the oracle the comparison runs against.
+
+Each subcommand transferred only after a differential harness had compared it against that oracle on standard output, standard error, exit code and effect on the repository, over one fixture fleet and seventeen modes.
+The harness has found five places where the two differ, each asserted where it was found rather than reconciled: an interactive `fix` whose confirmation is answered by its own file list, a `SIGINT` the shell runtime never acts on during a `set`, a double entry that stops checking anything over a seekable standard input, a `--version` the shell runtime has no answer for, and a schema mismatch the rust runtime refuses where the shell runtime's `jq` expressions ignore it.
+The changelog's "Known differences" records them.
+One check is linux-only: `safix-differential-strace` observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe, which needs `ptrace`.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/`.
 
 ## License

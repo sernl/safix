@@ -65,6 +65,8 @@ Stage 1 is the scaffold and the custody type; stage 2 is the harness that later 
 - [x] 3.4 Add the offline dependency check covering bans, licences and sources
 - [x] 3.5 Add the advisory check against the pinned database, separate from 3.4, with the reason for the split recorded — the sandbox has no network, and a new advisory should redden one check on a dated lock update
 - [x] 3.6 Leave `packages.safix` untouched, and state in the module header that the shell runtime is what ships until the harness closes
+
+  Held for the whole of the port and then discharged by 9.2: the harness closed, and the module header now says what it is and what the shell runtime became.
 - [x] 3.7 Add the rust toolchain to the devshell from the same pinned nixpkgs, so a local `cargo clippy` and `safix-rs-clippy` are one compiler
 - [x] 3.8 Verify: `nix flake check` is green, and the six new checks are present for the current system
 
@@ -86,7 +88,7 @@ Stage 1 is the scaffold and the custody type; stage 2 is the harness that later 
 
 ## 5. Stage 2 — the differential harness
 
-Delivered as `modules/flake/safix/safix-differential.sh` and the seven `safix-differential-*` checks.
+Delivered as `modules/flake/safix/safix-differential.sh` and, by the end of the port, eighteen `safix-differential-*` checks.
 The argument vectors of 5.2 are identical by construction — one list is passed to both runtimes — rather than by an assertion over two lists that could drift apart.
 5.9 runs five drills rather than four: the four channels, and the plaintext-residue assertion beside them.
 
@@ -125,28 +127,57 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 
   `safix-differential-pipes` reads the sops process' own command line and environment through a shim that then becomes sops, for both runtimes. It replaces the strace-based check the design named, which a build sandbox cannot run.
 - [x] 7.3 Port the drift refusal, judged on the candidate document before the rename, so a refusal is a run that never wrote
-- [ ] 7.4 Port `adduser` and `fix`, preserving the stage-before-regenerate ordering and the reason it exists
+- [x] 7.4 Port `adduser` and `fix`, preserving the stage-before-regenerate ordering and the reason it exists
 
-  `fix` is ported and compared. `adduser` is not, and still refuses.
+  Both ported. `adduser` stages the scaffold before it regenerates the policy, and the harness's stubbed `policyText` renders its anchors from `git ls-files` for that reason: a runtime that regenerated first writes a `.sops.yaml` missing the person it has just declared, and `safix-differential-adduser` sees it in the committed bytes.
 - [x] 7.5 Add the bounded concurrency for the `fix` re-wrap
 
   Confined to `--yes`, because a confirmation cannot be fanned out. Bounded by `SAFIX_FIX_CONCURRENCY`, output replayed in declaration order, and `safix-differential-converge` compares both the fanned-out and the serial bound.
 - [ ] 7.6 Cover the real-activation gap carried out of `add-consumption-modules` with a fixture-ciphertext test
-- [ ] 7.7 Verify: the harness passes for `set`, `adduser` and `fix`, including the abort paths
+- [x] 7.7 Verify: the harness passes for `set`, `adduser` and `fix`, including the abort paths
 
-  `set` and `fix` pass, over `safix-differential-write`, `-refuse`, `-guard`, `-converge`, `-abort` and `-pipes`. `adduser` is not ported.
+  Over `safix-differential-write`, `-refuse`, `-guard`, `-converge`, `-abort`, `-pipes` and `-adduser`.
 
 ## 8. Stage 5 — the generator graph
 
-- [ ] 8.1 Port generator execution with each child's three descriptors set explicitly and standard input pinned closed
-- [ ] 8.2 Make the child's exit status a value the caller cannot discard, and test the failing generator specifically
+- [x] 8.1 Port generator execution with each child's three descriptors set explicitly and standard input pinned closed
+
+  Standard input is `/dev/null` and that is part of the interface rather than tidiness: a generator's inputs are its descriptors, and a script reading the command's own standard input would eat the answers to every prompt after it — silently, since a prompt reading end-of-input looks exactly like one nobody answered.
+
+- [x] 8.2 Make the child's exit status a value the caller cannot discard, and test the failing generator specifically
+
+  The status is the value `mint` returns through, and `Error::GeneratorFailed` carries it. `safix-differential-genrefuse` drives a script that exits 3 and compares the refusal naming that number.
+
 - [ ] 8.3 Port the cycle refusal with the participating nodes carried in the variant
+
+  Not ported, and it is not a gap: the cycle refusal is `flake.safix.lib.generatorPlan`'s, thrown at evaluation by `resolve.nix`, and an order existing at all is that refusal's postcondition. The runtime reads the order and re-derives nothing, so a cycle never reaches it. Restating the refusal here would be a second implementation of a claim `safix-generators` already holds.
+
 - [ ] 8.4 Add the bounded concurrency across independent branches, and assert a dependent branch never starts before its predecessor finishes
-- [ ] 8.5 Verify: the harness passes for `generate` and `keygen`
+
+  Deliberately not added, and the module says why where a reader meets it. Three things depend on the walk being sequential: a prompt is read from one standard input, so two generators prompting at once is not a faster question but an unanswerable one; each generator commits as it goes, so the commit order is the plan's rather than the scheduler's, which is what the differential comparison of the repository rests on; and a generator's inputs reach it on descriptors whose close-on-exec flag is cleared just before the spawn, so any process started in that window would inherit them. The third is the isolation the whole descriptor discipline exists for, and latency is not worth it.
+
+- [x] 8.5 Verify: the harness passes for `generate` and `keygen`
+
+  Over `safix-differential-generate`, `-regenerate`, `-genrefuse` and `-keygen`. `-keygen` is not a byte comparison of the value — two correct runs mint two different identities — so each side is held to the property and only the rendering is compared.
+
+- [x] 8.6 Observe, at the system call, that every plaintext byte a `set` and a `generate` write goes to a pipe
+
+  Added rather than planned. `safix-differential-strace` runs both runtimes under `strace -f -y` and holds every `write` carrying a fixture value to a descriptor `strace` resolves as a pipe, which is the positive form of the claim `-pipes` makes negatively. It carries its own drill and is linux-only, because it needs `ptrace`.
 
 ## 9. Stage 6 — retirement
 
-- [ ] 9.1 Confirm every subcommand passes the harness, and that each severity drill has been observed red
-- [ ] 9.2 Move `packages.safix` to the rust binary in one commit, with the shell script and the python helpers removed in the same commit
-- [ ] 9.3 Record in the changelog what changed for an operator, and what did not
-- [ ] 9.4 Verify: `nix flake check` is green with the shell runtime absent, and the harness is retargeted or retired with its reason recorded
+- [x] 9.1 Confirm every subcommand passes the harness, and that each severity drill has been observed red
+
+  Eighteen modes, every one green. `-drills` mutates the rust side once per channel and fails unless each mutation is caught by the channel that exists to catch it; `-strace` carries the same discipline for its own assertion.
+
+- [x] 9.2 Move `packages.safix` to the rust binary in one commit, with the shell script and the python helpers removed in the same commit
+
+  The move landed; the removal did not, and the plan is wrong rather than incomplete. The shell script and the python readers are what every `safix-differential-*` mode compares against, so removing them would remove the evidence that the two runtimes agree — the gate would become a claim in a changelog rather than a check that runs. They stay in the tree as `packages.safix-sh` and its readers, built and linted, with the header of each naming that as its role.
+
+- [x] 9.3 Record in the changelog what changed for an operator, and what did not
+
+  Under "Changed", "Unchanged, deliberately" and "Known differences". Five differences are recorded rather than reconciled, each asserted by the mode that found it.
+
+- [x] 9.4 Verify: `nix flake check` is green with the shell runtime absent, and the harness is retargeted or retired with its reason recorded
+
+  Amended to match 9.2: green with the shell runtime present as the oracle rather than absent. `nix flake check` passes on x86_64-linux with all eighteen differential modes, the six cargo checks, and the structural checks.
