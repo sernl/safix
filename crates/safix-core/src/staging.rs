@@ -388,8 +388,25 @@ mod tests {
             .map(|metadata| metadata.permissions().mode() & 0o777)
             .unwrap_or_default();
 
+        // The directory the file was staged in, not only the root above it.
+        // `inputs.rs` records `$in` and `$out` being `0700` here rather than at
+        // the process umask as a deliberate departure from clan, and a
+        // departure recorded and not asserted is a sentence rather than a
+        // property: a `create_dir_all` that lost its mode would leave both
+        // world-readable on a host with the common `0022` umask and nothing
+        // would have said so.
+        let staged_dir_mode = staged
+            .parent()
+            .and_then(|parent| std::fs::metadata(parent).ok())
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .unwrap_or_default();
+
         assert_eq!(root_mode, 0o700, "the staging root is not owner-only");
         assert_eq!(file_mode, 0o600, "a staged file is not owner-only");
+        assert_eq!(
+            staged_dir_mode, 0o700,
+            "a directory inside the staging root is not owner-only"
+        );
     }
 
     #[test]

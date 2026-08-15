@@ -36,6 +36,23 @@
 //! so a script cannot distinguish "none declared" from "directory missing" by
 //! reading a variable somebody else set.
 //!
+//! *`$in` and `$out` are created mode `0700` rather than at the umask.* clan
+//! makes the generator's directories with the process umask in force, so on a
+//! host whose umask is the common `0022` they are world-readable — the files
+//! inside are not, and clan's containment rests on that. Here both directories
+//! are `0700` as well, and the files inside stay `0600`.
+//!
+//! This is defence in depth rather than a correction: the mode on a directory
+//! does not protect a file whose own mode already refuses, and no attack on
+//! clan's arrangement is claimed here. What it buys is that the containment
+//! stops resting on one mode. A future output written by a path that got its
+//! permissions wrong, a script that creates a file of its own beside the ones
+//! safix placed, and anything that makes a file inside more permissive than
+//! intended are all still behind a directory nobody else can enter. The whole
+//! tree already sits inside a `0700` staging root — see [`crate::staging`] — so
+//! this costs one flag per directory and removes a single point of failure
+//! rather than adding a barrier.
+//!
 //! # What the earlier interface bought and this one does not
 //!
 //! Until 0.2 every input reached the script as `$in_<name>`, the path of a
