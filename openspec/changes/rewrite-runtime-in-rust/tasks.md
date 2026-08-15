@@ -16,42 +16,73 @@ Stage 1 is the scaffold and the custody type; stage 2 is the harness that later 
 
 ## 1. Stage 1 — the workspace and its posture
 
-- [ ] 1.1 Create the cargo workspace with `safix-core` and `safix`, edition 2024, both declaring `#![forbid(unsafe_code)]`
-- [ ] 1.2 Pin the minimum supported version to the toolchain the locked nixpkgs provides, and record beside it the rule that produced the number — newest required rather than oldest tolerated, because one toolchain is ever compiled against
-- [ ] 1.3 Write the lint posture into the workspace manifest: the pedantic group on, the panicking and lossy constructions denied, every relaxation listed in one place, and the reason recorded where a reader of the manifest meets it
-- [ ] 1.4 Write `rustfmt.toml` and `clippy.toml`
-- [ ] 1.5 Write `deny.toml` covering bans, licences and sources, with the permitted licences enumerated and the repository's own dual licence among them
-- [ ] 1.6 Commit `Cargo.lock`, and add the cargo build directory to `.gitignore`
-- [ ] 1.7 Verify: `cargo metadata --locked` succeeds and the workspace members are the two crates
+- [x] 1.1 Create the cargo workspace with `safix-core` and `safix`, edition 2024, both declaring `#![forbid(unsafe_code)]`
+- [x] 1.2 Pin the minimum supported version to the toolchain the locked nixpkgs provides, and record beside it the rule that produced the number — newest required rather than oldest tolerated, because one toolchain is ever compiled against
+
+  The locked nixpkgs carries rustc 1.97.1, so the field is `rust-version = "1.97"`.
+
+- [x] 1.3 Write the lint posture into the workspace manifest: the pedantic group on, the panicking and lossy constructions denied, every relaxation listed in one place, and the reason recorded where a reader of the manifest meets it
+
+  One relaxation was needed and it is the technique rather than an exception to it: `clippy::assertions_on_constants` fires on every `const` assertion in section 2, which is exactly what those assertions are.
+
+- [x] 1.4 Write `rustfmt.toml` and `clippy.toml`
+- [x] 1.5 Write `deny.toml` covering bans, licences and sources, with the permitted licences enumerated and the repository's own dual licence among them
+
+  The licence list is the set actually present, read off `cargo-deny list`, rather than a superset: an unmatched allowance is a warning, and a licence arriving later should be a decision rather than a lock update. Two duplicate versions are skipped by exact version with the reason at each, so a *new* duplicate still fails.
+
+- [x] 1.6 Commit `Cargo.lock`, and add the cargo build directory to `.gitignore`
+- [x] 1.7 Verify: `cargo metadata --locked` succeeds and the workspace members are the two crates
 
 ## 2. Stage 1 — the custody type
 
-- [ ] 2.1 Implement the plaintext type as a newtype over the zeroing secret crates, with no derived or hand-written debug, display or serialization implementation
-- [ ] 2.2 Give it stream construction only — a reader, and the process's standard input — and no constructor taking an owned or borrowed string
-- [ ] 2.3 Zero whatever was read when a read fails partway, and return the failure rather than a partial value
-- [ ] 2.4 Write the compile-time probe that reports each of the three traits absent, and assert all three in a unit test, so adding any of them later fails the build rather than a review
-- [ ] 2.5 Record at the type why the traits are absent, naming the shell hazard it removes rather than describing good practice
-- [ ] 2.6 Severity drill: derive the debug trait on the type locally and confirm the probe test goes red; the probe is worth nothing if it cannot distinguish the two states
-- [ ] 2.7 Severity drill: add a string constructor locally and confirm a test asserting the constructor set goes red
-- [ ] 2.8 Verify: `cargo test` passes, and the drills in 2.6 and 2.7 are each observed red before being reverted
+- [x] 2.1 Implement the plaintext type as a newtype over the zeroing secret crates, with no derived or hand-written debug, display or serialization implementation
+- [x] 2.2 Give it stream construction only — a reader, and the process's standard input — and no constructor taking an owned or borrowed string
+- [x] 2.3 Zero whatever was read when a read fails partway, and return the failure rather than a partial value
+
+  The read grows its buffer by allocating, copying and dropping the old one rather than by `read_to_end`, because a `Vec` reallocation copies the plaintext into a fresh allocation and frees the old one unzeroed — which `zeroize`'s own `Vec` documentation says it cannot reach. The final buffer is allocated at exactly the value's length, so the handoff to the secret box does not reallocate either.
+
+- [x] 2.4 Write the compile-time probe that reports each of the absent traits, and assert each as a `const` assertion, so adding any of them later fails the build rather than a review
+
+  Five rather than three. The absence of `From<String>` and `From<&str>` is probeable the same way, which turns "no constructor takes a string" from a claim about the constructor list into a compiled one.
+
+- [x] 2.5 Record at the type why the traits are absent, naming the shell hazard it removes rather than describing good practice
+- [x] 2.6 Severity drill: derive the debug trait on the type locally and confirm the build goes red; the probe is worth nothing if it cannot distinguish the two states
+
+  Observed: `error[E0080]: evaluation panicked: Secret must not implement Debug`.
+
+- [x] 2.7 Severity drill: implement `From<String>` for the type locally and confirm the build goes red
+
+  Observed: `error[E0080]: evaluation panicked: Secret must not be constructible from an owned string`.
+
+- [x] 2.8 Assert the probe's own positive case in the library rather than only in a test, since a probe answering `false` unconditionally satisfies every absence assertion in the crate while detecting nothing
+- [x] 2.9 Verify: `cargo test` passes, and the drills in 2.6 and 2.7 are each observed red before being reverted
 
 ## 3. Stage 1 — the nix wiring
 
-- [ ] 3.1 Add `crane` and a pinned advisory database to the flake inputs, each with the reason recorded beside it in the same shape the existing inputs carry
-- [ ] 3.2 Write `modules/flake/rust.nix` producing `packages.safix-rs`, with the toolchain taken from the pinned nixpkgs
-- [ ] 3.3 Add the build, test, clippy and format checks over the workspace
-- [ ] 3.4 Add the offline dependency check covering bans, licences and sources
-- [ ] 3.5 Add the advisory check against the pinned database, separate from 3.4, with the reason for the split recorded — the sandbox has no network, and a new advisory should redden one check on a dated lock update
-- [ ] 3.6 Leave `packages.safix` untouched, and state in the module header that the shell runtime is what ships until the harness closes
-- [ ] 3.7 Verify: `nix flake check` is green, and the six new checks appear in `nix flake show` for the current system
+- [x] 3.1 Add `crane` and a pinned advisory database to the flake inputs, each with the reason recorded beside it in the same shape the existing inputs carry
+- [x] 3.2 Write `modules/flake/rust.nix` producing `packages.safix-rs`, with the toolchain taken from the pinned nixpkgs
+- [x] 3.3 Add the build, test, clippy and format checks over the workspace
+- [x] 3.4 Add the offline dependency check covering bans, licences and sources
+- [x] 3.5 Add the advisory check against the pinned database, separate from 3.4, with the reason for the split recorded — the sandbox has no network, and a new advisory should redden one check on a dated lock update
+- [x] 3.6 Leave `packages.safix` untouched, and state in the module header that the shell runtime is what ships until the harness closes
+- [x] 3.7 Add the rust toolchain to the devshell from the same pinned nixpkgs, so a local `cargo clippy` and `safix-rs-clippy` are one compiler
+- [x] 3.8 Verify: `nix flake check` is green, and the six new checks are present for the current system
+
+  `nix flake show` could not be the instrument, for the reason already carried out of `add-consumption-modules` §5.4: it evaluates every declared system and the pinned nixpkgs has dropped one of them. `nix eval .#checks.x86_64-linux --apply builtins.attrNames` was used instead, and lists all six.
 
 ## 4. Stage 1 — the adoption surface
 
-- [ ] 4.1 Document the library's public items, with the custody type's construction rule and absent traits stated where the type is defined
-- [ ] 4.2 Write `CHANGELOG.md` in the keep-a-changelog shape, whose unreleased entry states that the rust runtime is not what the shipping package builds
-- [ ] 4.3 Write `CONTRIBUTING.md` carrying the fixture-fleet recipe and the no-real-identifiers rule
-- [ ] 4.4 State the versioning policy: the library's public interface is what semantic versioning governs, and the command's refusal prose is governed by the equivalence gate rather than by the version number
-- [ ] 4.5 Verify: `cargo doc` builds without warnings, and no document describes a runtime behaviour that has not landed
+- [x] 4.1 Document the library's public items, with the custody type's construction rule and absent traits stated where the type is defined
+
+  `missing_docs` is denied workspace-wide, so an undocumented public item is a build failure rather than a review comment.
+
+- [x] 4.2 Write `CHANGELOG.md` in the keep-a-changelog shape, whose unreleased entry states that the rust runtime is not what the shipping package builds
+- [x] 4.3 Write `CONTRIBUTING.md` carrying the fixture-fleet recipe and the no-real-identifiers rule
+
+  The recipe points at `safix-selftest.sh` rather than describing a second one, and names the two commits where a real recipient was carried in and removed, because both arrived as an example beside a working change.
+
+- [x] 4.4 State the versioning policy: the library's public interface is what semantic versioning governs, and the command's refusal prose is governed by the equivalence gate rather than by the version number
+- [x] 4.5 Verify: `cargo doc` builds warning-free under `RUSTDOCFLAGS=-D warnings`, and no document describes a runtime behaviour that has not landed
 
 ## 5. Stage 2 — the differential harness
 
