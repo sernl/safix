@@ -17,7 +17,7 @@ A refusal's prose is a tested string, so it changes when a test changes, and the
 The nix half — `flake.safix.*`, the flake module, and the consumption modules — is the option surface consumers write against.
 A change to it is a breaking change whether or not any rust changed.
 
-## [0.2.0] — unreleased
+## [0.2.0] — 2026-08-16
 
 `Cargo.toml` still reads `0.1.0`.
 Cutting the version is a release decision and is not made by this section.

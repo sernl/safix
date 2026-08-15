@@ -47,9 +47,10 @@
         };
 
         # Named here rather than read from the root manifest, which is a virtual
-        # workspace and carries no package to read a name from.
+        # workspace and carries no package to read a name from. The version is
+        # read from the workspace field so a release bump cannot miss it.
         pname = "safix-rs";
-        version = "0.1.0";
+        version = (builtins.fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
         strictDeps = true;
 
