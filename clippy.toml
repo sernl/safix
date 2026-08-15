@@ -1,0 +1,7 @@
+# Clippy reads the minimum supported version from the workspace manifest, so it
+# is not repeated here. What is here is the pair of thresholds that keep the
+# workspace-wide denial of the panicking constructions from applying where it
+# would be noise: a test asserting a condition is a test whose failure is the
+# point, and the alternative spelling adds a branch nobody reads.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

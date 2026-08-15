@@ -1,0 +1,26 @@
+[package]
+name = "safix-core"
+description = "The safix runtime as a library: custody types, drivers, and refusals, with no terminal in it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+# No diagnostic renderer here: rendering belongs to the command, and an embedder
+# should not inherit one. `thiserror` produces the variants; `miette` renders
+# them, and only `safix` depends on it.
+thiserror.workspace = true
+secrecy.workspace = true
+zeroize.workspace = true
+# Present so that the compiled probe asserting `Secret` is not serializable has
+# the trait in scope to probe for. An absence probe against a trait no crate in
+# the graph defines would be vacuous.
+serde.workspace = true
+
+[lints]
+workspace = true

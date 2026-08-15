@@ -1,0 +1,65 @@
+[workspace]
+resolver = "3"
+members = ["crates/safix-core", "crates/safix"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The toolchain the locked nixpkgs provides, and the only one anything here is
+# ever compiled with. This repository states the newest version it requires
+# rather than the oldest it might tolerate: `nix flake check` builds with one
+# toolchain, so a lower number would be a compatibility claim nothing has
+# compiled. Cargo enforces this field itself, so the claim and its enforcement
+# are the same line. Lowering it means adding a check that builds against the
+# older toolchain, in the same commit.
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sernl/safix"
+homepage = "https://github.com/sernl/safix"
+categories = ["command-line-utilities", "cryptography"]
+keywords = ["sops", "age", "nix", "secrets"]
+
+[workspace.dependencies]
+safix-core = { path = "crates/safix-core", version = "0.1.0" }
+
+miette = "7"
+secrecy = "0.10"
+serde = "1"
+thiserror = "2"
+zeroize = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+# Left off deliberately rather than by default. `Secret` has no `Debug`, and
+# turning this lint on would report that absence as a defect and invite someone
+# to close it by deriving one.
+missing_debug_implementations = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+# The pedantic group, plus the constructions that can end a process while it
+# holds a decrypted value. A panic unwinds through the drop that zeroes the
+# buffer, and its message is somewhere a value could surface if a type ever grew
+# a rendering trait, so every failure here is a returned error instead — which is
+# also what makes the refusal model true for a library embedder and not only for
+# the command. Every relaxation of the group is listed here rather than as an
+# attribute at a call site.
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+
+arithmetic_side_effects = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+unwrap_used = "deny"
+
+# The one relaxation, and it is the technique rather than an exception to it.
+# `Secret`'s absent traits are asserted by `const` assertions over a
+# compile-time probe, which is exactly the shape this lint exists to report: an
+# assertion whose value is known at compile time. Here that is the point — the
+# assertion is meant to be evaluated by the compiler and to fail the build — so
+# the lint would fire on every one of the claims it is protecting.
+assertions_on_constants = "allow"
