@@ -107,6 +107,50 @@ Both verbs SHALL read both sides of a mapping and compare them before writing ei
 - **THEN** the mapping is refused
 - **AND** the reason given is that a value that cannot be read cannot be verified
 
+### Requirement: An export refuses a source that holds no value
+
+The export verb SHALL refuse a mapping whose source key is absent from the source file, and the refusal SHALL name the two ways a value gets there.
+
+#### Scenario: An unwritten source refuses rather than exporting nothing
+
+- **WHEN** an export reaches a mapping whose source key is not in the source file
+- **THEN** the mapping is refused
+- **AND** the refusal names the entry and the file that would have held it
+- **AND** it names setting the value by hand and generating it as the two remedies
+
+#### Scenario: The refusal is the runtime sibling of an evaluation silence
+
+- **WHEN** the same mapping is evaluated
+- **THEN** evaluation produces no message about it
+- **AND** the reason is that an entry declares where a value lives rather than that one is there
+
+### Requirement: An export refuses when clan already considers the generator stale
+
+The export verb SHALL refuse a mapping whose clan-side generator has a recorded validation that no longer matches its definition, before writing anything, and SHALL provide no option to proceed.
+
+#### Scenario: A stale generator refuses before the write
+
+- **WHEN** an export reaches a mapping whose clan-side generator clan reports as having an outdated validation
+- **THEN** the mapping is refused and nothing is written into clan
+- **AND** the refusal names the machine and the generator
+
+#### Scenario: The refusal names both remedies
+
+- **WHEN** the refusal is read
+- **THEN** it names updating the clan-side definition
+- **AND** it names declaring the mapping in the other direction instead
+
+#### Scenario: The staleness is clan's answer rather than safix's computation
+
+- **WHEN** the runtime establishes whether a generator is stale
+- **THEN** it obtains the answer by invoking clan's own command
+- **AND** it reads no recorded validation and computes no hash
+
+#### Scenario: No option defeats the refusal
+
+- **WHEN** the export verb's arguments are enumerated
+- **THEN** none of them proceeds past this refusal
+
 ### Requirement: A run reports each mapping's outcome as one of four states
 
 Each mapping acted on SHALL be reported as unchanged, updated, absent at source, or refused with its reason, and no value SHALL appear in any report.

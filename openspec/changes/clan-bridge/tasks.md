@@ -4,22 +4,21 @@ The three standing disciplines hold: fixture identities only, nothing deploys, a
 
 This change lands after `clan-generator-contract`, because a mapping compares a generator's `share` across the two systems and safix does not carry that field until then.
 
-One decision is unresolved and gates stage 3. Task 0.1 is that decision, and it is USER-RUN.
+Both gating decisions are resolved. They are recorded in `design.md` under "The three decisions", together with a third ruling that deletes an evaluation refusal the spec carried and replaces it with a runtime one.
 
-Stages 1 and 2 are landed. Stage 3 onward is held at 0.1: the decision governs where the *clan-side read* comes from, and both verbs read the clan side — export compares before writing, so the read is not import's alone. Task 1.3's third refusal and task 2.2 are held with it; the reasons are in the report accompanying those commits.
+Stages: 0 is the decisions, 1 is the surface, 2 is the delegation, 3 is transfer and convergence, 4 is the audit, 5 is the record and the follow-up.
 
-Stages: 0 is the decision, 1 is the surface, 2 is the delegation, 3 is transfer and convergence, 4 is the audit, 5 is the record and the follow-up.
+## 0. The decisions that gated the read path
 
-## 0. The decision that gates the read path
-
-- [ ] 0.1 USER-RUN: decide the import-direction question in design D1. The brief specifies that import decrypts clan material with the operator's admin identity; the recommendation is symmetric delegation through clan's command. The evidence is that this fleet's clan sets `secretStore = "age"` at `modules/clan/vars.nix:80` in dotfiles, so direct decryption means implementing clan's age backend rather than reading a sops file. Record the answer in `design.md` with the reason
-- [ ] 0.2 USER-RUN: decide question 2 in design's open questions — whether export refuses outright when the clan-side generator's definition could invalidate the exported value, or exports and lets the audit catch the loss. Refusing is safer and forbids a legitimate case
+- [x] 0.1 USER-RUN: decide the import-direction question in design D1. Decided: symmetric delegation. Every clan-side read is `clan vars get` captured on a pipe and every clan-side write is `clan vars set` fed on standard input; the runtime reads, writes, decrypts, encrypts and parses none of clan's stored files, in either direction. The evidence is that this fleet's clan sets `secretStore = "age"` at `modules/clan/vars.nix:80` in dotfiles, so direct decryption means implementing clan's age backend rather than reading a sops file. Recorded in `design.md`
+- [x] 0.2 USER-RUN: decide whether export refuses outright when the clan-side generator's definition could invalidate the exported value. Decided: refuse, with its own code and message naming both remedies, and no override flag in 0.2. The comparison is delegated to `clan vars check --generator` rather than made against clan's recorded hash, because reading that record would break 0.1 to enforce this. Recorded in `design.md`
+- [x] 0.3 Delete the bridge-surface requirement that evaluation refuse a `safix-to-clan` mapping "whose source entry has neither a generator nor a declared value". It has no referent at evaluation: an entry declares where a value lives rather than that one is there, and a hand-set entry with no generator is the ordinary export. Replace it with a runtime refusal — export refuses when the source key is absent from the source file, naming `safix set` and `safix generate` — and keep `handSetExportMessages` in `modules/flake/checks/bridge.nix` asserting the evaluation silence
 
 ## 1. The declared surface
 
 - [x] 1.1 Add `flake.safix.bridge` to `types.nix`: `clanFlake`, and `mappings.<id>` carrying `direction`, `clan.{machine,generator,file}` and `safix.{user,name}`
 - [x] 1.2 Make `direction` an enum of `clan-to-safix` and `safix-to-clan`. Record at the option why it is not spelled `import`/`export`: the word moves values in opposite directions across this boundary depending on which tool says it
-- [~] 1.3 Five of six landed in `bridge.nix`; the safix-to-clan-source-with-nothing-to-send refusal is held (see the report: safix has no evaluation-time notion of an entry having no value). Refusals: unresolvable safix side; a clan-to-safix target that also has a generator; a safix-to-clan source with nothing to send; two mappings writing one target; one endpoint pair declared in both directions; more than one `clanFlake`
+- [x] 1.3 Five refusals in `bridge.nix`: unresolvable safix side; a clan-to-safix target that also has a generator; two mappings writing one target; one endpoint pair declared in both directions; more than one `clanFlake`. The sixth — a safix-to-clan source with nothing to send — is deleted by 0.3 rather than held, and its runtime sibling is 3.9
 - [x] 1.4 Expose the refusals through `checks.nix` as a message function and a builder over it, matching the custody and generator-tool families, and add `safix-bridge-refusals` to `mkChecks`
 - [x] 1.5 Record in the option documentation that evaluation does not and cannot verify the clan half, and that a bad clan side is a run-time refusal naming the triple
 - [x] 1.6 Severity drill: for each of the six refusals, perturb a fixture fleet and confirm the message names what it should. Run the drill through `refuseScript` so it executes the bytes the real check runs
@@ -28,7 +27,7 @@ Stages: 0 is the decision, 1 is the surface, 2 is the delegation, 3 is transfer 
 ## 2. Delegation to clan
 
 - [x] 2.1 Implement the clan subprocess driver in `crates/safix-core/src/bridge.rs`: resolve clan's command on PATH, invoke read with the value captured from standard output, invoke write with the value supplied on standard input
-- [ ] 2.2 BLOCKED on 0.1's read path. Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
+- [ ] 2.2 Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
 - [x] 2.3 Implement the absent-command refusal: both verbs refuse before transferring anything, the refusal states that clan is the authority on its own store, and no subset of mappings runs
 - [x] 2.4 Surface clan's own failures rather than reinterpreting them — a missing var, an ambiguous id, an ungenerated value each reach the operator as clan's message with safix's mapping name attached
 - [x] 2.5 Add the new refusal variants and codes to `crates/safix-core/src/error/`, with paired plain and graphical snapshots
@@ -36,8 +35,6 @@ Stages: 0 is the decision, 1 is the surface, 2 is the delegation, 3 is transfer 
 - [x] 2.7 Verify: `cargo test` passes; the absent-command refusal is observed; and 2.6's search is recorded
 
 ## 3. Transfer and convergence
-
-Gated on 0.1.
 
 - [ ] 3.1 Implement `safix import`: for each clan-to-safix mapping, read both sides, compare, and write through the existing `set` path when they differ
 - [ ] 3.2 Implement `safix export`: for each safix-to-clan mapping, read both sides, compare, and invoke clan's write only when they differ. Record at the comparison why it is load-bearing rather than an optimisation — clan's write commits unconditionally and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run commits in the clan repository for every mapping
@@ -47,6 +44,9 @@ Gated on 0.1.
 - [ ] 3.6 Confirm the safix-side write acquires the recipient-drift refusal, the staged write and rename, and the pipe, by driving a drifted fixture through import rather than by inspecting the call
 - [ ] 3.7 Verify: an integration test runs each verb twice and requires the second run to write nothing and commit nothing
 - [ ] 3.8 Severity drill: remove the pre-write comparison from export and confirm the idempotency test fails with a commit per mapping per run
+- [ ] 3.9 Implement 0.3's runtime sibling: export refuses when the source key is absent from the source file, naming the entry, the file, and both remedies. Assert it against a literal beside the evaluation silence it replaces
+- [ ] 3.10 Implement 0.2's refusal: before writing, ask clan whether the mapping's generator has an outdated recorded validation, and refuse the mapping when it has. Read no recorded hash and compute none. The message names the machine, the generator, and both remedies
+- [ ] 3.11 Bare `safix import` and `safix export` converge every mapping of their direction, reporting changed, unchanged and failed per mapping; a mapping id narrows the run to one. An unknown id is refused naming what is declared
 
 ## 4. The audit
 

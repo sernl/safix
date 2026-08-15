@@ -54,7 +54,7 @@ A mapping's direction SHALL be one of two values naming the source and the desti
 
 ### Requirement: Evaluation refuses every mapping mistake that is local to the consumer
 
-Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, whose source has nothing to send, or which duplicates or contradicts another mapping.
+Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, or which duplicates or contradicts another mapping.
 
 #### Scenario: An unresolvable safix side is refused
 
@@ -67,11 +67,6 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 - **THEN** evaluation refuses
 - **AND** the reason given is the one already given for two generators naming one output: the winner is whichever ran last
 
-#### Scenario: An export with nothing to send is refused
-
-- **WHEN** a safix-to-clan mapping's source entry has neither a generator nor a declared value
-- **THEN** evaluation refuses
-
 #### Scenario: Two mappings writing one target are refused
 
 - **WHEN** two mappings name the same destination
@@ -82,6 +77,21 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 - **WHEN** one pair of endpoints appears in two mappings with opposite directions
 - **THEN** evaluation refuses
 - **AND** the refusal states that this is a two-way synchronisation with no conflict resolution
+
+### Requirement: Whether an entry holds a value is not an evaluation question
+
+Evaluation SHALL NOT refuse a safix-to-clan mapping on the ground that its source entry has no value, and SHALL treat a source entry with no generator as the ordinary hand-set export.
+
+#### Scenario: A hand-set source is not refused
+
+- **WHEN** a safix-to-clan mapping names a source entry that no generator produces
+- **THEN** evaluation produces no message about it
+
+#### Scenario: The reason is recorded where the refusals are documented
+
+- **WHEN** the evaluation-time refusals are documented
+- **THEN** they state that an entry is a declaration of where a value lives rather than that one is there
+- **AND** they state that the question is answered when something reads the entry, and is refused there
 
 ### Requirement: The clan half is checked at run time and the asymmetry is stated
 
