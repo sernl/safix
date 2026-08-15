@@ -34,6 +34,7 @@ pub mod check;
 mod error;
 pub mod fix;
 pub mod git;
+pub mod inputs;
 pub mod model;
 pub mod nix;
 mod probe;

@@ -13,7 +13,14 @@
 //! the indented continuations, and it carries no trailing newline — the
 //! command's reporter adds that.
 
+mod prose;
+
 use std::io;
+
+use prose::{
+    HOST_WITHOUT_HOOK, already_declared, bad_recipient, bad_user_name, bulleted, drifted,
+    hardware_recipient, keygen_for_someone_else, no_generator,
+};
 
 /// A refusal from the safix runtime.
 ///
@@ -386,51 +393,223 @@ pub enum Error {
         /// What sops wrote to its standard error, less one trailing newline.
         output: String,
     },
-}
 
-/// The recipient-drift refusal, whose two lists are each present or absent.
-///
-/// `safix` is spelled out rather than taken from the command, because this is
-/// the library and the shell runtime spells its own `$PROG` into the same
-/// sentence.
-fn drifted(file: &str, extra: &[String], missing: &[String]) -> String {
-    let mut message = format!("{file} is not encrypted to the audience declared for it.\n\n");
-    if !extra.is_empty() {
-        message.push_str("Can open it and is not in its audience:");
-        message.push_str(&bulleted(extra));
-        message.push_str("\n\n");
-    }
-    if !missing.is_empty() {
-        message.push_str("Is in its audience and cannot open it:");
-        message.push_str(&bulleted(missing));
-        message.push_str("\n\n");
-    }
-    message.push_str(
-        "Nothing was written. A value set now would be wrapped for the recipients\n\
-        above rather than for the declared audience, and this command commits what\n\
-        it writes, so a reader the audience no longer names would read a value\n\
-        minted after their removal straight out of git history.\n\
-        \n\
-        Re-wrap the file to its declared audience, review the diff, then re-run:\n\
-        \n\
-        \x20   safix fix\n",
-    );
-    message.push_str("    git diff -- ");
-    message.push_str(file);
-    message
-}
+    /// The name resolves to an entry nothing mints.
+    #[error("{}", no_generator(.user, .name))]
+    NoGenerator {
+        /// The user whose custody it is in.
+        user: String,
+        /// The name that was asked for.
+        name: String,
+    },
 
-/// The one-per-line bulleted continuation the shell writes with `sed 's/^/  - /'`.
-///
-/// Empty for an empty list, and leading rather than trailing with its newline,
-/// so that a message ending in a list and a message ending in a heading with no
-/// list under it both end without one.
-fn bulleted(items: &[String]) -> String {
-    items
-        .iter()
-        .map(|item| format!("\n  - {item}"))
-        .collect::<Vec<_>>()
-        .concat()
+    /// A generator reads a secret whose file does not exist.
+    #[error("the dependency behind $in_{identifier} has no value yet: {file} does not exist")]
+    DependencyHasNoValue {
+        /// The script identifier the dependency would have arrived under.
+        identifier: String,
+        /// The file the declarations place the dependency in.
+        file: String,
+    },
+
+    /// A descriptor carrying an input could not be made or handed over.
+    ///
+    /// About this process rather than about a declaration: the value it would
+    /// have carried never left the memory it was read into, and the run stops
+    /// before anything is written.
+    #[error("could not open the descriptor $in_{identifier} carries: {cause}")]
+    GeneratorPipe {
+        /// The script identifier the value would have arrived under.
+        identifier: String,
+        /// What the system call objected to.
+        cause: String,
+    },
+
+    /// The stream carrying a prompt's answer ended before the answer did.
+    #[error("no value read for prompt '{name}'")]
+    NoValueForPrompt {
+        /// The prompt that went unanswered.
+        name: String,
+    },
+
+    /// The operator answered a prompt with nothing.
+    #[error("prompt '{name}' was answered with nothing; refusing to generate from an empty input")]
+    PromptUnanswered {
+        /// The prompt that was answered with nothing.
+        name: String,
+    },
+
+    /// The generator script exited non-zero.
+    #[error(
+        "the generator for '{generator}' exited {status}; nothing was written. \
+        Its diagnostics are above, on stderr."
+    )]
+    GeneratorFailed {
+        /// The generator that failed.
+        generator: String,
+        /// What its script exited with.
+        status: i32,
+    },
+
+    /// A generator writing several outputs printed something other than a JSON
+    /// object.
+    ///
+    /// The fork between one output and several is not a convenience: a shell's
+    /// standard output is a byte stream with no way to say "these two values",
+    /// and a stream carrying a separator would make every value that could
+    /// contain the separator unstorable.
+    #[error(
+        "'{generator}' writes {outputs} outputs, so its script must print a JSON object \
+        keyed by output name; it printed something else"
+    )]
+    GeneratorNotAnObject {
+        /// The generator that printed it.
+        generator: String,
+        /// How many outputs it declares.
+        outputs: usize,
+    },
+
+    /// A generator's document is keyed by something other than its outputs.
+    #[error(
+        "'{generator}' printed keys {actual} but declares outputs {declared}; nothing was written"
+    )]
+    GeneratorKeysDiffer {
+        /// The generator that printed it.
+        generator: String,
+        /// The keys the document carries, as the shell renders them.
+        actual: String,
+        /// The outputs the declarations name, as the shell renders them.
+        declared: String,
+    },
+
+    /// A generator produced an empty value for one of its outputs.
+    #[error(
+        "'{generator}' produced nothing for '{output}'; an empty value is the state a \
+        truncated write leaves behind, so it is refused"
+    )]
+    GeneratorProducedNothing {
+        /// The generator that produced it.
+        generator: String,
+        /// The output it produced nothing for.
+        output: String,
+    },
+
+    /// The entry's own validation refused a candidate value.
+    ///
+    /// The values are still only in this process's memory when this is raised,
+    /// so nothing has to be undone.
+    #[error(
+        "the validation for '{generator}' rejected the candidate value for '{output}'; \
+        nothing was written"
+    )]
+    ValidationRejected {
+        /// The generator whose validation refused.
+        generator: String,
+        /// The output whose candidate value was refused.
+        output: String,
+    },
+
+    /// The operator declined the cascade a rotation carries.
+    #[error("declined; nothing was written. Pass --yes to answer this in advance.")]
+    CascadeDeclined,
+
+    /// `keygen` was asked to mint an identity for somebody else.
+    #[error("{}", keygen_for_someone_else(.user))]
+    KeygenForSomeoneElse {
+        /// The user it was asked to mint for.
+        user: String,
+    },
+
+    /// `age-keygen` could not be run, or refused.
+    #[error("age-keygen failed; nothing was appended")]
+    KeygenFailed,
+
+    /// `age-keygen` ran and named no public key.
+    #[error("age-keygen wrote no public key; check {file} before re-running")]
+    KeygenNoPublicKey {
+        /// The identity file it was appending to.
+        file: String,
+    },
+
+    /// The name is outside the alphabet a path and a `path_regex` are built
+    /// from.
+    #[error("{}", bad_user_name(.name, .pattern))]
+    BadUserName {
+        /// The name that was asked for.
+        name: String,
+        /// The pattern the nix half declares, unanchored.
+        pattern: String,
+    },
+
+    /// The recipient needs a person present to decrypt with.
+    #[error("{}", hardware_recipient(.recipient))]
+    HardwareRecipient {
+        /// The recipient that was given.
+        recipient: String,
+    },
+
+    /// The recipient is not shaped like an age X25519 public key.
+    #[error("{}", bad_recipient(.recipient))]
+    BadRecipient {
+        /// The recipient that was given.
+        recipient: String,
+    },
+
+    /// The declarations already name this person.
+    #[error("{}", already_declared(.user))]
+    AlreadyDeclared {
+        /// The name that was asked for.
+        user: String,
+    },
+
+    /// The scaffold's path is occupied by something that declares nobody.
+    #[error(
+        "{file} already exists but declares no user; \
+        resolve that by hand before scaffolding over it"
+    )]
+    ScaffoldExists {
+        /// The repository-relative path the scaffold would occupy.
+        file: String,
+    },
+
+    /// `--host` was given and no hook is configured to receive it.
+    #[error("{HOST_WITHOUT_HOOK}")]
+    HostWithoutHook,
+
+    /// A generated file does not parse, so nothing is staged.
+    #[error("generated {path} does not parse; nothing was staged")]
+    Unparsable {
+        /// The path that was written and then read back.
+        path: String,
+    },
+
+    /// The operator declined the scaffold.
+    #[error("aborted; nothing was written")]
+    ScaffoldDeclined,
+
+    /// The policy could not be regenerated after the scaffold was written.
+    ///
+    /// Its own variant rather than [`Error::NixEvalFailed`] because what the
+    /// operator needs to know is the state this leaves: one untracked file
+    /// written, the policy untouched, and no commit.
+    #[error(
+        "could not evaluate flake.safix.lib.policyText in {root}; the scaffold is written \
+        but .sops.yaml is untouched and nothing is committed"
+    )]
+    PolicyEvalAfterScaffold {
+        /// The repository the evaluation was rooted at.
+        root: String,
+    },
+
+    /// The consumer's onboarding hook exited non-zero.
+    #[error(
+        "the onboarding hook exited {status}. The scaffold and the policy are committed; \
+        whatever the hook left behind is yours to review."
+    )]
+    HookFailed {
+        /// What the hook exited with.
+        status: i32,
+    },
 }
 
 /// The result type this crate returns.

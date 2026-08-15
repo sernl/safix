@@ -41,7 +41,7 @@ zeroize = "1"
 # `set` has to shred its scratch file on. Both are safe wrappers over what would
 # otherwise be `unsafe` in a crate that forbids it, and both are confined to the
 # command: a library embedder gets neither a terminal nor a signal handler.
-rustix = { version = "1", default-features = false, features = ["std", "termios"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 insta = "1"

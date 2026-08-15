@@ -29,6 +29,11 @@ serde_norway.workspace = true
 # discipline is sequential, so the feature list is the three that fan-out needs
 # and nothing that would make reaching for it elsewhere convenient.
 tokio = { workspace = true, features = ["rt-multi-thread", "process", "sync"] }
+# The pipe a generator's input travels down, and the one flag that has to come
+# off a descriptor for the script to inherit it. A safe wrapper over what would
+# otherwise be `unsafe` in a crate that forbids it; nothing here opens a
+# terminal or catches a signal, which stay the command's.
+rustix.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

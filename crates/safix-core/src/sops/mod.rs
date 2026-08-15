@@ -122,6 +122,35 @@ impl Sops {
         })
     }
 
+    /// Decrypt one key of one file into a pipe, without waiting for it.
+    ///
+    /// What a generator's dependency travels down: the value goes from sops
+    /// straight into the descriptor the script reads, so it is never a file and
+    /// never this process's to hold. The caller owns the child and is what reaps
+    /// it — see [`crate::inputs`] for the ordering that keeps a generator which
+    /// ignores its input from blocking the sops feeding it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SopsUnavailable`] when the binary cannot be run.
+    pub fn decrypt_key_streaming(&self, file: &Path, key: &str) -> Result<std::process::Child> {
+        let index = serde_json::to_string(&[key]).map_err(|cause| Error::SopsKeyIndex {
+            key: key.to_owned(),
+            cause: cause.to_string(),
+        })?;
+
+        Command::new(&self.program)
+            .arg("decrypt")
+            .arg("--extract")
+            .arg(&index)
+            .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|cause| self.unavailable(cause))
+    }
+
     /// Create a document at `destination` holding one empty key, encrypted as
     /// the creation rule for `relative` says.
     ///
