@@ -10,11 +10,13 @@
 //!   becomes the real sops. It reads them from itself rather than from `/proc`,
 //!   so the claim — that a plaintext value reached sops down neither channel —
 //!   is made the same way on every platform.
-//! - `slow` waits before becoming the real sops, which holds open the window an
-//!   interrupt has to arrive in for the scratch discipline to be under test. It
-//!   waits only before the sops subcommand `SAFIX_SHIM_HOLD` names, because a
-//!   delay in front of every invocation would put the signal in whichever window
-//!   the run reached first rather than in the one being drilled.
+//! - `interrupt` signals whoever invoked it and then does the real work, which
+//!   turns "interrupted while sops holds the candidate document open" from a
+//!   race into a fixture. It signals its parent alone rather than a process
+//!   group, and it acts only before the sops subcommand `SAFIX_SHIM_HOLD`
+//!   names, because a signal in front of every invocation would land in
+//!   whichever window the run reached first rather than in the one being
+//!   drilled.
 //! - `mutate` runs the real binary and then damages exactly one channel: a line
 //!   on standard output, a line on standard error, a different exit status, a
 //!   file left in the repository, a value left in the temporary directory, or a
@@ -29,7 +31,7 @@ fn main() -> ! {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match environment("SAFIX_SHIM_ROLE").as_str() {
         "spy" => spy(&arguments),
-        "slow" => slow(&arguments),
+        "interrupt" => interrupt(&arguments),
         "mutate" => mutate(&arguments),
         other => refuse(&format!("unknown shim role: {other}")),
     }
@@ -53,17 +55,54 @@ fn spy(arguments: &[String]) -> ! {
     become_sops(arguments)
 }
 
-/// Hold the window open, then be sops.
-fn slow(arguments: &[String]) -> ! {
+/// Interrupt whoever invoked this, then be sops.
+///
+/// Settled into waiting for this child before the signal arrives, and still
+/// running for a moment afterwards, so the window drilled is the one where the
+/// candidate document is open rather than either edge of it. Then the real work
+/// happens and this exits normally, which is what makes the run's own status the
+/// thing under test: a runtime that reported its child's failure would be
+/// answering a different question.
+fn interrupt(arguments: &[String]) -> ! {
     let hold = environment("SAFIX_SHIM_HOLD");
     if arguments.first().is_some_and(|first| *first == hold) {
-        let millis = std::env::var("SAFIX_SHIM_DELAY_MS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(2_000);
-        std::thread::sleep(std::time::Duration::from_millis(millis));
+        pause();
+        signal_parent();
+        pause();
     }
     become_sops(arguments)
+}
+
+/// Long enough that the run is waiting rather than arriving or leaving.
+fn pause() {
+    let millis = std::env::var("SAFIX_SHIM_PAUSE_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(500);
+    std::thread::sleep(std::time::Duration::from_millis(millis));
+}
+
+/// `SIGINT` to the process that invoked this, and to nothing else.
+///
+/// The parent alone, rather than a process group: a group signal would reach
+/// this process too, and a sops that died of the signal would make the run
+/// report its child's failure instead of its own interruption, which is a
+/// different claim.
+///
+/// `kill` is coreutils', which the suite already needs for `timeout` and `id`,
+/// and `parent_id` is the standard library's — so no signal-sending dependency
+/// is added to a crate whose shipped binary needs none.
+fn signal_parent() {
+    let parent = std::os::unix::process::parent_id();
+    match Command::new("kill")
+        .arg("-INT")
+        .arg(parent.to_string())
+        .status()
+    {
+        Ok(status) if status.success() => (),
+        Ok(status) => refuse(&format!("kill -INT {parent} exited {status}")),
+        Err(cause) => refuse(&format!("could not run kill: {cause}")),
+    }
 }
 
 /// Run the real binary, then damage one channel.

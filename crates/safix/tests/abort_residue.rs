@@ -9,8 +9,8 @@
 //! waiting for the confirmation, waiting for either under a signal that is not
 //! `SIGINT`, and waiting for sops while it holds the candidate document open.
 //! The last is the one the whole scratch discipline exists for, and it is a
-//! fixture rather than a race here: sops is a shim that sleeps long enough for
-//! the signal to arrive while it is running.
+//! fixture rather than a race here: sops is a shim that signals the runtime
+//! itself, from inside the window, and then finishes normally.
 //!
 //! Each window is held to four things: the exit status the signal implies, a
 //! repository identical to the one the run found, no candidate document left
@@ -101,12 +101,16 @@ fn a_termination_is_answered_the_same_way_and_exits_143() {
 /// created — it is that the file's bytes are the ones the run found and the key
 /// still reads back the value it held.
 ///
-/// That the signal lands in this window rather than an earlier one is not
-/// assumed. Both answers are on standard input before the run starts, so a run
-/// that did not stop inside sops would finish well inside the two seconds and
-/// commit the second value; the exit status and the unchanged value are what
-/// rule that out. Neutralizing the delay was observed to fail here, with the
-/// run exiting 0.
+/// The signal comes from inside sops rather than from a timer, which is what
+/// makes this a fixture rather than a race: sops settles into being waited on,
+/// signals the runtime alone, stays running for a moment, and then does the real
+/// work and exits normally. So the status under test is the run's own decision
+/// about having been interrupted, not a report of a child that died.
+///
+/// Both answers are on standard input before the run starts, so a run that did
+/// not stop here would commit the second value; the exit status and the
+/// unchanged value are what rule that out. Neutralizing the signal was observed
+/// to fail here, with the run exiting 0.
 #[test]
 fn a_signal_during_encryption_stops_before_the_rename() {
     let fixture = Fixture::new();
@@ -118,20 +122,17 @@ fn a_signal_during_encryption_stops_before_the_rename() {
     let untouched = fixture.read(ANA_FILE);
 
     let sops = real_sops();
-    let run = fixture.interrupt_after(
-        "2",
-        "INT",
+    let run = fixture.run_env(
         &["set", "ana", "api-token"],
-        "CANARY-second-value\nCANARY-second-value\n",
+        Some("CANARY-second-value\nCANARY-second-value\n"),
         &[
             ("SAFIX_SOPS", shim()),
-            ("SAFIX_SHIM_ROLE", "slow"),
+            ("SAFIX_SHIM_ROLE", "interrupt"),
             ("SAFIX_SHIM_SOPS", &sops),
             // Only in front of `sops set`, which is the invocation that holds
-            // the candidate open. Held in front of every invocation, the signal
+            // the candidate open. Sent in front of every invocation, the signal
             // would land in whichever window the run reached first.
             ("SAFIX_SHIM_HOLD", "set"),
-            ("SAFIX_SHIM_DELAY_MS", "8000"),
         ],
     );
 
