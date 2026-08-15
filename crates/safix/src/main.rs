@@ -45,7 +45,9 @@ mod usage;
 use std::io::Write;
 use std::process::ExitCode;
 
-use safix_core::{Error, Progress, Workspace, adduser, check, edit, fix, generate, keygen, set};
+use safix_core::{
+    Error, Progress, Workspace, adduser, bridge, check, edit, fix, generate, keygen, set,
+};
 
 use reporter::Refusal;
 
@@ -80,6 +82,109 @@ fn main() -> ExitCode {
     }
 }
 
+/// One subcommand: the word that selects it, the text `-h` prints for it, and
+/// what it runs.
+///
+/// One table rather than three lists. Dispatch reads it, `-h` reads it, and the
+/// refusal for a word that is in none of it names what is in it — so a
+/// subcommand cannot be dispatchable and absent from the refusal, or listed in
+/// the refusal and unreachable, which is exactly the pair that had drifted:
+/// `edit` shipped, dispatched, and was missing from the sentence telling an
+/// operator what they could have typed.
+struct Verb {
+    /// The word that selects it.
+    name: &'static str,
+    /// What `safix <name> -h` prints.
+    help: &'static str,
+    /// What it does with the arguments after its own name.
+    run: fn(&[String]) -> Result<ExitCode, Refusal>,
+}
+
+/// Every subcommand, in the order [`usage::SCAFFOLD`] lists them.
+///
+/// The order is the operator-facing one — write, read, converge, bridge,
+/// custody — and it is the order the unknown-subcommand refusal names them in,
+/// because a list in a different order from the help would be a second answer
+/// to the question the help already answers.
+const VERBS: &[Verb] = &[
+    Verb {
+        name: "set",
+        help: usage::SET,
+        run: set_command,
+    },
+    Verb {
+        name: "edit",
+        help: usage::EDIT,
+        run: edit_command,
+    },
+    Verb {
+        name: "get",
+        help: usage::GET,
+        run: get,
+    },
+    Verb {
+        name: "list",
+        help: usage::LIST,
+        run: list,
+    },
+    Verb {
+        name: "generate",
+        help: usage::GENERATE,
+        run: generate_command,
+    },
+    Verb {
+        name: "check",
+        help: usage::CHECK,
+        run: check_command,
+    },
+    Verb {
+        name: "fix",
+        help: usage::FIX,
+        run: fix_command,
+    },
+    Verb {
+        name: "import",
+        help: usage::IMPORT,
+        run: import_command,
+    },
+    Verb {
+        name: "export",
+        help: usage::EXPORT,
+        run: export_command,
+    },
+    Verb {
+        name: "keygen",
+        help: usage::KEYGEN,
+        run: keygen_command,
+    },
+    Verb {
+        name: "adduser",
+        help: usage::ADDUSER,
+        run: adduser_command,
+    },
+];
+
+/// The subcommand this word selects, if it selects one.
+fn verb(name: &str) -> Option<&'static Verb> {
+    VERBS.iter().find(|verb| verb.name == name)
+}
+
+/// Every subcommand, as the unknown-subcommand refusal names them.
+///
+/// Derived from [`VERBS`] rather than written out, which is the whole point:
+/// the sentence cannot name a subcommand this binary does not have, and cannot
+/// omit one it does. The snapshot holding this refusal is therefore a snapshot
+/// of the table, and adding a subcommand fails it until the new wording is
+/// accepted.
+pub(crate) fn expected_verbs() -> String {
+    let names: Vec<&str> = VERBS.iter().map(|verb| verb.name).collect();
+    match names.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
 fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let Some((subcommand, rest)) = arguments.split_first() else {
         eprint!("{}", usage::SCAFFOLD);
@@ -94,23 +199,19 @@ fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
     match subcommand.as_str() {
         "-h" | "--help" | "help" => {
             eprint!("{}", usage::SCAFFOLD);
-            Ok(ExitCode::SUCCESS)
+            return Ok(ExitCode::SUCCESS);
         }
         "--version" => {
             println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-            Ok(ExitCode::SUCCESS)
+            return Ok(ExitCode::SUCCESS);
         }
-        "list" => list(rest),
-        "get" => get(rest),
-        "set" => set_command(rest),
-        "edit" => edit_command(rest),
-        "check" => check_command(rest),
-        "fix" => fix_command(rest),
-        "generate" => generate_command(rest),
-        "keygen" => keygen_command(rest),
-        "adduser" => adduser_command(rest),
-        other => Err(Refusal::UnknownSubcommand {
-            subcommand: other.to_owned(),
+        _ => {}
+    }
+
+    match verb(subcommand) {
+        Some(verb) => (verb.run)(rest),
+        None => Err(Refusal::UnknownSubcommand {
+            subcommand: subcommand.clone(),
         }),
     }
 }
@@ -128,18 +229,7 @@ fn help_requested(subcommand: &str, rest: &[String]) -> Option<&'static str> {
     {
         return None;
     }
-    Some(match subcommand {
-        "set" => usage::SET,
-        "edit" => usage::EDIT,
-        "get" => usage::GET,
-        "list" => usage::LIST,
-        "check" => usage::CHECK,
-        "fix" => usage::FIX,
-        "generate" => usage::GENERATE,
-        "keygen" => usage::KEYGEN,
-        "adduser" => usage::ADDUSER,
-        _ => usage::SCAFFOLD,
-    })
+    Some(verb(subcommand).map_or(usage::SCAFFOLD, |verb| verb.help))
 }
 
 /// Every name a user holds, and what serves it.
@@ -343,6 +433,50 @@ fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         options,
     )?;
     Ok(abort::exit_code(status))
+}
+
+/// Declared clan-to-safix mappings, moved into safix.
+fn import_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    transfer(arguments, "import [<mapping>]", bridge::import)
+}
+
+/// Declared safix-to-clan mappings, moved into clan.
+fn export_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    transfer(arguments, "export [<mapping>]", bridge::export)
+}
+
+/// The two transfer verbs, which differ in nothing but the direction they act
+/// on.
+///
+/// No mapping named means every mapping of that direction, rather than an
+/// `--all` flag. The flag would be the only way to spell "do the thing this verb
+/// is for", and a verb whose bare form does nothing is a verb an operator has to
+/// remember a flag for; the narrowing case is the one that takes an argument.
+fn transfer(
+    arguments: &[String],
+    form: &'static str,
+    act: fn(&Workspace, &dyn Progress, Option<&str>) -> safix_core::Result<bridge::Run>,
+) -> Result<ExitCode, Refusal> {
+    let only = match arguments {
+        [] => None,
+        [option] if option.starts_with('-') => {
+            return Err(Refusal::UnknownOption {
+                option: option.clone(),
+            });
+        }
+        [mapping] => Some(mapping.clone()),
+        _ => return Err(Refusal::Usage { form }),
+    };
+
+    let workspace = Workspace::discover()?;
+    let outcome = act(&workspace, &Terminal, only.as_deref())?;
+    eprint!("{}", render::transfer(&outcome));
+
+    Ok(if outcome.refused() {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// An age identity for a person who has none.

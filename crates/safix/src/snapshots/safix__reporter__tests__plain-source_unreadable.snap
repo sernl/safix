@@ -1,0 +1,10 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the mapping 'ntfy-token' exports ntfy-token for ana, and secrets/safix/users/ana/secrets.yaml did not
+decrypt. sops has said why, above this.
+
+The mapping is refused rather than transferred. A value that cannot be
+read cannot be verified, and pushing an unverifiable value into another
+store is worse than not pushing it.

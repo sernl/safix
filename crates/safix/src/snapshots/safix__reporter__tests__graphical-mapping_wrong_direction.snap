@@ -1,0 +1,14 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::mapping_wrong_direction
+
+  × the mapping 'ntfy-token' is declared safix-to-clan, which 'safix export'
+  │ acts on.
+  │ 
+  │ 'safix import' acts on the other direction. Either run
+  │ 
+  │     safix export ntfy-token
+  │ 
+  │ or change the mapping's direction if it is declared the wrong way round.

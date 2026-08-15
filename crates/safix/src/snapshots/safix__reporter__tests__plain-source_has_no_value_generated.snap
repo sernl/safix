@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the mapping 'wg-key' exports wg-private for ana, which holds no value yet.
+
+secrets/safix/users/ana/secrets.yaml does not carry the key. Evaluation could not have caught this: an
+entry declares where a value lives, not that one is there, and the two
+are the same declaration until something reads the file.
+
+Put a value there first:
+
+    safix generate ana wg-private
+
+or, if this value is not to be minted after all, set it by hand:
+
+    safix set ana wg-private

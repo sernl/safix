@@ -277,6 +277,77 @@ pub enum Error {
         declared: Vec<String>,
     },
 
+    /// A verb was given a mapping declared for the other direction.
+    ///
+    /// Separate from [`Error::UnknownMapping`] because the mapping is declared
+    /// and the operator has named it correctly: what is wrong is which verb
+    /// they asked, and the message can say so and name the other one.
+    #[error("{}", prose::mapping_wrong_direction(mapping, direction, verb, asked))]
+    MappingWrongDirection {
+        /// The mapping that was named.
+        mapping: String,
+        /// The direction it is declared with.
+        direction: &'static str,
+        /// The verb that acts on that direction.
+        verb: &'static str,
+        /// The verb that was asked.
+        asked: &'static str,
+    },
+
+    /// An export's source entry holds no value.
+    ///
+    /// The runtime sibling of a refusal evaluation cannot make. An entry
+    /// declares where a value lives rather than that one is there, and the two
+    /// are indistinguishable until something reads the file.
+    #[error("{}", prose::source_has_no_value(mapping, user, name, file, *generated))]
+    SourceHasNoValue {
+        /// The mapping being exported.
+        mapping: String,
+        /// The user whose entry it is.
+        user: String,
+        /// The entry's name.
+        name: String,
+        /// The file that would have held the value.
+        file: String,
+        /// Whether a generator mints it, which decides which remedy leads.
+        generated: bool,
+    },
+
+    /// An export's source could not be decrypted by whoever is running.
+    ///
+    /// sops has already said why on its own standard error. What this adds is
+    /// that the mapping was refused rather than transferred, and why that is
+    /// the right answer: a value that cannot be read cannot be verified, and
+    /// pushing an unverifiable value into another store is worse than not
+    /// pushing it.
+    #[error("{}", prose::source_unreadable(mapping, user, name, file))]
+    SourceUnreadable {
+        /// The mapping being exported.
+        mapping: String,
+        /// The user whose entry it is.
+        user: String,
+        /// The entry's name.
+        name: String,
+        /// The file holding it.
+        file: String,
+    },
+
+    /// clan already considers the mapping's generator stale.
+    ///
+    /// Refused before the write rather than reported after it: clan's next
+    /// routine generation replaces the value of a generator whose recorded
+    /// validation no longer matches its definition, so exporting into one is
+    /// writing a value that is already scheduled to be discarded.
+    #[error("{}", prose::generator_definition_drifted(mapping, machine, generator))]
+    GeneratorDefinitionDrifted {
+        /// The mapping being exported.
+        mapping: String,
+        /// The machine the mapping names.
+        machine: String,
+        /// The generator whose recorded validation is stale.
+        generator: String,
+    },
+
     /// A transfer was asked for and no clan is declared to transfer with.
     #[error("{}", prose::no_clan_flake())]
     NoClanFlake,

@@ -44,6 +44,53 @@ read every value in the file, and re-wrapping the data key does not unread it;
 revoking means a new value, which is `generate --regenerate` or `sops <file>`.
 ";
 
+/// `safix import -h`.
+pub const IMPORT: &str = "\
+safix import [<mapping>]
+
+Move every clan-to-safix mapping declared in flake.safix.bridge.mappings, or the
+one named, from clan into safix. With no mapping named it acts on all of them.
+
+The value is read by running clan's own command and arrives on a pipe. safix
+reads, writes and parses none of clan's stored files, in either direction, so
+the bridge works whatever backend that clan uses.
+
+Both sides are read and compared before either is written. A mapping whose two
+sides already agree is not written and not committed, so a second run
+immediately after a first writes nothing. Each mapping that is written goes
+through the same path `set` uses — the same recipient-drift refusal, the same
+staged write and rename — and lands as its own commit naming the mapping.
+
+Each mapping is reported as unchanged, updated, absent at source, or refused.
+Absent at source is not a failure: a clan var that has not been generated yet is
+the ordinary state during bootstrap. A refused mapping does not stop the others,
+and the run exits non-zero.
+";
+
+/// `safix export -h`.
+pub const EXPORT: &str = "\
+safix export [<mapping>]
+
+Move every safix-to-clan mapping declared in flake.safix.bridge.mappings, or the
+one named, from safix into clan. With no mapping named it acts on all of them.
+
+The value is written by running clan's own command with the value on its
+standard input. Nothing here writes into clan's store directly, and clan commits
+what it wrote, in its own repository.
+
+Both sides are read and compared before either is written, and here the
+comparison is load-bearing rather than an optimisation: clan's write is
+unconditional and a re-encrypting backend produces fresh ciphertext for an
+unchanged value, so without it every run would commit in the clan repository for
+every mapping.
+
+Two refusals are this direction's own. A source entry that holds no value is
+refused rather than exported as nothing. A mapping whose clan-side generator
+clan already considers outdated is refused, because clan's next routine
+generation would replace whatever was exported without saying so; there is no
+option that exports anyway.
+";
+
 /// `safix get -h`.
 pub const GET: &str = "\
 safix get [<user>] <name>
@@ -278,6 +325,8 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                                                     mint values from generators
   safix check    [<user>]                           report drift, change nothing
   safix fix      [--yes]                            converge policy and ciphertext
+  safix import   [<mapping>]                        clan-to-safix declared mappings
+  safix export   [<mapping>]                        safix-to-clan declared mappings
   safix keygen   [--for-someone-else] [<user>]      an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
 

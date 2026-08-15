@@ -250,6 +250,111 @@ pub(super) fn unknown_mapping(mapping: &str, declared: &str) -> String {
     )
 }
 
+/// A mapping named to the verb that does not act on it.
+pub(super) fn mapping_wrong_direction(
+    mapping: &str,
+    direction: &str,
+    verb: &str,
+    asked: &str,
+) -> String {
+    format!(
+        "the mapping '{mapping}' is declared {direction}, which 'safix {verb}' acts on.\n\
+        \n\
+        'safix {asked}' acts on the other direction. Either run\n\
+        \n\
+        \x20   safix {verb} {mapping}\n\
+        \n\
+        or change the mapping's direction if it is declared the wrong way round."
+    )
+}
+
+/// An export whose source entry has nothing in it.
+///
+/// The remedy that leads is the one that applies: naming `safix set` first for
+/// an entry a generator mints would be telling the operator to type a value the
+/// declarations say is minted.
+pub(super) fn source_has_no_value(
+    mapping: &str,
+    user: &str,
+    name: &str,
+    file: &str,
+    generated: bool,
+) -> String {
+    let remedy = if generated {
+        format!(
+            "\x20   safix generate {user} {name}\n\
+            \n\
+            or, if this value is not to be minted after all, set it by hand:\n\
+            \n\
+            \x20   safix set {user} {name}"
+        )
+    } else {
+        format!(
+            "\x20   safix set {user} {name}\n\
+            \n\
+            or, if a generator should mint it, declare one and run:\n\
+            \n\
+            \x20   safix generate {user} {name}"
+        )
+    };
+    format!(
+        "the mapping '{mapping}' exports {name} for {user}, which holds no value yet.\n\
+        \n\
+        {file} does not carry the key. Evaluation could not have caught this: an\n\
+        entry declares where a value lives, not that one is there, and the two\n\
+        are the same declaration until something reads the file.\n\
+        \n\
+        Put a value there first:\n\
+        \n\
+        {remedy}"
+    )
+}
+
+/// An export whose source the operator cannot open.
+pub(super) fn source_unreadable(mapping: &str, user: &str, name: &str, file: &str) -> String {
+    format!(
+        "the mapping '{mapping}' exports {name} for {user}, and {file} did not\n\
+        decrypt. sops has said why, above this.\n\
+        \n\
+        The mapping is refused rather than transferred. A value that cannot be\n\
+        read cannot be verified, and pushing an unverifiable value into another\n\
+        store is worse than not pushing it."
+    )
+}
+
+/// An export into a generator clan already considers stale.
+///
+/// Both remedies are named because the second is the right one often enough to
+/// belong here: a mapping whose clan-side generator keeps being edited is a
+/// mapping declared in the wrong direction, and clan is the producer.
+pub(super) fn generator_definition_drifted(
+    mapping: &str,
+    machine: &str,
+    generator: &str,
+) -> String {
+    format!(
+        "clan considers the generator '{generator}' on {machine} outdated, so exporting\n\
+        the mapping '{mapping}' would write a value clan's next generation replaces.\n\
+        \n\
+        clan records a validation for each generator and regenerates when the\n\
+        recorded one no longer matches the definition. That has already happened\n\
+        here, so the next routine\n\
+        \n\
+        \x20   clan vars generate {machine}\n\
+        \n\
+        would discard whatever this export wrote, without saying so.\n\
+        \n\
+        Two ways out. Either bring clan's side back into agreement, by running\n\
+        that generation now and accepting the value it mints; or declare this\n\
+        mapping clan-to-safix instead, which is the right shape when clan's\n\
+        generator is what produces the value.\n\
+        \n\
+        There is no option that exports anyway. safix has nowhere to record that\n\
+        this var is externally supplied, so proceeding would be a silent loss\n\
+        rather than an accepted risk."
+    )
+}
+
 /// A transfer with no clan to transfer with.
 pub(super) fn no_clan_flake() -> String {
     "no clan is declared, so there is nothing to transfer with.\n\

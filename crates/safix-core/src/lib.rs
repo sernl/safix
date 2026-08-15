@@ -39,6 +39,7 @@
 //! `openspec/changes/rust-only-runtime/` for the retirement.
 
 pub mod adduser;
+pub mod bridge;
 pub mod check;
 pub mod clan;
 pub mod edit;

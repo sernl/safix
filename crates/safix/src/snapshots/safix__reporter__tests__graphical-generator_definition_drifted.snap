@@ -1,0 +1,27 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::generator_definition_drifted
+
+  × clan considers the generator 'ntfy' on ana-workstation outdated, so
+  │ exporting
+  │ the mapping 'ntfy-token' would write a value clan's next generation
+  │ replaces.
+  │ 
+  │ clan records a validation for each generator and regenerates when the
+  │ recorded one no longer matches the definition. That has already happened
+  │ here, so the next routine
+  │ 
+  │     clan vars generate ana-workstation
+  │ 
+  │ would discard whatever this export wrote, without saying so.
+  │ 
+  │ Two ways out. Either bring clan's side back into agreement, by running
+  │ that generation now and accepting the value it mints; or declare this
+  │ mapping clan-to-safix instead, which is the right shape when clan's
+  │ generator is what produces the value.
+  │ 
+  │ There is no option that exports anyway. safix has nowhere to record that
+  │ this var is externally supplied, so proceeding would be a silent loss
+  │ rather than an accepted risk.

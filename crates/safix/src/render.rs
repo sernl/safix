@@ -362,3 +362,57 @@ pub fn listing(
     }
     rows
 }
+
+/// What a transfer run did, one line per mapping and a closing count.
+///
+/// Each line names the mapping, the direction, both endpoints and the outcome.
+/// None of them names a value, and the arrow points the way the value moves so
+/// that a report of a mixed run reads without the reader holding the
+/// declarations open.
+///
+/// A refused mapping's reason is printed under its line rather than only
+/// counted, because a run that says "refused" and not why is a run the operator
+/// has to reproduce one mapping at a time to understand.
+#[must_use]
+pub fn transfer(run: &safix_core::bridge::Run) -> String {
+    let mut out = String::new();
+    if run.transferred.is_empty() {
+        let empty = format!("{PROGRAM}: no mapping is declared for this direction.\n");
+        out.push_str(&empty);
+        return out;
+    }
+
+    for entry in &run.transferred {
+        let (from, to) = match entry.direction {
+            safix_core::model::Direction::ClanToSafix => (&entry.clan, &entry.safix),
+            safix_core::model::Direction::SafixToClan => (&entry.safix, &entry.clan),
+        };
+        let line = format!(
+            "{PROGRAM}: {mapping}  {from} -> {to}  {outcome}\n",
+            mapping = entry.mapping,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        if let safix_core::bridge::Outcome::Refused(reason) = &entry.outcome {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                out.push_str("  ");
+                out.push_str(line);
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+    }
+
+    let tally = run.tally();
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s): {} updated, {} unchanged, {} absent at source, {} refused.\n",
+        tally.updated,
+        tally.unchanged,
+        tally.absent,
+        tally.refused,
+        total = run.transferred.len(),
+    );
+    out.push_str(&closing);
+    out
+}

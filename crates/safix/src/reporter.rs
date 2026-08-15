@@ -54,9 +54,13 @@ pub enum Refusal {
     },
 
     /// No such subcommand.
+    ///
+    /// The list is built from the table `main` dispatches on rather than
+    /// written out beside it. A second list is a list that drifts, and this one
+    /// had: `edit` shipped and was never added to the sentence.
     #[error(
-        "unknown subcommand '{subcommand}' \
-        (expected set, get, list, generate, check, fix, keygen or adduser)"
+        "unknown subcommand '{subcommand}' (expected {})",
+        crate::expected_verbs()
     )]
     UnknownSubcommand {
         /// What was asked for.
@@ -293,6 +297,30 @@ mod tests {
                 mapping: "ntfy-tokne".into(),
                 declared: vec!["ntfy-token".into(), "wg-key".into()],
             },
+            Code::MappingWrongDirection => Error::MappingWrongDirection {
+                mapping: "ntfy-token".into(),
+                direction: "safix-to-clan",
+                verb: "export",
+                asked: "import",
+            },
+            Code::SourceHasNoValue => Error::SourceHasNoValue {
+                mapping: "ntfy-token".into(),
+                user: "ana".into(),
+                name: "ntfy-token".into(),
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                generated: false,
+            },
+            Code::SourceUnreadable => Error::SourceUnreadable {
+                mapping: "ntfy-token".into(),
+                user: "ana".into(),
+                name: "ntfy-token".into(),
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+            },
+            Code::GeneratorDefinitionDrifted => Error::GeneratorDefinitionDrifted {
+                mapping: "ntfy-token".into(),
+                machine: "ana-workstation".into(),
+                generator: "ntfy".into(),
+            },
             Code::NoClanFlake => Error::NoClanFlake,
             Code::FileUnreadable => Error::FileUnreadable {
                 path: "secrets/safix/users/ana/secrets.yaml.safix-tmp.4213.yaml".into(),
@@ -436,14 +464,26 @@ mod tests {
     /// held here as well, under a name of its own, because the branch is in the
     /// prose rather than in the type and nothing but a second value pins it.
     fn further_shapes() -> Vec<(&'static str, Refusal)> {
-        vec![(
-            "recipient_drift_one_sided",
-            Refusal::Runtime(Error::RecipientDrift {
-                file: "secrets/safix/users/bo/secrets.yaml".into(),
-                extra: Vec::new(),
-                missing: vec!["age1bo".into()],
-            }),
-        )]
+        vec![
+            (
+                "recipient_drift_one_sided",
+                Refusal::Runtime(Error::RecipientDrift {
+                    file: "secrets/safix/users/bo/secrets.yaml".into(),
+                    extra: Vec::new(),
+                    missing: vec!["age1bo".into()],
+                }),
+            ),
+            (
+                "source_has_no_value_generated",
+                Refusal::Runtime(Error::SourceHasNoValue {
+                    mapping: "wg-key".into(),
+                    user: "ana".into(),
+                    name: "wg-private".into(),
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    generated: true,
+                }),
+            ),
+        ]
     }
 
     /// The command's own, about how it was invoked.

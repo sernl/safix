@@ -72,6 +72,36 @@ pub fn run(
     user: &str,
     name: &str,
 ) -> Result<i32> {
+    run_committing(
+        workspace,
+        progress,
+        source,
+        user,
+        name,
+        &format!("chore(safix): set {name} for {user}"),
+    )
+}
+
+/// The same write, committed under a subject the caller chose.
+///
+/// The bridge is the caller that needs this: a value arriving through a mapping
+/// is not "set by hand", and a commit saying it was would be the one sentence in
+/// the history that is wrong about where the value came from. Everything else —
+/// the ordering above, every refusal in it, the staged write and the rename — is
+/// the same code, which is the point: an imported value takes the hand-set
+/// path's refusals because it *is* the hand-set path.
+///
+/// # Errors
+///
+/// Every refusal [`run`] raises.
+pub fn run_committing(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    source: &mut dyn ValueSource,
+    user: &str,
+    name: &str,
+    subject: &str,
+) -> Result<i32> {
     scratch::set_floor(workspace.root());
     let _guard = scratch::Guard;
 
@@ -161,7 +191,7 @@ pub fn run(
         workspace.git(),
         workspace.root(),
         progress,
-        &format!("chore(safix): set {name} for {user}"),
+        subject,
         std::slice::from_ref(&relative),
     )?;
     Ok(0)

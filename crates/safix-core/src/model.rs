@@ -391,6 +391,129 @@ pub struct Holders {
     pub orphaned: Vec<String>,
 }
 
+/// Which way a mapping's value moves, written as its endpoints.
+///
+/// Not `import` and `export`: `clan vars export` moves values out of clan and
+/// `safix export` moves them in, so a direction spelled with either word means
+/// opposite things depending on which tool the reader has in mind. The verbs
+/// stay relative because they sit on safix's own command line; the declaration
+/// does not, because it is read without a tool in hand to be relative to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Direction {
+    /// clan holds the value and safix receives it. `safix import` acts on these.
+    #[serde(rename = "clan-to-safix")]
+    ClanToSafix,
+    /// safix holds the value and clan receives it. `safix export` acts on these.
+    #[serde(rename = "safix-to-clan")]
+    SafixToClan,
+}
+
+impl Direction {
+    /// The direction as it is declared, reported and committed.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClanToSafix => "clan-to-safix",
+            Self::SafixToClan => "safix-to-clan",
+        }
+    }
+
+    /// The verb that acts on mappings of this direction.
+    #[must_use]
+    pub const fn verb(self) -> &'static str {
+        match self {
+            Self::ClanToSafix => "import",
+            Self::SafixToClan => "export",
+        }
+    }
+}
+
+impl std::fmt::Display for Direction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The clan half of a mapping: the triple clan's own command line takes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClanSide {
+    /// The clan machine the var belongs to.
+    pub machine: String,
+    /// The clan generator that declares the var.
+    pub generator: String,
+    /// The file that generator declares, named as clan names it.
+    pub file: String,
+}
+
+/// The safix half of a mapping: a user and a name that user holds.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SafixSide {
+    /// The `flake.safix.users` entry holding the value.
+    pub user: String,
+    /// The secret that user holds, as they hold it.
+    pub name: String,
+}
+
+/// One declared relationship between a clan var and a safix entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mapping {
+    /// The attribute name the mapping was declared under.
+    ///
+    /// The mapping's own identifier rather than anything derived from an
+    /// endpoint: it appears in reports, in commit messages and in refusals, and
+    /// a name taken from one side reads wrongly in a sentence about the other.
+    pub id: String,
+    /// Which way the value moves.
+    pub direction: Direction,
+    /// The clan endpoint. Nothing at evaluation verified any of it.
+    pub clan: ClanSide,
+    /// The safix endpoint, which evaluation did verify.
+    pub safix: SafixSide,
+}
+
+/// Every declared mapping, and the clan they reach.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bridge {
+    /// The flake reference clan's own command takes for `--flake`, or none when
+    /// the consumer declared no clan.
+    #[serde(rename = "clanFlake")]
+    pub clan_flake: Option<String>,
+    /// Every mapping, in the order the attribute names sort.
+    pub mappings: Vec<Mapping>,
+}
+
+impl Bridge {
+    /// The mappings of one direction, in declaration order.
+    pub fn of(&self, direction: Direction) -> impl Iterator<Item = &Mapping> {
+        self.mappings
+            .iter()
+            .filter(move |mapping| mapping.direction == direction)
+    }
+
+    /// One mapping by its declared name, whichever direction it runs.
+    ///
+    /// Found across both directions rather than within the verb's own, so that
+    /// naming an export mapping to `import` is refused as a direction mistake
+    /// with the mapping named, rather than as an unknown id.
+    #[must_use]
+    pub fn named(&self, id: &str) -> Option<&Mapping> {
+        self.mappings.iter().find(|mapping| mapping.id == id)
+    }
+
+    /// Every declared mapping's name, for a refusal that has to list them.
+    #[must_use]
+    pub fn declared(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -56,6 +56,20 @@ const NOT_GENERATED: &str = "has not been generated yet";
 /// wrong and the refusal can say which three names were tried.
 const NO_SUCH_VAR: &str = "Couldn't find var";
 
+/// The line clan writes about a generator whose recorded validation no longer
+/// matches its definition.
+///
+/// Matched as a substring for the reason the two above are, and with one more:
+/// clan's exit status alone cannot answer this question. `clan vars check`
+/// exits non-zero for a missing var and for a secret needing re-encryption as
+/// well as for a stale generator, and the first of those is the ordinary state
+/// of a var about to be exported into for the first time. Treating the status
+/// as the answer would refuse every first export.
+///
+/// The sentence is emitted per generator by `clan_lib/vars/check.py`, at the
+/// default log level, on standard error.
+const OUTDATED_VALIDATION: &str = "outdated invalidation hash";
+
 /// The environment variable that replaces the program, for checks.
 ///
 /// Mirrors `SAFIX_SOPS`. A hermetic check drives the runtime against a stub
@@ -202,6 +216,54 @@ impl Clan {
             var_id: id,
             output: trimmed(&complaint),
         })
+    }
+
+    /// Whether clan considers this generator's recorded validation stale.
+    ///
+    /// clan records a validation hash per generator and regenerates when the
+    /// recorded one no longer matches the definition's. An export into a
+    /// generator in that state writes a value clan's next routine generation
+    /// replaces, silently, so `export` refuses rather than writes.
+    ///
+    /// The comparison is clan's own and is asked for rather than made here.
+    /// Nothing in this runtime reads the recorded hash, computes one, or writes
+    /// one: the recorded hash is a file in clan's store and reading it is the
+    /// thing this module exists not to do, and the hash it would be compared
+    /// against is a function of clan's definition, which safix would then be
+    /// evaluating clan's nix to obtain.
+    ///
+    /// A clan that cannot answer — because the machine does not exist, because
+    /// the generator does not, or because it refused for any other reason — is
+    /// reported as not stale rather than as stale. That is deliberate: the
+    /// caller's next act is a `get` or a `set` against the same triple, and
+    /// those produce clan's own refusal naming what is wrong. Answering "stale"
+    /// here would replace an accurate refusal with a misleading one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ClanUnavailable`] when the binary cannot be run.
+    pub fn generator_stale(&self, machine: &str, generator: &str) -> Result<bool> {
+        let finished = Command::new(&self.program)
+            .arg("vars")
+            .arg("check")
+            .arg("--flake")
+            .arg(&self.flake)
+            .arg(machine)
+            .arg("--generator")
+            .arg(generator)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|cause| Error::ClanUnavailable {
+                program: self.program(),
+                cause,
+            })?;
+
+        if finished.status.success() {
+            return Ok(false);
+        }
+        Ok(String::from_utf8_lossy(&finished.stderr).contains(OUTDATED_VALIDATION))
     }
 
     /// One value written into clan, on a pipe.

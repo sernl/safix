@@ -35,6 +35,8 @@ pub enum Attribute {
     GeneratorPlan,
     /// The alphabet a declared name is drawn from, as an unanchored pattern.
     NameRegex,
+    /// The declared bridge: the clan flake, and every mapping under it.
+    Bridge,
     /// The consumer's onboarding invocation, or null when none is configured.
     OnboardingHook,
 }
@@ -51,6 +53,7 @@ impl Attribute {
             Self::PolicyText => "safix.lib.policyText",
             Self::GeneratorPlan => "safix.lib.generatorPlan",
             Self::NameRegex => "safix.lib.nameRegex",
+            Self::Bridge => "safix.lib.bridge",
             Self::OnboardingHook => "safix.onboardingHook",
         }
     }
@@ -66,6 +69,7 @@ impl Attribute {
             Self::PolicyText => "flake.safix.lib.policyText",
             Self::GeneratorPlan => "flake.safix.lib.generatorPlan",
             Self::NameRegex => "flake.safix.lib.nameRegex",
+            Self::Bridge => "flake.safix.lib.bridge",
             Self::OnboardingHook => "flake.safix.onboardingHook",
         }
     }

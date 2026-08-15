@@ -18,7 +18,9 @@ use std::sync::OnceLock;
 
 use crate::error::{Error, Result};
 use crate::git::Git;
-use crate::model::{Audiences, GeneratorPlan, GovernedFiles, Placement, Placements, Recipients};
+use crate::model::{
+    Audiences, Bridge, GeneratorPlan, GovernedFiles, Placement, Placements, Recipients,
+};
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
 
@@ -34,6 +36,7 @@ pub struct Workspace {
     governed_files: OnceLock<GovernedFiles>,
     recipients: OnceLock<Recipients>,
     generator_plan: OnceLock<GeneratorPlan>,
+    bridge: OnceLock<Bridge>,
 }
 
 impl Workspace {
@@ -67,6 +70,7 @@ impl Workspace {
             governed_files: OnceLock::new(),
             recipients: OnceLock::new(),
             generator_plan: OnceLock::new(),
+            bridge: OnceLock::new(),
         }
     }
 
@@ -152,6 +156,17 @@ impl Workspace {
     pub fn generator_plan(&self) -> Result<&GeneratorPlan> {
         cached(&self.generator_plan, || {
             self.nix.eval_json(&self.root, Attribute::GeneratorPlan)
+        })
+    }
+
+    /// The clan this consumer bridges to, and every mapping declared for it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn bridge(&self) -> Result<&Bridge> {
+        cached(&self.bridge, || {
+            self.nix.eval_json(&self.root, Attribute::Bridge)
         })
     }
 
