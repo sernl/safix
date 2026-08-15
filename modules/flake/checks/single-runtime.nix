@@ -24,9 +24,7 @@
     let
       integration = import ./integration.nix { inherit pkgs; };
 
-      claim =
-        name: target:
-        integration.runOne config.checks.safix-integration name target "";
+      claim = name: target: integration.runOne config.checks.safix-integration name target "";
     in
     {
       # An interrupted write, in each of the four windows it has: waiting for the
