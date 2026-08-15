@@ -13,16 +13,33 @@
 //! crate is a value of [`Error`] carrying the data its message needs, so an
 //! embedder can act on it without parsing prose.
 //!
+//! # The shape of a run
+//!
+//! [`Workspace`] is one run's view of one repository: it finds the repository,
+//! evaluates the four attributes of `flake.safix.lib` the runtime reads, and
+//! resolves a name to the file and key holding it. [`check`] is the drift
+//! report over that view. [`sops`] and [`git`] are the two subprocess drivers,
+//! and [`Secret`] is what a decrypted value comes back as.
+//!
 //! # What is implemented today
 //!
-//! [`Secret`] and [`Error`]. The command's subcommands are not ported yet, and
-//! the shell runtime remains what the flake's `safix` package builds. The
-//! migration is gated on a differential harness rather than scheduled; see
+//! The read paths — the placement resolution behind `list`, the decryption
+//! behind `get`, and the four-part report behind `check`. The write paths and
+//! the generator graph are not ported, and the shell runtime remains what the
+//! flake's `safix` package builds. The migration is gated on a differential
+//! harness rather than scheduled; see
 //! `openspec/changes/rewrite-runtime-in-rust/`.
 
+pub mod check;
 mod error;
+pub mod git;
+pub mod model;
+pub mod nix;
 mod probe;
 mod secret;
+pub mod sops;
+mod workspace;
 
 pub use error::{Error, Result};
 pub use secret::Secret;
+pub use workspace::Workspace;

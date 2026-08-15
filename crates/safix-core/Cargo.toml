@@ -17,10 +17,17 @@ keywords.workspace = true
 thiserror.workspace = true
 secrecy.workspace = true
 zeroize.workspace = true
-# Present so that the compiled probe asserting `Secret` is not serializable has
-# the trait in scope to probe for. An absence probe against a trait no crate in
+# `derive` because the schemas this reads are the nix half's output and are
+# declared as types here; the probe asserting `Secret` is not serializable needs
+# the trait in scope besides, and an absence probe against a trait no crate in
 # the graph defines would be vacuous.
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_norway.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

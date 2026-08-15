@@ -25,8 +25,17 @@ safix-core = { path = "crates/safix-core", version = "0.1.0" }
 miette = "7"
 secrecy = "0.10"
 serde = "1"
+serde_json = "1"
+# The YAML reader for sops metadata, and a maintained fork rather than
+# `serde_yaml`, which its author archived. It reads the two things the python
+# readers read — the top-level mapping and the `sops.age` stanza list — and
+# nothing about the format beyond them; see `sops::document`.
+serde_norway = "0.9"
 thiserror = "2"
 zeroize = "1"
+
+insta = "1"
+proptest = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
