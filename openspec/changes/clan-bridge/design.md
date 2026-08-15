@@ -49,7 +49,7 @@ This is deliberately not a soft failure that skips clan-side mappings — a brid
 
 ## D2. The mapping is a declaration
 
-The alternative is CLI arguments: `safix import --machine sundog --generator ntfy --file token --user sernl --name ntfy-token`.
+The alternative is CLI arguments: `safix import --machine meridian --generator ntfy --file token --user sernl --name ntfy-token`.
 That is rejected because a bridge is a standing relationship, not an event.
 
 A declaration is diffable, so adding a mapping shows up in review as a line naming both endpoints.
@@ -64,7 +64,7 @@ flake.safix.bridge.clanFlake = ./.;
 
 flake.safix.bridge.mappings.ntfy-token = {
   direction = "clan-to-safix";
-  clan = { machine = "sundog"; generator = "ntfy"; file = "token"; };
+  clan = { machine = "meridian"; generator = "ntfy"; file = "token"; };
   safix = { user = "sernl"; name = "ntfy-token"; };
 };
 ```

@@ -85,7 +85,7 @@ in
             ntfy-token = {
               direction = "clan-to-safix";
               clan = {
-                machine = "sundog";
+                machine = "meridian";
                 generator = "ntfy";
                 file = "token";
               };

@@ -61,7 +61,7 @@ mod linux {
     const EXPORTED: &str = "CANARY-exported-traced";
 
     /// The machine and var the traced mappings name.
-    const BRIDGE_MACHINE: &str = "sundog";
+    const BRIDGE_MACHINE: &str = "meridian";
     const BRIDGE_VAR: &str = "ntfy/token";
 
     /// A fixture carrying one mapping of the given direction.

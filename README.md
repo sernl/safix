@@ -524,7 +524,7 @@ The relationship is declared rather than passed as arguments, because a bridge i
 
   flake.safix.bridge.mappings.ntfy-token = {
     direction = "clan-to-safix";
-    clan = { machine = "sundog"; generator = "ntfy"; file = "token"; };
+    clan = { machine = "meridian"; generator = "ntfy"; file = "token"; };
     safix = { user = "ana"; name = "ntfy-token"; };
   };
 }

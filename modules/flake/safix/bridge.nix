@@ -32,7 +32,7 @@ let
     options = {
       machine = lib.mkOption {
         type = lib.types.str;
-        example = "sundog";
+        example = "meridian";
         description = "The clan machine the var belongs to.";
       };
 

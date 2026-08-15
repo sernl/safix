@@ -32,7 +32,7 @@ use harness::{ANA_FILE, Fixture, Run};
 const VAR: &str = "ntfy/token";
 
 /// The machine they name.
-const MACHINE: &str = "sundog";
+const MACHINE: &str = "meridian";
 
 /// One run of a bridge verb, with the stubbed clan in place.
 fn bridge(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) -> Run {
@@ -271,7 +271,7 @@ fn an_export_into_a_stale_generator_is_refused_and_names_both_remedies() {
         .expect_refusal("exporting into a stale generator");
 
     run.says("outdated");
-    run.says("clan vars generate sundog");
+    run.says("clan vars generate meridian");
     run.says("clan-to-safix");
     run.says("no option that exports anyway");
     run.silent_about("CANARY-would-be-lost");
@@ -387,10 +387,10 @@ fn a_clan_side_that_does_not_resolve_is_refused_naming_all_three_names() {
 
     let run = bridge(&fixture, &["import"], &[("SAFIX_CLAN_STUB_UNKNOWN", VAR)])
         .expect_refusal("a mapping clan has no var for");
-    run.says("sundog");
+    run.says("meridian");
     run.says("ntfy");
     run.says("token");
-    run.says("clan vars list sundog");
+    run.says("clan vars list meridian");
 }
 
 /// clan's own refusal reaches the operator as clan's words, with the mapping
