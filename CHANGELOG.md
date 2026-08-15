@@ -54,7 +54,8 @@ What is retained: the pipe requirement is modified rather than deleted.
 
 - `plaintext-staging`: a mode-`0700` directory on a filesystem verified with `statfs` rather than inferred from its name, one per run, every file `0600`, registered for removal before it is created and swept on return, on error, on panic and from both signal handlers.
   There is no fallback to `/tmp` — this fleet's is ext4, so a silent fallback would be the exact failure the rule prevents under a code path that looks like it succeeded.
-  `--allow-disk-staging` accepts a disk-backed directory; `SAFIX_STAGING_DIR` names a mount to try first and is verified like any other.
+  `--allow-disk-staging` accepts a disk-backed directory; `SAFIX_STAGING_DIR` names the mount to use, replacing the conventional candidates rather than preceding them, and is verified like any other.
+  Replacing is deliberate twice over: an operator who sets it has said where plaintext goes, and a runtime that tried it and quietly staged elsewhere would look like it honoured the setting; and with a fallback behind it no drill on a host that has a tmpfs could ever reach the refusal, so the rule would be asserted only by reading the code.
   Two residual exposures are documented rather than smoothed over: a page swapped before the overwrite is not reached, and the directory is readable by every process running as its owner for the run's duration.
 - `files.<name>.secret = false`: a public output, stored in the clear at `public/safix/users/<user>/<name>/value` or `public/safix/shared/<audience>/<name>/value`, given no creation rule, and readable at evaluation through `flake.safix.lib.publicValue`.
   `flake.safix.lib.outputPath` answers for every output and is a path, never a value.

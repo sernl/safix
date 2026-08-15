@@ -281,6 +281,7 @@ A generator's inputs and outputs are files, so they exist, and this is where.
 The staging directory is created mode `0700` on a filesystem safix asks the kernel about with `statfs` rather than infers from its name, and it is overwritten and removed however the run ends — on return, on error, on panic, and from both signal handlers.
 There is no fallback to `/tmp`: on a host whose `/tmp` is disk-backed a silent fallback would put plaintext in free blocks under a code path that looks like it succeeded.
 Where no memory-backed filesystem is available the run refuses, and `--allow-disk-staging` is what accepts a disk-backed one.
+`SAFIX_STAGING_DIR` names the mount to use instead of the conventional ones — it replaces them rather than being tried first, so a mount you named and safix rejects is a refusal rather than a silent fall back to somewhere else.
 
 What that bounds, and what it does not, stated rather than implied.
 Overwriting a page of a memory-backed filesystem does not reach a copy already written to swap.

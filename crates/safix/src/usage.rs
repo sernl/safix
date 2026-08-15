@@ -145,7 +145,10 @@ terminate. There is no fallback to /tmp: on a host whose /tmp is disk-backed a
 silent fallback would put plaintext in free blocks under a code path that looks
 like it succeeded. Where no memory-backed filesystem is available the run
 refuses, and --allow-disk-staging accepts a disk-backed one. SAFIX_STAGING_DIR
-names a mount to try first, and it is verified like any other.
+names the mount to use instead of the conventional ones \u{2014} it replaces them
+rather than being tried first, so a mount you named and this rejects is a
+refusal rather than a silent fall back to somewhere else \u{2014} and it is
+verified like any one of them.
 
 What that bounds, and what it does not. Overwriting a page of a memory-backed
 filesystem does not reach a copy already written to swap. A mode-0700 directory
