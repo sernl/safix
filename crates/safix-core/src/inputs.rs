@@ -289,7 +289,10 @@ mod tests {
             return;
         };
 
-        let produced = run(&tree, r#"cat "$prompts/seed"; printf ' | '; cat "$prompts/seed""#);
+        let produced = run(
+            &tree,
+            r#"cat "$prompts/seed"; printf ' | '; cat "$prompts/seed""#,
+        );
         assert_eq!(
             String::from_utf8_lossy(&produced.stdout),
             "a fixture value | a fixture value",
@@ -347,7 +350,10 @@ mod tests {
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
-        let produced = run(&tree, r#"echo -n unstripped > "$out/a"; echo padded > "$out/b""#);
+        let produced = run(
+            &tree,
+            r#"echo -n unstripped > "$out/a"; echo padded > "$out/b""#,
+        );
         assert!(produced.status.success());
 
         let Ok(values) = tree.collect("paired", &["a".to_owned(), "b".to_owned()]) else {
@@ -369,7 +375,10 @@ mod tests {
         let Ok(tree) = Tree::establish(false, false) else {
             return;
         };
-        let produced = run(&tree, r#"printf x > "$out/written"; printf y > "$out/also""#);
+        let produced = run(
+            &tree,
+            r#"printf x > "$out/written"; printf y > "$out/also""#,
+        );
         assert!(produced.status.success());
 
         let refused = tree.collect("paired", &["written".to_owned(), "absent".to_owned()]);

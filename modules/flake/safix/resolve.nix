@@ -305,9 +305,9 @@ let
       lib.unique (
         lib.concatMap (
           user:
-          lib.concatMap (name: lib.optional (placements.${user}.${name}.public != null) placements.${user}.${name}.public) (
-            builtins.attrNames placements.${user}
-          )
+          lib.concatMap (
+            name: lib.optional (placements.${user}.${name}.public != null) placements.${user}.${name}.public
+          ) (builtins.attrNames placements.${user})
         ) (builtins.attrNames users)
       )
     );

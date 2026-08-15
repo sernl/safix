@@ -323,9 +323,7 @@
           noOutputReferenceFires = planFires fixtures.noOutputReference;
 
           shareDisagreementMessages = resolve.generatorViolations disagreeing.users disagreeing.catalogue;
-          shareDisagreementFires = fires (
-            resolve.generatorPlanOf disagreeing.users disagreeing.catalogue
-          );
+          shareDisagreementFires = fires (resolve.generatorPlanOf disagreeing.users disagreeing.catalogue);
 
           # A public output resolves to a path in the plaintext store, an
           # encrypted one to null, and the two prefixes do not overlap.
@@ -333,8 +331,7 @@
           publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
           publicOnTheEncryptedHalf =
             (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.public;
-          publicShare =
-            (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.generator.share;
+          publicShare = (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.generator.share;
           publicRuleReaches = checks.publicRuleMessages (fleetOf fixtures.publicOutput) { };
 
           unsafePromptNameMessages = violationsOf fixtures.unsafePromptName;

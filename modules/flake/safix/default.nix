@@ -185,9 +185,8 @@ in
       user: name:
       let
         placement =
-          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name} or (throw
-            "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no value to read"
-          );
+          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name}
+            or (throw "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no value to read");
         path = "${toString self}/${placement.public}";
       in
       if placement.public == null then
@@ -203,9 +202,8 @@ in
       user: name:
       let
         placement =
-          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name} or (throw
-            "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no path"
-          );
+          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name}
+            or (throw "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no path");
       in
       if placement.public != null then placement.public else placement.file;
 

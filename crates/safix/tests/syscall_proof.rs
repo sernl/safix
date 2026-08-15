@@ -1,11 +1,19 @@
 //! Every plaintext byte the runtime writes, observed at the system call.
 //!
 //! This is the retired `differential-strace` mode. `value_pipe.rs` shows the two
-//! routes the value did *not* take; this shows the one it did, and shows it from
-//! outside the runtime entirely: `strace -y` annotates each descriptor with what
-//! it resolves to, so a write of a plaintext value carries the answer to "into
-//! what" beside it. A pipe is a descriptor with no name in the filesystem and no
-//! bytes at rest.
+//! routes the value did *not* take; this shows the ones it did, and shows them
+//! from outside the runtime entirely: `strace -y` annotates each descriptor with
+//! what it resolves to, so a write of a plaintext value carries the answer to
+//! "into what" beside it. A pipe is a descriptor with no name in the filesystem
+//! and no bytes at rest.
+//!
+//! Two destinations are admissible rather than one, and the second is 0.2's
+//! deliberate weakening. A typed value still travels a pipe end to end. A minted
+//! value reaches files, because the interoperable generator contract addresses
+//! its inputs and outputs by path — but only files inside that run's private
+//! staging root, which is what `plaintext-staging` bounds and what this reading
+//! holds it to. A write of a minted value to any other named file is what this
+//! is looking for.
 //!
 //! Linux only, and absent rather than trivially green elsewhere: this needs
 //! ptrace, and darwin's `dtruss` needs system integrity protection disabled,
@@ -71,9 +79,9 @@ mod linux {
         );
     }
 
-    /// A minted value takes the same route.
+    /// A minted value reaches a pipe and the staging root, and nothing else.
     #[test]
-    fn every_plaintext_write_of_a_minted_value_goes_to_a_pipe() {
+    fn every_plaintext_write_of_a_minted_value_goes_to_a_pipe_or_the_staging_root() {
         let mut fixture = Fixture::new();
         fixture.seed_generator(
             "api-token",
@@ -81,8 +89,9 @@ mod linux {
             &[],
             &serde_json::json!({
                 "dependencies": [], "description": "a value minted from nothing",
-                "files": [], "prompts": {},
-                "runtimeInputs": [], "script": format!("printf '{MINTED}'"),
+                "files": {}, "prompts": {}, "share": false,
+                "runtimeInputs": [],
+                "script": format!("printf '{MINTED}' > \"$out/api-token\""),
                 "validation": null,
             }),
         );
@@ -135,7 +144,7 @@ mod linux {
 
         let reason = outcome.expect_err("a plaintext write to a regular file was not caught");
         assert!(
-            reason.contains("something other than a pipe"),
+            reason.contains("neither a pipe"),
             "the drill was caught by something other than the pipe assertion: {reason}"
         );
         assert!(
@@ -144,8 +153,16 @@ mod linux {
         );
     }
 
+    /// The prefix `staging.rs` names every staging root with.
+    ///
+    /// A literal rather than a read of the constant, so that renaming the
+    /// directory scheme without revisiting this reading fails here: the point of
+    /// the assertion is what an outside observer sees, and an outside observer
+    /// has the name and not the constant.
+    const STAGING: &str = "safix-stage-";
+
     /// Run one invocation under `strace`, and hold every write carrying one of
-    /// the values to being a write into a pipe.
+    /// the values to being a write into a pipe or into the staging root.
     ///
     /// The reason comes back rather than being asserted here, so the drill can
     /// require that a failure is *this* assertion's failure rather than some
@@ -188,9 +205,10 @@ mod linux {
             // resolution `-y` annotates it with; the buffer follows and may hold
             // commas of its own, so the split is deliberate.
             let descriptor = line.split_once(',').map_or(line, |(head, _)| head);
-            if !descriptor.contains("<pipe:[") {
+            if !descriptor.contains("<pipe:[") && !descriptor.contains(STAGING) {
                 return Err(format!(
-                    "a plaintext value was written to something other than a pipe: {descriptor}"
+                    "a plaintext value was written to something that is neither a pipe \
+                     nor a file in the run's staging root: {descriptor}"
                 ));
             }
         }
@@ -211,7 +229,14 @@ mod linux {
         ))
     }
 
-    /// No value left in the temporary directory the run staged in.
+    /// No value left in the temporary directory the run staged in, nor in any
+    /// staging root it made.
+    ///
+    /// The second half is what makes admitting a staging-root write above safe
+    /// to admit: the trace shows plaintext going into a file, and this shows the
+    /// file is gone by the time the run returned. Without it the reading would
+    /// have been weakened to "a file somewhere" and nothing would hold the
+    /// shred.
     fn residue_free(fixture: &Fixture, values: &[&str]) -> Result<(), String> {
         for value in values {
             if let Some(path) = find(&fixture.tmpdir(), value) {
@@ -221,7 +246,46 @@ mod linux {
                 ));
             }
         }
+        for root in ["/dev/shm", "/run/user"] {
+            for value in values {
+                if let Some(path) = find_staged(Path::new(root), value) {
+                    return Err(format!(
+                        "a plaintext value was left in a staging root: {}",
+                        path.display()
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The first file under a staging root anywhere below this directory holding
+    /// this text.
+    ///
+    /// Scoped to directories named the way `staging.rs` names them, because
+    /// `/dev/shm` is shared with everything else running as this user and a
+    /// blind walk of it would report somebody else's file as this run's residue.
+    fn find_staged(root: &Path, needle: &str) -> Option<std::path::PathBuf> {
+        let entries = std::fs::read_dir(root).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let named = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(STAGING));
+            let found = if named {
+                find(&path, needle)
+            } else {
+                find_staged(&path, needle)
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
     }
 
     /// The first file under a directory holding this text.

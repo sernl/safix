@@ -172,7 +172,10 @@ impl Staging {
         }
 
         Err(Error::StagingNotMemoryBacked {
-            candidates: tried.iter().map(|path| path.display().to_string()).collect(),
+            candidates: tried
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
             disk_backed: refusals,
         })
     }
@@ -299,10 +302,10 @@ pub fn names_in(directory: &Path) -> Vec<String> {
     let mut found: Vec<String> = entries
         .flatten()
         .map(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map_or_else(|| entry.file_name().to_string_lossy().into_owned(), str::to_owned)
+            entry.file_name().to_str().map_or_else(
+                || entry.file_name().to_string_lossy().into_owned(),
+                str::to_owned,
+            )
         })
         .collect();
     found.sort();
@@ -403,7 +406,17 @@ mod tests {
     /// assertion, and the root's path is carried out of the unwinding closure
     /// through a channel rather than through the caught payload, because a
     /// payload is what a panic hook could render.
+    ///
+    /// The `panic` lint is denied across this workspace because a panic can end
+    /// a process while it holds a decrypted value, and every failure is a
+    /// returned error instead. This is the one place the construction is the
+    /// subject rather than a defect: the claim under test is that unwinding
+    /// through the guard shreds the tree, and it cannot be made without one.
     #[test]
+    #[expect(
+        clippy::panic,
+        reason = "the panic is the behaviour under test, not a failure path"
+    )]
     fn a_panic_unwinding_through_the_guard_removes_the_tree() {
         let (announce, root) = std::sync::mpsc::channel();
         let previous = std::panic::take_hook();

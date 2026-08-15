@@ -76,10 +76,7 @@ impl Editor {
     /// [`Error::NoEditor`] when neither variable names anything, raised before
     /// anything is decrypted or staged.
     pub fn from_environment() -> Result<Self> {
-        Self::choose(
-            std::env::var(PREFERRED).ok(),
-            std::env::var(FALLBACK).ok(),
-        )
+        Self::choose(std::env::var(PREFERRED).ok(), std::env::var(FALLBACK).ok())
     }
 
     /// The selection itself, over two values rather than over the environment.
@@ -230,9 +227,9 @@ fn read_existing(workspace: &Workspace, relative: &str, key: &str) -> Result<Sec
     let Some(text) = workspace.read_relative(relative)? else {
         return Ok(Secret::empty());
     };
-    if !document::keys_of(&text)?
+    if document::keys_of(&text)?
         .get(key)
-        .is_some_and(|state| !state.empty)
+        .is_none_or(|state| state.empty)
     {
         return Ok(Secret::empty());
     }
@@ -244,10 +241,7 @@ mod tests {
     use super::*;
 
     fn chosen(preferred: Option<&str>, fallback: Option<&str>) -> Result<Editor> {
-        Editor::choose(
-            preferred.map(str::to_owned),
-            fallback.map(str::to_owned),
-        )
+        Editor::choose(preferred.map(str::to_owned), fallback.map(str::to_owned))
     }
 
     #[test]
@@ -265,7 +259,9 @@ mod tests {
             Some("fallback".to_owned())
         );
         assert_eq!(
-            chosen(Some("   "), Some("fallback")).map(|e| e.program).ok(),
+            chosen(Some("   "), Some("fallback"))
+                .map(|e| e.program)
+                .ok(),
             Some("fallback".to_owned())
         );
     }

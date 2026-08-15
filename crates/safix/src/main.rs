@@ -305,8 +305,7 @@ fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// Both flags are read before the positional arguments and in either order,
 /// because `--yes` answers a question `--regenerate` is what raises.
 fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str =
-        "generate [--regenerate] [--yes] [--allow-disk-staging] [<user>] [<name>]";
+    const FORM: &str = "generate [--regenerate] [--yes] [--allow-disk-staging] [<user>] [<name>]";
     let mut options = generate::Options::default();
     let mut rest = arguments;
     while let Some((first, tail)) = rest.split_first() {

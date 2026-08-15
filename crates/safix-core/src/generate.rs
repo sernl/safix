@@ -421,19 +421,22 @@ fn mint(
                 tree.add_prompt(&input.name, &answer)?;
             }
             crate::model::InputKind::Dependency => {
-                // Keyed by the generator that produces the dependency, which is
-                // the directory name clan's contract uses, so `$in/openssh/…`
-                // means here what it means there. Only the declared dependency
-                // is placed under it: clan materializes every file of the
-                // dependency generator, which would hand a script depending on a
-                // keypair's public half the private half as well.
+                // The directory is named for the entry the value's producer is
+                // declared on, which is clan's keying: `$in/openssh/…` means
+                // here what it means there. A dependency nothing generates —
+                // a hand-set value, which safix has and clan does not — is
+                // keyed by its own name, because there is no producer to name
+                // it after and inventing one would be a directory naming
+                // nothing.
+                //
+                // Only the declared dependency is placed under it. clan
+                // materializes every file of the dependency generator, which
+                // would hand a script depending on a keypair's public half the
+                // private half as well.
                 let producer = plan
                     .for_user(user)
                     .and_then(|mine| mine.producer_of(&input.name))
-                    .ok_or_else(|| Error::NoGenerator {
-                        user: user.to_owned(),
-                        name: input.name.clone(),
-                    })?
+                    .unwrap_or(&input.name)
                     .to_owned();
                 let placement = workspace.resolve(user, &input.name)?;
                 let absolute = workspace.absolute(&placement.file);

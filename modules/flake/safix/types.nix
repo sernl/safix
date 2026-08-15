@@ -235,7 +235,7 @@ let
       files = lib.mkOption {
         type = lib.types.attrsOf generatorFile;
         default = { };
-        example = lib.literalExpression ''{ ssh-personal-pub.secret = false; }'';
+        example = lib.literalExpression "{ ssh-personal-pub.secret = false; }";
         description = ''
           Further outputs of the same user this one generator also writes,
           beside the entry it is declared on. A keypair is the case this exists

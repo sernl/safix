@@ -115,6 +115,8 @@ mod tests {
         assert!(is_public_path("public/safix/users/ana/wg-public/value"));
         assert!(is_public_path("public/safix/shared/ana,bo/wg-public/value"));
         assert!(!is_public_path("secrets/safix/users/ana/secrets.yaml"));
-        assert!(!is_public_path("public/safix/users/ana/wg-public/notes.txt"));
+        assert!(!is_public_path(
+            "public/safix/users/ana/wg-public/notes.txt"
+        ));
     }
 }

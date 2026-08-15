@@ -296,6 +296,27 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare a placement for a public output: a path in the plaintext store
+    /// rather than a key inside an encrypted document.
+    ///
+    /// `file` and `key` stay populated because the resolver populates them for
+    /// every entry; what makes this public is `public` naming a path, which is
+    /// the one field the runtime branches on.
+    pub fn seed_public_output(&mut self, name: &str, path: &str) {
+        self.placements["ana"][name] = json!({
+            "file": ANA_FILE, "key": name, "origin": "private",
+            "owner": "ana", "shared": false, "generator": null,
+            "public": path,
+        });
+        self.write_fixtures();
+    }
+
+    /// The plaintext a public output holds, read straight off the repository.
+    pub fn public_value(&self, path: &str) -> String {
+        std::fs::read_to_string(self.repo.join(path))
+            .unwrap_or_else(|cause| panic!("{path} is not readable: {cause}"))
+    }
+
     /// Declare an entry both people carry and `shared = true` makes one value
     /// of: two placements, each with its carrier as owner, both naming one file
     /// and one key.
@@ -303,7 +324,7 @@ impl Fixture {
         for user in ["ana", "bo"] {
             self.placements[user][name] = json!({
                 "file": file, "key": name, "origin": "carries",
-                "owner": user, "shared": true, "generator": null,
+                "owner": user, "shared": true, "generator": null, "public": null,
             });
         }
         self.write_fixtures();
@@ -331,15 +352,16 @@ impl Fixture {
         self.placements["ana"][name] = json!({
             "file": file, "key": name, "origin": "private",
             "owner": "ana", "shared": false, "generator": record.clone(),
+            "public": null,
         });
 
+        // Keyed by the declared name, which is how `resolve.nix` emits the plan
+        // now that the script addresses its inputs by path rather than through a
+        // shell identifier.
         let mut inputs = serde_json::Map::new();
         if let Some(prompts) = self.placements["ana"][name]["generator"]["prompts"].as_object() {
             for prompt in prompts.keys() {
-                inputs.insert(
-                    prompt.replace('-', "_"),
-                    json!({ "kind": "prompt", "name": prompt }),
-                );
+                inputs.insert(prompt.clone(), json!({ "kind": "prompt", "name": prompt }));
             }
         }
         if let Some(dependencies) =
@@ -347,7 +369,7 @@ impl Fixture {
         {
             for dependency in dependencies.iter().filter_map(Value::as_str) {
                 inputs.insert(
-                    dependency.replace('-', "_"),
+                    dependency.to_owned(),
                     json!({ "kind": "dependency", "name": dependency }),
                 );
             }
@@ -443,6 +465,39 @@ impl Fixture {
     /// set — a backend that fails, a temporary directory of its own.
     pub fn run_env(&self, arguments: &[&str], stdin: Option<&str>, extra: &[(&str, &str)]) -> Run {
         self.invoke(safix(), arguments, stdin, Reporter::Plain, extra)
+    }
+
+    /// One invocation under the graphical reporter with an environment of its
+    /// own, which is how a staging drill reads the code of a refusal only a
+    /// disk-backed mount produces.
+    pub fn run_graphical_env(&self, arguments: &[&str], extra: &[(&str, &str)]) -> Run {
+        self.invoke(safix(), arguments, None, Reporter::Graphical, extra)
+    }
+
+    /// The fixture's own scratch directory, which is on whatever filesystem the
+    /// checkout is on and is therefore what a disk-backed staging drill points
+    /// at.
+    pub fn work_dir(&self) -> &std::path::Path {
+        &self.work
+    }
+
+    /// Every staging root left behind under a directory a run was pointed at.
+    ///
+    /// Named by the prefix `staging.rs` gives them. A run that shredded its root
+    /// leaves none, and one that did not leaves a directory holding plaintext.
+    pub fn staging_roots(&self) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(&self.work) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("safix-stage-"))
+            })
+            .collect()
     }
 
     /// One invocation of a program standing in for the binary, which is how a
@@ -871,7 +926,7 @@ enum Reporter {
 fn placement(file: &str, key: &str, origin: &str, owner: &str) -> Value {
     json!({
         "file": file, "key": key, "origin": origin,
-        "owner": owner, "shared": false, "generator": null,
+        "owner": owner, "shared": false, "generator": null, "public": null,
     })
 }
 
