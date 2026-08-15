@@ -57,13 +57,23 @@ use crate::error::{Error, Result};
 use crate::scratch;
 use crate::secret::Secret;
 
-/// The environment variable naming a staging location to use ahead of the
-/// conventional ones.
+/// The environment variable naming the staging location, replacing the
+/// conventional ones rather than being tried ahead of them.
 ///
-/// Its purpose is the severity drill this module's rule is verified by: pointing
-/// staging at a disk-backed directory must refuse. It weakens nothing, because
-/// what it names is verified exactly as the conventional candidates are — an
-/// operator who points it at ext4 gets the refusal, not a silent disk write.
+/// Replacing rather than preceding, and that is the decision rather than an
+/// implementation detail. An operator who sets this has said where plaintext is
+/// to go; a runtime that tried it, found it disk-backed and quietly staged in
+/// `/dev/shm` instead would have looked like it honoured the setting and done
+/// something else — which is the same class of failure as falling back to a
+/// disk-backed `/tmp`, in the other direction.
+///
+/// It also makes the refusal reachable. With a fallback behind it, no drill
+/// could ever produce the disk-backed refusal on a host that has a tmpfs, so
+/// the rule this module exists for would be asserted only by reading the code.
+///
+/// It weakens nothing: what it names is verified exactly as the conventional
+/// candidates are, so an operator who points it at ext4 gets the refusal and
+/// not a silent disk write.
 pub const OVERRIDE_VARIABLE: &str = "SAFIX_STAGING_DIR";
 
 /// The flag that accepts disk-backed staging, spelled once.
@@ -103,19 +113,21 @@ pub fn memory_backed(path: &Path) -> Option<bool> {
 
 /// The mounts a staging root is looked for in, in order.
 ///
-/// The override first, so a drill can point staging anywhere and watch the same
-/// verification run over it. Then the conventional shared-memory mount, then the
-/// per-user runtime directory, which is a tmpfs on a systemd host and is already
-/// mode `0700`.
+/// The override alone when it is set — see [`OVERRIDE_VARIABLE`] for why it
+/// replaces rather than precedes. Otherwise the conventional shared-memory
+/// mount, then the per-user runtime directory, which is a tmpfs on a systemd
+/// host and is already mode `0700`. Every one of them is verified; the order
+/// decides which is tried first and nothing else.
 fn candidates() -> Vec<PathBuf> {
     let named = |variable: &str| {
         std::env::var_os(variable)
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
     };
-    let mut found = Vec::new();
-    found.extend(named(OVERRIDE_VARIABLE));
-    found.push(PathBuf::from("/dev/shm"));
+    if let Some(chosen) = named(OVERRIDE_VARIABLE) {
+        return vec![chosen];
+    }
+    let mut found = vec![PathBuf::from("/dev/shm")];
     found.extend(named("XDG_RUNTIME_DIR"));
     found
 }

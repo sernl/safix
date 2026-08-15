@@ -258,17 +258,30 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
     );
 
     // No memory-backed filesystem, which is the containment refusing rather than
-    // falling back. Pointed at the fixture's own working directory, which is on
-    // whatever the checkout is on; the drill is skipped where that is itself a
-    // tmpfs, because there the claim has no disk-backed mount to be about.
+    // falling back.
+    //
+    // A directory the kernel says is disk-backed has to be found rather than
+    // assumed: this suite's own scratch is on tmpfs by design, so pointing the
+    // drill at it would assert nothing. The candidates are the places a
+    // disk-backed directory plausibly is, and where none of them is one the
+    // drill says so rather than passing quietly — a check that silently stopped
+    // asserting is the failure this whole file is arranged against.
     fixture.seed_generator(
         "staged",
         ANA_FILE,
         &[],
         &plain("printf staged > \"$out/staged\""),
     );
-    let disk_backed = fixture.work_dir().to_string_lossy().into_owned();
-    let drill_ran = !safix_core::staging::memory_backed(fixture.work_dir()).unwrap_or(true);
+    let disk_backed = disk_backed_directory(&fixture);
+    let drill_ran = disk_backed.is_some();
+    let disk_backed = disk_backed.unwrap_or_default();
+    if !drill_ran {
+        eprintln!(
+            "no disk-backed directory was reachable, so the staging refusal was not \
+             drilled here. It is drilled wherever one is, and `staging.rs` holds the \
+             probe itself."
+        );
+    }
     if drill_ran {
         let refused = fixture
             .run_env(
@@ -697,4 +710,27 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
         .run_env(&["edit", "ana", "wg-public"], None, &[("EDITOR", "true")])
         .expect_refusal("editing a public output")
         .says("is a public output");
+}
+
+/// A directory the kernel reports as disk-backed, if this machine has one the
+/// suite can reach.
+///
+/// Asked of the kernel through the same probe the runtime uses, over candidates
+/// in decreasing order of how likely they are to be disk-backed: the source tree
+/// the suite was built from, the host temporary directory, and the fixture's own
+/// scratch. `None` where every one of them is memory-backed, which is a real
+/// state — a build sandbox whose `/build` is a tmpfs is one — and is reported
+/// rather than treated as a pass.
+fn disk_backed_directory(fixture: &Fixture) -> Option<String> {
+    let mut candidates: Vec<std::path::PathBuf> = vec![
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        std::env::temp_dir(),
+        std::path::PathBuf::from("/tmp"),
+    ];
+    candidates.push(fixture.work_dir().to_path_buf());
+
+    candidates
+        .into_iter()
+        .find(|path| safix_core::staging::memory_backed(path) == Some(false))
+        .map(|path| path.to_string_lossy().into_owned())
 }
