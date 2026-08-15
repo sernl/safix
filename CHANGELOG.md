@@ -171,7 +171,7 @@ Keeping the oracle alive would not have preserved that fact; it would have produ
 
 ### Added
 
-- `crates/safix/tests/`, the integration suite: 36 tests across ten targets, driving the built binary against throwaway repositories with real sops, real age, real git and a real `nix-instantiate --parse`.
+- `crates/safix/tests/`, the integration suite: 66 tests across thirteen targets, driving the built binary against throwaway repositories with real sops, real age, real git and a real `nix-instantiate --parse`.
   Only `nix` is stubbed, by a binary the suite builds itself which asserts the attribute path it was asked for.
   Each of the eighteen retired behavioural modes is one test asserting against a literal — the value that should be at that key, the paths that should be in that commit, the files that should not exist after that abort — rather than against a second implementation.
 - `checks.safix-integration`, which compiles the suite once, runs it whole in the sandbox, and leaves the test binaries and the three programs they drive in its output.
@@ -185,6 +185,7 @@ Keeping the oracle alive would not have preserved that fact; it would have produ
   A consumer's CI keeps running the check it configured.
 - Four differential modes were never comparisons and are re-expressed as single-runtime checks: `safix-differential-abort` becomes `safix-abort-residue`, `-pipes` becomes `safix-value-pipe`, `-strace` becomes `safix-syscall-proof`, and `-drills` becomes `safix-channel-drills`.
   `safix-channel-drills` gains the exit-status channel, which a comparison got for nothing and a single runtime must assert deliberately, and now requires each mutation to be caught by its own channel and by no other.
+  Two more single-runtime checks sit beside them with no differential ancestor: `safix-bridge-transfer`, which drives both bridge directions against a clan that records what it was handed, and `safix-memory-backing`, which holds the tmpfs rule against the kernel's own mount table rather than against the probe that enforces it.
 - `checks.safix-rs-test` runs `--lib --bins`.
   It had been running every target since the integration suite landed, without the backends those tests need.
 

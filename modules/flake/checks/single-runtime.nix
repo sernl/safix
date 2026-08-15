@@ -7,11 +7,16 @@
 # something, which is a claim with no successor once there is one runtime; the
 # thing itself is asserted against a literal by the checks in `./cli.nix`.
 #
-# These four asserted something about the rust runtime in its own right and were
-# only ever incidentally comparative, so they keep their claims and lose the
-# `differential-` infix. Each is one test target of the integration suite,
-# because each is a single claim made of several windows or several channels and
-# splitting it across attributes would leave an attribute asserting a fragment.
+# Four of them asserted something about the rust runtime in its own right and
+# were only ever incidentally comparative, so they keep their claims and lose the
+# `differential-` infix: `safix-abort-residue`, `safix-value-pipe`,
+# `safix-syscall-proof` and `safix-channel-drills`. `safix-memory-backing` and
+# `safix-bridge-transfer` have no differential ancestor and are here because they
+# are the same shape of claim rather than because anything was retired into them.
+#
+# Each is one test target of the integration suite, because each is a single
+# claim made of several windows or several channels and splitting it across
+# attributes would leave an attribute asserting a fragment.
 #
 # `safix-channel-drills` is the one that keeps every other check on this flake
 # honest, and is the last thing that should ever be deleted rather than the
