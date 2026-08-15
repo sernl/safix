@@ -86,27 +86,35 @@ Stage 1 is the scaffold and the custody type; stage 2 is the harness that later 
 
 ## 5. Stage 2 — the differential harness
 
-- [ ] 5.1 Build the fixture fleet as a fixture repository: `ana`, `bo` and `cy`, keys minted at test time into the run's scratch directory, and a governed file set exercising the single-reader and shared-audience shapes
-- [ ] 5.2 Give each runtime its own pristine copy of that repository per invocation, and assert the argument vectors are identical
-- [ ] 5.3 Implement the plain reporter in the command, selected from the environment, emitting the program name, the message and two-space-indented notes with no colour, code or span
-- [ ] 5.4 Assert that reporter selection alters standard error only: identical standard output, exit code and repository effects with and without it
-- [ ] 5.5 Implement the canonical repository projection — ordered commit subjects with per-path status, porcelain status, paths with modes, decrypted plaintext per governed file, recipient set per governed file — as one program applied to both sides
-- [ ] 5.6 Record at that program why the ciphertext bytes are not the comparison: a new value takes a fresh initialization vector and moves the authentication code and timestamp with it
-- [ ] 5.7 Compare standard output and standard error byte for byte, and exit codes as numbers rather than as success-or-failure
-- [ ] 5.8 Assert no plaintext residue in either runtime's temporary directory, with the refusal paths covered specifically
-- [ ] 5.9 Severity drills: mutate a refusal's wording, an exit code, the staged path set, and a written value, and confirm each is caught, and caught by the channel that targets it
-- [ ] 5.10 Record any mutation caught only incidentally as a gap in the channel that should have caught it
-- [ ] 5.11 Verify: the harness is red under each of the four mutations and green with none applied
+Delivered as `modules/flake/safix/safix-differential.sh` and the seven `safix-differential-*` checks.
+The argument vectors of 5.2 are identical by construction — one list is passed to both runtimes — rather than by an assertion over two lists that could drift apart.
+5.9 runs five drills rather than four: the four channels, and the plaintext-residue assertion beside them.
+
+- [x] 5.1 Build the fixture fleet as a fixture repository: `ana`, `bo` and `cy`, keys minted at test time into the run's scratch directory, and a governed file set exercising the single-reader and shared-audience shapes
+- [x] 5.2 Give each runtime its own pristine copy of that repository per invocation, and assert the argument vectors are identical
+- [x] 5.3 Implement the plain reporter in the command, selected from the environment, emitting the program name, the message and two-space-indented notes with no colour, code or span
+- [x] 5.4 Assert that reporter selection alters standard error only: identical standard output, exit code and repository effects with and without it
+- [x] 5.5 Implement the canonical repository projection — ordered commit subjects with per-path status, porcelain status, paths with modes, decrypted plaintext per governed file, recipient set per governed file — as one program applied to both sides
+- [x] 5.6 Record at that program why the ciphertext bytes are not the comparison: a new value takes a fresh initialization vector and moves the authentication code and timestamp with it
+- [x] 5.7 Compare standard output and standard error byte for byte, and exit codes as numbers rather than as success-or-failure
+- [x] 5.8 Assert no plaintext residue in either runtime's temporary directory, with the refusal paths covered specifically
+- [x] 5.9 Severity drills: mutate a refusal's wording, an exit code, the staged path set, and a written value, and confirm each is caught, and caught by the channel that targets it
+- [x] 5.10 Record any mutation caught only incidentally as a gap in the channel that should have caught it
+- [x] 5.11 Verify: the harness is red under each of the four mutations and green with none applied
 
 ## 6. Stage 3 — the read paths
 
-- [ ] 6.1 Port the evaluation seam: placements, audiences, governed files and policy text, obtained by evaluating the consumer's flake exactly as the shell does
-- [ ] 6.2 Port the two ciphertext readers, reading only the metadata fields the python helpers read
-- [ ] 6.3 Port `get`, `list` and `check`, with their refusals as error variants carrying data
-- [ ] 6.4 Snapshot every refusal variant's rendering under both reporters
-- [ ] 6.5 Property tests on the parsing and joining logic, with the audience separator's injectivity stated as a property
+Delivered with stage 2 rather than after it, because a harness with nothing to compare is not a harness.
+
+- [x] 6.1 Port the evaluation seam: placements, audiences, governed files and policy text, obtained by evaluating the consumer's flake exactly as the shell does
+- [x] 6.2 Port the two ciphertext readers, reading only the metadata fields the python helpers read
+- [x] 6.3 Port `get`, `list` and `check`, with their refusals as error variants carrying data
+- [x] 6.4 Snapshot every refusal variant's rendering under both reporters
+- [x] 6.5 Property tests on the parsing and joining logic, with the audience separator's injectivity stated as a property
 - [ ] 6.6 Add the bounded concurrency for the `check` probes, and assert the output ordering is independent of completion order
-- [ ] 6.7 Verify: the harness passes for `get`, `list` and `check`
+
+  Superseded by D11 rather than deferred. The probes are subprocesses in the shell runtime and in-process reads in the rust one, so there is no fan-out here to bound; adding concurrency would be a change to what the harness compares rather than an optimisation under it.
+- [x] 6.7 Verify: the harness passes for `get`, `list` and `check`
 
 ## 7. Stage 4 — the write paths
 
