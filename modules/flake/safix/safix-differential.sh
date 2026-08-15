@@ -794,6 +794,195 @@ recipients_unchanged() { # <repo> <side>
   done < <(governed_paths)
 }
 
+# --- Being interrupted ---------------------------------------------------------
+# A write prepares a candidate document beside its target and renames it into
+# place. Between those two moments the tree holds a file the operator did not ask
+# for, and what an abort in that window leaves behind is a property of the
+# runtime rather than of the fixture. Three windows are drilled: waiting for the
+# value, waiting for the confirmation, and while sops holds the candidate open.
+#
+# The two runtimes are compared as everywhere else, and each is additionally held
+# to the outcome: exit 130, a repository byte-for-byte where it was, no candidate
+# document beside the target, and no plaintext in the temporary directory.
+ABORT_FEED=()
+ABORT_SOPS=""
+ABORT_SIGNAL=INT
+ABORT_STATUS=0
+ABORT_ALIVE=""
+
+abort_shims() {
+  # The pid is announced by a shell that then `exec`s the runtime, so the pid it
+  # wrote is the runtime's own. Needed because `setsid` forks, so the job this
+  # script backgrounds is not the process to signal.
+  emit_stub "$work/bin/announce-pid" <<'SH'
+printf '%s\n' "$$" >"$SAFIX_PIDFILE"
+exec "$@"
+SH
+
+  # A sops that interrupts whoever invoked it and then does the real work. It
+  # turns "interrupted during encryption" from a race into a fixture: the signal
+  # is delivered while sops holds the candidate document open, which is the
+  # moment the whole scratch discipline exists for.
+  emit_stub "$work/bin/sops-interrupting" <<'SH'
+if [ "${1:-}" = set ]; then
+  # Settled into waiting for this child before the signal arrives, and still
+  # running for a moment afterwards, so the window being drilled is the one where
+  # the candidate document is open rather than the edges around it.
+  sleep 0.5
+  kill -INT "$PPID" 2>/dev/null || true
+  sleep 0.5
+fi
+exec "$SAFIX_REAL_SOPS" "$@"
+SH
+}
+
+# `setsid` detaches the run from any controlling terminal this script may have,
+# so the value is read from standard input on a developer's machine exactly as it
+# is in a build sandbox. A run that found a terminal would be waiting at a
+# different prompt from the one being drilled.
+run_interrupted() { # <side> <dir> <argv>...
+  local side="$1" dir="$2"
+  shift 2
+  rm -rf "$dir"
+  mkdir -p "$dir/tmp"
+  cp -a "$REPO" "$dir/repo"
+  mkfifo "$dir/in"
+  : >"$dir/pid"
+
+  runtime_env "$dir/repo" "$dir/tmp"
+  local extra=("SAFIX_PIDFILE=$dir/pid" "SAFIX_REAL_SOPS=$REAL_SOPS")
+  [ -z "$ABORT_SOPS" ] || extra+=("SAFIX_SOPS=$ABORT_SOPS")
+
+  if [ "$side" = sh ]; then
+    setsid --wait env "${RUNTIME_ENV[@]}" "${extra[@]}" \
+      "$work/bin/announce-pid" bash "$SAFIX_SH" "$@" \
+      <"$dir/in" >"$dir/out" 2>"$dir/err" &
+  else
+    setsid --wait env "${RUNTIME_ENV[@]}" "${extra[@]}" SAFIX_ERROR_FORMAT=plain \
+      "$work/bin/announce-pid" "$SAFIX_RS" "$@" \
+      <"$dir/in" >"$dir/out" 2>"$dir/err" &
+  fi
+  local waiter=$!
+
+  exec 8>"$dir/in"
+  local line
+  for line in ${ABORT_FEED+"${ABORT_FEED[@]}"}; do printf '%s\n' "$line" >&8; done
+
+  local pid="" tries=0
+  while [ -z "$pid" ] && [ "$tries" -lt 400 ]; do
+    sleep 0.05
+    pid="$(cat "$dir/pid" 2>/dev/null || true)"
+    tries=$((tries + 1))
+  done
+  [ -n "$pid" ] || fail "the $side runtime never announced its pid"
+
+  # A run that is being interrupted at a prompt is blocked reading, so the signal
+  # comes from here once it has had time to get there. A run that is being
+  # interrupted during encryption is signalled by the sops shim instead, at the
+  # only moment that is not a race.
+  if [ -z "$ABORT_SOPS" ]; then
+    sleep 1.5
+    kill "-$ABORT_SIGNAL" "$pid" 2>/dev/null || true
+  fi
+
+  # A run that is expected to have deferred the signal is checked for still
+  # being there, and then killed outright so the drill can end.
+  if [ -n "$ABORT_ALIVE" ]; then
+    sleep 1.5
+    kill -0 "$pid" 2>/dev/null \
+      || fail "the run acted on the signal at a prompt; the recorded oracle behaviour has changed"
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+
+  # The write end stays open until the run has ended. Closing it at the signal
+  # would race the run: a read woken by the interrupt and retried would then find
+  # the stream closed and report the value as missing rather than the run as
+  # interrupted, which is a different drill and a flaky one.
+  # Standard error is discarded here alone: a run this drill killed outright
+  # draws a job-termination notice from this shell, and it is noise about the
+  # drill rather than about the runtime.
+  ABORT_STATUS=0
+  { wait "$waiter" || ABORT_STATUS=$?; } 2>/dev/null
+  exec 8>&-
+}
+
+# The oracle's response to SIGINT, pinned rather than compared, because it has
+# none.
+#
+# `safix.sh` sets `trap 'exit 130' INT` so that the signal routes through the
+# single EXIT trap that shreds. That trap is not reached from either window this
+# drills, and for two different reasons in bash rather than one in safix.
+#
+# At a prompt, bash restarts a `read` the interrupt returned from and defers the
+# trap until the read completes, so a signal arriving while the runtime waits for
+# a value does nothing while the stream stays open: the run keeps waiting.
+#
+# During encryption, a non-interactive bash waiting for a foreground command
+# ignores SIGINT outright — the child is the one expected to handle it — so the
+# signal is discarded rather than deferred, and the run goes on to write, commit
+# and exit zero.
+#
+# Neither is a behaviour the rust runtime can be compared against: there is no
+# status, no output and no effect in the first, and in the second the effect is
+# the write the interruption was meant to prevent. So both are asserted directly.
+# A shell runtime that later did act on the signal fails here, and whoever
+# changed it is sent to this comment and to the drills below, which are what
+# claim the property.
+oracle_defers_at_a_prompt() { # <label> <argv>...
+  local label="$1"
+  shift
+  ABORT_ALIVE=1
+  run_interrupted sh "$work/abort/deferred" "$@"
+  ABORT_ALIVE=""
+  COMPARED=$((COMPARED + 1))
+  note "[$label] the oracle was still waiting after the signal, as recorded"
+}
+
+oracle_ignores_it_during_encryption() { # <label> <argv>...
+  local label="$1"
+  shift
+  run_interrupted sh "$work/abort/ignored" "$@"
+  [ "$ABORT_STATUS" = 0 ] || {
+    cat "$work/abort/ignored/err" >&2
+    fail "[$label] the oracle now acts on a signal during encryption; re-examine the drills below"
+  }
+  project "$work/abort/ignored/repo" >"$work/abort/ignored/projection"
+  if cmp -s "$work/pristine" "$work/abort/ignored/projection"; then
+    fail "[$label] the oracle now leaves the repository alone when interrupted; re-examine"
+  fi
+  COMPARED=$((COMPARED + 1))
+  note "[$label] the oracle wrote and committed through the signal, as recorded"
+}
+
+# What an interrupted run must leave behind, which is nothing.
+#
+# The rust runtime alone, for the reason above: there is no oracle behaviour in
+# these windows to compare against. Each drill holds the whole property — exit
+# with the signal's own status, a repository byte-for-byte where it was, no
+# candidate document beside the target, and no plaintext in the temporary
+# directory.
+abort_drill() { # <label> <expected-status> <argv>...
+  local label="$1" expect="$2"
+  shift 2
+
+  run_interrupted rs "$work/abort/rs" "$@"
+  [ "$ABORT_STATUS" = "$expect" ] || {
+    cat "$work/abort/rs/err" >&2
+    fail "[$label] the rust runtime exited $ABORT_STATUS rather than $expect"
+  }
+
+  project "$work/abort/rs/repo" >"$work/abort/rs/projection"
+  cmp -s "$work/pristine" "$work/abort/rs/projection" || {
+    diff -u "$work/pristine" "$work/abort/rs/projection" >&2 || true
+    fail "[$label] the rust runtime changed the repository"
+  }
+  no_scratch_left "$work/abort/rs/repo" rust "$label"
+  residue_free "$work/abort/rs/tmp" rust "$label"
+
+  COMPARED=$((COMPARED + 1))
+  note "[$label] exited $expect, wrote nothing, and left no candidate document"
+}
+
 prepare() {
   setup_keys
   write_fixture
@@ -1021,6 +1210,97 @@ case "$mode" in
     interactive_fix_diverges
     ;;
 
+  # Interrupted while waiting for the value, while waiting for the confirmation,
+  # and while sops holds the candidate document open. Plus one termination, so
+  # that the second signal the shell runtime routes through its own exit is
+  # drilled too.
+  abort)
+    prepare
+    seed_values
+    abort_shims
+    project "$REPO" >"$work/pristine"
+
+    ABORT_FEED=()
+    oracle_defers_at_a_prompt abort/oracle-at-the-value set ana ana-alone
+    abort_drill abort/at-the-value 130 set ana ana-alone
+
+    ABORT_FEED=(value-reset)
+    abort_drill abort/at-the-confirmation 130 set ana ana-alone
+
+    ABORT_SIGNAL=TERM
+    ABORT_FEED=()
+    abort_drill abort/terminated 143 set ana ana-alone
+    ABORT_SIGNAL=INT
+
+    # The window the whole scratch discipline exists for: the signal arrives
+    # while sops holds the candidate document open, so the run has to wait for
+    # sops before it can sweep, and has to stop before the rename.
+    ABORT_FEED=(value-reset value-reset)
+    ABORT_SOPS="$work/bin/sops-interrupting"
+    oracle_ignores_it_during_encryption abort/oracle-during-encryption set ana ana-alone
+    abort_drill abort/during-encryption 130 set ana ana-alone
+    ABORT_SOPS=""
+    ;;
+
+  # The value reaches sops down a pipe and reaches it no other way.
+  #
+  # The claim `safix.sh` carries in a comment and this makes checkable: a value
+  # never reaches argv, so never a process listing, and never the environment, so
+  # never /proc/<pid>/environ. Both are read from the sops process itself, at the
+  # moment it is about to encrypt, by a shim that records its own command line
+  # and environment and then becomes the real sops.
+  #
+  # The run has to succeed and the value has to come back out again, or the
+  # assertion would hold just as well over a runtime that sent sops nothing.
+  pipes)
+    prepare
+    seed_values
+    emit_stub "$work/bin/sops-observed" <<'SH'
+mkdir -p "$SAFIX_SPY"
+tr '\0' '\n' </proc/self/cmdline >>"$SAFIX_SPY/argv"
+tr '\0' '\n' </proc/self/environ >>"$SAFIX_SPY/environ"
+exec "$SAFIX_REAL_SOPS" "$@"
+SH
+
+    for side in sh rs; do
+      dir="$work/pipes/$side"
+      mkdir -p "$dir/tmp" "$dir/spy"
+      cp -a "$REPO" "$dir/repo"
+      runtime_env "$dir/repo" "$dir/tmp"
+      status=0
+      if [ "$side" = sh ]; then
+        env "${RUNTIME_ENV[@]}" "SAFIX_SPY=$dir/spy" "SAFIX_REAL_SOPS=$REAL_SOPS" \
+          "SAFIX_SOPS=$work/bin/sops-observed" bash "$SAFIX_SH" set ana ana-alone \
+          < <(printf 'value-reset\nvalue-reset\n') >"$dir/out" 2>"$dir/err" || status=$?
+      else
+        env "${RUNTIME_ENV[@]}" "SAFIX_SPY=$dir/spy" "SAFIX_REAL_SOPS=$REAL_SOPS" \
+          "SAFIX_SOPS=$work/bin/sops-observed" SAFIX_ERROR_FORMAT=plain \
+          "$SAFIX_RS" set ana ana-alone \
+          < <(printf 'value-reset\nvalue-reset\n') >"$dir/out" 2>"$dir/err" || status=$?
+      fi
+      [ "$status" = 0 ] || {
+        cat "$dir/err" >&2
+        fail "the $side runtime could not set the value through the observed sops"
+      }
+
+      readback="$(SOPS_AGE_KEY_FILE="$work/keys.txt" sops decrypt \
+        --extract '["ana_alone"]' "$dir/repo/$ANA_FILE")"
+      [ "$readback" = value-reset ] \
+        || fail "the $side runtime did not store the value, so observing how it travelled proves nothing"
+
+      [ -s "$dir/spy/argv" ] \
+        || fail "the $side runtime never invoked the observed sops"
+      if grep_for_values "$dir/spy/argv"; then
+        fail "the $side runtime put a value in sops' argv, where a process listing reads it"
+      fi
+      if grep_for_values "$dir/spy/environ"; then
+        fail "the $side runtime put a value in sops' environment, where /proc/<pid>/environ reads it"
+      fi
+      COMPARED=$((COMPARED + 1))
+      note "[$side] the value was stored, and reached sops in neither argv nor the environment"
+    done
+    ;;
+
   # The harness is not trusted until it has been shown to fail. Each drill puts
   # a deliberately wrong runtime in the rust side's place and asserts that the
   # comparison fails, and that it fails on the channel that exists to catch that
@@ -1093,9 +1373,18 @@ SH
   *) fail "unknown mode" ;;
 esac
 
-if [ "$mode" = drills ]; then
-  note "every channel was shown to fail under the mutation it exists to catch."
-else
-  [ "$COMPARED" -gt 0 ] || fail "no invocation was compared"
-  note "$COMPARED invocation(s) compared, all four channels identical."
-fi
+case "$mode" in
+  drills) note "every channel was shown to fail under the mutation it exists to catch." ;;
+  abort)
+    [ "$COMPARED" -gt 0 ] || fail "no drill was run"
+    note "$COMPARED drill(s) run; every interrupted run left the repository as it found it."
+    ;;
+  pipes)
+    [ "$COMPARED" -gt 0 ] || fail "no runtime was observed"
+    note "$COMPARED runtime(s) observed; the value reached sops down a pipe and no other way."
+    ;;
+  *)
+    [ "$COMPARED" -gt 0 ] || fail "no invocation was compared"
+    note "$COMPARED invocation(s) compared, all four channels identical."
+    ;;
+esac
