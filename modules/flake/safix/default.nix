@@ -155,6 +155,60 @@ in
     # addresses its prompts and dependencies by.
     generatorPlan = resolve.generatorPlanOf cfg.users cfg.catalogue;
 
+    # Every repository-relative path the plaintext store holds, sorted. What the
+    # generated recipient policy is checked against: no rule may match any of
+    # them, because a rule reaching the public store would encrypt a value the
+    # whole point of which is being readable at evaluation.
+    publicPaths = resolve.publicPathsOf cfg.users cfg.catalogue;
+
+    # The two accessors a consuming module reads an output through.
+    #
+    # `path` answers for every output, secret or public, and is a path rather
+    # than a value: for a secret it is where the provisioner will place the
+    # decrypted file, and reading it decrypts nothing.
+    #
+    # `value` answers only for a public output, and reads the file at evaluation
+    # — which is the whole reason `files.<n>.secret = false` exists. A public
+    # output that has not been generated yet fails with the command that would
+    # produce it, because an evaluation failing with "run `safix generate ana
+    # wg-public`" is strictly better than one failing with a path that is not
+    # there.
+    #
+    # Reaching for `value` on a secret output fails with a sentence rather than
+    # with nix's generic undefined-option message, which is where this departs
+    # from clan: clan leaves the option undefined under `mkIf (secret == false)`.
+    # The cost is one evaluated thunk. What it buys is that the likeliest
+    # authoring mistake in this whole surface — reaching for `.value` on a secret
+    # because the sibling public output has one — produces a sentence saying what
+    # to do instead of one saying that an option was used but not defined.
+    publicValue =
+      user: name:
+      let
+        placement =
+          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name} or (throw
+            "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no value to read"
+          );
+        path = "${toString self}/${placement.public}";
+      in
+      if placement.public == null then
+        throw "safix public: '${name}' of flake.safix.users.${user} is a secret, so it has no value readable at evaluation — that is what being encrypted means. Use flake.safix.lib.outputPath ${user} \"${name}\" for where the decrypted file is placed at activation, or declare the output with `files.${name}.secret = false` if it is meant to be public."
+      else if builtins.pathExists path then
+        builtins.readFile path
+      else
+        throw "safix public: '${name}' of flake.safix.users.${user} has not been generated yet, so ${placement.public} does not exist. Run `safix generate ${user} ${name}`.";
+
+    # The repository-relative path of an output, secret or public. A path, never
+    # a value.
+    outputPath =
+      user: name:
+      let
+        placement =
+          (resolve.placementsOf cfg.users cfg.catalogue).${user}.${name} or (throw
+            "safix public: flake.safix.users.${user} holds no secret named '${name}', so it has no path"
+          );
+      in
+      if placement.public != null then placement.public else placement.file;
+
     # The alphabet a user, anchor or secret name must be drawn from, as the
     # unanchored pattern resolve.nix matches with. `safix adduser` reads it to
     # refuse a malformed name at the point it would otherwise scaffold one: a

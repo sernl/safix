@@ -24,15 +24,6 @@
 # to that secret's base record.
 { lib }:
 let
-  # How an operator addresses a prompt or a dependency from inside a generator
-  # script. Names in this registry are `[a-z0-9][a-z0-9_-]*` and a shell variable
-  # name is `[A-Za-z_][A-Za-z0-9_]*`, so a hyphen has to become an underscore for
-  # the name to be spellable at all. The mapping is not injective — `a-b` and
-  # `a_b` both arrive as `a_b` — so ./resolve.nix refuses a generator whose
-  # inputs collide under it rather than letting one input silently shadow the
-  # other.
-  shellInputName = name: builtins.replaceStrings [ "-" ] [ "_" ] name;
-
   promptKind = lib.types.enum [
     "hidden"
     "line"
@@ -82,43 +73,85 @@ let
   # distributed.
   #
   # `shared` lives on the entry rather than here, and it decides whether one
-  # value serves many people.
+  # value serves many people. `share` below is that fact read back, derived.
+  generatorFile = lib.types.submodule {
+    options = {
+      secret = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether this output is encrypted, or stored in the repository in the
+          clear as a public value.
+
+          true, the default, writes the value through sops into the file the
+          entry's audience picks, exactly as the entry a generator is declared
+          on is written.
+
+          false writes it to `public/safix/…/<name>/value` in plaintext, gives
+          it no creation rule, and makes it readable at evaluation. That is what
+          a public key, a fingerprint or a derived identifier is for: a nix
+          module reads it directly rather than through a deployment-time
+          indirection, which is how the keypair samples this contract was taken
+          from are written.
+
+          The default is true rather than clan's false, and the asymmetry is
+          deliberate. A mistyped field that leaves a value encrypted is
+          recoverable by fixing the typo; a mistyped field that publishes one is
+          not — the value is in the repository's history, and only minting a new
+          one revokes it.
+
+          The public store sits under its own top-level prefix rather than
+          inside `secrets/`, because a path named for secrets has to mean that
+          everything under it is encrypted without qualification. That is the
+          proposition every backup rule, every sync exclusion and every reviewer
+          applies to it.
+        '';
+      };
+    };
+  };
+
   generator = lib.types.submodule {
     options = {
       script = lib.mkOption {
         type = lib.types.lines;
-        example = lib.literalExpression ''"openssl rand -base64 32"'';
+        example = lib.literalExpression ''"openssl rand -base64 32 > \"$out/api-token\""'';
         description = ''
           Shell fragment that produces this generator's output values.
 
           It runs under `bash -euo pipefail` with `runtimeInputs` prepended to
-          PATH, and its standard output is the value. A generator that declares
-          `files` prints a JSON object keyed by output name instead, because a
-          byte stream has no way to say "these two values".
+          PATH, with its working directory at a private staging root, and it
+          writes one file per declared output:
 
-          The output travels a pipe into the same `sops set --value-stdin` write
-          path a hand-typed value takes: it never reaches argv, an environment
-          variable, or a file. Output that is empty is refused and nothing is
-          written, because an empty value is the state a truncated write leaves
-          behind.
+          - `$out/<name>` is where each output's value goes. Every declared
+            output must be present when the fragment exits, and a missing one
+            refuses the whole run naming what `$out` did contain.
+          - `$prompts/<name>` holds one answered prompt each, and exists only
+            when this generator declares prompts.
+          - `$in/<generator>/<name>` holds a dependency's plaintext, keyed by
+            the generator that produces it.
 
-          One trailing newline comes off a single-line value, so the usual
-          echo-shaped one-liner stores what it looks like it stores, and nothing
-          comes off a multi-line one, so an OpenSSH private key keeps the final
-          newline `ssh` requires. A value read out of the JSON form is stored
-          exactly as JSON states it, with no newline removed.
+          This is the interface clan's own executor implements, so a fragment
+          written for either system runs under the other. What differs is that
+          only the dependencies this generator declares appear under `$in`,
+          where clan places every file of the dependency generator.
 
-          Anything the fragment prints on standard error reaches the operator, so
-          diagnostics go there and never into the value.
+          An output's bytes are stored exactly as the fragment wrote them.
+          Nothing is appended and nothing is stripped, so `echo` stores a
+          trailing newline and `printf` does not — a convention that removed one
+          would corrupt every key whose last byte is a newline. An output that
+          is empty is refused and nothing is written, because an empty value is
+          the state a truncated write leaves behind.
 
-          What `prompts` and `dependencies` promise about a value not reaching
-          argv, the environment or a file is a promise about how the value
-          arrives, not a sandbox this fragment runs inside. It runs with the
-          caller's filesystem and network, so a fragment that redirects
-          `$in_<name>` into a file, or echoes it to standard error, has put
-          plaintext somewhere safix does not know about and cannot shred. What
-          the fragment does with a value it has been handed is the fragment
-          author's to get right.
+          Anything the fragment prints reaches the operator rather than a value,
+          so diagnostics are free.
+
+          The staging root is a mode-0700 directory on a filesystem verified to
+          be memory-backed, and it is shredded however the run ends. That is
+          bounded containment and not a sandbox: the fragment runs with the
+          caller's filesystem and network, so one that copies `$in/dep/name`
+          elsewhere, or writes an output outside `$out`, has put plaintext
+          somewhere safix does not look and cannot shred. What the fragment does
+          with a value it has been handed is the fragment author's to get right.
         '';
       };
       runtimeInputs = lib.mkOption {
@@ -140,10 +173,16 @@ let
         default = { };
         example = lib.literalExpression ''{ passphrase.description = "the account's login password"; }'';
         description = ''
-          Values the operator supplies when this generator runs, each addressed
-          from the script as `$in_<name>`, holding the path of a read-only file
-          descriptor carrying the value. Nothing about a prompt reaches argv, the
-          environment, or a file, and a descriptor is read once.
+          Values the operator supplies when this generator runs, each readable
+          from the script at `$prompts/<name>`, holding exactly what the
+          operator typed with nothing added and nothing removed. Nothing about a
+          prompt reaches argv or the environment; the file is inside the staging
+          root, and is shredded with it.
+
+          `$prompts` exists only when a generator declares prompts, and is unset
+          otherwise, so a script cannot distinguish "none declared" from "the
+          directory is missing". That is clan's behaviour and is matched so no
+          script comes to rely on the difference.
 
           A generator may have prompts, a script, and dependencies at once. That
           is the difference between this and `safix set`, which stays the
@@ -157,8 +196,16 @@ let
         example = [ "root-ca-key" ];
         description = ''
           Other secrets of the same user whose plaintext this script reads, each
-          addressed as `$in_<name>` exactly the way a prompt is: a read-only file
-          descriptor with the decrypted value on it, read once, never a file.
+          readable at `$in/<generator>/<name>`, where `<generator>` is the entry
+          the generator producing it is declared on. That keying is clan's, so a
+          fragment written against `$in/openssh-ca/id_ed25519` means the same
+          thing here.
+
+          Only the dependencies named here are placed under `$in`. clan
+          materializes every file of the dependency generator, which hands a
+          script depending on a keypair's public half the private half as well;
+          that is the one place this contract is deliberately narrower than the
+          one it copies.
 
           The names are resolved against this user's own resolved set, and a
           dependency naming a secret they do not hold is refused at evaluation. A
@@ -186,21 +233,50 @@ let
         '';
       };
       files = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        example = [ "ssh-personal-pub" ];
+        type = lib.types.attrsOf generatorFile;
+        default = { };
+        example = lib.literalExpression ''{ ssh-personal-pub.secret = false; }'';
         description = ''
-          Further secrets of the same user this one generator also writes, beside
-          the entry it is declared on. A keypair is the case this exists for: one
-          run mints a private half and a public half, and neither is meaningful
-          without the other.
+          Further outputs of the same user this one generator also writes,
+          beside the entry it is declared on. A keypair is the case this exists
+          for: one run mints a private half and a public half, and neither is
+          meaningful without the other.
 
           Each name is a registry entry in its own right, so each carries its own
-          `mode`, `path` and `sopsKey`; this list only records which generator
-          produces it. An entry named here may not carry a generator of its own
-          and may not be named by a second generator, both refused at evaluation,
-          because two producers for one value is a race whose winner is whichever
-          ran last.
+          `mode`, `path` and `sopsKey`; this record says which generator produces
+          it and whether it is encrypted. An entry named here may not carry a
+          generator of its own and may not be named by a second generator, both
+          refused at evaluation, because two producers for one value is a race
+          whose winner is whichever ran last.
+
+          The entry a generator is declared on is an output too, and it is always
+          encrypted. It has no `secret` slot of its own because its placement — a
+          file, a key inside it, an audience — is the whole of how custody is
+          expressed here, and a public value has none of the three. A generator
+          that mints a public value declares it here.
+        '';
+      };
+
+      share = lib.mkOption {
+        type = lib.types.nullOr lib.types.bool;
+        default = null;
+        visible = false;
+        defaultText = lib.literalMD "derived: true exactly when every entry this generator writes is `shared`";
+        description = ''
+          Read-only. Derived from the entries this generator writes rather than
+          authored: it is true exactly when every one of them is `shared`, and a
+          generator whose outputs disagree is refused at evaluation.
+
+          Setting it is refused by name. `shared` lives on the entry, where it
+          decides whether two carriers hold one value or two, and where the
+          resolver, the policy renderer and the audience directory all read it.
+          A second place to state the same fact is a second place for it to be
+          wrong.
+
+          It exists because a bridge to clan compares a generator's `share`
+          against clan's own, and it has a second effect worth having on its own:
+          a generator's outputs then always land in one audience, so one file, so
+          a multi-output write is one rename.
         '';
       };
       validation = lib.mkOption {
@@ -529,7 +605,6 @@ in
   inherit
     entry
     generator
-    shellInputName
     override
     scope
     grant

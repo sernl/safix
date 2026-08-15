@@ -66,11 +66,6 @@
 # ceremony and is never something a rebuild does.
 { lib }:
 let
-  # For `shellInputName` alone: the identifier a generator script addresses an
-  # input by is a property of the type that declares it, so the mapping and the
-  # collision refusal that rests on it read one definition.
-  types = import ./types.nix { inherit lib; };
-
   mergeSets = lib.foldl' (a: b: a // b) { };
 
   sortNames = lib.sort (a: b: a < b);
@@ -232,28 +227,90 @@ let
   #
   # The entry read is the base record with this user's own override applied, and
   # no host scope: placement is host-independent.
+  # Where a public output's plaintext lives, derived from the same audience
+  # computation `audienceFileOf` uses so the two cannot place one entry in two
+  # places. The leaf is a directory named for the output holding a file named
+  # `value`, which is clan's shape; the prefix is a top-level sibling of the
+  # ciphertext tree rather than a path inside it, so the two are separable by
+  # prefix — which is what a `.gitignore`, an `rsync --exclude`, a backup policy
+  # and a reviewer all actually operate on.
+  publicFileOf =
+    audience: name:
+    if builtins.length audience == 1 then
+      "public/safix/users/${builtins.head audience}/${name}/value"
+    else
+      "public/safix/shared/${lib.concatStringsSep audienceSeparator audience}/${name}/value";
+
   placementsOf =
     users: catalogue:
     lib.mapAttrs (
       user: _:
-      lib.mapAttrs
-        (
-          name: src:
-          let
-            entry = applyOverride src.base src.override;
-          in
-          {
-            inherit (src) origin owner;
-            file = audienceFileOf (audienceOf users catalogue src.owner name);
-            shared = isShared users catalogue src.owner name;
-            key = if entry.sopsKey != null then entry.sopsKey else name;
-            inherit (entry) generator;
-          }
-        )
-        (sourcesOf {
+      let
+        sources = sourcesOf {
           inherit users catalogue user;
-        })
+        };
+        entryOf = src: applyOverride src.base src.override;
+
+        # Which generator, if any, declares this name as a public output. Read
+        # off the same `files` record the executor reads, so "public" means one
+        # thing across the two halves.
+        publiclyDeclared =
+          name:
+          lib.any (
+            other:
+            let
+              g = (entryOf sources.${other}).generator;
+            in
+            g != null && g.files ? ${name} && !g.files.${name}.secret
+          ) (builtins.attrNames sources);
+      in
+      lib.mapAttrs (
+        name: src:
+        let
+          entry = entryOf src;
+          audience = audienceOf users catalogue src.owner name;
+        in
+        {
+          inherit (src) origin owner;
+          file = audienceFileOf audience;
+          shared = isShared users catalogue src.owner name;
+          key = if entry.sopsKey != null then entry.sopsKey else name;
+          public = if publiclyDeclared name then publicFileOf audience name else null;
+          generator =
+            if entry.generator == null then
+              null
+            else
+              entry.generator
+              // {
+                # Derived rather than authored, and true only when every entry
+                # this generator writes agrees. A generator whose outputs
+                # disagree never reaches here: `generatorViolations` refuses it,
+                # naming both sides.
+                share = lib.all (
+                  output: sources ? ${output} && isShared users catalogue sources.${output}.owner output
+                ) ([ name ] ++ builtins.attrNames entry.generator.files);
+              };
+        }
+      ) sources
     ) users;
+
+  # Every path the public store holds, over every user. What the recipient
+  # policy is checked against: no generated creation rule may match any of them.
+  publicPathsOf =
+    users: catalogue:
+    let
+      placements = placementsOf users catalogue;
+    in
+    sortNames (
+      lib.unique (
+        lib.concatMap (
+          user:
+          lib.concatMap (name: lib.optional (placements.${user}.${name}.public != null) placements.${user}.${name}.public) (
+            builtins.attrNames placements.${user}
+          )
+        ) (builtins.attrNames users)
+      )
+    );
 
   # ── the generator graph ──
   # A generator is data on an entry; the graph over generators is what says in
@@ -274,7 +331,7 @@ let
       let
         g = placements.${name}.generator;
       in
-      if g == null then acc else acc // lib.genAttrs ([ name ] ++ g.files) (_: name)
+      if g == null then acc else acc // lib.genAttrs ([ name ] ++ builtins.attrNames g.files) (_: name)
     ) { } (builtins.attrNames placements);
 
   generatorsIn =
@@ -396,8 +453,11 @@ let
             at = n: "flake.safix.users.${user}'s generator on '${n}'";
 
             deps = n: p.${n}.generator.dependencies;
-            files = n: p.${n}.generator.files;
+            files = n: builtins.attrNames p.${n}.generator.files;
             promptNames = n: builtins.attrNames p.${n}.generator.prompts;
+            script = n: p.${n}.generator.script;
+            validationOf = n: p.${n}.generator.validation;
+            outputsOf = n: [ n ] ++ files n;
 
             crossUser = lib.concatMap (
               n:
@@ -467,24 +527,85 @@ let
                 ) (lib.groupBy (c: c.f) claims)
               );
 
-            # Prompts and dependencies share one name space inside the script, so
-            # a collision under either the identity or the hyphen-to-underscore
-            # mapping would have one input silently shadow the other.
-            inputCollision = lib.concatMap (
+            # A generator's outputs land in one file, which is what makes a
+            # multi-output write one rename, and they land in one file only if
+            # they land in one audience. Refused rather than split, and the
+            # refusal names both sides because the remedy is a choice: make them
+            # agree, or write two generators and have the second depend on the
+            # first.
+            #
+            # This forbids something 0.1 permitted — one generator writing a
+            # private entry for one person and a shared entry for several — and
+            # that is stated rather than left to be discovered.
+            shareDisagreement = lib.concatMap (
               n:
               let
-                inputs = promptNames n ++ lib.filter (d: !(lib.hasInfix "/" d)) (deps n);
-                byShell = lib.groupBy types.shellInputName inputs;
+                outputs = outputsOf n;
+                sharedness = map (o: {
+                  name = o;
+                  shared = p ? ${o} && isShared users catalogue p.${o}.owner o;
+                }) outputs;
+                yes = lib.filter (o: o.shared) sharedness;
+                no = lib.filter (o: !o.shared) sharedness;
+                say = set: lib.concatMapStringsSep ", " (o: "'${o.name}'") set;
               in
-              lib.concatLists (
-                lib.mapAttrsToList (
-                  shell: raw:
-                  lib.optional (builtins.length (lib.unique raw) > 1) (
-                    "${at n} has inputs ${
-                      lib.concatMapStringsSep " and " (r: "'${r}'") (lib.unique raw)
-                    }, which are all addressed as $in_${shell} inside the script"
-                  )
-                ) byShell
+              lib.optional (yes != [ ] && no != [ ]) (
+                "${at n} writes outputs that disagree about sharing: ${say yes} ${
+                  if builtins.length yes == 1 then "is" else "are"
+                } shared and ${say no} ${
+                  if builtins.length no == 1 then "is" else "are"
+                } not. A generator's outputs resolve to one audience, so one file, so one write. "
+                + "Make them agree, or split this into two generators and have the second depend on the first."
+              )
+            ) gens;
+
+            # `share` is derived from the entries, and a second place to state
+            # one fact is a second place for it to be wrong.
+            authoredShare = lib.concatMap (
+              n:
+              lib.optional (p.${n}.generator.share != null) (
+                "${at n} sets `share` directly, which is derived and not authored. It is true exactly when every entry the generator writes is `shared`; set `shared` on those entries instead."
+              )
+            ) gens;
+
+            # ── the retired descriptor interface ──
+            # Detection is a string match on a nix string, so it is total and
+            # available before anything executes. Retained permanently rather
+            # than deleted once the fleet has migrated: it costs a comparison
+            # during evaluation, and what it prevents is a generator that
+            # silently produces no value or reads an empty input.
+            #
+            # `bash -euo pipefail` would fail on `$in_foo` as an unbound variable
+            # anyway. Both firing is not redundancy worth removing: "unbound
+            # variable" names a symptom inside a script the operator did not just
+            # write, while this names the interface change and the rewrite.
+            retiredInput = lib.concatMap (
+              n:
+              lib.optional (lib.hasInfix "$in_" (script n) || lib.hasInfix "\${in_" (script n)) (
+                "${at n} references an input as $in_<name>, which was the read-once descriptor interface safix 0.1 used and 0.2 removed (openspec change 'clan-generator-contract'). A prompt is now the file $prompts/<name>; a dependency is now the file $in/<generator>/<name>, where <generator> is the entry the generator producing it is declared on. Both are re-readable, which a descriptor was not."
+              )
+            ) gens;
+
+            # `$out_name` is validation's, and validation is unchanged: it still
+            # names the output under judgement and the candidate still arrives on
+            # standard input. In a *script* it names nothing, so its only
+            # plausible origin is a 0.1 validation fragment pasted into one — and
+            # under `set -u` it would fail as an unbound variable naming a
+            # variable the operator never wrote.
+            retiredOutputName = lib.concatMap (
+              n:
+              lib.optional (lib.hasInfix "$out_name" (script n) || lib.hasInfix "\${out_name}" (script n)) (
+                "${at n} references $out_name in its script, where it names nothing. $out_name belongs to `validation`, which is unchanged: it names the output under judgement, and the candidate still arrives on standard input. A script addresses its outputs as $out/<name>."
+              )
+            ) gens;
+
+            # A script that never mentions the output directory writes no output
+            # file, and would otherwise be refused at run time by a message that
+            # names the symptom rather than the interface change.
+            noOutputReference = lib.concatMap (
+              n:
+              lib.optional (!(lib.hasInfix "$out" (script n) || lib.hasInfix "\${out}" (script n))) (
+                "${at n} never references $out, so it would write no output file and be refused at run time with \"did not write a file for '${n}'\" — a message naming the symptom rather than the cause. Under the 0.2 contract (openspec change 'clan-generator-contract') a script writes each declared output to $out/<name>; standard output is no longer the value."
               )
             ) gens;
 
@@ -510,7 +631,11 @@ let
               ++ selfFile
               ++ fileHasGenerator
               ++ fileClaimedTwice
-              ++ inputCollision
+              ++ shareDisagreement
+              ++ authoredShare
+              ++ retiredInput
+              ++ retiredOutputName
+              ++ noOutputReference
               ++ unsafePromptName;
 
             cyclic =
@@ -558,24 +683,32 @@ let
         in
         {
           order = (topoSplit (generatorEdges mine)).order;
-          outputs = lib.genAttrs (generatorsIn mine) (n: [ n ] ++ mine.${n}.generator.files);
+          outputs = lib.genAttrs (generatorsIn mine) (
+            n: [ n ] ++ builtins.attrNames mine.${n}.generator.files
+          );
+          # Keyed by the declared name, because that is now the name the script
+          # addresses. The hyphen-to-underscore mapping the descriptor interface
+          # needed is gone with it, and with it the collision it could produce: a
+          # prompt and a dependency of the same name no longer share a name
+          # space, because prompts live under $prompts and dependencies under
+          # $in.
           inputs = lib.genAttrs (generatorsIn mine) (
             n:
             lib.listToAttrs (
-              map (
-                q:
-                lib.nameValuePair (types.shellInputName q) {
+              map (q: {
+                name = q;
+                value = {
                   kind = "prompt";
                   name = q;
-                }
-              ) (builtins.attrNames mine.${n}.generator.prompts)
-              ++ map (
-                d:
-                lib.nameValuePair (types.shellInputName d) {
+                };
+              }) (builtins.attrNames mine.${n}.generator.prompts)
+              ++ map (d: {
+                name = d;
+                value = {
                   kind = "dependency";
                   name = d;
-                }
-              ) mine.${n}.generator.dependencies
+                };
+              }) mine.${n}.generator.dependencies
             )
           );
         }
@@ -1086,6 +1219,8 @@ in
     audienceSeparator
     audiencesOf
     placementsOf
+    publicFileOf
+    publicPathsOf
     recipientsOf
     sourcesOf
     selectFor
