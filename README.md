@@ -524,9 +524,11 @@ The repository has no remote yet, so the GitHub Actions workflow in `.github/wor
 
 The runtime is being rewritten in rust, and `packages.safix` is not affected by that yet.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built as `packages.safix-rs` and checked six ways under `nix flake check`.
-It implements no subcommand today: run it with anything but `--version` and it says so and exits.
+It implements five of the eight subcommands: the read paths `list`, `get` and `check`, and the two write paths that change no declaration, `set` and `fix`.
+`generate`, `keygen` and `adduser` refuse rather than approximate.
 The nix half is not in scope and does not move; what is being replaced is `safix.sh` and the three python helpers.
 Each subcommand transfers only after a differential harness has compared it against the shell runtime on standard output, standard error, exit code and effect on the repository, and `packages.safix` stays the shell script until the last one has.
+The harness has found three places where the two runtimes differ for reasons in `bash` rather than in safix — an interactive `fix` whose confirmation is answered by its own file list, a `SIGINT` the shell runtime never acts on during a `set`, and a double entry that stops checking anything over a seekable standard input — and each is asserted where it was found rather than reconciled; the changelog's "Known differences" records them.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/`.
 
 ## License

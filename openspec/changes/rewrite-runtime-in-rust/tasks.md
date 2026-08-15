@@ -118,13 +118,23 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 
 ## 7. Stage 4 — the write paths
 
-- [ ] 7.1 Port the scratch-file discipline as a guard that shreds on every unwind, and test the abort path directly rather than the happy one
-- [ ] 7.2 Port `set`, driving the backend through pipes with the value never in an argument vector or an environment
-- [ ] 7.3 Port the drift refusal, judged on the candidate document before the rename, so a refusal is a run that never wrote
+- [x] 7.1 Port the scratch-file discipline as a guard that shreds on every unwind, and test the abort path directly rather than the happy one
+
+  `safix-differential-abort` interrupts a write in each of its three windows. The two at a prompt and the one during encryption are rust-side drills, and two assertions record why: the shell runtime has no response to `SIGINT` in any of them, because `bash` restarts an interrupted `read` and, while waiting for a foreground command, ignores the signal outright.
+- [x] 7.2 Port `set`, driving the backend through pipes with the value never in an argument vector or an environment
+
+  `safix-differential-pipes` reads the sops process' own command line and environment through a shim that then becomes sops, for both runtimes. It replaces the strace-based check the design named, which a build sandbox cannot run.
+- [x] 7.3 Port the drift refusal, judged on the candidate document before the rename, so a refusal is a run that never wrote
 - [ ] 7.4 Port `adduser` and `fix`, preserving the stage-before-regenerate ordering and the reason it exists
-- [ ] 7.5 Add the bounded concurrency for the `fix` re-wrap
+
+  `fix` is ported and compared. `adduser` is not, and still refuses.
+- [x] 7.5 Add the bounded concurrency for the `fix` re-wrap
+
+  Confined to `--yes`, because a confirmation cannot be fanned out. Bounded by `SAFIX_FIX_CONCURRENCY`, output replayed in declaration order, and `safix-differential-converge` compares both the fanned-out and the serial bound.
 - [ ] 7.6 Cover the real-activation gap carried out of `add-consumption-modules` with a fixture-ciphertext test
 - [ ] 7.7 Verify: the harness passes for `set`, `adduser` and `fix`, including the abort paths
+
+  `set` and `fix` pass, over `safix-differential-write`, `-refuse`, `-guard`, `-converge`, `-abort` and `-pipes`. `adduser` is not ported.
 
 ## 8. Stage 5 — the generator graph
 
