@@ -5,17 +5,23 @@
 # only kind that can end the port: a claim can be written to match whatever the
 # code does, and a comparison against the runtime that ships cannot.
 #
-# The modes are read-path fixtures — a repository in step, a declared name with
+# The read-path modes are fixtures — a repository in step, a declared name with
 # no value, recipients drifted from their audience, a value no declaration
 # claims, names nobody declared, and a path no creation rule covers — and each
 # runs the same list of `list`, `get` and `check` invocations against both
-# runtimes. `safix-differential-drills` is the one that keeps the rest honest:
-# it mutates the rust side on purpose, once per channel, and fails unless each
-# mutation is caught by the channel that exists to catch it.
+# runtimes. The write-path modes drive `set` and `fix` over the same fleet.
+# `safix-differential-drills` is the one that keeps the rest honest: it mutates
+# the rust side on purpose, once per channel, and fails unless each mutation is
+# caught by the channel that exists to catch it.
 #
-# Only the read paths are compared, because only the read paths are ported. The
-# write paths and the generator graph reach this file as they land, and the
-# shell runtime stays `packages.safix` until the last of them has.
+# Two of them are not comparisons. `abort` interrupts a write in each window it
+# has and holds the run to what it must leave behind, which is nothing; `pipes`
+# observes the sops process itself and holds the value to travelling down a pipe
+# and no other way. Both also assert the shell runtime's own behaviour where it
+# differs, so a divergence stays recorded rather than becoming folklore.
+#
+# The generator graph is not compared, because it is not ported. It reaches this
+# file as it lands, and the shell runtime stays `packages.safix` until it has.
 { ... }:
 {
   perSystem =
@@ -83,6 +89,41 @@
       # suffix every rule ends in. Neither is repairable by `fix`, and both
       # runtimes have to say so in the same words.
       checks.safix-differential-norule = differential "safix-differential-norule" "norule";
+
+      # The write path that lands. A value replaced in a file that exists, a
+      # value re-entered unchanged and committing nothing, a file created
+      # through the creation rules, and a staged change to a path `set` does not
+      # name surviving in the index rather than being swept into the commit.
+      checks.safix-differential-write = differential "safix-differential-write" "write";
+
+      # What `set` refuses about how it was asked and about what was typed: an
+      # empty value, two entries that differ, and a stream that ended before
+      # either arrived.
+      checks.safix-differential-refuse = differential "safix-differential-refuse" "refuse";
+
+      # The states a write is refused in because of what the repository or the
+      # declarations are. Recipients drifted from the declared audience is the
+      # one this exists for: `sops set` takes an existing file's recipients from
+      # that file, so a value minted into a drifted file would be wrapped for
+      # the audience that used to be, and committed.
+      checks.safix-differential-guard = differential "safix-differential-guard" "guard";
+
+      # `fix` over a drifted fixture, compared as an invocation and then
+      # asserted as a convergence: run once, `check` has nothing left to report.
+      # Both bounds of the re-wrap fan-out are exercised, because the bound is
+      # what decides whether sops holds the operator's own streams or a pipe.
+      checks.safix-differential-converge = differential "safix-differential-converge" "converge";
+
+      # An interrupted write, in each of the three windows it has. Not a
+      # comparison: the shell runtime does not act on SIGINT in any of them, and
+      # the two assertions that record why are what keep this from silently
+      # becoming one.
+      checks.safix-differential-abort = differential "safix-differential-abort" "abort";
+
+      # The value's path into sops, read off the sops process itself. This is
+      # the claim `safix.sh` carries in a comment — never argv, never the
+      # environment — made checkable for both runtimes.
+      checks.safix-differential-pipes = differential "safix-differential-pipes" "pipes";
 
       # The harness shown to fail. One mutation per channel — a line added to
       # standard output, a line added to standard error, an exit code changed, a
