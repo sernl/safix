@@ -55,29 +55,34 @@ Column meanings.
 
 ### The eighteen behavioural modes (`safix-selftest.sh`, driven by `cli.nix`)
 
-| Mode | Rust coverage today | Port: the literal the test asserts against |
-|---|---|---|
-| `set-new` | `set.rs` unit tests (3) cover path resolution, not the write | the file exists, `sops -d` yields exactly the bytes written, the recipients equal the creation rule's, one commit names the secret and not the value |
-| `set-existing` | none end-to-end | every other key's ciphertext line is byte-identical after the write, and a re-run one second later changes nothing |
-| `refusals` | `error/` unit tests (8) cover variants and codes, not the conditions | each of the six refusal conditions produces its own code and its own prose, and no file is written under any of them |
-| `recipient-drift` | `check.rs` unit tests (6) cover the diff, not the pre-write refusal | a drifted file is refused before the rename, in both drift directions, naming which side is short |
-| `staged-bystander` | none | an unrelated staged path survives the run staged and uncommitted, and does not make an idempotent re-run commit |
-| `abort` | `scratch.rs` unit tests (3) cover the guard's drop | after a SIGINT at the prompt and after a backend failure past the read: no partial file, no scratch file, no created directory |
-| `get-list` | `table.rs` unit tests (8) cover rendering | a value round-trips by digest for an own secret and for one shared from another owner, and both resolve one file |
-| `generate` | none end-to-end | no-input, prompted and dependent generators each mint and commit; the prompt is read unechoed |
-| `generate-refusals` | none | five refusal conditions, each with its own code, each leaving nothing written |
-| `generate-isolation` | `inputs.rs` unit tests (4) cover descriptor construction | a script reading standard input to end of input does not consume a later prompt's answer |
-| `generate-cascade` | none | `--regenerate` lists the transitive downstream set in dependency order, confirms once, and declining writes nothing |
-| `governed-extras` | none | a consumer-named file in step with its rule is not a finding; the same file drifted is |
-| `adduser` | `adduser.rs` unit tests (7) cover the record and the nix rendering | one custody record and the regenerated policy are committed, and a staged bystander is not |
-| `adduser-refusals` | `adduser.rs` covers name validation | four refusal conditions, each named, nothing written |
-| `adduser-hook` | none | `--host` with no hook configured is refused naming the hook; with one, the hook receives what it is promised |
-| `shared-placement` | `model.rs` unit tests (12) cover audience resolution | both carriers' placements name one file and one key; one mints, the other reads back what was minted |
-| `shared-shrink` | none | a dropped carrier is reported as a revocation naming the file and the person |
-| `shared-flip` | none | flipping to shared over existing values is reported as a migration, not a disclosure |
+| Mode | Rust coverage before this change | Port: the literal the test asserts against | Carried by |
+|---|---|---|---|
+| `set-new` | `set.rs` unit tests (3) cover path resolution, not the write | the file exists, `sops -d` yields exactly the bytes written, the recipients equal the creation rule's, one commit names the secret and not the value | `write_path::set_new_creates_the_file_through_the_creation_rules` |
+| `set-existing` | none end-to-end | every other key's ciphertext line is byte-identical after the write, and a re-run one second later changes nothing | `write_path::set_existing_moves_one_key_and_leaves_the_others_byte_identical` |
+| `refusals` | `error/` unit tests (8) cover variants and codes, not the conditions | each of the six refusal conditions produces its own code and its own prose, and no file is written under any of them | `write_path::refusals_each_have_their_own_code_and_leave_the_tree_alone` |
+| `recipient-drift` | `check.rs` unit tests (6) cover the diff, not the pre-write refusal | a drifted file is refused before the rename, in both drift directions, naming which side is short | `write_path::recipient_drift_is_refused_before_anything_is_written` |
+| `staged-bystander` | none | an unrelated staged path survives the run staged and uncommitted, and does not make an idempotent re-run commit | `write_path::a_staged_bystander_survives_the_run_and_does_not_make_it_commit` |
+| `abort` | `scratch.rs` unit tests (3) cover the guard's drop | after a SIGINT at the prompt and after a backend failure past the read: no partial file, no scratch file, no created directory | `write_path::an_aborted_run_leaves_no_file_no_scratch_and_no_value` |
+| `get-list` | `table.rs` unit tests (8) cover rendering | a value round-trips by digest for an own secret and for one shared from another owner, and both resolve one file | `read_path::get_round_trips_a_value_and_list_reports_where_it_lives` |
+| `generate` | none end-to-end | no-input, prompted and dependent generators each mint and commit; the prompt is read unechoed | `generators::generate_mints_in_dependency_order_and_commits_each_generator` |
+| `generate-refusals` | none | five refusal conditions, each with its own code, each leaving nothing written | `generators::generate_refusals_each_have_their_own_code_and_write_nothing` |
+| `generate-isolation` | `inputs.rs` unit tests (4) cover descriptor construction | a script reading standard input to end of input does not consume a later prompt's answer | `generators::one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another` |
+| `generate-cascade` | none | `--regenerate` lists the transitive downstream set in dependency order, confirms once, and declining writes nothing | `generators::a_rotation_carries_its_downstream_set_and_nothing_else` |
+| `governed-extras` | none | a consumer-named file in step with its rule is not a finding; the same file drifted is | `read_path::a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations` |
+| `adduser` | `adduser.rs` unit tests (7) cover the record and the nix rendering | one custody record and the regenerated policy are committed, and a staged bystander is not | `custody::adduser_commits_the_scaffold_and_the_policy_that_saw_it` |
+| `adduser-refusals` | `adduser.rs` covers name validation | four refusal conditions, each named, nothing written | `custody::adduser_refusals_leave_the_tree_as_they_found_it` |
+| `adduser-hook` | none | `--host` with no hook configured is refused naming the hook; with one, the hook receives what it is promised | `custody::host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit` |
+| `shared-placement` | `model.rs` unit tests (12) cover audience resolution | both carriers' placements name one file and one key; one mints, the other reads back what was minted | `shared_entries::both_carriers_resolve_one_file_and_read_one_value` |
+| `shared-shrink` | none | a dropped carrier is reported as a revocation naming the file and the person | `shared_entries::a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person` |
+| `shared-flip` | none | flipping to shared over existing values is reported as a migration, not a disclosure | `shared_entries::a_flip_to_shared_over_existing_values_is_reported_as_a_migration` |
 
-Every row's *Rust coverage today* is "none end-to-end".
-That is the finding, and no row may be marked done by pointing at the unit tests in column two.
+Every row's coverage before this change was "none end-to-end".
+That was the finding, and no row was marked done by pointing at the unit tests in column two.
+
+Every row is now carried, and the eighteen attributes in `modules/flake/checks/cli.nix` run exactly the test named beside them.
+The runner reads the result line rather than the exit status, because libtest exits zero having run nothing when a filter names no test; pointing `safix-set-new` at a name that does not exist was observed to fail with "no test ran" rather than passing.
+
+One claim outside these eighteen lost its only pin in the triage below and was rewritten rather than dropped: `safix --version`, which `differential-unknown` held and which `read_path::version_is_answered_on_standard_output_and_is_not_an_unknown_subcommand` now holds.
 
 ### The nineteen comparative modes (`safix-differential.sh`)
 
@@ -90,10 +95,10 @@ A comparative mode whose claim is "both runtimes said the same thing about X" ha
 | `write`, `refuse`, `guard`, `converge` | die; the write-path claims are `set-new`, `set-existing`, `staged-bystander` and `refusals` |
 | `generate`, `regenerate`, `genrefuse` | die; claims are `generate`, `generate-cascade`, `generate-refusals` |
 | `keygen`, `adduser` | die; `keygen.rs` unit tests plus the `adduser` behavioural rows |
-| `abort` | **survives** as `safix-abort-residue`. It was never a comparison — it interrupts a write in each window it has and holds the run to leaving nothing behind. |
-| `pipes` | **survives** as `safix-value-pipe`. Also never a comparison: it observes the sops process and holds the value to travelling down a pipe and no other way. |
-| `strace` | **survives** as `safix-syscall-proof`, linux-only for the same ptrace reason, with the same non-linux placeholder. |
-| `drills` | **survives** as `safix-channel-drills`. It mutates the runtime on purpose, once per channel, and fails unless each mutation is caught. This is the severity evidence for the whole suite and is the last thing that should be deleted, not the first. |
+| `abort` | **survived** as `safix-abort-residue`, carried by `abort_residue.rs` (4 tests). It was never a comparison — it interrupts a write in each window it has and holds the run to leaving nothing behind. | `write_path::an_aborted_run_leaves_no_file_no_scratch_and_no_value` |
+| `pipes` | **survived** as `safix-value-pipe`, carried by `value_pipe.rs` (3 tests). Also never a comparison: it observes the sops process and holds the value to travelling down a pipe and no other way. |
+| `strace` | **survived** as `safix-syscall-proof`, carried by `syscall_proof.rs` (3 tests), linux-only for the same ptrace reason. The non-linux placeholder moved from a derivation that said it observed nothing into the suite itself, so the attribute exists on both platforms and the test says what it did not do. |
+| `drills` | **survived** as `safix-channel-drills`, carried by `channel_drills.rs` (5 tests). It mutates the runtime on purpose, once per channel, and fails unless each mutation is caught. This is the severity evidence for the whole suite and is the last thing that should be deleted, not the first. |
 
 `drills` surviving is the load-bearing decision here.
 Without it the new integration suite is eighteen assertions nobody has shown can fail, which is the failure mode a green suite is best at hiding.
@@ -119,7 +124,13 @@ The survivors, each named individually:
 | `modules/flake/safix/checks.nix` `refuseScript` | A six-line `writeShellScript` that exits non-zero while a message file is non-empty. It asserts nothing itself — the messages are computed in nix — and it is deliberately shared so a severity drill runs the same bytes the real check runs. |
 | `modules/flake/checks/mk-structural-check.nix` and the fixture builders under `modules/flake/checks/` | Inline `runCommand` text that assembles fixture repositories. They construct the subject; the rust suite makes the claims. A malformed fixture fails loudly at build. |
 | `crates/safix/tests/` fixture setup shelling out to `git`, `age`, `sops` | Arranging real backends over a throwaway repository. The assertions are rust. |
+| `modules/flake/checks/integration.nix` `runOne` | Inline `runCommand` text that invokes one test binary and reads its result line. It arranges for the rust assertions to run and asserts nothing about a secret. Its one judgment — whether a test actually ran — exists because libtest exits zero over a filter that named nothing, and it fails closed: a wrong answer here reddens a check rather than greening one. |
+| `modules/flake/rust.nix` `installPhaseCommand` | Two `jq` expressions selecting the compiled binaries out of cargo's own artifact messages, and four existence assertions over the result. A mistake fails the build. |
 | The operator-authored `generator.script` and `generator.validation` fragments | Not safix's code. They are data safix executes on the operator's behalf, and making them rust would be making safix a compiler. |
+
+Two survivors this change *discovered* are on that list rather than exempted as a class: the check runner and the artifact-installing install phase, both added when the eighteen attributes were repointed.
+Two things it might have written in shell it wrote in rust instead, for the rule's own reason — each decides whether an assertion is shown to fail, which puts it on the tooling side of the test: `crates/safix/tests/support/nix-stub.rs`, which asserts the attribute path the runtime asked for, and `crates/safix/tests/support/shim.rs`, which records what sops was handed, interrupts the runtime from inside a window, and damages one channel at a time.
+The retired harness spelled all three as shell functions.
 
 Two files are deliberately *not* on this list and must be surfaced rather than assumed: `modules/flake/secrets/sops_recipients.py` and `modules/flake/secrets/sops-recipients-check.py` live in the dotfiles repository, not here.
 They are the same tooling by the same test and the same rule reaches them, but they are outside this change's repository and are named in `safix-full-switch`'s impact as an open routing question.
