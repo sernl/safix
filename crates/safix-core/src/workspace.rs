@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 
 use crate::error::{Error, Result};
 use crate::git::Git;
-use crate::model::{Audiences, GovernedFiles, Placement, Placements, Recipients};
+use crate::model::{Audiences, GeneratorPlan, GovernedFiles, Placement, Placements, Recipients};
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
 
@@ -33,6 +33,7 @@ pub struct Workspace {
     audiences: OnceLock<Audiences>,
     governed_files: OnceLock<GovernedFiles>,
     recipients: OnceLock<Recipients>,
+    generator_plan: OnceLock<GeneratorPlan>,
 }
 
 impl Workspace {
@@ -65,6 +66,7 @@ impl Workspace {
             audiences: OnceLock::new(),
             governed_files: OnceLock::new(),
             recipients: OnceLock::new(),
+            generator_plan: OnceLock::new(),
         }
     }
 
@@ -140,6 +142,43 @@ impl Workspace {
         cached(&self.recipients, || {
             self.nix.eval_json(&self.root, Attribute::Recipients)
         })
+    }
+
+    /// `user -> what may run, in which order, reading and writing what`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn generator_plan(&self) -> Result<&GeneratorPlan> {
+        cached(&self.generator_plan, || {
+            self.nix.eval_json(&self.root, Attribute::GeneratorPlan)
+        })
+    }
+
+    /// The alphabet a declared name is drawn from, unanchored.
+    ///
+    /// Uncached, because the one caller judges one name with it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn name_regex(&self) -> Result<String> {
+        self.nix.eval_raw(&self.root, Attribute::NameRegex)
+    }
+
+    /// The consumer's onboarding invocation, or the empty string when none is
+    /// configured.
+    ///
+    /// A consumer who sets nothing is deliberately indistinguishable from one
+    /// whose flake safix cannot see: both mean onboarding does less rather than
+    /// that something is wrong.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn onboarding_hook(&self) -> Result<String> {
+        let hook: Option<String> = self.nix.eval_json(&self.root, Attribute::OnboardingHook)?;
+        Ok(hook.unwrap_or_default())
     }
 
     /// The recipient policy the declarations imply, as text.

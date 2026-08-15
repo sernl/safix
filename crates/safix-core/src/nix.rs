@@ -31,6 +31,12 @@ pub enum Attribute {
     Recipients,
     /// The recipient policy these declarations imply, as text.
     PolicyText,
+    /// `user -> what may run, in which order, reading and writing what`.
+    GeneratorPlan,
+    /// The alphabet a declared name is drawn from, as an unanchored pattern.
+    NameRegex,
+    /// The consumer's onboarding invocation, or null when none is configured.
+    OnboardingHook,
 }
 
 impl Attribute {
@@ -43,6 +49,9 @@ impl Attribute {
             Self::GovernedFiles => "safix.lib.governedFiles",
             Self::Recipients => "safix.lib.recipients",
             Self::PolicyText => "safix.lib.policyText",
+            Self::GeneratorPlan => "safix.lib.generatorPlan",
+            Self::NameRegex => "safix.lib.nameRegex",
+            Self::OnboardingHook => "safix.onboardingHook",
         }
     }
 
@@ -55,6 +64,9 @@ impl Attribute {
             Self::GovernedFiles => "flake.safix.lib.governedFiles",
             Self::Recipients => "flake.safix.lib.recipients",
             Self::PolicyText => "flake.safix.lib.policyText",
+            Self::GeneratorPlan => "flake.safix.lib.generatorPlan",
+            Self::NameRegex => "flake.safix.lib.nameRegex",
+            Self::OnboardingHook => "flake.safix.onboardingHook",
         }
     }
 }
@@ -165,6 +177,37 @@ impl Nix {
                 cause: None,
             })
         }
+    }
+
+    /// The command that runs one shell fragment with a generator's declared
+    /// tools on `PATH`.
+    ///
+    /// `--inputs-from` resolves each `nixpkgs#<attribute>` against this flake's
+    /// own locked nixpkgs, which is what makes a generator mint the same value
+    /// from the same declaration on every machine. The tools are *prepended* to
+    /// the caller's `PATH` rather than replacing it, so a script reaching a tool
+    /// it did not declare works for whoever wrote it and fails for everyone
+    /// else — which is why `runtimeInputs` has to name every tool the script
+    /// runs.
+    ///
+    /// Handed back rather than run, because how the three streams are connected
+    /// differs between minting a value and judging one, and neither belongs to
+    /// this driver.
+    #[must_use]
+    pub fn generator_shell(&self, root: &Path, runtime_inputs: &[String], script: &str) -> Command {
+        let mut command = Command::new(&self.program);
+        command.arg("shell").arg("--inputs-from").arg(root);
+        for attribute in runtime_inputs {
+            command.arg(format!("nixpkgs#{attribute}"));
+        }
+        command
+            .arg("-c")
+            .arg("bash")
+            .arg("-euo")
+            .arg("pipefail")
+            .arg("-c")
+            .arg(script);
+        command
     }
 
     /// Standard error is inherited: nix's own diagnosis of a broken

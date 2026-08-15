@@ -154,6 +154,108 @@ impl Placements {
     }
 }
 
+/// Which side of a generator's name space one input came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputKind {
+    /// Another secret of the same user, whose plaintext the script reads.
+    Dependency,
+    /// A value the operator is asked for.
+    Prompt,
+}
+
+/// One entry of a generator's script-facing name space.
+///
+/// The map key is the identifier the script addresses — `$in_<key>` — and
+/// [`PlanInput::name`] is the declared name it was derived from, which is the
+/// one a refusal quotes and the one a dependency is resolved by.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanInput {
+    /// Whether the value comes from another secret or from the operator.
+    pub kind: InputKind,
+    /// The declared name, before the hyphen-to-underscore mapping.
+    pub name: String,
+}
+
+/// One user's run plan: what may run, in which order, reading and writing what.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserPlan {
+    /// `generator -> script identifier -> what that identifier carries`.
+    pub inputs: BTreeMap<String, BTreeMap<String, PlanInput>>,
+    /// Every generator this user has, in an order that puts each after
+    /// everything it reads.
+    pub order: Vec<String>,
+    /// `generator -> every name it writes`, the entry carrying it first.
+    pub outputs: BTreeMap<String, Vec<String>>,
+}
+
+/// `user -> run plan`, as `flake.safix.lib.generatorPlan` computes it.
+///
+/// The order and the edges are the resolver's, not this runtime's: the nix half
+/// is what refuses a cycle, and an order existing at all is that refusal's
+/// postcondition. Nothing here re-derives either.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(transparent)]
+pub struct GeneratorPlan(pub BTreeMap<String, UserPlan>);
+
+impl GeneratorPlan {
+    /// This user's plan, or nothing when the declarations name no such user.
+    #[must_use]
+    pub fn for_user(&self, user: &str) -> Option<&UserPlan> {
+        self.0.get(user)
+    }
+}
+
+impl UserPlan {
+    /// The generator writing this name, when one does.
+    ///
+    /// An output of a multi-output generator is named by its own name rather
+    /// than by the entry the generator hangs off, so naming either half of a
+    /// keypair resolves to the one generator that mints both.
+    #[must_use]
+    pub fn producer_of(&self, name: &str) -> Option<&str> {
+        self.outputs
+            .iter()
+            .find(|(_, written)| written.iter().any(|output| output == name))
+            .map(|(generator, _)| generator.as_str())
+    }
+
+    /// Every generator that would derive from this one's output, it first, in
+    /// the plan's own order.
+    ///
+    /// One forward pass over [`UserPlan::order`] is sufficient because that
+    /// order is topological — a generator appears after everything it reads —
+    /// which is the resolver's claim and is what its cycle refusal guarantees. A
+    /// dependency nobody generates resolves to no producer and contributes no
+    /// edge, exactly as it contributes none at evaluation.
+    #[must_use]
+    pub fn cascade(&self, generator: &str) -> Vec<String> {
+        let mut marked: Vec<&str> = vec![generator];
+        for candidate in &self.order {
+            if marked.contains(&candidate.as_str()) {
+                continue;
+            }
+            let derives = self.inputs.get(candidate).is_some_and(|inputs| {
+                inputs
+                    .values()
+                    .filter(|input| input.kind == InputKind::Dependency)
+                    .filter_map(|input| self.producer_of(&input.name))
+                    .any(|producer| marked.contains(&producer))
+            });
+            if derives {
+                marked.push(candidate);
+            }
+        }
+        self.order
+            .iter()
+            .filter(|name| marked.contains(&name.as_str()))
+            .cloned()
+            .collect()
+    }
+}
+
 /// Who can open one encrypted file, and where it sits.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -297,6 +399,40 @@ mod tests {
     fn an_unknown_origin_is_refused() {
         let with_origin = PLACEMENT.replace(r#""origin": "private""#, r#""origin": "inherited""#);
         assert!(serde_json::from_str::<Placements>(&with_origin).is_err());
+    }
+
+    const PLAN: &str = r#"{
+      "ana": {
+        "order": ["base", "derived", "aside", "far"],
+        "outputs": {
+          "base": ["base", "base-pub"], "derived": ["derived"],
+          "aside": ["aside"], "far": ["far"]
+        },
+        "inputs": {
+          "base": { "seed": { "kind": "prompt", "name": "seed" } },
+          "derived": { "in_base": { "kind": "dependency", "name": "base-pub" } },
+          "aside": {},
+          "far": { "in_derived": { "kind": "dependency", "name": "derived" } }
+        }
+      }
+    }"#;
+
+    #[test]
+    fn the_plan_deserializes_and_resolves_an_output_to_the_generator_writing_it() {
+        let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
+        let ana = plan.for_user("ana").unwrap();
+        assert_eq!(ana.producer_of("base-pub"), Some("base"));
+        assert_eq!(ana.producer_of("derived"), Some("derived"));
+        assert_eq!(ana.producer_of("nobody-writes-this"), None);
+    }
+
+    #[test]
+    fn a_cascade_is_transitive_and_stays_in_the_plans_order() {
+        let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
+        let ana = plan.for_user("ana").unwrap();
+        assert_eq!(ana.cascade("base"), ["base", "derived", "far"]);
+        assert_eq!(ana.cascade("derived"), ["derived", "far"]);
+        assert_eq!(ana.cascade("aside"), ["aside"]);
     }
 
     #[test]
