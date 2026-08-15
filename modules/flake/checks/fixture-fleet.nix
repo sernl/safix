@@ -86,9 +86,35 @@ in
           # check resolves.
           api-token = {
             generator = {
-              script = "printf '%s' fixture";
+              script = ''printf '%s' fixture > "$out/api-token"'';
               runtimeInputs = [ "coreutils" ];
             };
+          };
+
+          # clan's wireguard keypair, ported. One generator, two outputs: a
+          # private half that is encrypted and a public half stored in the clear
+          # and readable at evaluation, which is how clan's own service modules
+          # reach a peer's public key without a deployment-time indirection.
+          #
+          # `wg pubkey` reads the private half on standard input, so the script
+          # is exactly the two lines clan's is, addressing `$out` the same way.
+          wg-private = {
+            mode = "0400";
+            generator = {
+              runtimeInputs = [ "wireguard-tools" ];
+              script = ''
+                wg genkey > "$out/wg-private"
+                wg pubkey < "$out/wg-private" > "$out/wg-public"
+              '';
+              files.wg-public.secret = false;
+            };
+          };
+
+          # The public half is a registry entry in its own right, so it carries
+          # its own mode; being public, nothing encrypts it and no rule covers
+          # it.
+          wg-public = {
+            mode = "0444";
           };
         };
 

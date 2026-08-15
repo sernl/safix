@@ -56,6 +56,7 @@
     let
       resolve = import ../safix/resolve.nix { inherit lib; };
       types = import ../safix/types.nix { inherit lib; };
+      checks = import ../safix/checks.nix { inherit lib; };
       mkStructuralCheck = import ./mk-structural-check.nix pkgs;
 
       resolves = spec: lib.hasAttrByPath (lib.splitString "." spec) pkgs;
@@ -98,13 +99,20 @@
       };
 
       # A generator record with everything defaulted but what a fixture states.
+      # The default script references `$out`, because a script that never does is
+      # itself a refusal under the 0.2 contract and every fixture below would
+      # otherwise report that instead of the rule it is about.
       gen = attrs: {
         generator = {
-          script = "printf x";
+          script = ''printf x > "$out/value"'';
           runtimeInputs = [ "coreutils" ];
         }
         // attrs;
       };
+
+      # `files` is an attrset now, and every fixture that only cares which names
+      # a generator claims spells them through this.
+      encrypted = names: lib.genAttrs names (_: { });
 
       plain = { };
 
@@ -154,7 +162,7 @@
           root = gen { };
           leaf = gen {
             dependencies = [ "root" ];
-            files = [ "leaf-pub" ];
+            files = encrypted [ "leaf-pub" ];
           };
           leaf-pub = plain;
         };
@@ -176,35 +184,56 @@
           a = gen { dependencies = [ "a" ]; };
           b = gen {
             dependencies = [ "b-pub" ];
-            files = [ "b-pub" ];
+            files = encrypted [ "b-pub" ];
           };
           b-pub = plain;
         };
 
-        unknownFile.a = gen { files = [ "absent" ]; };
+        unknownFile.a = gen { files = encrypted [ "absent" ]; };
 
-        selfFile.a = gen { files = [ "a" ]; };
+        selfFile.a = gen { files = encrypted [ "a" ]; };
 
         fileHasGenerator = {
-          a = gen { files = [ "b" ]; };
+          a = gen { files = encrypted [ "b" ]; };
           b = gen { };
         };
 
         fileClaimedTwice = {
-          a = gen { files = [ "shared-out" ]; };
-          b = gen { files = [ "shared-out" ]; };
+          a = gen { files = encrypted [ "shared-out" ]; };
+          b = gen { files = encrypted [ "shared-out" ]; };
           shared-out = plain;
         };
 
-        inputCollision.a = gen {
-          dependencies = [ "pass_phrase" ];
-          prompts.pass-phrase = { };
-        };
-        # The dependency has to be a name this user holds, or the collision would
-        # be reported behind an unknown-dependency message instead.
-        inputCollisionHeld.pass_phrase = plain;
-
         unsafePromptName.a = gen { prompts."Pass Phrase" = { }; };
+
+        # ── the 0.2 contract ──
+        # `share` is derived, so authoring it is refused by name rather than
+        # accepted and then contradicted by the entries.
+        authoredShare.a = gen { share = true; };
+
+        # The retired descriptor interface, in the three spellings evaluation
+        # can see before anything runs.
+        retiredInput.a = gen { script = ''cat "$in_seed" > "$out/a"''; };
+
+        retiredOutputName.a = gen {
+          script = ''printf '%s' "$out_name" > "$out/a"'';
+        };
+
+        noOutputReference.a = gen { script = "printf x"; };
+
+        # A public half beside an encrypted one, which is the keypair shape this
+        # contract exists for: one generator, two outputs, one of them readable
+        # at evaluation.
+        publicOutput = {
+          keys = gen {
+            script = ''
+              printf priv > "$out/keys"
+              printf pub > "$out/keys-pub"
+            '';
+            files.keys-pub.secret = false;
+          };
+          keys-pub = plain;
+        };
 
         # Length two, which is what `cyclic` sees and `selfDependency` must not
         # take over.
@@ -214,7 +243,36 @@
         };
       };
 
-      collision = fixtures.inputCollision // fixtures.inputCollisionHeld;
+      # A generator whose two outputs land in two audiences, which needs a shared
+      # catalogue entry and so a second user to carry it — a fleet rather than a
+      # bare `private` record.
+      disagreeing =
+        let
+          bo = "age1fixturebbb00000000000000000000000000000000000000000000000";
+        in
+        {
+          catalogue.split-shared = typed types.entry { shared = true; };
+          private = {
+            split = gen {
+              script = ''
+                printf a > "$out/split"
+                printf b > "$out/split-shared"
+              '';
+              files = encrypted [ "split-shared" ];
+            };
+          };
+          users = {
+            ana = typed types.profile {
+              private = disagreeing.private;
+              carries.split-shared = { };
+              recipient = fixtureRecipient;
+            };
+            bo = typed types.profile {
+              carries.split-shared = { };
+              recipient = bo;
+            };
+          };
+        };
     in
     {
       checks.safix-generators = mkStructuralCheck {
@@ -252,8 +310,32 @@
           fileClaimedTwiceMessages = violationsOf fixtures.fileClaimedTwice;
           fileClaimedTwiceFires = planFires fixtures.fileClaimedTwice;
 
-          inputCollisionMessages = violationsOf collision;
-          inputCollisionFires = planFires collision;
+          authoredShareMessages = violationsOf fixtures.authoredShare;
+          authoredShareFires = planFires fixtures.authoredShare;
+
+          retiredInputMessages = violationsOf fixtures.retiredInput;
+          retiredInputFires = planFires fixtures.retiredInput;
+
+          retiredOutputNameMessages = violationsOf fixtures.retiredOutputName;
+          retiredOutputNameFires = planFires fixtures.retiredOutputName;
+
+          noOutputReferenceMessages = violationsOf fixtures.noOutputReference;
+          noOutputReferenceFires = planFires fixtures.noOutputReference;
+
+          shareDisagreementMessages = resolve.generatorViolations disagreeing.users disagreeing.catalogue;
+          shareDisagreementFires = fires (
+            resolve.generatorPlanOf disagreeing.users disagreeing.catalogue
+          );
+
+          # A public output resolves to a path in the plaintext store, an
+          # encrypted one to null, and the two prefixes do not overlap.
+          publicMessages = violationsOf fixtures.publicOutput;
+          publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
+          publicOnTheEncryptedHalf =
+            (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.public;
+          publicShare =
+            (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.generator.share;
+          publicRuleReaches = checks.publicRuleMessages (fleetOf fixtures.publicOutput) { };
 
           unsafePromptNameMessages = violationsOf fixtures.unsafePromptName;
           unsafePromptNameFires = planFires fixtures.unsafePromptName;
@@ -317,10 +399,36 @@
           ];
           fileClaimedTwiceFires = true;
 
-          inputCollisionMessages = [
-            "flake.safix.users.ana's generator on 'a' has inputs 'pass-phrase' and 'pass_phrase', which are all addressed as $in_pass_phrase inside the script"
+          authoredShareMessages = [
+            "flake.safix.users.ana's generator on 'a' sets `share` directly, which is derived and not authored. It is true exactly when every entry the generator writes is `shared`; set `shared` on those entries instead."
           ];
-          inputCollisionFires = true;
+          authoredShareFires = true;
+
+          retiredInputMessages = [
+            "flake.safix.users.ana's generator on 'a' references an input as $in_<name>, which was the read-once descriptor interface safix 0.1 used and 0.2 removed (openspec change 'clan-generator-contract'). A prompt is now the file $prompts/<name>; a dependency is now the file $in/<generator>/<name>, where <generator> is the entry the generator producing it is declared on. Both are re-readable, which a descriptor was not."
+          ];
+          retiredInputFires = true;
+
+          retiredOutputNameMessages = [
+            "flake.safix.users.ana's generator on 'a' references $out_name in its script, where it names nothing. $out_name belongs to `validation`, which is unchanged: it names the output under judgement, and the candidate still arrives on standard input. A script addresses its outputs as $out/<name>."
+          ];
+          retiredOutputNameFires = true;
+
+          noOutputReferenceMessages = [
+            "flake.safix.users.ana's generator on 'a' never references $out, so it would write no output file and be refused at run time with \"did not write a file for 'a'\" — a message naming the symptom rather than the cause. Under the 0.2 contract (openspec change 'clan-generator-contract') a script writes each declared output to $out/<name>; standard output is no longer the value."
+          ];
+          noOutputReferenceFires = true;
+
+          shareDisagreementMessages = [
+            "flake.safix.users.ana's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs resolve to one audience, so one file, so one write. Make them agree, or split this into two generators and have the second depend on the first."
+          ];
+          shareDisagreementFires = true;
+
+          publicMessages = [ ];
+          publicPaths = [ "public/safix/users/ana/keys-pub/value" ];
+          publicOnTheEncryptedHalf = null;
+          publicShare = false;
+          publicRuleReaches = [ ];
 
           unsafePromptNameMessages = [
             "flake.safix.users.ana's generator on 'a' declares a prompt named 'Pass Phrase', which is not [a-z0-9][a-z0-9_-]* and so cannot be addressed from the script"

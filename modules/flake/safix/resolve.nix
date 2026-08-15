@@ -449,6 +449,13 @@ let
           let
             p = placements.${user};
             gens = generatorsIn p;
+
+            # The record before `placementsOf` replaces `share` with the derived
+            # value, which is the only place the authored one is still visible.
+            raw = sourcesOf {
+              inherit users catalogue user;
+            };
+            authoredShareOf = n: (applyOverride raw.${n}.base raw.${n}.override).generator.share;
             producers = producersOf p;
             at = n: "flake.safix.users.${user}'s generator on '${n}'";
 
@@ -563,7 +570,7 @@ let
             # one fact is a second place for it to be wrong.
             authoredShare = lib.concatMap (
               n:
-              lib.optional (p.${n}.generator.share != null) (
+              lib.optional (authoredShareOf n != null) (
                 "${at n} sets `share` directly, which is derived and not authored. It is true exactly when every entry the generator writes is `shared`; set `shared` on those entries instead."
               )
             ) gens;
