@@ -11,12 +11,16 @@
 //!   so the claim — that a plaintext value reached sops down neither channel —
 //!   is made the same way on every platform.
 //! - `slow` waits before becoming the real sops, which holds open the window an
-//!   interrupt has to arrive in for the scratch discipline to be under test.
+//!   interrupt has to arrive in for the scratch discipline to be under test. It
+//!   waits only before the sops subcommand `SAFIX_SHIM_HOLD` names, because a
+//!   delay in front of every invocation would put the signal in whichever window
+//!   the run reached first rather than in the one being drilled.
 //! - `mutate` runs the real binary and then damages exactly one channel: a line
 //!   on standard output, a line on standard error, a different exit status, a
-//!   file left in the repository, or a value left in the temporary directory.
-//!   Each is a mutation some assertion is supposed to catch, and the drill fails
-//!   unless the assertion that catches it is the one that exists to.
+//!   file left in the repository, a value left in the temporary directory, or a
+//!   plaintext value written to a regular file in the repository. Each is a
+//!   mutation some assertion is supposed to catch, and the drill fails unless
+//!   the assertion that catches it is the one that exists to.
 
 use std::io::Write as _;
 use std::process::Command;
@@ -51,8 +55,14 @@ fn spy(arguments: &[String]) -> ! {
 
 /// Hold the window open, then be sops.
 fn slow(arguments: &[String]) -> ! {
-    let millis = environment("SAFIX_SHIM_DELAY_MS").parse().unwrap_or(2_000);
-    std::thread::sleep(std::time::Duration::from_millis(millis));
+    let hold = environment("SAFIX_SHIM_HOLD");
+    if arguments.first().is_some_and(|first| *first == hold) {
+        let millis = std::env::var("SAFIX_SHIM_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(2_000);
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+    }
     become_sops(arguments)
 }
 
@@ -76,6 +86,16 @@ fn mutate(arguments: &[String]) -> ! {
         "residue" => {
             let temporary = std::path::PathBuf::from(environment("TMPDIR"));
             write(&temporary.join("leaked"), &environment("SAFIX_SHIM_VALUE"));
+        }
+        // Neither in the temporary directory nor named like a candidate
+        // document, so the residue sweep and the scratch sweep both pass over
+        // it and only a trace of the write itself can catch it.
+        "plaintext" => {
+            let repository = std::path::PathBuf::from(environment("SAFIX_REPO_ROOT"));
+            write(
+                &repository.join("a-plaintext-note"),
+                &environment("SAFIX_SHIM_VALUE"),
+            );
         }
         other => refuse(&format!("unknown mutation: {other}")),
     }

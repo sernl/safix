@@ -471,6 +471,13 @@ impl Fixture {
     /// the signal because it sends it to the process it spawned;
     /// `--preserve-status` is what lets the runtime's own 130 or 143 be
     /// observed rather than timeout's 124.
+    ///
+    /// The whole chain is detached where this process has a terminal, because a
+    /// run that found one would read its value from `/dev/tty` and wait at the
+    /// first prompt whatever the fixture fed it — so the window named by the
+    /// test would not be the window the signal arrived in. `timeout` stays the
+    /// signal's sender either way: it signals the process it spawned, which is
+    /// the runtime, and `setsid` sits above it.
     pub fn interrupt_after(
         &self,
         seconds: &str,
@@ -480,7 +487,14 @@ impl Fixture {
         extra: &[(&str, &str)],
     ) -> Run {
         let (reader, writer) = rustix::pipe::pipe().expect("could not open a pipe");
-        let mut command = Command::new("timeout");
+        let mut command = match detached() {
+            Some(setsid) => {
+                let mut command = Command::new(setsid);
+                command.arg("-w").arg("timeout");
+                command
+            }
+            None => Command::new("timeout"),
+        };
         command
             .arg("--preserve-status")
             .arg("-s")
