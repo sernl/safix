@@ -510,6 +510,8 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the home-manager module and its activation guard | `modules/consume/home.nix` |
 | the NixOS module | `modules/consume/nixos.nix` |
 | the command | `modules/flake/safix/safix.sh` |
+| the runtime as a library, in rust — not yet what ships | `crates/safix-core/` |
+| the rust command, exposed as `packages.safix-rs` | `crates/safix/` |
 | recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand |
 | encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/` |
 
@@ -519,6 +521,13 @@ The option reference lives on the types themselves; this document is the narrati
 
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are here and green under `nix flake check`.
 The repository has no remote yet, so the GitHub Actions workflow in `.github/workflows/` has never run; it activates on the first push.
+
+The runtime is being rewritten in rust, and `packages.safix` is not affected by that yet.
+`crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built as `packages.safix-rs` and checked six ways under `nix flake check`.
+It implements no subcommand today: run it with anything but `--version` and it says so and exits.
+The nix half is not in scope and does not move; what is being replaced is `safix.sh` and the three python helpers.
+Each subcommand transfers only after a differential harness has compared it against the shell runtime on standard output, standard error, exit code and effect on the repository, and `packages.safix` stays the shell script until the last one has.
+The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/`.
 
 ## License
 

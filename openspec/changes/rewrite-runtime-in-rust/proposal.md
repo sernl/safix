@@ -12,7 +12,7 @@ They are this project's documented bug history, recorded in the script's own com
 - A herestring or a command substitution materializes its operand in `$TMPDIR`, so the value path has to avoid two of bash's three most natural spellings and read stdin through `read -r -d ''` instead, "where a shredder cannot reach what it never registered" (`safix.sh:402`).
 - A function-scoped `trap ... RETURN` does not run when the process dies between the write and the return, "which is the abort a value actually leaks through", so cleanup has to be one process-wide `EXIT` trap with `INT` and `TERM` routed through exit (`safix.sh:31`, `safix.sh:111`).
 - A process substitution inherits `errexit`, so a bare `$?` on the next line is a line the subshell never reaches on exactly the run whose status matters, and a failed generator would be reported as one that printed nothing (`safix.sh:563`).
-- A generator that reads standard input eats the answers to every prompt after it, silently, "since a prompt that reads end-of-input looks exactly like one nobody answered", so descriptors are part of the generator interface (`safix.sh:555`).
+- A generator that reads standard input eats the answers to every prompt after it, silently, "since a prompt that reads end-of-input looks exactly like one nobody answered", so descriptors are part of the generator interface (`safix.sh:557`).
 
 Every one of those is a comment holding a convention in place.
 Delete the comment and the next edit reintroduces the bug; the language offers no help, because in bash a secret is a string and a string can be spelled anywhere a string goes.

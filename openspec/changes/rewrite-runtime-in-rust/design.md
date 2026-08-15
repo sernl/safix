@@ -73,7 +73,7 @@ Message parity with the shell runtime is not a rendering coincidence; it is the 
 Each is bounded by a semaphore rather than spawning per item.
 
 Everywhere else is sequential, and that is a correctness requirement rather than a simplification.
-The script's write discipline is sequential — stage before regenerate, regenerate before commit — and the reason is recorded at `safix.sh:1660`: a flake evaluation reads the files git knows about, so regenerating a policy before staging a new scaffold renders the policy of a fleet that does not include it.
+The script's write discipline is sequential — stage before regenerate, regenerate before commit — and the reason is recorded at `safix.sh:1663`: a flake evaluation reads the files git knows about, so regenerating a policy before staging a new scaffold renders the policy of a fleet that does not include it.
 Two writers interleaving through that sequence would produce a `.sops.yaml` that matches neither.
 
 ### D6. sops stays the cryptographic authority
