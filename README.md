@@ -167,7 +167,7 @@ Reaching an entry only through a `perHost` or `perTag` `add` is refused, because
 
 ```nix
 flake.safix.users.ana.private.grafana-token = {
-  generator.script = "openssl rand -hex 32";
+  generator.script = ''openssl rand -hex 32 > "$out/grafana-token"'';
   generator.runtimeInputs = [ "openssl" ];
 };
 ```
@@ -177,15 +177,29 @@ $ safix generate                              # mints everything declared but em
 $ safix generate --regenerate grafana-token   # rotation: new value, committed
 ```
 
+A generator script writes files rather than printing a value, and the three directories it addresses are clan's:
+
+| | what it holds |
+|---|---|
+| `$out/<name>` | one file per declared output; the script's working directory is the root above it |
+| `$prompts/<name>` | one answered prompt each, present only when prompts are declared |
+| `$in/<generator>/<name>` | a dependency's plaintext, keyed by the generator producing it |
+
+This is the interface clan-core's own generators are written against, so a script written for either system runs under the other.
+One difference is deliberate: only the dependencies a generator *declares* appear under `$in`, where clan places every file of the dependency generator — which would hand a script depending on a keypair's public half the private half as well.
+
+Bytes are stored exactly as written.
+`echo` leaves a trailing newline and `printf` does not, and nothing removes one, because a convention that took a byte off would corrupt every key whose last byte is a newline while looking like it had tidied one up.
+
 Dependencies chain generators.
 Think of a recipe that uses another recipe's output.
 
 ```nix
 flake.safix.users.ana.private = {
-  db-password.generator.script = "openssl rand -base64 24";
+  db-password.generator.script = ''openssl rand -base64 24 > "$out/db-password"'';
   db-password-hash.generator = {
     dependencies = [ "db-password" ];
-    script = ''mkpasswd -sm bcrypt <"$in_db_password"'';
+    script = ''mkpasswd -sm bcrypt <"$in/db-password/db-password" > "$out/db-password-hash"'';
     runtimeInputs = [ "mkpasswd" ];
   };
 };
@@ -203,45 +217,94 @@ flake.safix.users.ana.private.upstream-api-key.generator = {
     type = "hidden";
     description = "the API key issued by the provider's console";
   };
-  script = ''cat "$in_token"'';
+  script = ''cat "$prompts/token" > "$out/upstream-api-key"'';
 };
 ```
 
-A multi-output generator mints related values together, each with its own mode.
+A multi-output generator mints related values together, each with its own mode, and each half may be encrypted or public.
 
 ```nix
 flake.safix.users.ana.private = {
-  deploy-key = {
-    mode = "0600";
+  wg-private = {
+    mode = "0400";
     generator = {
-      files = [ "deploy-key-pub" ];
-      runtimeInputs = [
-        "openssl"
-        "jq"
-      ];
+      runtimeInputs = [ "wireguard-tools" ];
+      files.wg-public.secret = false;
       script = ''
-        key=$(openssl genpkey -algorithm ed25519)
-        pub=$(printf '%s' "$key" | openssl pkey -pubout)
-        jq -n --arg k "$key" --arg p "$pub" '{"deploy-key": $k, "deploy-key-pub": $p}'
+        wg genkey > "$out/wg-private"
+        wg pubkey < "$out/wg-private" > "$out/wg-public"
       '';
     };
   };
 
-  deploy-key-pub.mode = "0444";
+  wg-public.mode = "0444";
 };
 ```
 
-Each name a generator writes is a registry entry in its own right, carrying its own mode, path and key; `files` only records which generator produces it.
+Each name a generator writes is a registry entry in its own right, carrying its own mode, path and key; `files` records which generator produces it and whether it is encrypted.
 An entry named there may not carry a generator of its own and may not be named by a second generator, both refused at evaluation, because two producers for one value is a race whose winner is whichever ran last.
-Both keys land in one commit, because a keypair split across two commits is an incoherent state.
-A `validation` script receives the candidate value on stdin and refuses the write on a non-zero exit.
+Both halves land in one commit, because a keypair split across two commits is an incoherent state.
+A `validation` script receives the candidate value on stdin, with `$out_name` naming the output under judgement, and refuses the write on a non-zero exit — before anything is written.
+
+### Public outputs, readable at evaluation
+
+`files.<name>.secret = false` writes the value to the repository in the clear, gives it no creation rule, and makes it readable while nix evaluates:
+
+```nix
+peers = [ { publicKey = config.flake.safix.lib.publicValue "ana" "wg-public"; } ];
+```
+
+That is what a public key, a fingerprint or a derived identifier is for: a module reads it directly rather than through a deployment-time indirection.
+`flake.safix.lib.outputPath` answers for every output and is a path, never a value.
+Reaching for a value on a secret output fails with a sentence naming the entry and pointing at the path, rather than with nix's generic undefined-option message.
+
+The plaintext store sits under a top-level `public/` prefix rather than inside `secrets/`:
+
+```
+public/safix/users/<user>/<name>/value
+public/safix/shared/<audience>/<name>/value
+```
+
+A path named for secrets has to mean everything under it is encrypted, without qualification, because that is what every backup rule, sync exclusion and reviewer assumes about it.
+Two checks hold the trees apart: `safix-public-no-rule` matches every generated creation rule against every public path, and the catch-all check carries the public shape among its probes.
+
+The default is `secret = true`, not clan's `false`.
+A mistyped field that leaves a value encrypted is recoverable by fixing the typo; one that publishes a value is not.
 
 `runtimeInputs` names nixpkgs attributes as strings rather than holding packages, because the whole generator travels to the command as JSON and a derivation cannot cross that boundary.
 Strings are unchecked by construction, so `safix-generator-tools` resolves each one against the package set at build time; otherwise `opensll` is discovered at a rotation, which is the worst moment to learn a declaration was never right.
 
-One honest limitation, stated on the option itself: the file descriptor is how a dependency or prompt value arrives, not a sandbox.
-A generator script that redirects `$in_*` to a file or echoes it to stderr puts plaintext where the tool cannot see it.
+### Where the plaintext is
+
+A generator's inputs and outputs are files, so they exist, and this is where.
+
+The staging directory is created mode `0700` on a filesystem safix asks the kernel about with `statfs` rather than infers from its name, and it is overwritten and removed however the run ends — on return, on error, on panic, and from both signal handlers.
+There is no fallback to `/tmp`: on a host whose `/tmp` is disk-backed a silent fallback would put plaintext in free blocks under a code path that looks like it succeeded.
+Where no memory-backed filesystem is available the run refuses, and `--allow-disk-staging` is what accepts a disk-backed one.
+
+What that bounds, and what it does not, stated rather than implied.
+Overwriting a page of a memory-backed filesystem does not reach a copy already written to swap.
+A mode-`0700` directory is readable by every process running as you for the length of the run, where the pipe this replaced was readable by neither a third process nor a shell — that is a real reduction, and the two are not equivalent.
+And it is not a sandbox: a script that copies `$in/dep/name` elsewhere, or writes an output outside `$out`, has put plaintext where safix does not look.
 Write generators the way you would write any code that holds a credential.
+
+## Editing a value: `safix edit`
+
+```console
+$ safix edit ana grafana-token
+```
+
+Opens `$VISUAL`, or `$EDITOR` when that is unset, on the entry's decrypted value.
+Neither set is a refusal naming both: safix opens no editor of its own choosing, because dropping you into one you did not pick with a secret in the buffer produces either an accidental write or an accidental abandonment, and nothing can tell those apart.
+
+The command is split on whitespace and run directly rather than through a shell, so `EDITOR="code --wait"` works.
+The staged file's path is an argument; the value is not.
+
+A non-zero exit writes nothing, an unchanged buffer commits nothing, an emptied buffer takes the same refusal an empty value takes anywhere else, and a changed non-empty buffer goes through the same write path `safix set` uses.
+An entry that holds no value yet opens on an empty buffer, so this is an authoring verb as well as an amending one.
+
+The buffer lives in the same private staging directory generators use, and whatever the editor leaves beside it — swap files, backups, undo history — is removed with the directory.
+An editor configured to write undo history to a location of its own has put plaintext where safix does not look; that is the limit of the containment, and it is stated rather than left to be discovered.
 
 ## Values without declarations: the runtime extract
 
@@ -464,7 +527,7 @@ The failure is also rarer there, because sops-nix's system-scope default identit
 }
 ```
 
-Called with no arguments it returns five checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all, and the audience separator.
+Called with no arguments it returns six checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all, the non-interaction between the rules and the public store, and the audience separator.
 `committedPolicy` adds the drift check, which fails while the committed `.sops.yaml` and the generated one differ and whose failure names `safix fix`.
 `materializations` adds the path-collision check, which forces the materializations you hand it so that the refusal reaches the hosts nobody has built this week.
 
@@ -524,7 +587,7 @@ The repository has no remote yet, so the GitHub Actions workflow in `.github/wor
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.
-It implements all eight subcommands: the read paths `list`, `get` and `check`, the two write paths `set` and `fix`, the generator graph behind `generate`, and the two that touch custody itself, `keygen` and `adduser`.
+It implements all nine subcommands: the read paths `list`, `get` and `check`, the three write paths `set`, `edit` and `fix`, the generator graph behind `generate`, and the two that touch custody itself, `keygen` and `adduser`.
 The nix half was never in scope and did not move; what was replaced is a shell runtime and two python helpers, and all three are now deleted rather than kept.
 
 Each subcommand transferred only after a differential harness had compared it against that shell runtime on standard output, standard error, exit code and effect on the repository, over one fixture fleet and nineteen modes.

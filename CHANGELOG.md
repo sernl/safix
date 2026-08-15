@@ -22,6 +22,89 @@ A change to it is a breaking change whether or not any rust changed.
 `Cargo.toml` still reads `0.1.0`.
 Cutting the version is a release decision and is not made by this section.
 
+### The generator contract is clan's, and what that costs
+
+This is a breaking change to the nix option surface, to the generator interface, and to safix's most load-bearing promise.
+The cost is stated first because it is the change, not a side effect of it.
+
+safix 0.1 required that a generated value "travels a pipe and never argv, the environment, or a file", and that values "move through pipes only".
+The interoperable generator contract is a filesystem contract: `$out/<name>`, `$in/<generator>/<file>` and `$prompts/<key>` are paths, and an editor edits a file.
+There is no version of clan compatibility that keeps the pipe.
+Emulating one with FIFOs was considered and refused: a FIFO is not seekable and not re-readable, so `head -c 32 "$in/dep/key"` and any tool that opens its input twice would break with a truncated secret as the failure mode, and a directory of FIFOs cannot answer `ls "$out"` or `[ -f "$out/x" ]`, which scripts written against this contract legitimately do.
+
+So the absolute is replaced by a bounded containment, and the two are not equivalent:
+
+| | pipe (0.1) | tmpfs staging (0.2) |
+|---|---|---|
+| plaintext at rest on a block device | never | never, unless `--allow-disk-staging` is passed |
+| plaintext in memory | for the transfer | for the run |
+| plaintext in swap | possible | possible |
+| reachable by another process of the same user | no | yes, for the run's duration |
+| reachable by root | yes | yes |
+| survives a crash | no | no, if the sweep runs; yes, in the window before it |
+
+The fourth row is the one that is genuinely worse.
+A pipe between two processes safix spawned is reachable by neither a third process nor a shell; a mode-`0700` directory on `/dev/shm` is reachable by anything running as that user, which on a workstation includes the operator's own shell, editor and agent processes.
+
+What is retained: the pipe requirement is modified rather than deleted.
+`set` from standard input, `get` to standard output and every sops invocation still travel pipes end to end, and no value reaches an argument vector or an environment variable on any leg.
+`crates/safix/tests/syscall_proof.rs` holds that at the system call, admitting exactly two destinations — a pipe, and a file inside the run's staging root — and sweeping every staging root afterwards, so admitting the second is not a weakening of the reading.
+
+### Added
+
+- `plaintext-staging`: a mode-`0700` directory on a filesystem verified with `statfs` rather than inferred from its name, one per run, every file `0600`, registered for removal before it is created and swept on return, on error, on panic and from both signal handlers.
+  There is no fallback to `/tmp` — this fleet's is ext4, so a silent fallback would be the exact failure the rule prevents under a code path that looks like it succeeded.
+  `--allow-disk-staging` accepts a disk-backed directory; `SAFIX_STAGING_DIR` names a mount to try first and is verified like any other.
+  Two residual exposures are documented rather than smoothed over: a page swapped before the overwrite is not reached, and the directory is readable by every process running as its owner for the run's duration.
+- `files.<name>.secret = false`: a public output, stored in the clear at `public/safix/users/<user>/<name>/value` or `public/safix/shared/<audience>/<name>/value`, given no creation rule, and readable at evaluation through `flake.safix.lib.publicValue`.
+  `flake.safix.lib.outputPath` answers for every output and is a path, never a value.
+  The store sits under a top-level prefix rather than inside `secrets/`, because a path named for secrets has to mean everything under it is encrypted without qualification.
+  The default is `secret = true` rather than clan's `false`: a mistyped field that leaves a value encrypted is recoverable by fixing the typo, and one that publishes a value is not.
+- `safix edit <name>`: the operator's own editor on one value, `$VISUAL` then `$EDITOR`, refusing when neither is set and adding no fallback program.
+  A non-zero exit writes nothing, an unchanged buffer commits nothing, an emptied buffer takes the existing empty-value refusal, and a changed buffer goes through the same write path `set` uses.
+  A verb rather than an option on `set`, because the two have different custody profiles and an option would make custody a function of a flag.
+- `share` on a generator: derived from its outputs rather than authored, true exactly when every entry it writes is `shared`, and refused when the outputs disagree.
+  That constrains a generator's outputs to one audience, so one file, so one rename — which closes the crash window a keypair's two renames used to open.
+  It does not close in general: a `--regenerate` cascade still commits per generator.
+- `checks.safix-public-no-rule`, matching every generated creation rule against every public path.
+  The public store's shape also joins `catchAllProbes`, so a rule reaching it fails two checks that ask different questions.
+- Refusal codes `safix::staging_not_memory_backed`, `safix::staging_unusable`, `safix::generator_output_missing`, `safix::no_editor`, `safix::public_not_editable` and `safix::editor_failed`.
+
+### Changed — breaking
+
+- A generator script writes `$out/<name>` per declared output instead of printing its value.
+  Standard output is no longer a value; it reaches the operator like standard error.
+- A prompt is the file `$prompts/<name>`, and `$prompts` is created only when prompts are declared — clan's behaviour, matched so no script comes to rely on the difference.
+  Unlike clan, an ambient `$prompts` is removed from the environment rather than inherited.
+- A dependency is the file `$in/<generator>/<name>`, keyed by the entry the producing generator is declared on.
+  A dependency nothing generates — a hand-set value, which safix has and clan does not — is keyed by its own name.
+  Only declared dependencies are placed under `$in`, where clan places every file of the dependency generator: safix's edge names an entry, and materializing its siblings would hand a script plaintext it never declared.
+- Output bytes are stored exactly as written.
+  0.1 stripped one trailing newline from a single-output value; under this contract the file *is* the value, and removing a byte would corrupt every key whose last byte is a newline.
+  A generator that wants no trailing newline writes with `printf`.
+- `generator.files` is an attribute set carrying `secret` rather than a list of names.
+- The JSON multi-output form is gone: several outputs are several files, so `safix::generator_not_an_object` and `safix::generator_keys_differ` are retired and replaced by `safix::generator_output_missing`, which names the absent output and lists what `$out` did contain.
+- The `$in_<name>` descriptor interface is removed with no compatibility mode, and evaluation refuses three shapes by name: a script referencing `$in_`, a script referencing `$out_name` where it names nothing, and a script that never references `$out`.
+  Each names this change and gives the rewrite.
+  A compatibility mode was refused because the two interfaces differ in custody rather than in spelling: a run containing both would stage plaintext on a filesystem while the per-generator documentation claimed a descriptor-only guarantee.
+- The hyphen-to-underscore identifier mapping and the input-collision refusal that rested on it are gone.
+  Prompts and dependencies no longer share a name space, because one lives under `$prompts` and the other under `$in`.
+- `safix::dependency_has_no_value` names the dependency and the path it would have been written to.
+- A public output is not selected for the secret provisioner.
+  It has no ciphertext, no key and no creation rule, so an entry for one would be an activation that fails to extract a key which will never exist.
+  It stays in `flake.safix.lib.placements`, where `generate`, `list` and `check` read it.
+
+### Not adopted
+
+- clan's `validationHash`.
+  It answers "has the definition changed such that this value is stale"; safix's `validation` answers "is this candidate acceptable before it is written".
+  Neither subsumes the other, and safix writes into git, so the failure to prevent is a bad value reaching a committed file rather than a stale one persisting.
+  `validation` is unchanged: the candidate arrives on standard input and `$out_name` names the output under judgement.
+- clan's generator sandbox.
+  clan runs a script inside `sandbox_cmd` with the staging root as the only writable path and refuses when sandboxing is unavailable.
+  Adopting it is a second material change to what a generator may do, would break a generator that reaches the network, and is separable from the interface change.
+  Whether it becomes its own 0.2 change or is deliberately out of scope is an open question for the operator.
+
 ### Removed
 
 - The shell runtime, `modules/flake/safix/safix.sh`, 2149 lines, and `packages.safix-sh` with it.
