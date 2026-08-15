@@ -1,0 +1,45 @@
+# Dependency review over the locked graph.
+#
+# Advisories are deliberately not run from here. The advisory database is a
+# network resource and the nix build sandbox has none, so the checks split: this
+# file's bans, licences and sources run offline against the vendored graph, and
+# the advisory scan is its own check reading a database pinned in `flake.lock`.
+# The split also means a newly published advisory reddens exactly one check, and
+# only on a lock update, which is a signal with a date on it.
+
+[graph]
+all-features = true
+
+[licenses]
+# Every licence in the closure, enumerated. The repository's own dual licence is
+# the first two. Nothing weak-copyleft or stronger is on the list: adding one is
+# a decision, not a lock update.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "0BSD",
+  "ISC",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+
+# The duplicates the graph carries today, each named at the version that is the
+# older of the pair, so a *new* duplicate is still a failure. Both come from
+# transitive dependencies of the command's diagnostic renderer, which is why
+# neither reaches the library.
+skip = [
+  { crate = "syn@2.0.119", reason = "thiserror-impl and miette-derive have not moved to syn 3 yet" },
+  { crate = "unicode-width@0.1.14", reason = "textwrap pins 0.1 while terminal_size's chain is on 0.2" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

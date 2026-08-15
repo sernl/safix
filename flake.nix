@@ -10,6 +10,19 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
 
+    # The cargo builder for the rust runtime. It takes no nixpkgs of its own;
+    # the toolchain comes from this flake's pinned nixpkgs, which is what makes
+    # the workspace's stated minimum version the one anything is ever compiled
+    # with.
+    crane.url = "github:ipetkov/crane";
+
+    # Read only by `safix-rs-audit`. It is an input rather than a fetch at build
+    # time because the sandbox has no network, and pinning it here is what gives
+    # a newly published advisory a date: it reddens that one check on the commit
+    # that updates this lock, and not before.
+    advisory-db.url = "github:rustsec/advisory-db";
+    advisory-db.flake = false;
+
     # sops-nix is what a consumer's NixOS or home-manager profile reads, so the
     # checks that prove a resolved entry is consumable have to build against it.
     # It is also imported by `homeModules.default` and `nixosModules.default`, so
@@ -48,6 +61,7 @@
         ./modules/flake/checks/namespace.nix
         ./modules/flake/checks/policy.nix
         ./modules/flake/devshell.nix
+        ./modules/flake/rust.nix
         ./modules/flake/safix
         ./modules/flake/treefmt.nix
       ];
