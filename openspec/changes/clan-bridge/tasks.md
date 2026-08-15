@@ -6,6 +6,8 @@ This change lands after `clan-generator-contract`, because a mapping compares a 
 
 One decision is unresolved and gates stage 3. Task 0.1 is that decision, and it is USER-RUN.
 
+Stages 1 and 2 are landed. Stage 3 onward is held at 0.1: the decision governs where the *clan-side read* comes from, and both verbs read the clan side — export compares before writing, so the read is not import's alone. Task 1.3's third refusal and task 2.2 are held with it; the reasons are in the report accompanying those commits.
+
 Stages: 0 is the decision, 1 is the surface, 2 is the delegation, 3 is transfer and convergence, 4 is the audit, 5 is the record and the follow-up.
 
 ## 0. The decision that gates the read path
@@ -15,23 +17,23 @@ Stages: 0 is the decision, 1 is the surface, 2 is the delegation, 3 is transfer 
 
 ## 1. The declared surface
 
-- [ ] 1.1 Add `flake.safix.bridge` to `types.nix`: `clanFlake`, and `mappings.<id>` carrying `direction`, `clan.{machine,generator,file}` and `safix.{user,name}`
-- [ ] 1.2 Make `direction` an enum of `clan-to-safix` and `safix-to-clan`. Record at the option why it is not spelled `import`/`export`: the word moves values in opposite directions across this boundary depending on which tool says it
-- [ ] 1.3 Add the evaluation-time refusals to `resolve.nix`: unresolvable safix side; a clan-to-safix target that also has a generator; a safix-to-clan source with nothing to send; two mappings writing one target; one endpoint pair declared in both directions; more than one `clanFlake`
-- [ ] 1.4 Expose the refusals through `checks.nix` as a message function and a builder over it, matching the custody and generator-tool families, and add `safix-bridge-refusals` to `mkChecks`
-- [ ] 1.5 Record in the option documentation that evaluation does not and cannot verify the clan half, and that a bad clan side is a run-time refusal naming the triple
-- [ ] 1.6 Severity drill: for each of the six refusals, perturb a fixture fleet and confirm the message names what it should. Run the drill through `refuseScript` so it executes the bytes the real check runs
-- [ ] 1.7 Verify: `nix flake check` passes and the six drills were observed
+- [x] 1.1 Add `flake.safix.bridge` to `types.nix`: `clanFlake`, and `mappings.<id>` carrying `direction`, `clan.{machine,generator,file}` and `safix.{user,name}`
+- [x] 1.2 Make `direction` an enum of `clan-to-safix` and `safix-to-clan`. Record at the option why it is not spelled `import`/`export`: the word moves values in opposite directions across this boundary depending on which tool says it
+- [~] 1.3 Five of six landed in `bridge.nix`; the safix-to-clan-source-with-nothing-to-send refusal is held (see the report: safix has no evaluation-time notion of an entry having no value). Refusals: unresolvable safix side; a clan-to-safix target that also has a generator; a safix-to-clan source with nothing to send; two mappings writing one target; one endpoint pair declared in both directions; more than one `clanFlake`
+- [x] 1.4 Expose the refusals through `checks.nix` as a message function and a builder over it, matching the custody and generator-tool families, and add `safix-bridge-refusals` to `mkChecks`
+- [x] 1.5 Record in the option documentation that evaluation does not and cannot verify the clan half, and that a bad clan side is a run-time refusal naming the triple
+- [x] 1.6 Severity drill: for each of the six refusals, perturb a fixture fleet and confirm the message names what it should. Run the drill through `refuseScript` so it executes the bytes the real check runs
+- [x] 1.7 Verify: `nix flake check` passes and the six drills were observed
 
 ## 2. Delegation to clan
 
-- [ ] 2.1 Implement the clan subprocess driver in `crates/safix-core/src/bridge.rs`: resolve clan's command on PATH, invoke read with the value captured from standard output, invoke write with the value supplied on standard input
-- [ ] 2.2 Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
-- [ ] 2.3 Implement the absent-command refusal: both verbs refuse before transferring anything, the refusal states that clan is the authority on its own store, and no subset of mappings runs
-- [ ] 2.4 Surface clan's own failures rather than reinterpreting them — a missing var, an ambiguous id, an ungenerated value each reach the operator as clan's message with safix's mapping name attached
-- [ ] 2.5 Add the new refusal variants and codes to `crates/safix-core/src/error/`, with paired plain and graphical snapshots
-- [ ] 2.6 Confirm by search that no clan store layout, backend, recipient handling or file format exists anywhere in the runtime
-- [ ] 2.7 Verify: `cargo test` passes; the absent-command refusal is observed; and 2.6's search is recorded
+- [x] 2.1 Implement the clan subprocess driver in `crates/safix-core/src/bridge.rs`: resolve clan's command on PATH, invoke read with the value captured from standard output, invoke write with the value supplied on standard input
+- [ ] 2.2 BLOCKED on 0.1's read path. Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
+- [x] 2.3 Implement the absent-command refusal: both verbs refuse before transferring anything, the refusal states that clan is the authority on its own store, and no subset of mappings runs
+- [x] 2.4 Surface clan's own failures rather than reinterpreting them — a missing var, an ambiguous id, an ungenerated value each reach the operator as clan's message with safix's mapping name attached
+- [x] 2.5 Add the new refusal variants and codes to `crates/safix-core/src/error/`, with paired plain and graphical snapshots
+- [x] 2.6 Confirm by search that no clan store layout, backend, recipient handling or file format exists anywhere in the runtime
+- [x] 2.7 Verify: `cargo test` passes; the absent-command refusal is observed; and 2.6's search is recorded
 
 ## 3. Transfer and convergence
 
