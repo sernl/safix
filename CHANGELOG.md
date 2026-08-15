@@ -106,6 +106,16 @@ What is retained: the pipe requirement is modified rather than deleted.
   It has no ciphertext, no key and no creation rule, so an entry for one would be an activation that fails to extract a key which will never exist.
   It stays in `flake.safix.lib.placements`, where `generate`, `list` and `check` read it.
 
+### Fixed
+
+- A signal arriving while a generator's script or its validation fragment is running now ends the run with 130 or 143 rather than reporting the generator as having failed.
+  A script the operator interrupted is a child that died on a signal, so what `wait` reports carries no exit code; read as an ordinary result that is a failure, and the run ended with 1 and a sentence blaming the script for the operator's Ctrl-C.
+  The validation case was worse: it said the candidate had been judged and rejected when nothing judged it.
+  Both readings are now taken before the status is interpreted, and the child's own termination signal is read alongside the handler's flag — a keyboard interrupt reaches the whole process group, so the child dies at the same instant the runtime is signalled and the flag may not be set yet.
+  Only `SIGINT` and `SIGTERM` are read that way; a child killed by `SIGSEGV` failed.
+- The quiescence lock now covers the generator's script and its validation, as it already covered sops.
+  Without it the signal handler's sweep could remove the staging root while the script was still writing into it.
+
 ### Not adopted
 
 - clan's `validationHash`, as a thing safix computes, records or writes.
