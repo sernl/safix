@@ -198,29 +198,31 @@
           "get_round_trips_a_value_and_list_reports_where_it_lives";
 
       # A generator with no inputs mints and commits; one with a prompt reads it
-      # unechoed and derives from it; one with a dependency runs after the
-      # generator that writes what it reads and sees that plaintext down a
-      # descriptor; one with several outputs writes both, in different files, in
-      # one commit. A second bulk run mints nothing, and --regenerate rotates its
-      # target while a neighbouring key's ciphertext comes through byte-identical.
+      # from $prompts twice, which the descriptor interface this replaced could
+      # not do; one with a dependency runs after the generator that writes what
+      # it reads and finds it at $in/<producer>/<name>; one with several outputs
+      # writes both, in different files, in one commit. A second bulk run mints
+      # nothing, and --regenerate rotates its target while a neighbouring key's
+      # ciphertext comes through byte-identical.
       checks.safix-generate =
         mode "safix-generate" "generators"
           "generate_mints_in_dependency_order_and_commits_each_generator";
 
       # Every way a run is refused: a name with no generator, empty output, a
-      # script that exits non-zero, a candidate the validation rejects, and a
-      # multi-output script printing the wrong keys. None leaves a value, a
-      # commit, or a scratch file, and a partial keypair is never written.
+      # script that exits non-zero, a candidate the validation rejects, a
+      # multi-output script that wrote only one of its outputs, and a staging
+      # location that is not memory-backed. None leaves a value, a commit, or a
+      # scratch file, and a partial keypair is never written.
       checks.safix-generate-refusals =
         mode "safix-generate-refusals" "generators"
           "generate_refusals_each_have_their_own_code_and_write_nothing";
 
       # What one generator's process may see of another's. A script that reads
       # standard input to end of input does not eat the answer to a later
-      # generator's prompt, and a generator running last sees exactly the
-      # descriptors one running first sees — every input descriptor carries a
-      # decrypted value, so one surviving the generator it was opened for is
-      # plaintext in a process that never declared it.
+      # generator's prompt — now true because answers are files rather than a
+      # shared stream, which is a different reason and so is re-asserted rather
+      # than assumed to carry over — and a generator running last sees exactly
+      # the descriptors one running first sees.
       checks.safix-generate-isolation =
         mode "safix-generate-isolation" "generators"
           "one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another";
@@ -234,6 +236,37 @@
       checks.safix-generate-cascade =
         mode "safix-generate-cascade" "generators"
           "a_rotation_carries_its_downstream_set_and_nothing_else";
+
+      # clan's wireguard keypair, ported. One generator, an encrypted private
+      # half and a public half stored in the clear and readable with no
+      # identity, both from one execution, both in one commit. A re-run mints
+      # nothing, a rotation moves both halves together, and editing the public
+      # half is refused.
+      checks.safix-generate-public =
+        mode "safix-generate-public" "generators"
+          "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
+
+      # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
+      # nothing, an unchanged buffer commits nothing, and a changed one goes
+      # through the same path `set` writes through. No staging root outlives any
+      # of them.
+      checks.safix-edit =
+        mode "safix-edit" "editor"
+          "the_four_outcomes_of_an_edit_write_what_each_is_supposed_to";
+
+      # Neither editor variable set is a refusal naming both, the visual one
+      # wins over the other, and an entry holding nothing opens on an empty
+      # buffer so that editing is an authoring verb too.
+      checks.safix-edit-selection =
+        mode "safix-edit-selection" "editor"
+          "the_editor_is_the_one_the_operator_named_or_the_run_refuses";
+
+      # The staged path reaches the editor's argument vector and the value does
+      # not, read out of the editor's own /proc entry rather than out of a
+      # process listing.
+      checks.safix-edit-argv =
+        mode "safix-edit-argv" "editor"
+          "the_editor_receives_the_path_and_never_the_value";
 
       # The union `fix` acts on, from both sides. A consumer-named file in step
       # with the rule that covers it is not a finding of any kind; the same file

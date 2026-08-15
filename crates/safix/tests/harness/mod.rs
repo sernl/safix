@@ -657,7 +657,15 @@ impl Fixture {
             )
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
-            .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"));
+            .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"))
+            // The two the developer's own shell almost certainly sets. A test
+            // that inherited them would open whoever is running it into their
+            // real editor, on a fixture value, and wait; and one that passed
+            // would have proved something about that machine. Every editor test
+            // names the one it wants through `run_env`, which is applied after
+            // this.
+            .env_remove("VISUAL")
+            .env_remove("EDITOR");
         match reporter {
             Reporter::Plain => command.env("SAFIX_ERROR_FORMAT", "plain"),
             Reporter::Graphical => command.env_remove("SAFIX_ERROR_FORMAT"),
