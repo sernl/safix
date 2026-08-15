@@ -52,6 +52,7 @@
       ];
 
       imports = [
+        ./modules/flake/checks/bridge.nix
         ./modules/flake/checks/cli.nix
         ./modules/flake/checks/consumption.nix
         ./modules/flake/checks/custody.nix
