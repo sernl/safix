@@ -3,7 +3,11 @@
 # the subject, one fixture fleet, four channels.
 #
 #   SAFIX_SH=/path/to/safix.sh SAFIX_RS=/path/to/safix-rs \
-#     safix-differential.sh <clean|missing|drift|orphan|unknown|norule|drills>
+#     safix-differential.sh <mode>
+#
+# Read-path modes:  clean missing drift orphan unknown norule
+# Write-path modes: write refuse guard converge abort pipes
+# Self-drill mode:  drills
 #
 # The gate that permits retiring the shell runtime is not a claim that the two
 # agree; it is this, running. Each mode builds one fixture repository, gives
@@ -18,6 +22,17 @@
 #            regular expression normalizing miette's graphical rendering would
 #            be a comparison whose strictness nobody could state.
 #   status   exactly.
+#            One substitution is applied before this comparison and it is the
+#            only normalization in the harness: `set` prints the abbreviated
+#            object name of the commit it just made, and two correct runs cannot
+#            print the same one — a value written now takes a fresh
+#            initialization vector, so the two trees differ and so do the two
+#            commits. Each side's own `git rev-parse --short HEAD` is what is
+#            substituted, per side, and anything left looking like an
+#            abbreviated object name afterwards fails the comparison. So a
+#            runtime that named someone else's commit, an older commit, or no
+#            commit where the other named one is still caught; what is given up
+#            is only the ability to compare two hashes that cannot be equal.
 #   effects  through one projection applied to both sides — ordered commits with
 #            their per-path status, the full porcelain status, the tree's paths
 #            and modes, every governed file's decrypted plaintext, and every
@@ -26,8 +41,12 @@
 #            with it, so comparing bytes would compare sops' random number
 #            generator.
 #
-# A fifth assertion sits beside them: after both runs, neither runtime's own
-# temporary directory holds any fixture value.
+# Three assertions sit beside them. After both runs, neither runtime's own
+# temporary directory holds any fixture value; neither repository holds a
+# candidate document left beside its target, which the effect projection cannot
+# catch on its own because two runtimes that both leave one agree about it; and
+# for `set`, neither runtime disturbed a key in the file that it was not asked
+# to set.
 #
 # ── what is real here and what is not ──
 # The age identities are minted in this run's scratch directory and exist for
@@ -52,6 +71,50 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 BASH_BIN="$(command -v bash)"
+REAL_SOPS="$(command -v sops)"
+
+# What both runtimes read on standard input, and anything else both are given.
+# Globals rather than parameters because `compare` already takes a label and an
+# argv, and threading two more through every call site would bury the argv.
+COMPARE_INPUT=""
+EXTRA_ENV=()
+
+# The lines an invocation is fed, each terminated. `set` reads two lines, so a
+# feed built with a command substitution would lose the trailing newline and
+# turn every comparison into the one about a confirmation that never arrived.
+with_input() { # <line>...
+  COMPARE_INPUT="$work/input"
+  : >"$COMPARE_INPUT"
+  local line
+  for line in "$@"; do printf '%s\n' "$line" >>"$COMPARE_INPUT"; done
+}
+
+# A feed with no terminating newline, which is how a stream that ends mid-value
+# is spelled.
+with_unterminated_input() { # <text>
+  COMPARE_INPUT="$work/input"
+  printf '%s' "$1" >"$COMPARE_INPUT"
+}
+
+no_input() { COMPARE_INPUT=""; }
+
+input_path() { printf '%s' "${COMPARE_INPUT:-/dev/null}"; }
+
+# The feed reaches both runtimes down a PIPE and never as a seekable file, and
+# that is a fixture decision with a finding behind it.
+#
+# `safix.sh` reads its two entries with `read ... </dev/stdin`, which re-opens
+# standard input for each read. Re-opening a pipe yields another handle on the
+# same stream, so the second read gets the second line; re-opening a regular file
+# yields a fresh description at offset zero, so the second read gets the FIRST
+# line again — the confirmation compares equal to the value whatever was typed on
+# the second line, and the double entry stops checking anything. A harness that
+# fed a file would be comparing the two runtimes over an oracle behaviour no
+# operator can reach, and would report the rust runtime's sequential read as the
+# divergence.
+#
+# A pipe is also the only non-terminal case an operator reaches, and it is how
+# this script's own fixture builder drives the oracle.
 
 fail() {
   printf 'differential[%s]: %s\n' "$mode" "$1" >&2
@@ -217,6 +280,9 @@ runtime_env() { # <repo> <tmpdir>
     "SAFIX_REPO_ROOT=$1"
     "SOPS_AGE_KEY_FILE=$work/keys.txt"
   )
+  if [ "${#EXTRA_ENV[@]}" -gt 0 ]; then
+    RUNTIME_ENV+=("${EXTRA_ENV[@]}")
+  fi
 }
 
 # Set one value through the shell runtime, which is what makes the fixture the
@@ -226,7 +292,7 @@ set_value() { # <user> <name> <value>
   runtime_env "$REPO" "$work/settmp"
   printf '%s\n%s\n' "$3" "$3" \
     | env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" set "$1" "$2" >/dev/null 2>&1 \
-    || fail "the oracle refused to set '$2' for $1 while building the fixture"
+    || fail "the oracle refused to set '\''$2'\'' for $1 while building the fixture"
 }
 
 seed_values() {
@@ -287,13 +353,19 @@ compare() { # <label> <argument>...
   cp -a "$REPO" "$sh/repo"
   cp -a "$REPO" "$rs/repo"
 
+  local input
+  input="$(input_path)"
+
   runtime_env "$sh/repo" "$sh/tmp"
   env "${RUNTIME_ENV[@]}" \
-    bash "$SAFIX_SH" "$@" >"$sh/out" 2>"$sh/err" || sh_status=$?
+    bash "$SAFIX_SH" "$@" < <(cat "$input") >"$sh/out" 2>"$sh/err" || sh_status=$?
   runtime_env "$rs/repo" "$rs/tmp"
   env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain \
-    "$SAFIX_RS" "$@" >"$rs/out" 2>"$rs/err" || rs_status=$?
+    "$SAFIX_RS" "$@" < <(cat "$input") >"$rs/out" 2>"$rs/err" || rs_status=$?
   rs_status_last="$rs_status"
+
+  normalize_run "$sh/repo" "$sh/out" "$sh/err"
+  normalize_run "$rs/repo" "$rs/out" "$rs/err"
 
   cmp -s "$sh/out" "$rs/out" || {
     printf '%s\n' '--- shell stdout ---' >&2
@@ -323,6 +395,8 @@ compare() { # <label> <argument>...
 
   residue_free "$sh/tmp" "shell" "$label"
   residue_free "$rs/tmp" "rust" "$label"
+  no_scratch_left "$sh/repo" "shell" "$label"
+  no_scratch_left "$rs/repo" "rust" "$label"
 
   reporter_changes_stderr_alone "$label" "$@"
 
@@ -346,7 +420,13 @@ reporter_changes_stderr_alone() { # <label> <argument>...
   mkdir -p "$fancy/tmp"
   cp -a "$REPO" "$fancy/repo"
   runtime_env "$fancy/repo" "$fancy/tmp"
-  env "${RUNTIME_ENV[@]}" "$SAFIX_RS" "$@" >"$fancy/out" 2>"$fancy/err" || status=$?
+  env "${RUNTIME_ENV[@]}" "$SAFIX_RS" "$@" < <(cat "$(input_path)") \
+    >"$fancy/out" 2>"$fancy/err" || status=$?
+  # Standard output alone: the graphical rendering of standard error is the one
+  # channel this harness does not compare — it is pinned by the command's own
+  # snapshots instead — and its line wrapping breaks a path across two lines,
+  # which a substitution over whole paths cannot see.
+  normalize_run "$fancy/repo" "$fancy/out"
 
   cmp -s "$plain/out" "$fancy/out" \
     || fail "selecting a reporter changed standard output for [$label]: safix $*"
@@ -373,7 +453,7 @@ expect_oracle() { # <label> <fragment> <argument>...
   mkdir -p "$dir/tmp"
   cp -a "$REPO" "$dir/repo"
   runtime_env "$dir/repo" "$dir/tmp"
-  env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" "$@" \
+  env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" "$@" < <(cat "$(input_path)") \
     >"$dir/out" 2>"$dir/err" || true
   grep -qF -- "$fragment" "$dir/out" "$dir/err" \
     || fail "the $label fixture drew no '$fragment' from the oracle, so comparing it is vacuous"
@@ -381,13 +461,98 @@ expect_oracle() { # <label> <fragment> <argument>...
 
 # Every value this fixture ever holds, so that a leak of any of them is caught
 # rather than only a leak of the one the invocation touched.
+VALUES=(
+  value-ana-alone value-api-token value-ana-ops-tooling value-ops-handover
+  value-team-vault value-bo-service value-bo-ops-tooling value-reset
+  value-orphan value-extra
+)
+
+grep_for_values() { # <path>...
+  local pattern=() value
+  for value in "${VALUES[@]}"; do pattern+=(-e "$value"); done
+  grep -rIl "${pattern[@]}" "$@" 2>/dev/null | grep -q .
+}
+
 residue_free() { # <dir> <side> <label>
   local dir="$1" side="$2" label="$3"
-  if grep -rIl -e 'value-ana-alone' -e 'value-api-token' -e 'value-ana-ops-tooling' \
-    -e 'value-ops-handover' -e 'value-team-vault' -e 'value-bo-service' \
-    -e 'value-bo-ops-tooling' "$dir" 2>/dev/null | grep -q .; then
+  if grep_for_values "$dir"; then
     fail "the $side runtime left a plaintext value in its temporary directory for [$label]"
   fi
+}
+
+# The one piece of residue the effect projection cannot catch on its own: a
+# candidate document left beside its target is a file both runtimes could leave,
+# and two repositories that both hold one compare equal. `set` names its
+# candidate after the target with the suffix below, so the tree is asked
+# directly.
+no_scratch_left() { # <repo> <side> <label>
+  if find "$1" -name '*safix-tmp*' -print -quit 2>/dev/null | grep -q .; then
+    fail "the $2 runtime left a candidate document beside its target for [$3]"
+  fi
+}
+
+# The one substitution this harness applies, and it carries its own proof.
+#
+# `set` prints the abbreviated object name of the commit it just made. Two
+# correct runs cannot print the same one: a value written now takes a fresh
+# initialization vector, so the two trees differ, so the two commits differ. What
+# is substituted is each side's OWN `git rev-parse --short HEAD`, so a runtime
+# that printed a hash which is not its repository's HEAD — a stale one, the other
+# side's, or one where the other side printed none — leaves something still
+# shaped like an object name behind, and that is a failure rather than a
+# normalization.
+# The second is the repository root. Each side is handed its own copy of the
+# fixture at its own path, so a message that names the repository — the marker of
+# an operation in progress, the file `fix` wrote — names two different absolute
+# paths for one reason that has nothing to do with the runtimes. Substituted per
+# side from that side's own root, and anything still naming a path inside this
+# harness's scratch directory afterwards is a runtime talking about somewhere
+# other than the repository it was given, which fails.
+normalize_run() { # <repo> <file>...
+  local repo="$1" head file
+  shift
+  head="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || true)"
+  for file in "$@"; do
+    [ -e "$file" ] || continue
+    sed -i "s|$repo|<repo>|g" "$file"
+    if [ -n "$head" ]; then
+      sed -i "s/$head/<head>/g" "$file"
+    fi
+    if grep -qE 'committed [0-9a-f]{4,}' "$file"; then
+      fail "a runtime named a commit that is not its own repository's HEAD, in $file"
+    fi
+    if grep -qF -- "$work/" "$file"; then
+      fail "a runtime named a path outside the repository it was given, in $file"
+    fi
+  done
+}
+
+# What `set` promises about the keys it did not name.
+#
+# sops reuses each unchanged value's original initialization vector, so every
+# other key in the file keeps byte-identical ciphertext; only the named key's
+# line, the message authentication code and `lastmodified` may move. Judged
+# against the fixture each side started from rather than across the two sides,
+# because the two sides necessarily differ on the key that WAS set — comparing
+# them there would compare sops' random number generator.
+bystanders_untouched() { # <repo> <side> <relpath> <key> <label>
+  local repo="$1" side="$2" rel="$3" key="$4" label="$5" line
+  [ -e "$REPO/$rel" ] || return 0
+  [ -e "$repo/$rel" ] || fail "the $side runtime removed $rel for [$label]"
+  while IFS= read -r line; do
+    case "$line" in
+      "< $key:"* | "> $key:"*) ;;
+      "< "*"mac: ENC["* | "> "*"mac: ENC["*) ;;
+      "< "*"lastmodified:"* | "> "*"lastmodified:"*) ;;
+      *) fail "the $side runtime disturbed a key it was not asked to set in $rel for [$label]: $line" ;;
+    esac
+  done < <(diff "$REPO/$rel" "$repo/$rel" | grep '^[<>]' || true)
+}
+
+# Both sides of the run just compared, held to the promise above.
+both_bystanders_untouched() { # <relpath> <key> <label>
+  bystanders_untouched "$work/run/sh/repo" shell "$1" "$2" "$3"
+  bystanders_untouched "$work/run/rs/repo" rust "$1" "$2" "$3"
 }
 
 # --- Fixture perturbations ---------------------------------------------------------
@@ -457,6 +622,22 @@ add_unruled_placement() {
   assert_attribute_order
 }
 
+# A placement in a directory no creation rule covers, whose file does not exist.
+# `set` there has to fail closed at creation rather than acquire a default
+# recipient set, and both runtimes have to say so in the same words.
+add_ungoverned_placement() {
+  jq '.cy["stray"] = { file: "secrets/elsewhere/notes.yaml", key: "stray",
+                       origin: "private", owner: "cy", shared: false, generator: null }' \
+    "$work/fixture/placements.json" | jq -S . >"$work/fixture/placements.tmp"
+  mv "$work/fixture/placements.tmp" "$work/fixture/placements.json"
+  assert_attribute_order
+}
+
+# The repository part-way through an operation a commit would disturb. The
+# marker's existence is the whole signal — `set` reads it and refuses before it
+# reaches the working tree — so an empty one is the honest fixture.
+mark_mid_merge() { : >"$REPO/.git/MERGE_HEAD"; }
+
 # `nix eval --json` emits every attribute set with its names sorted, and the two
 # runtimes read that order differently: the shell's `list` renders in the
 # document's own order, while its own refusals — and everything the rust runtime
@@ -491,6 +672,126 @@ compare_read_surface() { # <label-prefix>
   compare "$at/get-ana-alone" get ana ana-alone
   compare "$at/get-shared-from-bo" get bo ops-handover
   compare "$at/get-default-user" get team-vault
+}
+
+# `fix` is a convergence, and the claim is not that two runtimes print the same
+# thing — `compare` already judges that — but that either one, run once, leaves a
+# repository the drift report is then silent about. Asserted per side, because a
+# pair that converged to two different repositories would still have to be
+# caught, and then compared.
+converges() { # <label> <fix-argument>...
+  local label="$1" side dir status
+  shift
+  rm -rf "$work/converge"
+  for side in sh rs; do
+    dir="$work/converge/$side"
+    mkdir -p "$dir/tmp"
+    cp -a "$REPO" "$dir/repo"
+    runtime_env "$dir/repo" "$dir/tmp"
+    status=0
+    if [ "$side" = sh ]; then
+      env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" "$@" \
+        </dev/null >"$dir/fix.out" 2>"$dir/fix.err" || status=$?
+    else
+      env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" "$@" \
+        </dev/null >"$dir/fix.out" 2>"$dir/fix.err" || status=$?
+    fi
+    [ "$status" = 0 ] || {
+      cat "$dir/fix.err" >&2
+      fail "the $side runtime's [$label] exited $status"
+    }
+
+    status=0
+    if [ "$side" = sh ]; then
+      env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" check \
+        </dev/null >"$dir/check.out" 2>"$dir/check.err" || status=$?
+    else
+      env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" check \
+        </dev/null >"$dir/check.out" 2>"$dir/check.err" || status=$?
+    fi
+    [ "$status" = 0 ] || {
+      cat "$dir/check.err" >&2
+      fail "the $side runtime's [$label] did not converge: check still reports drift"
+    }
+    no_scratch_left "$dir/repo" "$side" "$label"
+    project "$dir/repo" >"$dir/projection"
+  done
+  cmp -s "$work/converge/sh/projection" "$work/converge/rs/projection" \
+    || {
+      diff -u "$work/converge/sh/projection" "$work/converge/rs/projection" >&2 || true
+      fail "the two runtimes converged to different repositories for [$label]"
+    }
+  COMPARED=$((COMPARED + 1))
+  note "[$label] both runtimes converged, and check is silent about both"
+}
+
+# A divergence this harness records rather than reconciles.
+#
+# `safix.sh` drives its re-wrap loop with `done < <(jq -r '.managed[]' ...)`,
+# which makes the loop's standard input the pipe carrying the governed file
+# names — and `sops updatekeys`, run inside that loop, inherits it. Without
+# `--yes` sops therefore reads its confirmation from that pipe rather than from
+# the operator: the answer to the prompt for one file is the NAME of the next
+# file, which is never `y`, and the list is consumed by the answers instead of by
+# the loop. Interactive `fix` in the shell runtime never reaches a terminal, so
+# it can neither be confirmed nor declined on purpose.
+#
+# The rust runtime hands sops the run's own standard input, so the prompt is
+# answerable. The difference is not reconcilable in the rust runtime's favour or
+# against it: reproducing the oracle would mean reproducing a prompt nobody can
+# answer, and a re-wrap is not something to leave unanswerable.
+#
+# So the divergence is pinned rather than compared. What both runtimes must still
+# agree on is the outcome that matters — with no answer available, neither
+# re-wraps anything and both refuse — and the shape of the difference is asserted
+# so that an oracle which later stops stealing its own file list fails here and
+# is looked at again.
+interactive_fix_diverges() {
+  local side dir status prompts
+  rm -rf "$work/interactive"
+  declare -A seen_prompts=()
+  for side in sh rs; do
+    dir="$work/interactive/$side"
+    mkdir -p "$dir/tmp"
+    cp -a "$REPO" "$dir/repo"
+    runtime_env "$dir/repo" "$dir/tmp"
+    status=0
+    if [ "$side" = sh ]; then
+      env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" fix \
+        < <(cat /dev/null) >"$dir/out" 2>"$dir/err" || status=$?
+    else
+      env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" fix \
+        < <(cat /dev/null) >"$dir/out" 2>"$dir/err" || status=$?
+    fi
+    [ "$status" != 0 ] \
+      || fail "the $side runtime's interactive fix succeeded with no answer available"
+
+    prompts="$(grep -o 'Is this okay' "$dir/out" | grep -c . || true)"
+    seen_prompts[$side]="$prompts"
+
+    recipients_unchanged "$dir/repo" "$side"
+    no_scratch_left "$dir/repo" "$side" converge/fix-interactive
+  done
+
+  [ "${seen_prompts[sh]}" -gt 1 ] \
+    || fail "the oracle no longer answers its own prompt from its file list; re-examine the divergence"
+  [ "${seen_prompts[rs]}" = 1 ] \
+    || fail "the rust runtime prompted ${seen_prompts[rs]} times for one file"
+  COMPARED=$((COMPARED + 1))
+  note "[converge/fix-interactive] divergence pinned: the oracle prompted ${seen_prompts[sh]} times over a stdin carrying no answer, the rust runtime once; neither re-wrapped anything"
+}
+
+# Every governed file still wrapped for exactly the recipients it was wrapped for
+# before the run, which is what "nothing was re-wrapped" means.
+recipients_unchanged() { # <repo> <side>
+  local repo="$1" side="$2" file before after
+  while IFS= read -r file; do
+    [ -e "$REPO/$file" ] || continue
+    before="$(sops-recipients-of "$REPO/$file" "$work/empty.json" | jq -c '.actual')"
+    after="$(sops-recipients-of "$repo/$file" "$work/empty.json" | jq -c '.actual')"
+    [ "$before" = "$after" ] \
+      || fail "the $side runtime re-wrapped $file without an answer to its confirmation"
+  done < <(governed_paths)
 }
 
 prepare() {
@@ -581,6 +882,143 @@ case "$mode" in
     expect_oracle norule 'which is not a *.yaml path' get bo bad-path
     compare_read_surface norule
     compare norule/get-unruled get bo bad-path
+    ;;
+
+  # The write path that lands: a value replaced in a file that exists, a value
+  # re-entered unchanged, a file created through the creation rules, and the
+  # default user resolving to the one the environment names. A staged change to
+  # a path `set` does not name sits in the index throughout, because surviving
+  # there — staged, and not swept into a commit whose message names one secret —
+  # is part of what `set` promises.
+  write)
+    prepare
+    set_value ana ana-alone value-ana-alone
+    set_value ana api-token value-api-token
+    set_value ana ops-tooling value-ana-ops-tooling
+    set_value ana ops-handover value-ops-handover
+    set_value ana team-vault value-team-vault
+    printf 'a note nobody asked for\n' >"$REPO/notes.md"
+    git -C "$REPO" add -- notes.md
+
+    with_input value-reset value-reset
+    expect_oracle write 'committed' set ana ana-alone
+    compare write/set-existing set ana ana-alone
+    both_bystanders_untouched "$ANA_FILE" ana_alone write/set-existing
+
+    with_input value-ana-ops-tooling value-ana-ops-tooling
+    expect_oracle write 'unchanged — the file already holds this value' set ana ops-tooling
+    compare write/set-idempotent set ana ops-tooling
+    both_bystanders_untouched "$ANA_FILE" ops_tooling write/set-idempotent
+
+    with_input value-bo-service value-bo-service
+    expect_oracle write 'does not exist yet; creating it through sops' set bo bo-service
+    compare write/set-new-file set bo bo-service
+
+    with_input value-team-vault value-team-vault
+    compare write/set-default-user set team-vault
+    both_bystanders_untouched "$SHARED_FILE" team-vault write/set-default-user
+
+    no_input
+    compare write/help-set set -h
+    compare write/help-fix fix -h
+    ;;
+
+  # Everything `set` refuses about how it was asked, and about what was typed.
+  # Nothing here perturbs the fixture: these are the refusals a correct
+  # repository still produces.
+  refuse)
+    prepare
+    seed_values
+
+    no_input
+    expect_oracle refuse 'is not a declared user of flake.safix.users.' set dee ana-alone
+    compare refuse/unknown-user set dee ana-alone
+    compare refuse/unknown-name set ana no-such-secret
+    compare refuse/usage-none set
+    compare refuse/usage-many set ana bo cy
+    compare refuse/usage-fix fix --no
+    compare refuse/usage-fix-many fix --yes --yes
+
+    with_input "" ""
+    expect_oracle refuse 'the value is empty' set ana ana-alone
+    compare refuse/empty-value set ana ana-alone
+
+    with_input one two
+    expect_oracle refuse 'the two entries differ' set ana ana-alone
+    compare refuse/entries-differ set ana ana-alone
+
+    with_input
+    expect_oracle refuse 'no value read' set ana ana-alone
+    compare refuse/no-value-read set ana ana-alone
+
+    with_unterminated_input 'half a value'
+    expect_oracle refuse 'no value read' set ana ana-alone
+    compare refuse/unterminated-value set ana ana-alone
+
+    with_input one
+    expect_oracle refuse 'no confirmation read' set ana ana-alone
+    compare refuse/no-confirmation-read set ana ana-alone
+    ;;
+
+  # The four states a write is refused in because of what the repository or the
+  # declarations are, rather than because of what was typed. Each is arranged in
+  # turn and the earlier ones are left in place, so the order is the order in
+  # which they stop being reachable: drift on ana's file, then an uncommitted
+  # change to bo's, then two placements no rule can serve, then a merge in
+  # progress, which refuses everything after it.
+  guard)
+    prepare
+    seed_values
+
+    drift_recipients "$ANA_FILE" ana cy
+    with_input value-reset value-reset
+    expect_oracle guard 'is not encrypted to the audience declared for it.' set ana ana-alone
+    compare guard/recipient-drift set ana ana-alone
+
+    printf '# an edit sops did not make\n' >>"$REPO/$BO_FILE"
+    with_input value-reset value-reset
+    expect_oracle guard 'already has uncommitted changes' set bo bo-service
+    compare guard/uncommitted-changes set bo bo-service
+
+    add_unruled_placement
+    with_input value-reset value-reset
+    expect_oracle guard 'which is not a *.yaml path' set bo bad-path
+    compare guard/not-a-yaml-path set bo bad-path
+
+    add_ungoverned_placement
+    with_input value-reset value-reset
+    expect_oracle guard 'has no creation rule for' set cy stray
+    compare guard/no-creation-rule set cy stray
+
+    mark_mid_merge
+    with_input value-reset value-reset
+    expect_oracle guard 'Finish or abort it before setting a secret.' set ana ana-alone
+    compare guard/mid-merge set ana ana-alone
+    ;;
+
+  # `fix`, over a fixture that has drifted in both directions at once. Compared
+  # as an invocation, and then asserted as a convergence: run once, `check` has
+  # nothing left to report. Both bounds of the re-wrap fan-out are exercised,
+  # because the bound is what decides whether sops holds the operator's own
+  # streams or a pipe.
+  converge)
+    prepare
+    seed_values
+    drift_recipients "$ANA_FILE" ana cy
+
+    no_input
+    expect_oracle converge 'sops updatekeys' fix --yes
+    expect_oracle converge 'It does not revoke' fix --yes
+
+    compare converge/fix-yes fix --yes
+    converges converge/fix-yes fix --yes
+
+    EXTRA_ENV=("SAFIX_FIX_CONCURRENCY=1")
+    compare converge/fix-yes-serial fix --yes
+    converges converge/fix-yes-serial fix --yes
+    EXTRA_ENV=()
+
+    interactive_fix_diverges
     ;;
 
   # The harness is not trusted until it has been shown to fail. Each drill puts

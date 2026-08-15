@@ -78,8 +78,9 @@ fn open_source() -> Source {
 /// One line, prompted and unechoed on a terminal, silent on anything else.
 ///
 /// The blank line after it is written whether or not there was a prompt, and
-/// whether or not the read produced a value: the shell runtime writes it
-/// immediately after `read` returns, before it decides what the return meant.
+/// only when a line arrived. The shell runtime spells that as
+/// `read ... || die "no value read"` with the `printf` on the line after, so a
+/// stream that ended mid-value ends the run before the newline is reached.
 fn one_line(source: &mut Source, prompt: &str) -> Result<Option<Secret>> {
     let read = match source {
         Source::Terminal(terminal) => {
@@ -94,7 +95,9 @@ fn one_line(source: &mut Source, prompt: &str) -> Result<Option<Secret>> {
         }
         Source::Stdin => Secret::read_line_from(&mut io::stdin().lock()),
     };
-    eprintln!();
+    if matches!(read, Ok(Some(_))) {
+        eprintln!();
+    }
     read
 }
 
