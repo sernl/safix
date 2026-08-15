@@ -158,24 +158,223 @@ pub fn plain_selected() -> bool {
     std::env::var(FORMAT_VARIABLE).is_ok_and(|value| value == PLAIN)
 }
 
-/// Write a refusal in the shell runtime's shape.
+/// A refusal in the shell runtime's shape.
 ///
 /// The message's own newlines are its continuation lines, indented as the shell
 /// indents them, so one `safix: ` prefix covers the whole paragraph.
+#[must_use]
+pub fn render_plain(message: &dyn Display) -> String {
+    format!("{PROGRAM}: {message}\n")
+}
+
+/// Write a refusal in the shell runtime's shape.
 pub fn report_plain(message: &dyn Display) {
-    eprintln!("{PROGRAM}: {message}");
+    eprint!("{}", render_plain(message));
+}
+
+/// A refusal rendered graphically: the diagnostic code, the message, and the
+/// help that names the way out.
+///
+/// Rendered through a handler built here rather than through `miette`'s
+/// installed hook, and the reason is that the hook is not a function of the
+/// refusal. It takes colour from whether standard error is a terminal and from
+/// half a dozen environment variables, and width from the terminal, so the same
+/// refusal renders differently in a shell, in a build sandbox and in a log —
+/// which would make a snapshot of it a statement about the machine that took
+/// it.
+///
+/// The cost is colour, and it is worth paying here. These refusals are
+/// paragraphs rather than annotated source spans, so colour carries little that
+/// the structure does not; and this is the one channel the differential harness
+/// cannot compare against the shell runtime, so being able to pin it against
+/// itself is what keeps it from being unchecked.
+#[must_use]
+pub fn render_graphical(refusal: &Refusal) -> String {
+    let mut rendered = String::new();
+    let handler =
+        miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+            .with_width(80);
+    if handler.render_report(&mut rendered, refusal).is_err() {
+        // Writing into a `String` cannot fail for want of space, so this is
+        // reached only if the handler itself errors — and a refusal that cannot
+        // be rendered still has to reach the operator.
+        return render_plain(refusal);
+    }
+    rendered
 }
 
 /// Write a refusal graphically.
-pub fn report_graphical(refusal: Refusal) {
-    eprint!("{:?}", miette::Report::new(refusal));
+pub fn report_graphical(refusal: &Refusal) {
+    eprint!("{}", render_graphical(refusal));
 }
 
 /// Write a refusal in whichever shape the environment selected.
-pub fn report(refusal: Refusal) {
+pub fn report(refusal: &Refusal) {
     if plain_selected() {
-        report_plain(&refusal);
+        report_plain(refusal);
     } else {
         report_graphical(refusal);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use safix_core::Error;
+
+    use super::*;
+
+    /// One value of every refusal the read paths can produce, so that adding a
+    /// variant without a snapshot is a test that does not exist rather than one
+    /// that silently passes.
+    fn every_refusal() -> Vec<(&'static str, Refusal)> {
+        let mut all = runtime_refusals();
+        all.extend(command_refusals());
+        all
+    }
+
+    /// The library's refusals, which an embedder also receives.
+    fn runtime_refusals() -> Vec<(&'static str, Refusal)> {
+        vec![
+            (
+                "not_a_repository",
+                Refusal::Runtime(Error::NotInsideRepository),
+            ),
+            (
+                "nix_eval_failed",
+                Refusal::Runtime(Error::NixEvalFailed {
+                    attribute: "flake.safix.lib.placements",
+                    root: "/srv/fleet".into(),
+                    cause: None,
+                }),
+            ),
+            (
+                "nix_schema_mismatch",
+                Refusal::Runtime(Error::NixSchemaMismatch {
+                    attribute: "flake.safix.lib.placements",
+                    cause: "unknown field `mode`".into(),
+                }),
+            ),
+            (
+                "unknown_user",
+                Refusal::Runtime(Error::UnknownUser {
+                    user: "dee".into(),
+                    declared: vec!["ana".into(), "bo".into(), "cy".into()],
+                }),
+            ),
+            (
+                "unknown_name",
+                Refusal::Runtime(Error::UnknownName {
+                    user: "ana".into(),
+                    name: "no-such-secret".into(),
+                    held: vec!["ana-alone".into(), "team-vault".into()],
+                }),
+            ),
+            (
+                "no_file_for_name",
+                Refusal::Runtime(Error::NoFileForName {
+                    name: "ana-alone".into(),
+                }),
+            ),
+            (
+                "not_a_yaml_path",
+                Refusal::Runtime(Error::NotAYamlPath {
+                    name: "bad-path".into(),
+                    file: "secrets/safix/users/bo/notes.txt".into(),
+                }),
+            ),
+            (
+                "no_default_user",
+                Refusal::Runtime(Error::NoDefaultUser {
+                    login: "builder".into(),
+                    holders: 2,
+                }),
+            ),
+            (
+                "no_value_yet",
+                Refusal::Runtime(Error::NoValueYet {
+                    file: "secrets/safix/users/bo/secrets.yaml".into(),
+                    name: "bo-service".into(),
+                    user: "bo".into(),
+                }),
+            ),
+            (
+                "recipients_unreadable",
+                Refusal::Runtime(Error::RecipientsUnreadable {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    cause: Box::new(Error::SopsStanzaUnreadable),
+                }),
+            ),
+            (
+                "mid_operation",
+                Refusal::Runtime(Error::MidOperation {
+                    state: "rebase-merge",
+                    marker: "/srv/fleet/.git/rebase-merge".into(),
+                }),
+            ),
+            (
+                "conflict_entries",
+                Refusal::Runtime(Error::ConflictEntries {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                }),
+            ),
+            (
+                "uncommitted_changes",
+                Refusal::Runtime(Error::UncommittedChanges {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    status: " M secrets/safix/users/ana/secrets.yaml".into(),
+                }),
+            ),
+            (
+                "secret_unreadable",
+                Refusal::Runtime(Error::SecretRead {
+                    cause: io::Error::from(io::ErrorKind::UnexpectedEof),
+                }),
+            ),
+        ]
+    }
+
+    /// The command's own, about how it was invoked.
+    fn command_refusals() -> Vec<(&'static str, Refusal)> {
+        vec![
+            (
+                "usage",
+                Refusal::Usage {
+                    form: "list [<user>]",
+                },
+            ),
+            (
+                "unknown_subcommand",
+                Refusal::UnknownSubcommand {
+                    subcommand: "rotate".into(),
+                },
+            ),
+            (
+                "not_ported",
+                Refusal::NotPorted {
+                    subcommand: "set".into(),
+                },
+            ),
+        ]
+    }
+
+    /// The graphical rendering is the one channel the differential harness does
+    /// not compare against the shell runtime, so it is pinned against itself.
+    ///
+    /// Both renderings are the functions the command prints through, so what is
+    /// held here is what is written, not a third rendering made for the test.
+    #[test]
+    fn every_refusal_renders_the_same_under_both_reporters() {
+        for (name, refusal) in every_refusal() {
+            insta::assert_snapshot!(format!("plain-{name}"), render_plain(&refusal));
+            insta::assert_snapshot!(format!("graphical-{name}"), render_graphical(&refusal));
+        }
+    }
+
+    #[test]
+    fn the_plain_reporter_is_selected_only_by_its_own_value() {
+        assert_eq!(FORMAT_VARIABLE, "SAFIX_ERROR_FORMAT");
+        assert_eq!(PLAIN, "plain");
     }
 }

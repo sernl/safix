@@ -22,5 +22,12 @@ thiserror.workspace = true
 # takes none of this.
 miette = { workspace = true, features = ["fancy"] }
 
+[dev-dependencies]
+# The graphical rendering of every refusal is held by a snapshot. It is the one
+# channel the differential harness does not compare against the shell runtime,
+# so it is pinned against itself instead.
+insta.workspace = true
+proptest.workspace = true
+
 [lints]
 workspace = true

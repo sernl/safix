@@ -141,6 +141,40 @@ The reason is specific to this crate rather than general hygiene: a panic in a r
 Denying the panicking constructions in the library keeps every failure a `Result` the caller can render, which is what D4 requires to be true for an embedder as well as for the command.
 The command crate is permitted `expect` in `main` alone, where the alternative is unreachable code.
 
+### D11. What the read-path gate found, and what it deliberately does not hold
+
+The first stage to run the harness is the read paths — `list`, `get` and `check`.
+Seven checks compare them: six fixtures, and the drills that keep those honest.
+Every compared invocation agreed on all four channels, so the list below is not a list of failures; it is the list of places where the two runtimes are known to be able to differ and the harness is the reason we know.
+
+The shell's `list` renders in the placement document's own key order, and every other ordering in either runtime is sorted.
+`jq`'s `to_entries` preserves the document's order while `keys` sorts, so the shell's table and the shell's own `refuse_unknown_name` disagree about ordering on any input where the two differ; the rust runtime reads placements into an ordered map and so always sorts.
+Over `nix eval --json` they coincide, because nix emits every attribute set with its names sorted — which makes this a property of the producer rather than of either runtime, and one a fixture could break without either being wrong.
+The harness therefore asserts its own fixture is in nix's order before comparing anything against it.
+This was found by the harness rather than by reading: a perturbation appended a placement, and the comparison failed on standard output.
+
+`check`'s probes are not a subprocess fan-out in the rust runtime, so D5's second concurrency site does not exist on this path.
+The shell shells out to `sops-keys-of` and `sops-recipients-of` once per file per question; the rust readers are in-process, and the report's finding order is part of its compared output.
+`check` is therefore sequential here, and adding concurrency to it later would be a change to what is compared, not an optimisation under it.
+`SAFIX_RECIPIENTS_OF` and `SAFIX_KEYS_OF` accordingly have no rust counterpart, while `SAFIX_GIT`, `SAFIX_SOPS`, `SAFIX_NIX` and `SAFIX_REPO_ROOT` do.
+
+A governed path holding something that is not a YAML document is reported by neither runtime's key reader.
+In the shell this is a swallow rather than a decision: the reader runs inside a pipeline whose failure becomes a false answer to "does this hold a value", and inside a process substitution whose failure ends the loop over keys.
+The rust runtime matches it deliberately and says so where it does.
+The blind spot is bounded: the recipient half of the report reads the same file and does speak about it, because a document with no `sops` block reports the sentinel rather than failing.
+
+The rust runtime has one refusal the shell has no counterpart for.
+Every schema read from the nix half denies unknown fields, so a field added there reaches `NixSchemaMismatch`; the shell reads the same JSON through `jq` expressions that select what they know and ignore the rest.
+This is the coupling the schema types exist to create, and it is a refusal the harness cannot compare because no fixture can produce it from both sides at once.
+
+The `list` table is aligned by character count, where `column -t` aligns by display width.
+Every field but one is a name, a path or a key drawn from the resolver's alphabet; the exception is a generator's description, which is free text, and that is where the two would part company over an east-asian or combining character.
+Closing it means a display-width table, and the gap is recorded rather than papered over because the fixture fleet is ASCII and a green harness would otherwise be read as evidence about a case it never ran.
+
+Finally, the general usage text is not ported in this stage.
+The shell's `usage` lists eight subcommands and this binary implements three, so reproducing it would advertise five it refuses; a bare invocation of `safix-rs` names the three it has, and `safix-rs set` refuses rather than approximating.
+The harness compares the help of the three ported subcommands and does not compare the general usage, and that exclusion ends when the last subcommand lands.
+
 ## Risks / Trade-offs
 
 The rewrite runs beside the shell runtime for its whole duration, so the two can drift while both are live.
@@ -158,7 +192,9 @@ That is a real risk of behavioural difference in the metadata-reading path, and 
 ## Migration Plan
 
 Stage 1 is this change's scaffold: the workspace, the toolchain pin, the lint and dependency posture, the crane wiring, and the `Secret` type with its construction rule and its compile-time absence probes.
-Later stages port the read paths, then the write paths, then the generator DAG, each behind its own differential gate, and the shell runtime is retired only when the last gate closes.
+Stage 2 is the read paths — the placement resolution behind `list`, the decryption behind `get`, and the four-part report behind `check` — together with the schemas that read the nix half, the sops and git drivers, and the first real use of the differential harness.
+Its findings are D11.
+Later stages port the write paths and then the generator DAG, each behind its own gate, and the shell runtime is retired only when the last gate closes.
 No stage moves `packages.safix`.
 
 ## Open Questions

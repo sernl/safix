@@ -310,3 +310,77 @@ mod tests {
         assert_eq!(found.orphaned, ["age1stray"]);
     }
 }
+
+/// The character the nix half joins a shared audience's members with when it
+/// names their directory.
+///
+/// Not used to build anything here — the directory arrives already built, in
+/// [`Audience::dir`]. It is named because [`Audiences::covering_dir`] resolves a
+/// file to an audience *by* that directory, which is sound only while the join
+/// is injective, and the property test below is where this crate states the
+/// assumption it is relying on rather than inheriting it silently.
+pub const AUDIENCE_SEPARATOR: &str = ",";
+
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+
+    use super::AUDIENCE_SEPARATOR;
+
+    /// The alphabet `resolve.nix` admits a user, anchor or secret name from.
+    const NAME: &str = "[a-z0-9][a-z0-9_-]{0,7}";
+
+    /// How a shared audience's directory is named: its members, sorted, joined.
+    fn directory_of(audience: &[String], separator: &str) -> String {
+        let mut sorted = audience.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        sorted.join(separator)
+    }
+
+    proptest! {
+        /// Two distinct audiences never reach one directory.
+        ///
+        /// This is what `covering_dir` needs to be true: a file with no audience
+        /// of its own is held to the rule covering its directory, and two
+        /// audiences sharing a directory would be one rule over two audiences'
+        /// secrets — a wider readership than either was declared with.
+        #[test]
+        fn distinct_audiences_reach_distinct_directories(
+            left in proptest::collection::vec(NAME, 1..4),
+            right in proptest::collection::vec(NAME, 1..4),
+        ) {
+            let mut left_set = left.clone();
+            left_set.sort();
+            left_set.dedup();
+            let mut right_set = right.clone();
+            right_set.sort();
+            right_set.dedup();
+
+            let collides = directory_of(&left, AUDIENCE_SEPARATOR)
+                == directory_of(&right, AUDIENCE_SEPARATOR);
+            prop_assert_eq!(collides, left_set == right_set);
+        }
+
+    }
+
+    /// The separator is what makes the property above true, not the names.
+    ///
+    /// A separator drawn from the alphabet a name is drawn from is forgeable
+    /// across an element boundary: two audiences that share no member list reach
+    /// one directory, because the character that was supposed to separate them
+    /// can sit inside a name. That is why `resolve.nix` chooses a separator
+    /// outside the alphabet rather than refusing names that contain the chosen
+    /// one — no refusal restores injectivity once the character is forgeable.
+    #[test]
+    fn a_separator_inside_the_alphabet_is_forgeable_across_an_element_boundary() {
+        let pair = ["ana".to_owned(), "bo-cy".to_owned()];
+        let other = ["ana-bo".to_owned(), "cy".to_owned()];
+
+        assert_eq!(directory_of(&pair, "-"), directory_of(&other, "-"));
+        assert_ne!(
+            directory_of(&pair, AUDIENCE_SEPARATOR),
+            directory_of(&other, AUDIENCE_SEPARATOR)
+        );
+    }
+}

@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_file_for_name
+
+  × the declarations resolved no file for 'ana-alone'

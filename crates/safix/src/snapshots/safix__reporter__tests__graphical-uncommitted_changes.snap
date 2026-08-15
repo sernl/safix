@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::uncommitted_changes
+
+  × secrets/safix/users/ana/secrets.yaml already has uncommitted changes:
+  │ 
+  │  M secrets/safix/users/ana/secrets.yaml
+  │ 
+  │ This commits the file it writes, so committing it now would carry that
+  │ change under a message naming only one secret. Commit or discard it
+  │ first, then re-run.

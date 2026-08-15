@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: could not evaluate flake.safix.lib.placements in /srv/fleet

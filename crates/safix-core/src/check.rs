@@ -440,3 +440,32 @@ mod tests {
         assert_eq!(parent_of("/secrets.yaml"), "/");
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+
+    use super::parent_of;
+
+    proptest! {
+        /// A file placed in a directory has that directory as its parent, which
+        /// is the whole of what the extra-governed-file lookup asks of it: the
+        /// directory it computes is matched against an audience's own `dir`, and
+        /// a parent that disagreed by a separator would report every consumer
+        /// file as covered by no rule.
+        #[test]
+        fn a_placed_file_has_the_directory_it_was_placed_in(
+            directory in "[a-z][a-z0-9/,_-]{0,20}[a-z0-9]",
+            name in "[a-z][a-z0-9._-]{0,10}",
+        ) {
+            prop_assert_eq!(parent_of(&format!("{directory}/{name}")), directory);
+        }
+
+        /// A path with no separator is at the root, and reports the directory
+        /// `dirname` reports for it.
+        #[test]
+        fn a_bare_name_is_at_the_current_directory(name in "[a-z][a-z0-9._-]{0,10}") {
+            prop_assert_eq!(parent_of(&name), ".");
+        }
+    }
+}

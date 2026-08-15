@@ -26,10 +26,19 @@
       craneLib = inputs.crane.mkLib pkgs;
 
       common = {
-        # `cleanCargoSource` keeps rust sources and every `.toml`, so
+        # `filterCargoSources` keeps rust sources and every `.toml`, so
         # `deny.toml`, `clippy.toml` and `rustfmt.toml` reach the sandbox while
-        # the nix modules, the README and the openspec tree do not.
-        src = craneLib.cleanCargoSource ../..;
+        # the nix modules, the README and the openspec tree do not. The `.snap`
+        # files are added to it because the refusal snapshots are the test's
+        # expected values: without them `safix-rs-test` runs against no
+        # expectation and passes by writing one, which is a green check over an
+        # assertion nobody made.
+        src = pkgs.lib.cleanSourceWith {
+          src = ../..;
+          name = "source";
+          filter =
+            path: type: (builtins.match ".*\\.snap$" path != null) || (craneLib.filterCargoSources path type);
+        };
 
         # Named here rather than read from the root manifest, which is a virtual
         # workspace and carries no package to read a name from.

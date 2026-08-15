@@ -1,0 +1,11 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::nix_schema_mismatch
+
+  × flake.safix.lib.placements evaluated to a shape this runtime does not
+  │ read: unknown field `mode`
+  help: the nix half declares a field this runtime does not read. Both halves
+        ship from one repository, so this is a version skew between them
+        rather than a configuration error.

@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_default_user
+
+  × no default user: 'builder' is not declared in flake.safix.users, and the
+  │ declarations name 2 holders. Name one: safix <subcommand> <user> <name>

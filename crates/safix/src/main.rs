@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     match run(&arguments) {
         Ok(code) => code,
         Err(refusal) => {
-            reporter::report(refusal);
+            reporter::report(&refusal);
             ExitCode::from(1)
         }
     }

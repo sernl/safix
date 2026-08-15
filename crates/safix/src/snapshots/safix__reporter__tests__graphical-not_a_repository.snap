@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::not_a_repository
+
+  × not inside a git repository
+  help: run this inside the repository holding the declarations, or set
+        SAFIX_REPO_ROOT.

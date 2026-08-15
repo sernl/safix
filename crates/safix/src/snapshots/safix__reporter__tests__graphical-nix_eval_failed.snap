@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::nix_eval_failed
+
+  × could not evaluate flake.safix.lib.placements in /srv/fleet
+  help: nix has already said why on its own standard error, above this.

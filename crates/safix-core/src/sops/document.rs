@@ -244,3 +244,64 @@ sops:
         assert!(drift(&["age1a".into()], &["age1a".into()]).is_empty());
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use std::collections::BTreeSet;
+
+    use proptest::prelude::*;
+
+    use super::{drift, is_empty_ciphertext};
+
+    const KEY: &str = "age1[a-z0-9]{0,12}";
+
+    proptest! {
+        /// Drift is the two-way set difference, and it is symmetric under
+        /// swapping the sides: what one call reports as extra the mirrored call
+        /// reports as missing. A report that named the same key on both sides
+        /// would be telling an operator to add and remove one recipient.
+        #[test]
+        fn drift_is_the_two_way_difference_and_mirrors_under_a_swap(
+            actual in proptest::collection::vec(KEY, 0..6),
+            declared in proptest::collection::vec(KEY, 0..6),
+        ) {
+            let found = drift(&actual, &declared);
+            let mirrored = drift(&declared, &actual);
+            prop_assert_eq!(&found.extra, &mirrored.missing);
+            prop_assert_eq!(&found.missing, &mirrored.extra);
+
+            let extra: BTreeSet<&String> = found.extra.iter().collect();
+            let missing: BTreeSet<&String> = found.missing.iter().collect();
+            prop_assert!(extra.intersection(&missing).next().is_none());
+
+            let mut sorted = found.extra.clone();
+            sorted.sort();
+            sorted.dedup();
+            prop_assert_eq!(&sorted, &found.extra);
+        }
+
+        /// Two sides holding the same keys never drift, whatever order or
+        /// repetition they arrive in: the report is about sets, and a recipient
+        /// listed twice is one recipient.
+        #[test]
+        fn one_set_never_drifts_from_itself(keys in proptest::collection::vec(KEY, 0..6)) {
+            let mut shuffled = keys.clone();
+            shuffled.reverse();
+            shuffled.extend(keys.clone());
+            prop_assert!(drift(&keys, &shuffled).is_empty());
+        }
+
+        /// The envelope test accepts exactly what the python reader's anchored
+        /// pattern accepts, stated here against an independently written
+        /// predicate rather than against the implementation restated.
+        #[test]
+        fn the_empty_envelope_test_matches_an_independent_reading(
+            algorithm in "[A-Z0-9_]{0,8}",
+            data in "[a-zA-Z0-9]{0,6}",
+        ) {
+            let value = format!("ENC[{algorithm},data:{data},iv:x,tag:y,type:str]");
+            let expected = !algorithm.is_empty() && data.is_empty();
+            prop_assert_eq!(is_empty_ciphertext(&value), expected);
+        }
+    }
+}

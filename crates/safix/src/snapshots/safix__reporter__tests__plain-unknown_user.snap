@@ -1,0 +1,10 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'dee' is not a declared user of flake.safix.users.
+
+Declared users:
+  - ana
+  - bo
+  - cy

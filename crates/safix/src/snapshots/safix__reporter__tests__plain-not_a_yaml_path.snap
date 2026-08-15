@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the declarations place 'bad-path' at secrets/safix/users/bo/notes.txt, which is not a *.yaml path; every .sops.yaml creation rule ends in \.yaml$, so no rule covers it

@@ -81,3 +81,61 @@ mod tests {
         assert_eq!(aligned(&[row(&["one line"])]), "one line\n");
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+
+    use super::aligned;
+
+    /// Cells with no space in them, so that a rendered row can be split back
+    /// into its cells and the reconstruction is a statement about the alignment
+    /// rather than about the cells.
+    const CELL: &str = "[a-zA-Z0-9._/,-]{1,12}";
+
+    proptest! {
+        /// Every cell survives, in order, and nothing else is added.
+        #[test]
+        fn a_row_reads_back_as_the_cells_it_was_given(
+            rows in proptest::collection::vec(
+                proptest::collection::vec(CELL, 1..7), 1..7),
+        ) {
+            let rendered = aligned(&rows);
+            let read_back: Vec<Vec<String>> = rendered
+                .lines()
+                .map(|line| line.split_whitespace().map(str::to_owned).collect())
+                .collect();
+            prop_assert_eq!(read_back, rows);
+        }
+
+        /// Every row starts each column it has at the same offset, which is what
+        /// makes the output a table rather than a list of padded strings.
+        #[test]
+        fn every_column_starts_at_one_offset_across_the_rows(
+            rows in proptest::collection::vec(
+                proptest::collection::vec(CELL, 3..4), 1..7),
+        ) {
+            let rendered = aligned(&rows);
+            let offsets: Vec<Vec<usize>> = rendered
+                .lines()
+                .map(|line| {
+                    let mut at = Vec::new();
+                    let mut in_cell = false;
+                    for (index, character) in line.chars().enumerate() {
+                        if character == ' ' {
+                            in_cell = false;
+                        } else if !in_cell {
+                            in_cell = true;
+                            at.push(index);
+                        }
+                    }
+                    at
+                })
+                .collect();
+            let first = offsets.first().cloned().unwrap_or_default();
+            for row in &offsets {
+                prop_assert_eq!(row, &first);
+            }
+        }
+    }
+}

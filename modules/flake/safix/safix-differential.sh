@@ -275,6 +275,7 @@ governed_paths() { jq -r '.managed[]' "$work/fixture/governed.json"; }
 
 # --- The comparison ---------------------------------------------------------------
 COMPARED=0
+rs_status_last=0
 
 compare() { # <label> <argument>...
   local label="$1"
@@ -292,6 +293,7 @@ compare() { # <label> <argument>...
   runtime_env "$rs/repo" "$rs/tmp"
   env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain \
     "$SAFIX_RS" "$@" >"$rs/out" 2>"$rs/err" || rs_status=$?
+  rs_status_last="$rs_status"
 
   cmp -s "$sh/out" "$rs/out" || {
     printf '%s\n' '--- shell stdout ---' >&2
@@ -322,7 +324,37 @@ compare() { # <label> <argument>...
   residue_free "$sh/tmp" "shell" "$label"
   residue_free "$rs/tmp" "rust" "$label"
 
+  reporter_changes_stderr_alone "$label" "$@"
+
   COMPARED=$((COMPARED + 1))
+}
+
+# Selecting a reporter is allowed to change the bytes on standard error and
+# nothing else. Without this the plain reporter would be a hole in the
+# comparison rather than a rendering of it: a binary that behaved differently
+# when the harness was watching would pass every other assertion here.
+#
+# The run is the same invocation with the variable unset, compared against the
+# run just made on standard output, exit status and repository effects — every
+# channel but the one the variable exists to change.
+reporter_changes_stderr_alone() { # <label> <argument>...
+  local label="$1"
+  shift
+  local plain="$work/run/rs" fancy="$work/run/rs-graphical" status=0
+
+  rm -rf "$fancy"
+  mkdir -p "$fancy/tmp"
+  cp -a "$REPO" "$fancy/repo"
+  runtime_env "$fancy/repo" "$fancy/tmp"
+  env "${RUNTIME_ENV[@]}" "$SAFIX_RS" "$@" >"$fancy/out" 2>"$fancy/err" || status=$?
+
+  cmp -s "$plain/out" "$fancy/out" \
+    || fail "selecting a reporter changed standard output for [$label]: safix $*"
+  [ "$status" = "$rs_status_last" ] \
+    || fail "selecting a reporter changed the exit status for [$label]: safix $*"
+  project "$fancy/repo" >"$fancy/projection"
+  cmp -s "$plain/projection" "$fancy/projection" \
+    || fail "selecting a reporter changed the repository for [$label]: safix $*"
 }
 
 # What the oracle has to be saying for a comparison of it to mean anything.

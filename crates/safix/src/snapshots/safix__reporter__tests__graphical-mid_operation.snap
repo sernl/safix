@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::mid_operation
+
+  × the repository is mid-rebase-merge (/srv/fleet/.git/rebase-merge). Finish
+  │ or abort it before setting a secret.

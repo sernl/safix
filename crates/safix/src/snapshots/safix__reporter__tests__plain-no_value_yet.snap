@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: secrets/safix/users/bo/secrets.yaml does not exist yet, so 'bo-service' has no value. Set one with: safix set bo bo-service
