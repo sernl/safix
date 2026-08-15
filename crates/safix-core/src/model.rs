@@ -396,12 +396,14 @@ mod tests {
         "api-token": {
           "file": "secrets/safix/users/ana/secrets.yaml",
           "generator": {
-            "dependencies": [], "description": null, "files": [],
+            "dependencies": [], "description": null,
+            "files": { "api-token-pub": { "secret": false } },
             "prompts": {}, "runtimeInputs": ["coreutils"],
-            "script": "printf '%s' fixture", "validation": null
+            "script": "printf '%s' fixture > $out/api-token",
+            "share": false, "validation": null
           },
           "key": "api-token", "origin": "private", "owner": "ana",
-          "shared": false
+          "public": null, "shared": false
         }
       },
       "cy": {}
@@ -413,11 +415,14 @@ mod tests {
         let ana = placements.held_by("ana").unwrap();
         let token = ana.get("api-token").unwrap();
         assert_eq!(token.origin, Origin::Private);
-        assert_eq!(
-            token.generator.as_ref().unwrap().runtime_inputs,
-            ["coreutils"]
-        );
+        let generator = token.generator.as_ref().unwrap();
+        assert_eq!(generator.runtime_inputs, ["coreutils"]);
         assert!(placements.declares("cy"));
+
+        // The entry a generator hangs off has no slot to say otherwise and is
+        // always encrypted; a further output says for itself.
+        assert!(generator.is_secret("api-token"));
+        assert!(!generator.is_secret("api-token-pub"));
     }
 
     #[test]
@@ -450,9 +455,9 @@ mod tests {
         },
         "inputs": {
           "base": { "seed": { "kind": "prompt", "name": "seed" } },
-          "derived": { "in_base": { "kind": "dependency", "name": "base-pub" } },
+          "derived": { "base-pub": { "kind": "dependency", "name": "base-pub" } },
           "aside": {},
-          "far": { "in_derived": { "kind": "dependency", "name": "derived" } }
+          "far": { "derived": { "kind": "dependency", "name": "derived" } }
         }
       }
     }"#;
