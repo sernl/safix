@@ -58,6 +58,7 @@ in
           SAFIX_TEST_BINARY = "${suite}/libexec/safix";
           SAFIX_TEST_NIX_STUB = "${suite}/libexec/safix-nix-stub";
           SAFIX_TEST_SHIM = "${suite}/libexec/safix-test-shim";
+          SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
         };
       }
       ''

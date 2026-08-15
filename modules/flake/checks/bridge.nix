@@ -21,6 +21,12 @@
 # facts about another flake, and a build that asserted any of them would be
 # asserting something about whatever clan happened to be in the check closure.
 #
+# And whether a safix entry holds a value at all. That one is not about the far
+# side: it is unanswerable here because an entry is a declaration of where a
+# value lives rather than that one is there. `handSetExportMessages` below is
+# the assertion that evaluation stays silent about it, and the refusal lives in
+# the runtime where the question can be asked.
+#
 # ── severity: proven by perturbation, one drill per claim ──
 # Dropping `unresolvableSafixSide` from the list `violationsOf` returns empties
 # `unknownUserMessages` and `unknownNameMessages` and moves no other field.
@@ -212,6 +218,23 @@
 
           # Exporting a hand-set entry is the ordinary case and is not refused.
           # A generator on the safix side is not required to send a value.
+          #
+          # This is the surviving half of a rule that used to have an
+          # evaluation-time sibling: the spec once required evaluation to refuse
+          # a safix-to-clan mapping "whose source entry has neither a generator
+          # nor a declared value". That requirement had no referent. An entry
+          # declares where a value lives, not that one is there, so at
+          # evaluation a hand-set entry before its first write and one after it
+          # are the same declaration — and refusing on it would refuse the
+          # ordinary export.
+          #
+          # Its replacement is a run-time refusal, and the two are siblings
+          # rather than a move: this asserts that the mapping produces no
+          # evaluation message, and `bridge.rs`'s
+          # `an_export_whose_source_holds_no_value_is_refused` asserts that a
+          # transfer reaching the same mapping over an unwritten entry refuses
+          # and names both remedies. Neither is redundant, and this one would be
+          # vacuous without it.
           handSetExportMessages = violations fleet {
             clanFlake = ".";
             mappings.a = mapping "safix-to-clan" "ana" "tok" "ntfy";

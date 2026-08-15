@@ -165,7 +165,7 @@ fn set(machine: &str, id: &str) -> ! {
     let _ = std::fs::write(&writes, format!("{}", seen.saturating_add(1)));
 
     let _ = std::fs::create_dir_all(store_dir(machine, id).0);
-    let _ = std::fs::write(store_dir(machine, id).1, &value);
+    let _ = std::fs::write(store_dir(machine, id).1, encoded(&value));
     std::process::exit(0);
 }
 
@@ -198,7 +198,31 @@ fn store_dir(machine: &str, id: &str) -> (std::path::PathBuf, std::path::PathBuf
 }
 
 fn stored(machine: &str, id: &str) -> Option<Vec<u8>> {
-    std::fs::read(store_dir(machine, id).1).ok()
+    decoded(&std::fs::read_to_string(store_dir(machine, id).1).ok()?)
+}
+
+/// The store holds an encoding of the value rather than the value.
+///
+/// Hex, which is not encryption and is not pretending to be. What it reproduces
+/// is the one property of clan's store that matters to the reading in
+/// `syscall_proof.rs`: a real clan writes ciphertext, so the plaintext bytes
+/// never appear in a write to a regular file. A stub that wrote them would make
+/// that reading fail on the stub's own behaviour rather than on safix's, and the
+/// only way to keep it green would be to widen the reading to admit a plaintext
+/// write to an arbitrary path — which is the whole thing it exists to refuse.
+fn encoded(value: &[u8]) -> String {
+    value.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decoded(text: &str) -> Option<Vec<u8>> {
+    let digits: Vec<char> = text.trim().chars().collect();
+    digits
+        .chunks(2)
+        .map(|pair| {
+            let text: String = pair.iter().collect();
+            u8::from_str_radix(&text, 16).ok()
+        })
+        .collect()
 }
 
 fn spool() -> std::path::PathBuf {

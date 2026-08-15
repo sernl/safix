@@ -53,6 +53,29 @@ mod linux {
     /// travels only between the script, the runtime and sops.
     const MINTED: &str = "CANARY-minted-traced";
 
+    /// The value the import leg carries, distinct from the export's so that
+    /// neither leg's observation can be satisfied by the other's write.
+    const IMPORTED: &str = "CANARY-imported-traced";
+
+    /// The value the export leg carries.
+    const EXPORTED: &str = "CANARY-exported-traced";
+
+    /// The machine and var the traced mappings name.
+    const BRIDGE_MACHINE: &str = "sundog";
+    const BRIDGE_VAR: &str = "ntfy/token";
+
+    /// A fixture carrying one mapping of the given direction.
+    fn bridged(direction: &str) -> Fixture {
+        let mut fixture = Fixture::new();
+        fixture.seed_mapping(
+            "ntfy-token",
+            direction,
+            (BRIDGE_MACHINE, "ntfy", "token"),
+            ("ana", "api-token"),
+        );
+        fixture
+    }
+
     /// A typed value goes into sops down a pipe and into nothing else.
     #[test]
     fn every_plaintext_write_of_a_typed_value_goes_to_a_pipe() {
@@ -114,6 +137,65 @@ mod linux {
         assert!(
             observed > 0,
             "no plaintext write was observed at all, so the assertion is vacuous"
+        );
+    }
+
+    /// A bridged value crosses the clan boundary on a pipe, in both directions.
+    ///
+    /// The bridge is where the pipes-only reading is easiest to lose without
+    /// noticing, because the value now crosses a boundary to a program this
+    /// repository does not own. Both legs are traced in one reading rather than
+    /// argued from the shape of the code: `clan vars get` writes the value to
+    /// its standard output and `clan vars set` reads it from its standard input,
+    /// and what this establishes is that between those two and sops the value
+    /// touched a pipe and the run's own staging root and nothing else.
+    ///
+    /// The import leg is traced first and its result seeded into the export
+    /// fixture, so the two legs carry different values: a single value would
+    /// make "the export's value was observed" satisfiable by the import's write.
+    #[test]
+    fn every_plaintext_write_of_a_bridged_value_goes_to_a_pipe() {
+        let down = bridged("clan-to-safix");
+        down.clan_seed(BRIDGE_MACHINE, BRIDGE_VAR, IMPORTED);
+
+        let mut environment = down.clan_env();
+        let borrowed: Vec<(&str, &str)> = environment
+            .iter_mut()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let observed = trace(&down, safix(), &["import"], None, &borrowed, &[IMPORTED])
+            .unwrap_or_else(|reason| panic!("{reason}"));
+
+        assert_eq!(
+            down.value(ANA_FILE, "api-token"),
+            IMPORTED,
+            "the traced import did not store the value, so the trace proves nothing"
+        );
+        assert!(
+            observed > 0,
+            "no plaintext write was observed on the import leg, so the assertion is vacuous"
+        );
+
+        let up = bridged("safix-to-clan");
+        up.set("ana", "api-token", EXPORTED)
+            .expect_success("seeding the export's source");
+
+        let mut environment = up.clan_env();
+        let borrowed: Vec<(&str, &str)> = environment
+            .iter_mut()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let observed = trace(&up, safix(), &["export"], None, &borrowed, &[EXPORTED])
+            .unwrap_or_else(|reason| panic!("{reason}"));
+
+        assert_eq!(
+            up.clan_holds(BRIDGE_MACHINE, BRIDGE_VAR).as_deref(),
+            Some(EXPORTED),
+            "the traced export did not reach clan, so the trace proves nothing"
+        );
+        assert!(
+            observed > 0,
+            "no plaintext write was observed on the export leg, so the assertion is vacuous"
         );
     }
 

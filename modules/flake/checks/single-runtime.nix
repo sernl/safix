@@ -1,4 +1,4 @@
-# The four claims that were never comparisons, held to one runtime.
+# The claims that were never comparisons, held to one runtime.
 #
 # These attributes are what survived `modules/flake/checks/differential.nix`,
 # whose nineteen modes ran the shell runtime and the rust one against each other
@@ -72,5 +72,22 @@
       # channel, and with one runtime there is nothing to differ from unless the
       # status is recorded and compared.
       checks.safix-channel-drills = claim "safix-channel-drills" "channel_drills";
+
+      # The tmpfs rule, held against the kernel's own mount table rather than
+      # against the probe that enforces it. The drill that exercises the refusal
+      # used to select its disk-backed directory by asking that probe which
+      # candidate was disk-backed, so a probe answering "memory-backed" for
+      # everything made the selection find nothing and the drill report itself
+      # skipped — a check that stopped asserting without failing. The two
+      # readings are now compared mount by mount, and each direction has to be
+      # present or a probe stuck at either answer would agree with the machine.
+      checks.safix-memory-backing = claim "safix-memory-backing" "memory_backing";
+
+      # Both bridge directions end to end against a clan that records what it
+      # was handed: the value on a pipe and in no argument vector, the read
+      # taking raw bytes rather than a terminal rendering, a second run writing
+      # nothing, and each refusal for its own reason. The stub states why
+      # stubbing clan is permitted where stubbing sops is not.
+      checks.safix-bridge-transfer = claim "safix-bridge-transfer" "bridge";
     };
 }

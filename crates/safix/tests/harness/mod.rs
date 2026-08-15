@@ -458,20 +458,21 @@ impl Fixture {
     /// find nothing here, because there is nothing shaped like clan's store to
     /// find.
     pub fn clan_holds(&self, machine: &str, id: &str) -> Option<String> {
-        std::fs::read_to_string(
+        let text = std::fs::read_to_string(
             self.clan_spool()
                 .join("store")
                 .join(machine)
                 .join(id.replace('/', "%")),
         )
-        .ok()
+        .ok()?;
+        from_hex(&text)
     }
 
     /// Put a value into the stubbed clan without going through safix.
     pub fn clan_seed(&self, machine: &str, id: &str, value: &str) {
         let directory = self.clan_spool().join("store").join(machine);
         std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(directory.join(id.replace('/', "%")), value).unwrap();
+        std::fs::write(directory.join(id.replace('/', "%")), to_hex(value)).unwrap();
     }
 
     /// One line of what the stubbed clan recorded, or the empty string.
@@ -1171,6 +1172,27 @@ pub fn disk_backed_directory(extra: &[PathBuf]) -> Option<PathBuf> {
     candidates
         .into_iter()
         .find(|path| kernel_says_memory_backed(path) == Some(false))
+}
+
+/// The stubbed clan's store holds an encoding rather than the value.
+///
+/// See `tests/support/clan-stub.rs`: a real clan writes ciphertext, so the
+/// plaintext bytes never reach a regular file, and the stub reproduces that one
+/// property so the syscall reading stays a statement about safix.
+fn to_hex(value: &str) -> String {
+    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn from_hex(text: &str) -> Option<String> {
+    let digits: Vec<char> = text.trim().chars().collect();
+    let bytes: Option<Vec<u8>> = digits
+        .chunks(2)
+        .map(|pair| {
+            let text: String = pair.iter().collect();
+            u8::from_str_radix(&text, 16).ok()
+        })
+        .collect();
+    String::from_utf8(bytes?).ok()
 }
 
 /// Every staging root sitting directly under one directory, by the prefix
