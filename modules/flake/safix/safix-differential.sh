@@ -896,6 +896,149 @@ recipients_unchanged() { # <repo> <side>
   done < <(governed_paths)
 }
 
+# --- A divergence this harness records rather than reconciles ------------------------
+# `safix.sh` runs under `set -e`, so a git that exits non-zero ends the run there:
+# the status the shell exits with is git's own, and the only thing on standard
+# error is what git itself wrote. The rust runtime turns the same failure into a
+# refusal like any other — `safix: git <arguments> failed` on standard error, and
+# exit 1 whatever git exited with.
+#
+# Neither shape is reproducible in the other's favour. Passing git's status
+# through would give the rust runtime exit statuses its contract does not name,
+# for a failure an operator can act on; dropping the refusal line would leave a
+# run that stopped without saying which command stopped it, because git's own
+# message names a lock file and not a subcommand. The rust runtime's shape is
+# strictly the more informative one and the shell's passthrough is not a contract
+# anything here depends on, so the difference is pinned rather than reconciled.
+#
+# Two statuses are run rather than one, because a single 128 is as consistent
+# with an oracle that passes git's status through as with an oracle that happens
+# to exit 128 of its own accord.
+#
+# What both runtimes must still agree on is what the failed commit left: the
+# value written, the file staged, nothing committed, and the two repositories
+# identical afterwards.
+git_refusal_diverges() { # <user> <name> <relpath>
+  local user="$1" name="$2" relative="$3"
+  local dir="$work/gitfail" side expected
+  local last_from_git="fatal: cannot lock ref 'HEAD': Unable to create index.lock: File exists."
+  local -A status_of=()
+  rm -rf "$dir"
+  write_stub_git_refusing_commit
+  with_input value-reset value-reset
+
+  for side in sh rs; do
+    set_against_refusing_git "$dir/$side" "$side" 128 "$user" "$name"
+    status_of[$side]="$RUN_STATUS"
+    # Both reached the commit, so both carry git's own refusal. Without this the
+    # rest would pass over a run that stopped earlier for a reason of its own and
+    # never asked git for anything.
+    grep -qF -- "$last_from_git" "$dir/$side/err" \
+      || fail "the $side runtime never reached the commit, so there is no git refusal to pin"
+  done
+
+  [ "${status_of[sh]}" = 128 ] \
+    || fail "the oracle exited ${status_of[sh]} rather than git's own 128; re-examine the divergence"
+  # The last thing on the oracle's standard error is git's own message, because
+  # `set -e` ends the run at the commit and nothing runs after it. Matched at the
+  # end rather than by a prefix, since `set` writes ordinary progress lines under
+  # the same `safix: ` the refusals use.
+  [ "$(tail -n 1 "$dir/sh/err")" = "$last_from_git" ] \
+    || fail "the oracle now says something of its own after a git that refused; the divergence is gone and should be reconciled"
+  [ "${status_of[rs]}" = 1 ] \
+    || fail "the rust runtime exited ${status_of[rs]} for a git that refused, not 1"
+  expected="safix: git commit -q -m chore(safix): set $name for $user -- $relative failed"
+  [ "$(tail -n 1 "$dir/rs/err")" = "$expected" ] \
+    || fail "the rust runtime did not end by naming the git command that refused"
+
+  # The same failure under a status nothing else in either runtime uses, which is
+  # what makes the oracle's passthrough a function of git's status rather than a
+  # number that agreed once.
+  for side in sh rs; do
+    set_against_refusing_git "$dir/second/$side" "$side" 42 "$user" "$name"
+    status_of[$side]="$RUN_STATUS"
+  done
+  [ "${status_of[sh]}" = 42 ] \
+    || fail "the oracle exited ${status_of[sh]} for a git that exited 42, so its status is not git's"
+  [ "${status_of[rs]}" = 1 ] \
+    || fail "the rust runtime exited ${status_of[rs]} for a git that exited 42, not 1"
+
+  for side in sh rs; do
+    no_scratch_left "$dir/$side/repo" "$side" write/git-refuses
+    residue_free "$dir/$side/tmp" "$side" write/git-refuses
+    project "$dir/$side/repo" >"$dir/$side/projection"
+    # The one field this comparison cannot hold, and it is sops' own property
+    # rather than a concession — the same one D7 gives for projecting rather
+    # than comparing bytes. The write survives as a STAGED change here instead
+    # of a commit, so the index entry's object name is in the projection, and it
+    # is the object name of a ciphertext two correct runs cannot agree on. Only
+    # the object names on a porcelain entry are normalized; the entry's status
+    # letters and its path are compared as they stand.
+    sed -i -E '/^1 /s/[0-9a-f]{40}/<object>/g' "$dir/$side/projection"
+  done
+  cmp -s "$dir/sh/out" "$dir/rs/out" \
+    || fail "the two runtimes wrote different standard output when git refused"
+  cmp -s "$dir/sh/projection" "$dir/rs/projection" || {
+    diff -u "$dir/sh/projection" "$dir/rs/projection" >&2 || true
+    fail "the two runtimes left different repositories behind when git refused"
+  }
+  grep -qE "^1 [AM][.] .* $relative\$" "$dir/rs/projection" \
+    || fail "the write did not survive the refused commit as a staged change"
+
+  no_input
+  COMPARED=$((COMPARED + 1))
+  note "[write/git-refuses] divergence pinned: the oracle exits with git's own status and says nothing of its own, the rust runtime exits 1 naming the command that refused; both leave the value staged and uncommitted"
+}
+
+# One `set` against a git that refuses its commit, with the status git leaves
+# chosen by the caller. The run's own status comes back in RUN_STATUS, because a
+# command substitution would swallow it.
+RUN_STATUS=0
+set_against_refusing_git() { # <dir> <side> <git-status> <user> <name>
+  local dir="$1" side="$2" status="$3" user="$4" name="$5"
+  rm -rf "$dir"
+  mkdir -p "$dir/tmp" "$dir/home"
+  cp -a "$REPO" "$dir/repo"
+  EXTRA_ENV=("SAFIX_GIT=$work/bin/git-refusing-commit" "SAFIX_HARNESS_GIT_STATUS=$status")
+  runtime_env "$dir/repo" "$dir/tmp" "$dir/home"
+  RUN_STATUS=0
+  if [ "$side" = sh ]; then
+    env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" set "$user" "$name" \
+      < <(cat "$(input_path)") >"$dir/out" 2>"$dir/err" || RUN_STATUS=$?
+  else
+    env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" set "$user" "$name" \
+      < <(cat "$(input_path)") >"$dir/out" 2>"$dir/err" || RUN_STATUS=$?
+  fi
+  EXTRA_ENV=()
+  normalize_run "$dir/repo" "$dir/out" "$dir/err"
+}
+
+# A git that passes everything through but the commit, which refuses the way a
+# locked index makes it refuse. Both runtimes reach it through SAFIX_GIT, so the
+# two are handed one failure rather than each its own. The real git is resolved
+# from PATH inside, and nothing on it answers to this name.
+write_stub_git_refusing_commit() {
+  mkdir -p "$work/bin"
+  emit_stub "$work/bin/git-refusing-commit" <<'SH'
+set -eu
+subcommand=""
+skip=0
+for argument in "$@"; do
+  if [ "$skip" = 1 ]; then skip=0; continue; fi
+  case "$argument" in
+    -C) skip=1 ;;
+    -*) ;;
+    *) subcommand="$argument"; break ;;
+  esac
+done
+if [ "$subcommand" = commit ]; then
+  printf "fatal: cannot lock ref 'HEAD': Unable to create index.lock: File exists.\n" >&2
+  exit "${SAFIX_HARNESS_GIT_STATUS:-128}"
+fi
+exec git "$@"
+SH
+}
+
 # --- Being interrupted ---------------------------------------------------------
 # A write prepares a candidate document beside its target and renames it into
 # place. Between those two moments the tree holds a file the operator did not ask
@@ -1507,6 +1650,8 @@ case "$mode" in
     no_input
     compare write/help-set set -h
     compare write/help-fix fix -h
+
+    git_refusal_diverges ana ana-alone "$ANA_FILE"
     ;;
 
   # Everything `set` refuses about how it was asked, and about what was typed.

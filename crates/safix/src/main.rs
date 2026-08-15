@@ -23,6 +23,13 @@
 //! status be the command's on all three, and sops's own standard error has
 //! already said why, so nothing of ours is printed over it.
 //!
+//! git is the exception to that, and deliberately: a git that refuses is a
+//! refusal like any other here — exit 1, and a line naming the command that
+//! refused — where the shell runtime, running under `set -e`, exits with git's
+//! own status and says nothing of its own. git's message names a lock file or a
+//! hook rather than the subcommand safix ran, so the line is what makes the
+//! failure actionable. `safix-differential-write` pins both behaviours.
+//!
 //! An interrupted run exits 130 and a terminated one 143, having swept up
 //! whatever it had written but not yet moved into place; see [`abort`].
 

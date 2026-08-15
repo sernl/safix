@@ -95,6 +95,10 @@ A change to it is a breaking change whether or not any rust changed.
   At a prompt, `bash` restarts a `read` the interrupt returned from and defers its `trap 'exit 130' INT` while the stream stays open, so the run keeps waiting; during encryption, a non-interactive `bash` waiting for a foreground command ignores `SIGINT` outright, so the run writes, commits and exits zero.
   The rust runtime exits 130 in both, having swept the candidate document and written nothing.
   `safix-differential-abort` asserts both oracle behaviours, so an oracle that later acquires a response fails the check rather than quietly making the drills comparable.
+- A git that exits non-zero ends the shell runtime with git's own status and nothing of its own on standard error, because it runs under `set -e`.
+  The rust runtime makes the same failure a refusal like any other: `safix: git <arguments> failed`, and exit 1 whatever git exited with.
+  The extra line names the subcommand that stopped the run, which git's own message — about a lock file — does not, and exit 1 is what this binary's contract says a refusal is.
+  `safix-differential-write` pins it under two different git statuses, so the check fails if the oracle stops passing git's status through or acquires a refusal of its own, and asserts what both still agree on: the value written, the file staged, and nothing committed.
 - Reading the two entries from a *seekable* standard input differs between the runtimes, and the harness feeds a pipe for that reason.
   The shell runtime re-opens `/dev/stdin` for each read, which yields another handle on a pipe and a fresh description at offset zero on a regular file — so over a file its confirmation is the first line read a second time, and the double entry stops checking anything.
   The rust runtime reads the two entries sequentially in both cases.

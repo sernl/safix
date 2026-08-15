@@ -4,7 +4,7 @@
 # `packages.safix` is this binary. It became this binary when the differential
 # harness had compared every subcommand the shell runtime has against it on
 # standard output, standard error, exit code and effect on the repository, with
-# the two divergences it did find recorded rather than reconciled — see
+# the divergences it did find recorded and pinned rather than reconciled — see
 # `modules/flake/checks/differential.nix` and the CHANGELOG. The shell runtime
 # stays in the tree as `packages.safix-sh`, because it is what those modes
 # compare against: retiring the oracle would retire the evidence.

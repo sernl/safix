@@ -18,7 +18,10 @@
 # has and holds the run to what it must leave behind, which is nothing; `pipes`
 # observes the sops process itself and holds the value to travelling down a pipe
 # and no other way. Both also assert the shell runtime's own behaviour where it
-# differs, so a divergence stays recorded rather than becoming folklore.
+# differs, so a divergence stays recorded rather than becoming folklore, and the
+# same is done for the ends of `unknown`, `converge` and `write`, each of which
+# closes on one difference the two runtimes are pinned to rather than held to
+# agreeing on. `CHANGELOG.md` lists every one of them under Known differences.
 #
 # The generator graph, `keygen` and `adduser` are compared here too, which is
 # what completed the gate: every subcommand the shell runtime has is judged
@@ -126,6 +129,13 @@
       # value re-entered unchanged and committing nothing, a file created
       # through the creation rules, and a staged change to a path `set` does not
       # name surviving in the index rather than being swept into the commit.
+      #
+      # It ends on a divergence rather than a comparison: a git that refuses its
+      # commit ends the shell runtime with git's own status and nothing of its
+      # own said, and ends the rust runtime with exit 1 and a refusal naming the
+      # command. Both sides are asserted, under two different git statuses, so
+      # an oracle that stops passing the status through or acquires a refusal of
+      # its own fails here rather than quietly making the two comparable.
       checks.safix-differential-write = differential "safix-differential-write" "write";
 
       # What `set` refuses about how it was asked and about what was typed: an

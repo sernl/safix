@@ -195,6 +195,8 @@ Stage 1 is this change's scaffold: the workspace, the toolchain pin, the lint an
 Stage 2 is the read paths — the placement resolution behind `list`, the decryption behind `get`, and the four-part report behind `check` — together with the schemas that read the nix half, the sops and git drivers, and the first real use of the differential harness.
 Its findings are D11.
 Later stages port the write paths and then the generator DAG, each behind its own gate, and the shell runtime is retired only when the last gate closes.
+Their findings continue the list D11 began, and are recorded in `CHANGELOG.md` under *Known differences* rather than here, because that is the list a consumer of the shipped binary reads.
+Some of those entries are pinned by an assertion on each runtime, so an oracle that stops differing fails the check that records the difference rather than quietly making the two comparable; each entry names the check that pins it, where one does.
 No stage moves `packages.safix`.
 
 ## Open Questions
