@@ -157,6 +157,11 @@
         };
 
         expected = {
+          # `wg-public` is absent from both scopes and present in the
+          # selection, which is the claim: the provisioner is handed a sopsFile
+          # and a key and decrypts at activation, and a public output has
+          # neither, so an entry for one would fail to extract a key that will
+          # never exist.
           names = {
             user = [
               "ana-alone"
@@ -164,6 +169,7 @@
               "ops-handover"
               "ops-tooling"
               "team-vault"
+              "wg-private"
             ];
             system = [
               "ana-alone"
@@ -171,6 +177,7 @@
               "ops-handover"
               "ops-tooling"
               "team-vault"
+              "wg-private"
             ];
           };
 

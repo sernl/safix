@@ -1098,7 +1098,28 @@ let
 
         forceSet = mergeSets ([ (profile.perHost.${hostname}.force or { }) ] ++ perTagSets "force");
 
-        selected = (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet;
+        selected = removeAttrs (
+          (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet
+        ) publicOutputs;
+
+        # A public output is dropped from the selection, and this is the one
+        # place it is dropped, so that `resolveSet`, `resolveNames` and
+        # `materializeFor` cannot disagree about what a person resolves.
+        #
+        # The reason is what selection is for. Every name it returns is handed to
+        # the secret provisioner with a `sopsFile` and a key inside it, and the
+        # provisioner decrypts at activation. A public output has no ciphertext,
+        # no key and no creation rule — that is what declaring it
+        # `files.<n>.secret = false` means — so an entry for one is an activation
+        # that fails to extract a key which will never exist.
+        #
+        # It is still the user's output and `flake.safix.lib.placements` still
+        # names it, which is where `safix generate`, `list` and `check` read it.
+        # A module reads its bytes with `flake.safix.lib.publicValue` at
+        # evaluation, or its path with `outputPath`.
+        publicOutputs = lib.filter (name: (placementsOf users catalogue).${user}.${name}.public != null) (
+          builtins.attrNames (placementsOf users catalogue).${user}
+        );
       in
       lib.mapAttrs (
         name: override:

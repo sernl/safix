@@ -253,7 +253,10 @@ in
               "secrets/safix/users/ana/secrets.yaml"
               "secrets/safix/users/bo/secrets.yaml"
             ];
-            generators = [ "ana/api-token" ];
+            generators = [
+              "ana/api-token"
+              "ana/wg-private"
+            ];
           };
           quietOnFixture = {
             custody = true;

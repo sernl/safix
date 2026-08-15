@@ -547,6 +547,7 @@ in
                 "ops-handover"
                 "ops-tooling"
                 "team-vault"
+                "wg-private"
               ];
               selectionIsScopeFree = true;
               entry = {
@@ -786,6 +787,7 @@ in
                   "ops-handover"
                   "ops-tooling"
                   "team-vault"
+                  "wg-private"
                 ];
               };
               undeclaredUser = {
