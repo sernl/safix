@@ -14,6 +14,16 @@ keywords.workspace = true
 name = "safix"
 path = "src/main.rs"
 
+# The one thing the integration suite stubs. It is a binary rather than a script
+# because it asserts — the attribute the runtime asked for, the mode it read it
+# in, the flake it named — and code that states a claim a check makes is tooling
+# under this repository's own rule, so it is rust like the rest of it. It lives
+# under `tests/` because that is what it is for, and `packages.safix` builds
+# `--bin safix` alone so it does not ship.
+[[bin]]
+name = "safix-nix-stub"
+path = "tests/support/nix-stub.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true
@@ -29,11 +39,16 @@ rustix.workspace = true
 signal-hook.workspace = true
 
 [dev-dependencies]
-# The graphical rendering of every refusal is held by a snapshot. It is the one
-# channel the differential harness does not compare against the shell runtime,
-# so it is pinned against itself instead.
+# The graphical rendering of every refusal is held by a snapshot, pinned against
+# itself.
 insta.workspace = true
 proptest.workspace = true
+# The integration suite writes the fixture documents the stubbed evaluator
+# answers with — placements, audiences, the generator plan — which are the nix
+# half's own schemas and are built rather than pasted, so a mode that adds a
+# generator changes the plan the way an evaluation would. A dev dependency: the
+# shipped binary reads no JSON of its own.
+serde_json.workspace = true
 
 [lints]
 workspace = true
