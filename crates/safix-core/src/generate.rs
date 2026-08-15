@@ -529,7 +529,7 @@ fn mint(
     // interrupted is a child that died on a signal, so it has no exit code and
     // reads as a failure; reporting it as one would blame the script for the
     // operator's Ctrl-C and would end the run with 1 where 130 is the answer.
-    if let Some(status) = scratch::interrupted() {
+    if let Some(status) = stopped(finished) {
         return Ok(Step::Stopped(status));
     }
 
@@ -539,6 +539,51 @@ fn mint(
     }
 
     Ok(Step::Done(tree.collect(generator, outputs)?))
+}
+
+/// The status a run is to end with, when this child's end means it was
+/// interrupted.
+///
+/// Two readings, because there are two ways the interruption arrives and only
+/// one of them is a race this process can win.
+///
+/// The first is [`scratch::interrupted`], which the signal handler sets. It is
+/// the only reading available when the child *finished normally* after the
+/// runtime was signalled — the shape the sops abort drill has, where the child
+/// is signalled by nothing and exits zero.
+///
+/// The second is the child's own termination signal, and it is what makes the
+/// answer deterministic. A keyboard interrupt reaches the whole process group,
+/// so the child dies at the same instant the runtime is signalled; the handler
+/// runs on another thread, and `wait` can return before that thread has been
+/// scheduled at all. Reading the flag alone therefore answers "not interrupted"
+/// on a run that plainly was, and reports the operator's Ctrl-C as the generator
+/// failing — which is a race this lost often enough to be found.
+///
+/// Only `SIGINT` and `SIGTERM` are read this way. A child killed by `SIGSEGV`
+/// or `SIGKILL` failed, and calling that an interruption would hide a crashing
+/// generator behind an exit code that says the operator asked to stop.
+///
+/// The flag is set from here as well, so the rest of the run and the sweep agree
+/// with what this concluded however the conclusion was reached.
+fn stopped(finished: std::process::ExitStatus) -> Option<i32> {
+    /// `SIGINT`, as the kernel numbers it.
+    const INTERRUPT: i32 = 2;
+    /// `SIGTERM`.
+    const TERMINATE: i32 = 15;
+
+    use std::os::unix::process::ExitStatusExt as _;
+
+    if let Some(status) = scratch::interrupted() {
+        return Some(status);
+    }
+    let status = match finished.signal()? {
+        INTERRUPT => 130,
+        TERMINATE => 143,
+        _ => return None,
+    };
+    scratch::interrupt(status);
+    Some(status)
 }
 
 /// The entry's validation fragment, judging one candidate value.
@@ -583,7 +628,7 @@ fn validate(
     // The same reading as in `mint`: an interrupted validation is a child that
     // died on a signal, and calling that a rejected candidate would tell the
     // operator their value was judged and found wanting when nothing judged it.
-    if let Some(status) = scratch::interrupted() {
+    if let Some(status) = stopped(finished) {
         return Ok(Step::Stopped(status));
     }
 
