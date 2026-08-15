@@ -238,3 +238,141 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
         assert_pristine(&fixture, &before, "CANARY-mid-generation");
     }
 }
+
+/// A signal while a generator's script is running is not the script failing.
+///
+/// The window this exists for is narrow and the failure in it was quiet. A
+/// script the operator interrupted is a child that died on a signal, so the
+/// status the runtime waits on carries no exit code; read as an ordinary result
+/// that is a failure, and the run ended with 1 and a sentence blaming the
+/// generator for the operator's Ctrl-C.
+///
+/// Making that observable takes two things the earlier drill did not have.
+///
+/// The signal goes to the command alone rather than to its process group. Under
+/// `timeout` the script dies at the same instant the runtime is signalled, so
+/// there is no window in which a child of the runtime is still running — which
+/// is exactly the window under test.
+///
+/// And the assertion is inside the window rather than after it. Both the fixed
+/// and the broken runtime exit 130 here, because the handler thread exits with
+/// that status whatever the run's own thread concludes; the exit code alone can
+/// therefore never separate them. What separates them is *when* the sweep runs.
+/// The fix holds the quiescence lock across the script, so the handler cannot
+/// sweep until the script has been waited on; without it the handler sweeps
+/// immediately and takes the staging root out from under a script that is still
+/// writing into it. So the script asks, after the signal has landed, whether its
+/// own output directory is still there, and records the answer where the test
+/// can read it.
+///
+/// Observed red before the fix: the witness reads `swept`.
+#[test]
+fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
+    let mut fixture = Fixture::new();
+    let witness = fixture.scratch("out-after-the-signal");
+    let before = fixture.head();
+
+    fixture.seed_generator(
+        "slow",
+        ANA_FILE,
+        &[],
+        &serde_json::json!({
+            "dependencies": [], "description": null,
+            "files": {}, "prompts": {}, "share": false,
+            "runtimeInputs": [],
+            // Writes its output, waits long enough for the signal to be
+            // delivered and acted on, then reports whether `$out` survived. The
+            // non-zero exit is what the run must *not* report: a runtime that
+            // read this status before reading the interrupt would call it
+            // "generator failed (exit 3)".
+            "script": "printf 'CANARY-mid-generation' > \"$out/slow\"\n\
+                       sleep 3\n\
+                       if [ -d \"$out\" ]; then\n\
+                         printf present > \"$SAFIX_TEST_WITNESS\"\n\
+                       else\n\
+                         printf swept > \"$SAFIX_TEST_WITNESS\"\n\
+                       fi\n\
+                       exit 3",
+            "validation": null,
+        }),
+    );
+
+    let run = fixture.interrupt_command_after(
+        std::time::Duration::from_millis(700),
+        rustix::process::Signal::INT,
+        &["generate", "ana", "slow"],
+        &[("SAFIX_TEST_WITNESS", &witness.to_string_lossy())],
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&witness).unwrap_or_default(),
+        "present",
+        "the staging root was swept while the generator was still writing into it\n{}",
+        run.combined()
+    );
+    assert_eq!(
+        run.code,
+        Some(130),
+        "an interrupted generator exited {:?}\n{}",
+        run.code,
+        run.combined()
+    );
+    run.silent_about("generator 'slow' failed");
+    assert_eq!(fixture.head(), before, "an interrupted generator committed");
+    assert!(
+        fixture.staging_roots().is_empty(),
+        "an interrupted generator left a staging root"
+    );
+    assert_pristine(&fixture, &before, "CANARY-mid-generation");
+}
+
+/// A signal while a validation fragment is judging a candidate is not a
+/// rejection.
+///
+/// The second window the same reading covers, and the one whose wrong answer is
+/// the more misleading of the two: a run that reported the candidate rejected
+/// would be telling the operator their value was judged and found wanting, when
+/// nothing judged it.
+///
+/// This one carries coverage rather than severity. By the time a validation
+/// runs, the staging root is already gone — it belongs to the mint that produced
+/// the candidate — so there is no in-window observable of the kind the test
+/// above uses, and both readings exit 130. What it holds is that the run says
+/// nothing about a rejection, over the window that the quiescence lock the test
+/// above proves is what keeps the run's own thread the one that answers.
+#[test]
+fn a_signal_during_a_validation_is_not_reported_as_a_rejection() {
+    let mut fixture = Fixture::new();
+    let before = fixture.head();
+
+    fixture.seed_generator(
+        "judged",
+        ANA_FILE,
+        &[],
+        &serde_json::json!({
+            "dependencies": [], "description": null,
+            "files": {}, "prompts": {}, "share": false,
+            "runtimeInputs": [],
+            "script": "printf 'CANARY-judged' > \"$out/judged\"",
+            "validation": "sleep 3; exit 1",
+        }),
+    );
+
+    let run = fixture.interrupt_command_after(
+        std::time::Duration::from_millis(700),
+        rustix::process::Signal::TERM,
+        &["generate", "ana", "judged"],
+        &[],
+    );
+
+    assert_eq!(
+        run.code,
+        Some(143),
+        "a terminated validation exited {:?}\n{}",
+        run.code,
+        run.combined()
+    );
+    run.silent_about("rejected");
+    assert_eq!(fixture.head(), before, "a terminated validation committed");
+    assert_pristine(&fixture, &before, "CANARY-judged");
+}

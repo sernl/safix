@@ -524,6 +524,48 @@ impl Fixture {
         found
     }
 
+    /// One invocation signalled after a delay, with the signal reaching the
+    /// command's own process and nothing else.
+    ///
+    /// Distinct from [`Fixture::interrupt_after`], which runs under `timeout`
+    /// and so signals the whole process group — every descendant included. That
+    /// is the right model for a keyboard interrupt and the wrong one for
+    /// asking what the *runtime* does when a signal arrives while a child of its
+    /// own is still running: with the group signalled, the child dies at the
+    /// same moment and there is no such window to observe.
+    ///
+    /// Here the child keeps running, so the window is the child's whole
+    /// remaining lifetime and a fixture can put an assertion inside it.
+    pub fn interrupt_command_after(
+        &self,
+        delay: std::time::Duration,
+        signal: rustix::process::Signal,
+        arguments: &[&str],
+        extra: &[(&str, &str)],
+    ) -> Run {
+        let mut command = Command::new(safix());
+        command.args(arguments);
+        self.environment(&mut command, Reporter::Plain);
+        for (name, value) in extra {
+            command.env(name, value);
+        }
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        let child = command.spawn().expect("could not spawn the command");
+
+        let pid = rustix::process::Pid::from_raw(
+            i32::try_from(child.id()).expect("a pid fits in an i32"),
+        )
+        .expect("the spawned command has a pid");
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            let _ = rustix::process::kill_process(pid, signal);
+        });
+
+        finish(child, None)
+    }
+
     /// One invocation of a program standing in for the binary, which is how a
     /// drill puts a deliberately damaged runtime in its place.
     pub fn run_program(

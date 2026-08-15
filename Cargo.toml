@@ -40,9 +40,11 @@ zeroize = "1"
 # Terminal control for the two prompts of `set`, the two signals an aborted
 # `set` has to shred its scratch file on, and `statfs`, which is how the staging
 # root asks the kernel whether a mount is memory-backed rather than inferring it
-# from the path. All are safe wrappers over what would otherwise be `unsafe` in a
-# crate that forbids it.
-rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs"] }
+# from the path. `process` is the integration suite's: a drill that signals the
+# command alone rather than its whole process group is what opens the window in
+# which a child of the runtime is still running. All are safe wrappers over what
+# would otherwise be `unsafe` in a crate that forbids it.
+rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs", "process"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 insta = "1"
