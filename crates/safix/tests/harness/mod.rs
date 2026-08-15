@@ -21,6 +21,13 @@
 //! than preferred. A platform with no tmpfs refuses unless
 //! `SAFIX_TEST_DISK_STAGING` says the caller accepts disk-backed staging.
 //!
+//! The drills that exercise the disk-staging refusal are the one exception, and
+//! they are deliberate: a run under `--allow-disk-staging` has to stage
+//! somewhere the kernel calls disk-backed or it is not the drill. That directory
+//! is [`Fixture::disk_staging_dir`], made per fixture and removed on drop, so
+//! the acknowledged run's plaintext is neither in a directory the rest of the
+//! machine shares nor left behind.
+//!
 //! # Why some runs go through `setsid`
 //!
 //! The command reads a value from `/dev/tty` when it opens and from standard
@@ -201,6 +208,9 @@ pub struct Fixture {
     /// recipient is derived, which is also how the fixture shows that writing to
     /// a shared file needs no key but the writer's own.
     pub bo: String,
+    /// A disk-backed directory this fixture alone writes into, where one is
+    /// reachable — see [`Fixture::disk_staging_dir`].
+    disk_staging: Option<PathBuf>,
     key_file: PathBuf,
     placements: Value,
     audiences: Value,
@@ -244,6 +254,7 @@ impl Fixture {
             repo,
             ana: ana.clone(),
             bo: bo.clone(),
+            disk_staging: disk_backed_scratch(),
             key_file,
             placements: json!({
                 "ana": {
@@ -577,11 +588,27 @@ impl Fixture {
         self.invoke(safix(), arguments, None, Reporter::Graphical, extra)
     }
 
-    /// The fixture's own scratch directory, which is on whatever filesystem the
-    /// checkout is on and is therefore what a disk-backed staging drill points
-    /// at.
-    pub fn work_dir(&self) -> &std::path::Path {
-        &self.work
+    /// A disk-backed directory this fixture's runs alone write into, where the
+    /// machine has one.
+    ///
+    /// The disk-backed counterpart of [`Fixture::staging_dir`], and it exists
+    /// for the same reason. The drills that refuse disk staging used to point at
+    /// whichever disk-backed directory the candidate search returned first —
+    /// `/tmp`, the checkout — and then assert that no staging root was left
+    /// under it. Two of those drills running at once each saw the other's root
+    /// in flight and read it as its own residue, which is a suite that fails on
+    /// a schedule rather than on a defect.
+    ///
+    /// Scoped here, the residue claim is the strong one again: after this run,
+    /// this directory holds no staging root, and nothing else was ever going to
+    /// put one there.
+    ///
+    /// `None` where every candidate is memory-backed — a build sandbox whose
+    /// whole tree is a tmpfs is one — which is the same condition under which
+    /// [`disk_backed_directory`] finds nothing, so a drill handed `None` here is
+    /// a drill with nothing to point at either way.
+    pub fn disk_staging_dir(&self) -> Option<&Path> {
+        self.disk_staging.as_deref()
     }
 
     /// The directory every run of this fixture stages plaintext in.
@@ -1086,6 +1113,9 @@ impl Drop for Fixture {
         // exit path including a panicking one. On tmpfs the pages are freed with
         // the directory.
         let _ = std::fs::remove_dir_all(&self.work);
+        if let Some(disk_staging) = &self.disk_staging {
+            let _ = std::fs::remove_dir_all(disk_staging);
+        }
     }
 }
 
@@ -1160,18 +1190,51 @@ pub fn kernel_says_memory_backed(path: &Path) -> Option<bool> {
 /// `None` where every candidate is memory-backed, which is a real state — a
 /// build sandbox whose whole tree is a tmpfs is one — and is reported rather
 /// than treated as a pass.
+///
+/// `preferred` goes in front of the conventional candidates rather than behind
+/// them, so a caller holding a directory of its own — [`Fixture::disk_staging_dir`]
+/// is the one that does — gets that one back and not a directory the rest of the
+/// machine also writes into. It is still checked against the mount table like
+/// any other candidate, so the answer remains the kernel's rather than the
+/// caller's assumption about where its own scratch landed.
 #[must_use]
-pub fn disk_backed_directory(extra: &[PathBuf]) -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = vec![
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+pub fn disk_backed_directory(preferred: Option<&Path>) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = preferred.map(Path::to_path_buf).into_iter().collect();
+    // The checkout is last. It is the one candidate that is somebody's working
+    // tree, and a scratch directory appearing in it mid-run is visible to every
+    // `git` this suite and its operator run.
+    candidates.extend([
         std::env::temp_dir(),
         PathBuf::from("/tmp"),
         PathBuf::from("/var/tmp"),
-    ];
-    candidates.extend_from_slice(extra);
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    ]);
     candidates
         .into_iter()
         .find(|path| kernel_says_memory_backed(path) == Some(false))
+}
+
+/// A mode-700 disk-backed directory unique to one fixture, where this machine
+/// has a disk-backed filesystem at all.
+///
+/// The base is chosen by the same independent oracle every other disk-backed
+/// selection uses, so a machine that is tmpfs throughout answers `None` here and
+/// `None` from [`disk_backed_directory`], and the drills report themselves
+/// undrilled once rather than disagreeing.
+fn disk_backed_scratch() -> Option<PathBuf> {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let base = disk_backed_directory(None)?;
+    let path = base.join(format!(
+        "safix-disk-stage-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Unwrapped rather than swallowed: falling back to a shared directory here
+    // would restore the residue-under-concurrency defect this exists to remove,
+    // and would do it silently.
+    std::fs::create_dir_all(&path).unwrap();
+    permit_owner_only(&path);
+    Some(path)
 }
 
 /// The stubbed clan's store holds an encoding rather than the value.

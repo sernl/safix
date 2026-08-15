@@ -719,7 +719,11 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
 /// the suite passed having asserted nothing about the rule. `memory_backing.rs`
 /// holds the two readings against each other; this only borrows the independent
 /// one.
+///
+/// The fixture's own disk-backed directory goes in front of the conventional
+/// candidates, so the residue assertion below is about a directory nothing else
+/// on this machine writes into.
 fn disk_backed_directory(fixture: &Fixture) -> Option<String> {
-    harness::disk_backed_directory(&[fixture.work_dir().to_path_buf()])
+    harness::disk_backed_directory(fixture.disk_staging_dir())
         .map(|path| path.to_string_lossy().into_owned())
 }

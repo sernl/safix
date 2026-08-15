@@ -138,7 +138,7 @@ fn a_run_pointed_at_a_disk_backed_directory_refuses() {
             "validation": null,
         }),
     );
-    let Some(disk_backed) = disk_backed_directory(&[]) else {
+    let Some(disk_backed) = disk_backed_directory(fixture.disk_staging_dir()) else {
         // A real state on a machine whose every mount is a tmpfs. Said out loud
         // rather than passed over, and the agreement test above still fails on
         // such a machine, so the probe is not left unasserted either way.
@@ -175,7 +175,7 @@ fn a_run_pointed_at_a_disk_backed_directory_refuses() {
 #[test]
 fn the_acknowledgement_is_the_only_way_past_the_refusal() {
     let mut fixture = Fixture::new();
-    let Some(disk_backed) = disk_backed_directory(&[]) else {
+    let Some(disk_backed) = disk_backed_directory(fixture.disk_staging_dir()) else {
         eprintln!("no disk-backed mount is reachable, so the acknowledgement was not drilled here");
         return;
     };
