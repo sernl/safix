@@ -44,7 +44,6 @@ in
 {
   imports = [
     ./options.nix
-    ./package.nix
   ];
 
   options.flake.safix = {
