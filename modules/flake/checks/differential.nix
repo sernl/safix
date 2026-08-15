@@ -20,8 +20,11 @@
 # and no other way. Both also assert the shell runtime's own behaviour where it
 # differs, so a divergence stays recorded rather than becoming folklore.
 #
-# The generator graph is not compared, because it is not ported. It reaches this
-# file as it lands, and the shell runtime stays `packages.safix` until it has.
+# The generator graph, `keygen` and `adduser` are compared here too, which is
+# what completed the gate: every subcommand the shell runtime has is judged
+# against it, and `packages.safix` is the rust binary as a result. The shell
+# runtime stays in the tree as `packages.safix-sh`, the oracle these modes
+# compare against.
 { ... }:
 {
   perSystem =
@@ -44,6 +47,12 @@
         pkgs.gnugrep
         pkgs.gnused
         pkgs.jq
+        # For `nix-instantiate --parse` alone, which is what holds the nix
+        # `adduser` generates to being nix. Parsing needs no store and no
+        # daemon, so it is available where an evaluation is not; the `nix` both
+        # runtimes reach for stays the stub, because it is named through
+        # SAFIX_NIX rather than found on PATH.
+        pkgs.nix
         pkgs.sops
         readers.sops-recipients-of
         readers.sops-keys-of
@@ -124,6 +133,37 @@
       # the claim `safix.sh` carries in a comment — never argv, never the
       # environment — made checkable for both runtimes.
       checks.safix-differential-pipes = differential "safix-differential-pipes" "pipes";
+
+      # Every generator with something to mint, run in the plan's order: the
+      # bulk form, the named form, the skip a second run makes, and a
+      # multi-output generator whose two halves land in one commit.
+      checks.safix-differential-generate = differential "safix-differential-generate" "generate";
+
+      # The rotation, and the cascade a rotation carries. A generator nothing
+      # reads asks nothing; one whose output another reads announces the whole
+      # downstream set before the first commit, and the answer is drilled both
+      # ways as well as given in advance.
+      checks.safix-differential-regenerate =
+        differential "safix-differential-regenerate" "regenerate";
+
+      # What `generate` refuses about a declaration and about what a script
+      # printed: no generator, an empty value, a script that exited non-zero, a
+      # validation that rejected the candidate, a multi-output script that
+      # printed something other than a JSON object, a prompt nobody answered,
+      # and a dependency with no value yet.
+      checks.safix-differential-genrefuse =
+        differential "safix-differential-genrefuse" "genrefuse";
+
+      # Minting an identity. Not a byte comparison of the value — two correct
+      # runs mint two different identities — so each side is held to the
+      # property and only the rendering is compared, with the recipient
+      # normalized away.
+      checks.safix-differential-keygen = differential "safix-differential-keygen" "keygen";
+
+      # Declaring a person who holds nothing yet: the scaffold, the policy
+      # regenerated from a tree that includes it, the two committed together,
+      # the hook, and every refusal about the name and the recipient.
+      checks.safix-differential-adduser = differential "safix-differential-adduser" "adduser";
 
       # The harness shown to fail. One mutation per channel — a line added to
       # standard output, a line added to standard error, an exit code changed, a

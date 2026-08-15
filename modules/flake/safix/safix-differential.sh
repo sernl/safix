@@ -7,6 +7,8 @@
 #
 # Read-path modes:  clean missing drift orphan unknown norule
 # Write-path modes: write refuse guard converge abort pipes
+# Generator modes:  generate regenerate genrefuse
+# Custody modes:    keygen adduser
 # Self-drill mode:  drills
 #
 # The gate that permits retiring the shell runtime is not a claim that the two
@@ -63,7 +65,7 @@
 # make a difference in output ambiguous between a defect and a fixture.
 set -euo pipefail
 
-mode="${1:?usage: safix-differential.sh <clean|missing|drift|orphan|unknown|norule|drills>}"
+mode="${1:?usage: safix-differential.sh <clean|missing|drift|orphan|unknown|norule|write|refuse|guard|converge|abort|pipes|generate|regenerate|genrefuse|keygen|adduser|drills>}"
 : "${SAFIX_SH:?SAFIX_SH must point at safix.sh}"
 : "${SAFIX_RS:?SAFIX_RS must point at the rust binary}"
 
@@ -142,6 +144,9 @@ setup_keys() {
   ESCROW_PUB="$(mint escrow)"
   BO_PUB="$(mint bo)"
   CY_PUB="$(mint cy)"
+  # A recipient for a person no declaration names yet, which is what `adduser`
+  # is handed. Its private half is minted here and never leaves this directory.
+  DEE_PUB="$(mint dee)"
   cat "$work/ana.txt" "$work/escrow.txt" "$work/bo.txt" "$work/cy.txt" >"$work/keys.txt"
 }
 
@@ -190,6 +195,19 @@ write_fixture() {
   jq -n --arg ana "$ANA_PUB" --arg escrow "$ESCROW_PUB" --arg bo "$BO_PUB" --arg cy "$CY_PUB" \
     '{ ana: [$escrow, $ana], bo: [$bo], cy: [$cy] }' | jq -S . >"$work/fixture/recipients.json"
 
+  # The run plan starts empty for everyone; each generator mode seeds exactly
+  # the generators it drives, so a mode's `order` is what that mode actually
+  # runs and no other mode's fixture can make a claim hold by accident.
+  printf '%s\n' '{
+  "ana": { "inputs": {}, "order": [], "outputs": {} },
+  "bo":  { "inputs": {}, "order": [], "outputs": {} },
+  "cy":  { "inputs": {}, "order": [], "outputs": {} }
+}' >"$work/fixture/genplan.json"
+
+  # No onboarding hook by default, which is the configuration every mode but one
+  # is driven under.
+  printf 'null\n' >"$work/fixture/hook.json"
+
   write_policy
   assert_attribute_order
 }
@@ -233,7 +251,32 @@ write_stub_nix() {
   mkdir -p "$work/bin"
   emit_stub "$work/bin/nix" <<'SH'
 set -eu
-[ "${1:-}" = eval ] || { echo "stub nix: expected eval, got '${1:-}'" >&2; exit 1; }
+case "${1:-}" in
+  eval) ;;
+  shell)
+    # `nix shell` is stubbed on the same grounds `nix eval` is: it resolves and
+    # realises store paths, which a build sandbox cannot do. The stub asserts the
+    # shape of the invocation instead — the flake the inputs are resolved from,
+    # every spec being an attribute of that flake's nixpkgs, and the `-c` — so a
+    # change in how a generator's runtimeInputs are requested fails here rather
+    # than at an operator's rotation, and fails identically for both runtimes.
+    shift
+    [ "${1:-}" = --inputs-from ] || { echo "stub nix shell: expected --inputs-from, got '${1:-}'" >&2; exit 1; }
+    [ "${2:-}" = "$SAFIX_REPO_ROOT" ] || { echo "stub nix shell: --inputs-from names '${2:-}', not the repository" >&2; exit 1; }
+    shift 2
+    while [ $# -gt 0 ] && [ "$1" != -c ]; do
+      case "$1" in
+        nixpkgs#*) ;;
+        *) echo "stub nix shell: '$1' is not a nixpkgs#<attr> spec" >&2; exit 1 ;;
+      esac
+      shift
+    done
+    [ "${1:-}" = -c ] || { echo "stub nix shell: no -c in the invocation" >&2; exit 1; }
+    shift
+    exec "$@"
+    ;;
+  *) echo "stub nix: expected eval or shell, got '${1:-}'" >&2; exit 1 ;;
+esac
 shift
 format="${1:-}"; shift
 target="${1:-}"
@@ -242,11 +285,35 @@ attribute="${target#*#}"
 [ "$root" = "$SAFIX_REPO_ROOT" ] \
   || { echo "stub nix: '$root' is not the repository under test" >&2; exit 1; }
 case "$format:$attribute" in
-  --json:safix.lib.placements)    cat "$SAFIX_FIXTURE/placements.json" ;;
-  --json:safix.lib.audiences)     cat "$SAFIX_FIXTURE/audiences.json" ;;
-  --json:safix.lib.governedFiles) cat "$SAFIX_FIXTURE/governed.json" ;;
-  --json:safix.lib.recipients)    cat "$SAFIX_FIXTURE/recipients.json" ;;
-  --raw:safix.lib.policyText)     cat "$SAFIX_FIXTURE/policy.yaml" ;;
+  --json:safix.lib.placements)     cat "$SAFIX_FIXTURE/placements.json" ;;
+  --json:safix.lib.audiences)      cat "$SAFIX_FIXTURE/audiences.json" ;;
+  --json:safix.lib.governedFiles)  cat "$SAFIX_FIXTURE/governed.json" ;;
+  --json:safix.lib.recipients)     cat "$SAFIX_FIXTURE/recipients.json" ;;
+  --json:safix.lib.generatorPlan)  cat "$SAFIX_FIXTURE/genplan.json" ;;
+  --json:safix.onboardingHook)     cat "$SAFIX_FIXTURE/hook.json" ;;
+  --raw:safix.lib.nameRegex)       printf '%s' '[a-z0-9][a-z0-9_-]*' ;;
+  --raw:safix.lib.policyText)
+    if [ "${SAFIX_POLICY_MODE:-static}" != scaffold ]; then
+      cat "$SAFIX_FIXTURE/policy.yaml"
+      exit 0
+    fi
+    # A flake evaluation sees the files git tracks and nothing else, and that is
+    # exactly what `adduser`'s staging order turns on: a command regenerating
+    # before it stages writes the policy of a tree WITHOUT the person it has just
+    # declared. Reproduced here rather than asserted about, so a runtime that got
+    # the order wrong writes a visibly different .sops.yaml.
+    printf 'keys:\n'
+    git -C "$SAFIX_REPO_ROOT" ls-files -- safix/users \
+      | grep '\.nix$' \
+      | while IFS= read -r m; do
+        u="${m#safix/users/}"
+        u="${u%.nix}"
+        r="$(sed -n 's/^ *recipient = "\(.*\)";$/\1/p' "$SAFIX_REPO_ROOT/$m")"
+        [ -n "$r" ] || continue
+        printf '  - &%s %s\n' "$u" "$r"
+      done
+    sed -n '/^creation_rules:/,$p' "$SAFIX_FIXTURE/policy.yaml"
+    ;;
   *) echo "stub nix: unexpected invocation: $format $attribute" >&2; exit 1 ;;
 esac
 SH
@@ -269,10 +336,11 @@ setup_repo() {
 # whose path contains a space reaches the child as one assignment rather than as
 # two.
 RUNTIME_ENV=()
-runtime_env() { # <repo> <tmpdir>
+runtime_env() { # <repo> <tmpdir> [<home>]
+  mkdir -p "${3:-$work/home}"
   RUNTIME_ENV=(
     "PATH=$work/bin:$PATH"
-    "HOME=$work/home"
+    "HOME=${3:-$work/home}"
     "TMPDIR=$2"
     "USER=ana"
     "SAFIX_NIX=$work/bin/nix"
@@ -349,17 +417,17 @@ compare() { # <label> <argument>...
   local sh="$work/run/sh" rs="$work/run/rs" sh_status=0 rs_status=0
 
   rm -rf "$work/run"
-  mkdir -p "$sh/tmp" "$rs/tmp" "$work/home"
+  mkdir -p "$sh/tmp" "$rs/tmp" "$sh/home" "$rs/home"
   cp -a "$REPO" "$sh/repo"
   cp -a "$REPO" "$rs/repo"
 
   local input
   input="$(input_path)"
 
-  runtime_env "$sh/repo" "$sh/tmp"
+  runtime_env "$sh/repo" "$sh/tmp" "$sh/home"
   env "${RUNTIME_ENV[@]}" \
     bash "$SAFIX_SH" "$@" < <(cat "$input") >"$sh/out" 2>"$sh/err" || sh_status=$?
-  runtime_env "$rs/repo" "$rs/tmp"
+  runtime_env "$rs/repo" "$rs/tmp" "$rs/home"
   env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain \
     "$SAFIX_RS" "$@" < <(cat "$input") >"$rs/out" 2>"$rs/err" || rs_status=$?
   rs_status_last="$rs_status"
@@ -395,6 +463,8 @@ compare() { # <label> <argument>...
 
   residue_free "$sh/tmp" "shell" "$label"
   residue_free "$rs/tmp" "rust" "$label"
+  residue_free "$sh/home" "shell" "$label"
+  residue_free "$rs/home" "rust" "$label"
   no_scratch_left "$sh/repo" "shell" "$label"
   no_scratch_left "$rs/repo" "rust" "$label"
 
@@ -417,9 +487,9 @@ reporter_changes_stderr_alone() { # <label> <argument>...
   local plain="$work/run/rs" fancy="$work/run/rs-graphical" status=0
 
   rm -rf "$fancy"
-  mkdir -p "$fancy/tmp"
+  mkdir -p "$fancy/tmp" "$fancy/home"
   cp -a "$REPO" "$fancy/repo"
-  runtime_env "$fancy/repo" "$fancy/tmp"
+  runtime_env "$fancy/repo" "$fancy/tmp" "$fancy/home"
   env "${RUNTIME_ENV[@]}" "$SAFIX_RS" "$@" < <(cat "$(input_path)") \
     >"$fancy/out" 2>"$fancy/err" || status=$?
   # Standard output alone: the graphical rendering of standard error is the one
@@ -508,18 +578,31 @@ no_scratch_left() { # <repo> <side> <label>
 # side from that side's own root, and anything still naming a path inside this
 # harness's scratch directory afterwards is a runtime talking about somewhere
 # other than the repository it was given, which fails.
+# The substitution is by POSITION in that side's own history rather than by a
+# single marker, because `generate` commits once per generator: replacing every
+# hash with one token would let a runtime that named the wrong one of its own
+# commits compare equal. `<commit-3>` on both sides is the same commit of two
+# histories that the effect projection has separately shown to agree.
 normalize_run() { # <repo> <file>...
-  local repo="$1" head file
+  local repo="$1" file hash index
   shift
-  head="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || true)"
+  local -a made=()
+  while IFS= read -r hash; do
+    made+=("$hash")
+  done < <(git -C "$repo" log --reverse --format=%h 2>/dev/null || true)
   for file in "$@"; do
     [ -e "$file" ] || continue
     sed -i "s|$repo|<repo>|g" "$file"
-    if [ -n "$head" ]; then
-      sed -i "s/$head/<head>/g" "$file"
+    index=0
+    for hash in ${made+"${made[@]}"}; do
+      sed -i "s/$hash/<commit-$index>/g" "$file"
+      index=$((index + 1))
+    done
+    if [ -n "${NORMALIZE_KEYS:-}" ]; then
+      sed -i -E 's/age1[02-9ac-hj-np-z]{58}/<recipient>/g' "$file"
     fi
     if grep -qE 'committed [0-9a-f]{4,}' "$file"; then
-      fail "a runtime named a commit that is not its own repository's HEAD, in $file"
+      fail "a runtime named a commit that is not one of its own repository's, in $file"
     fi
     if grep -qF -- "$work/" "$file"; then
       fail "a runtime named a path outside the repository it was given, in $file"
@@ -983,6 +1066,178 @@ abort_drill() { # <label> <expected-status> <argv>...
   note "[$label] exited $expect, wrote nothing, and left no candidate document"
 }
 
+
+# --- Generator fixtures -------------------------------------------------------------
+# A generator is two records that have to agree: the entry the command reads the
+# script off, and the run-plan entry the resolver would have computed from it.
+# `register_generator` derives the second from the first the way
+# modules/flake/safix/resolve.nix derives it — prompts and dependencies in one
+# name space, hyphens mapped to underscores — so a change to that mapping on one
+# side and not the other fails these modes.
+register_generator() { # <name>
+  jq --slurpfile p "$work/fixture/placements.json" --arg n "$1" '
+      .ana.order += [$n]
+    | .ana.outputs[$n] = ([$n] + ($p[0].ana[$n].generator.files // []))
+    | .ana.inputs[$n] = (
+        ( ($p[0].ana[$n].generator.prompts // {}) | keys
+          | map({ key: (. | gsub("-"; "_")), value: { kind: "prompt", name: . } }) )
+      + ( ($p[0].ana[$n].generator.dependencies // [])
+          | map({ key: (. | gsub("-"; "_")), value: { kind: "dependency", name: . } }) )
+        | from_entries)
+  ' "$work/fixture/genplan.json" >"$work/fixture/g.tmp"
+  mv "$work/fixture/g.tmp" "$work/fixture/genplan.json"
+}
+
+# The generator record arrives on standard input, as a quoted heredoc at the call
+# site: its `script` is bash for another shell to run, so it holds quotes and `$`
+# this shell must not expand.
+add_generator() { # <name> <file> ; record on stdin
+  local name="$1" file="$2" gen
+  gen="$(cat)"
+  jq --arg n "$name" --arg f "$file" --argjson g "$gen" \
+    '.ana[$n] = { file: $f, key: $n, origin: "private", owner: "ana", shared: false, generator: $g }' \
+    "$work/fixture/placements.json" | jq -S . >"$work/fixture/p.tmp"
+  mv "$work/fixture/p.tmp" "$work/fixture/placements.json"
+  register_generator "$name"
+  assert_attribute_order
+}
+
+# The further outputs a multi-output generator writes are entries in their own
+# right, which is what gives each its own key and its own file.
+add_plain_output() { # <name> <file>
+  jq --arg n "$1" --arg f "$2" \
+    '.ana[$n] = { file: $f, key: $n, origin: "private", owner: "ana", shared: false, generator: null }' \
+    "$work/fixture/placements.json" | jq -S . >"$work/fixture/p.tmp"
+  mv "$work/fixture/p.tmp" "$work/fixture/placements.json"
+  assert_attribute_order
+}
+
+# The three generators the `generate` mode drives: one that mints from nothing,
+# one that reads a prompt, and one that writes two outputs into one commit. Plus
+# `derived`, which reads another generator's output and so is what the cascade
+# has to carry.
+seed_generator_fleet() {
+  register_generator api-token
+
+  add_generator rotating "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": "a value minted from a typed seed", "files": [],
+  "prompts": { "seed": { "type": "hidden", "description": "any string" } },
+  "runtimeInputs": ["coreutils"],
+  "script": "printf 'rotated-%s' \"$(cat \"$in_seed\")\"", "validation": null }
+JSON
+
+  add_plain_output paired-pub "$ANA_FILE"
+  add_generator paired "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": "a keypair, both halves in one commit",
+  "files": ["paired-pub"], "prompts": {}, "runtimeInputs": ["coreutils"],
+  "script": "printf '{\"paired\":\"private-half\",\"paired-pub\":\"public-half\"}'",
+  "validation": null }
+JSON
+
+  add_generator derived "$ANA_FILE" <<'JSON'
+{ "dependencies": ["api-token"], "description": "derived from api-token", "files": [],
+  "prompts": {}, "runtimeInputs": ["coreutils"],
+  "script": "printf 'derived-from-%s' \"$(cat \"$in_api_token\")\"", "validation": null }
+JSON
+}
+
+# --- keygen -------------------------------------------------------------------------
+# Minting cannot be compared byte for byte: two correct runs produce two
+# different identities, and comparing the public halves would compare age's
+# random number generator. So each side is held to the property instead — one
+# identity appended, the file readable by its owner alone, the printed public half
+# being the one just appended, and the repository untouched — and only then are
+# the two renderings compared with the recipient normalized away.
+keygen_mints() { # <label> <argv>...
+  local label="$1" side dir status pub appended
+  shift
+  rm -rf "$work/keygen"
+  for side in sh rs; do
+    dir="$work/keygen/$side"
+    mkdir -p "$dir/tmp" "$dir/home"
+    cp -a "$REPO" "$dir/repo"
+    runtime_env "$dir/repo" "$dir/tmp" "$dir/home"
+    status=0
+    if [ "$side" = sh ]; then
+      env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" "$@" \
+        </dev/null >"$dir/out" 2>"$dir/err" || status=$?
+    else
+      env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" "$@" \
+        </dev/null >"$dir/out" 2>"$dir/err" || status=$?
+    fi
+    [ "$status" = 0 ] || { cat "$dir/err" >&2; fail "the $side runtime's [$label] exited $status"; }
+
+    local keyfile="$dir/home/.config/sops/age/keys.txt"
+    [ -e "$keyfile" ] || fail "the $side runtime appended no identity for [$label]"
+    [ "$(stat -c '%a' "$keyfile")" = 600 ] \
+      || fail "the $side runtime left $keyfile readable by more than its owner"
+    appended="$(grep -c '^AGE-SECRET-KEY-' "$keyfile" || true)"
+    [ "$appended" = 1 ] \
+      || fail "the $side runtime appended $appended identities rather than one for [$label]"
+    pub="$(age-keygen -y "$keyfile")"
+    grep -qF -- "$pub" "$dir/err" \
+      || fail "the $side runtime did not print the public half of the identity it appended"
+    grep -qF -- "AGE-SECRET-KEY-" "$dir/err" "$dir/out" \
+      && fail "the $side runtime printed a private half"
+
+    project "$dir/repo" >"$dir/projection"
+    cmp -s "$work/pristine" "$dir/projection" \
+      || fail "the $side runtime's [$label] changed the repository"
+  done
+
+  NORMALIZE_KEYS=1
+  normalize_run "$work/keygen/sh/repo" "$work/keygen/sh/out" "$work/keygen/sh/err"
+  normalize_run "$work/keygen/rs/repo" "$work/keygen/rs/out" "$work/keygen/rs/err"
+  NORMALIZE_KEYS=""
+  # Each side names its own home, which differs by construction.
+  sed -i "s|$work/keygen/sh|<home>|g" "$work/keygen/sh/out" "$work/keygen/sh/err"
+  sed -i "s|$work/keygen/rs|<home>|g" "$work/keygen/rs/out" "$work/keygen/rs/err"
+
+  cmp -s "$work/keygen/sh/out" "$work/keygen/rs/out" || {
+    diff -u "$work/keygen/sh/out" "$work/keygen/rs/out" >&2 || true
+    fail "stdout differs for [$label]"
+  }
+  cmp -s "$work/keygen/sh/err" "$work/keygen/rs/err" || {
+    diff -u "$work/keygen/sh/err" "$work/keygen/rs/err" >&2 || true
+    fail "stderr differs for [$label]"
+  }
+  COMPARED=$((COMPARED + 1))
+  note "[$label] both runtimes appended one identity, printed its public half alone, and left the repository alone"
+}
+
+# --- A divergence this harness records rather than reconciles ------------------------
+# The shell runtime has no --version: it reaches the unknown-subcommand refusal.
+# The rust runtime answers it, which is the convention for a compiled binary and
+# is a strictly wider surface rather than a different answer to a question both
+# were asked. Pinned rather than compared, so it stays a decision on the record.
+version_diverges() {
+  local dir="$work/version" sh_status=0 rs_status=0
+  rm -rf "$dir"
+  mkdir -p "$dir/tmp" "$dir/home"
+  cp -a "$REPO" "$dir/repo"
+  runtime_env "$dir/repo" "$dir/tmp" "$dir/home"
+  env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" --version \
+    </dev/null >"$dir/sh.out" 2>"$dir/sh.err" || sh_status=$?
+  env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain "$SAFIX_RS" --version \
+    </dev/null >"$dir/rs.out" 2>"$dir/rs.err" || rs_status=$?
+
+  [ "$sh_status" != 0 ] || fail "the oracle now accepts --version; the divergence is gone and should be reconciled"
+  grep -qF "unknown subcommand '--version'" "$dir/sh.err" \
+    || fail "the oracle refused --version for a reason other than not knowing it"
+  [ "$rs_status" = 0 ] || fail "the rust runtime refused --version"
+  grep -qE '^safix [0-9]+\.[0-9]+\.[0-9]+$' "$dir/rs.out" \
+    || fail "the rust runtime's --version is not a version on standard output"
+  COMPARED=$((COMPARED + 1))
+  note "[usage/version] divergence pinned: the oracle has no --version, the rust runtime prints one"
+}
+
+# The generator modes seed one ordinary value so that ana's file exists, and
+# nothing else: what the generators write is what is being compared, so a fixture
+# that pre-filled their outputs would compare two runtimes doing nothing.
+setup_repo_generators() {
+  set_value ana ana-alone value-ana-alone
+}
+
 prepare() {
   setup_keys
   write_fixture
@@ -1057,6 +1312,14 @@ case "$mode" in
     compare unknown/help-get get --help
     compare unknown/help-check check -h
     compare unknown/help-list-trailing list ana -h
+    compare unknown/help-generate generate -h
+    compare unknown/help-keygen keygen --help
+    compare unknown/help-adduser adduser -h
+    compare unknown/usage-none
+    compare unknown/usage-help help
+    compare unknown/usage-dash-h -h
+    compare unknown/unknown-subcommand rotate
+    version_diverges
     ;;
 
   # A governed file no creation rule's directory covers, and a placement outside
@@ -1299,6 +1562,166 @@ SH
       COMPARED=$((COMPARED + 1))
       note "[$side] the value was stored, and reached sops in neither argv nor the environment"
     done
+    ;;
+
+
+  # Every generator with something to mint, run in the plan's order. The bulk
+  # form, the named form, the skip a second bulk run makes, and the multi-output
+  # generator whose two halves land in one commit.
+  generate)
+    prepare
+    seed_generator_fleet
+    setup_repo_generators
+
+    with_input seed-value
+    expect_oracle generate 'generating api-token for ana' generate ana
+    compare generate/bulk generate ana
+
+    no_input
+    expect_oracle generate 'already holds a value for every output' generate ana api-token
+    compare generate/already-held generate ana api-token
+
+    compare generate/nothing-to-do generate bo
+    compare generate/unknown-user generate dee
+    compare generate/usage-many generate ana api-token extra
+    ;;
+
+  # The rotation. A named generator nothing reads asks nothing; one whose output
+  # another reads announces the whole downstream set and asks, and the answer is
+  # drilled both ways as well as answered in advance.
+  regenerate)
+    prepare
+    seed_generator_fleet
+    setup_repo_generators
+
+    with_input seed-value
+    compare regenerate/mint generate ana
+
+    no_input
+    expect_oracle regenerate 'rotation retires the input of' generate --regenerate ana api-token
+    with_input n
+    compare regenerate/declined generate --regenerate ana api-token
+    with_input y
+    compare regenerate/accepted generate --regenerate ana api-token
+
+    no_input
+    compare regenerate/assumed-yes generate --regenerate --yes ana api-token
+    compare regenerate/no-cascade generate --regenerate --yes ana paired
+    compare regenerate/by-second-output generate --regenerate --yes ana paired-pub
+    ;;
+
+  # What `generate` refuses about a declaration and about what a script printed.
+  genrefuse)
+    prepare
+    seed_generator_fleet
+    add_generator blank "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": null, "files": [], "prompts": {},
+  "runtimeInputs": ["coreutils"], "script": "printf ''", "validation": null }
+JSON
+    add_generator broken "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": null, "files": [], "prompts": {},
+  "runtimeInputs": ["coreutils"], "script": "echo 'the script says why' >&2; exit 3",
+  "validation": null }
+JSON
+    add_generator unvalidated "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": null, "files": [], "prompts": {},
+  "runtimeInputs": ["coreutils"], "script": "printf too-short",
+  "validation": "read -r v; [ \"${#v}\" -ge 32 ]" }
+JSON
+    add_plain_output halfpair-pub "$ANA_FILE"
+    add_generator halfpair "$ANA_FILE" <<'JSON'
+{ "dependencies": [], "description": null, "files": ["halfpair-pub"], "prompts": {},
+  "runtimeInputs": ["coreutils"], "script": "printf only-one-value", "validation": null }
+JSON
+    setup_repo_generators
+
+    no_input
+    expect_oracle genrefuse 'has no generator, so there is nothing to run' generate ana ana-alone
+    compare genrefuse/no-generator generate ana ana-alone
+    compare genrefuse/unknown-name generate ana no-such-secret
+
+    expect_oracle genrefuse 'produced nothing for' generate ana blank
+    compare genrefuse/empty-output generate ana blank
+
+    expect_oracle genrefuse 'exited 3; nothing was written' generate ana broken
+    compare genrefuse/script-failed generate ana broken
+
+    expect_oracle genrefuse 'rejected the candidate value' generate ana unvalidated
+    compare genrefuse/validation-rejected generate ana unvalidated
+
+    expect_oracle genrefuse 'must print a JSON object keyed by output name' generate ana halfpair
+    compare genrefuse/not-an-object generate ana halfpair
+
+    # A prompt with nothing on the stream, and a prompt answered with nothing.
+    with_input
+    expect_oracle genrefuse 'no value read for prompt' generate ana rotating
+    compare genrefuse/prompt-unread generate ana rotating
+    with_input ""
+    expect_oracle genrefuse 'was answered with nothing' generate ana rotating
+    compare genrefuse/prompt-empty generate ana rotating
+
+    # A dependency whose file does not exist at all.
+    no_input
+    expect_oracle genrefuse 'has no value yet' generate ana derived
+    compare genrefuse/dependency-missing generate ana derived
+    ;;
+
+  # Minting an identity, and refusing to mint one for somebody else.
+  keygen)
+    prepare
+    seed_values
+    project "$REPO" >"$work/pristine"
+
+    no_input
+    expect_oracle keygen 'is not you, and this writes a private key' keygen bo
+    compare keygen/for-someone-else keygen bo
+    compare keygen/unknown-user keygen dee
+    compare keygen/usage-many keygen ana bo
+    compare keygen/help keygen -h
+
+    keygen_mints keygen/mints keygen ana
+    keygen_mints keygen/mints-for-someone-else keygen --for-someone-else bo
+    ;;
+
+  # Declaring a person who holds nothing yet.
+  adduser)
+    prepare
+    seed_values
+    EXTRA_ENV=("SAFIX_POLICY_MODE=scaffold")
+
+    with_input y
+    expect_oracle adduser 'is declared.' adduser dee "$DEE_PUB"
+    compare adduser/scaffold adduser dee "$DEE_PUB"
+
+    no_input
+    compare adduser/assumed-yes adduser --yes dee "$DEE_PUB"
+    with_input n
+    expect_oracle adduser 'aborted; nothing was written' adduser dee "$DEE_PUB"
+    compare adduser/declined adduser dee "$DEE_PUB"
+
+    no_input
+    expect_oracle adduser 'is not a well-formed user name' adduser --yes 'Dee Smith' "$DEE_PUB"
+    compare adduser/bad-name adduser --yes 'Dee Smith' "$DEE_PUB"
+    expect_oracle adduser 'is not a well-formed age recipient' adduser --yes dee not-a-key
+    compare adduser/bad-recipient adduser --yes dee not-a-key
+    compare adduser/hardware-recipient adduser --yes dee "age1yubikey1$(printf 'q%.0s' $(seq 58))"
+    expect_oracle adduser 'is already a declared user' adduser --yes ana "$DEE_PUB"
+    compare adduser/already-declared adduser --yes ana "$DEE_PUB"
+    expect_oracle adduser 'flake.safix.onboardingHook is unset' adduser --yes dee "$DEE_PUB" --host box
+    compare adduser/host-without-hook adduser --yes dee "$DEE_PUB" --host box
+    compare adduser/usage-arity adduser dee
+    compare adduser/unknown-option adduser --force dee "$DEE_PUB"
+    compare adduser/host-needs-hostname adduser --yes dee "$DEE_PUB" --host
+
+    # With a hook configured, the hook runs after the commit and its arguments
+    # are the name, the recipient and every --host in order.
+    printf '%s\n' '"printf '"'"'hook: %s\\n'"'"' \"$*\" >&2"' >"$work/fixture/hook.json"
+    compare adduser/with-hook adduser --yes dee "$DEE_PUB" --host box --host other
+    printf '%s\n' '"exit 7"' >"$work/fixture/hook.json"
+    expect_oracle adduser 'the onboarding hook exited 7' adduser --yes dee "$DEE_PUB"
+    compare adduser/hook-failed adduser --yes dee "$DEE_PUB"
+    printf 'null\n' >"$work/fixture/hook.json"
+    EXTRA_ENV=()
     ;;
 
   # The harness is not trusted until it has been shown to fail. Each drill puts
