@@ -27,7 +27,7 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture, SHARED_FILE, SHIM, real_sops};
+use harness::{ANA_FILE, Fixture, SHARED_FILE, real_sops, shim};
 
 /// The directory the shared file would need, which no run before this one has
 /// made.
@@ -124,7 +124,7 @@ fn a_signal_during_encryption_stops_before_the_rename() {
         &["set", "ana", "api-token"],
         "CANARY-second-value\nCANARY-second-value\n",
         &[
-            ("SAFIX_SOPS", SHIM),
+            ("SAFIX_SOPS", shim()),
             ("SAFIX_SHIM_ROLE", "slow"),
             ("SAFIX_SHIM_SOPS", &sops),
             // Only in front of `sops set`, which is the invocation that holds

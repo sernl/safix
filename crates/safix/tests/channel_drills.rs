@@ -40,7 +40,7 @@ mod harness;
 
 use std::path::{Path, PathBuf};
 
-use harness::{Fixture, SAFIX, SHIM};
+use harness::{Fixture, safix, shim};
 
 /// The value the fixture holds, which the residue mutation leaks and which
 /// therefore has to be a real one rather than a string invented by the drill.
@@ -107,14 +107,14 @@ fn ready() -> Fixture {
 /// Run the invocation twice — once as itself, once with one channel damaged —
 /// and hold the damage to showing up on that channel and on no other.
 fn assert_caught(fixture: &Fixture, arguments: &[&str], mutation: &str, expected: &str) {
-    let reference = observe(fixture, SAFIX, arguments, &[]);
+    let reference = observe(fixture, safix(), arguments, &[]);
     let mutated = observe(
         fixture,
-        SHIM,
+        shim(),
         arguments,
         &[
             ("SAFIX_SHIM_ROLE", "mutate"),
-            ("SAFIX_SHIM_TARGET", SAFIX),
+            ("SAFIX_SHIM_TARGET", safix()),
             ("SAFIX_SHIM_MUTATION", mutation),
             ("SAFIX_SHIM_VALUE", VALUE),
         ],

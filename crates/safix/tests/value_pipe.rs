@@ -28,7 +28,7 @@ mod harness;
 
 use std::path::Path;
 
-use harness::{ANA_FILE, Fixture, SHIM, real_sops};
+use harness::{ANA_FILE, Fixture, real_sops, shim};
 
 /// A `set` observed at the sops process: the value is stored, and it was in
 /// neither of the two channels a bystander can read.
@@ -155,7 +155,7 @@ fn the_reading_that_found_no_value_finds_one_that_is_there() {
 /// The environment that puts the recording sops in the runtime's way.
 fn observed<'a>(spool: &'a Path, sops: &'a str) -> Vec<(&'a str, &'a str)> {
     vec![
-        ("SAFIX_SOPS", SHIM),
+        ("SAFIX_SOPS", shim()),
         ("SAFIX_SHIM_ROLE", "spy"),
         ("SAFIX_SHIM_SOPS", sops),
         ("SAFIX_SHIM_SPY", spool.to_str().unwrap()),

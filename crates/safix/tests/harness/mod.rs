@@ -49,6 +49,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
@@ -62,13 +63,37 @@ pub const ANA_FILE: &str = "secrets/safix/users/ana/secrets.yaml";
 pub const SHARED_FILE: &str = "secrets/safix/shared/ana,bo/secrets.yaml";
 
 /// The built binary under test.
-pub const SAFIX: &str = env!("CARGO_BIN_EXE_safix");
+pub fn safix() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| located("SAFIX_TEST_BINARY", env!("CARGO_BIN_EXE_safix")))
+        .as_str()
+}
 
 /// The evaluator the suite answers with.
-const NIX_STUB: &str = env!("CARGO_BIN_EXE_safix-nix-stub");
+fn nix_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| located("SAFIX_TEST_NIX_STUB", env!("CARGO_BIN_EXE_safix-nix-stub")))
+        .as_str()
+}
 
 /// The shim the residue and drill checks put in the runtime's way.
-pub const SHIM: &str = env!("CARGO_BIN_EXE_safix-test-shim");
+pub fn shim() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| located("SAFIX_TEST_SHIM", env!("CARGO_BIN_EXE_safix-test-shim")))
+        .as_str()
+}
+
+/// Where one of the three programs the suite drives is.
+///
+/// `CARGO_BIN_EXE_*` is an absolute path fixed when the test was compiled, and
+/// it points inside the build directory of whatever compiled it. A check that
+/// builds the suite once and then runs one test of it per attribute therefore
+/// has to say where the three programs went, and these variables are how it
+/// says so. The compiled-in path remains the answer when nothing says
+/// otherwise, so a developer's `cargo test` needs no environment at all.
+fn located(variable: &str, built: &str) -> String {
+    std::env::var(variable).unwrap_or_else(|_| built.to_owned())
+}
 
 /// What a run left on each stream, and what it exited with.
 pub struct Run {
@@ -395,29 +420,29 @@ impl Fixture {
 
     /// One invocation, with nothing on standard input.
     pub fn run(&self, arguments: &[&str]) -> Run {
-        self.invoke(SAFIX, arguments, None, Reporter::Plain, &[])
+        self.invoke(safix(), arguments, None, Reporter::Plain, &[])
     }
 
     /// One invocation, with the given bytes on standard input.
     pub fn run_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(SAFIX, arguments, Some(stdin), Reporter::Plain, &[])
+        self.invoke(safix(), arguments, Some(stdin), Reporter::Plain, &[])
     }
 
     /// One invocation under the graphical reporter, which is where a refusal's
     /// code is rendered.
     pub fn run_graphical(&self, arguments: &[&str]) -> Run {
-        self.invoke(SAFIX, arguments, None, Reporter::Graphical, &[])
+        self.invoke(safix(), arguments, None, Reporter::Graphical, &[])
     }
 
     /// One invocation under the graphical reporter, with standard input.
     pub fn run_graphical_with(&self, arguments: &[&str], stdin: &str) -> Run {
-        self.invoke(SAFIX, arguments, Some(stdin), Reporter::Graphical, &[])
+        self.invoke(safix(), arguments, Some(stdin), Reporter::Graphical, &[])
     }
 
     /// One invocation with something in its environment the fixture does not
     /// set — a backend that fails, a temporary directory of its own.
     pub fn run_env(&self, arguments: &[&str], stdin: Option<&str>, extra: &[(&str, &str)]) -> Run {
-        self.invoke(SAFIX, arguments, stdin, Reporter::Plain, extra)
+        self.invoke(safix(), arguments, stdin, Reporter::Plain, extra)
     }
 
     /// One invocation of a program standing in for the binary, which is how a
@@ -456,7 +481,7 @@ impl Fixture {
     /// The command's own environment, ready for a caller that needs to spawn it
     /// itself.
     pub fn command(&self, arguments: &[&str]) -> Command {
-        let mut command = Command::new(SAFIX);
+        let mut command = Command::new(safix());
         command.args(arguments);
         self.environment(&mut command, Reporter::Plain);
         command
@@ -500,7 +525,7 @@ impl Fixture {
             .arg("-s")
             .arg(signal)
             .arg(seconds)
-            .arg(SAFIX);
+            .arg(safix());
         command.args(arguments);
         self.environment(&mut command, Reporter::Plain);
         for (name, value) in extra {
@@ -567,7 +592,7 @@ impl Fixture {
             .env("USER", "ana")
             .env("SOPS_AGE_KEY_FILE", &self.key_file)
             .env("SAFIX_REPO_ROOT", &self.repo)
-            .env("SAFIX_NIX", NIX_STUB)
+            .env("SAFIX_NIX", nix_stub())
             .env(
                 "SAFIX_FIXTURE_PLACEMENTS",
                 self.work.join("placements.json"),

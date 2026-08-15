@@ -34,7 +34,7 @@ mod harness;
 mod linux {
     use std::path::Path;
 
-    use crate::harness::{ANA_FILE, Fixture, Run, SAFIX, SHIM};
+    use crate::harness::{ANA_FILE, Fixture, Run, safix, shim};
 
     /// Distinctive enough that a match is this fixture's value rather than a
     /// coincidence in a store path, and short enough to survive strace's own
@@ -52,7 +52,7 @@ mod linux {
 
         let observed = trace(
             &fixture,
-            SAFIX,
+            safix(),
             &["set", "ana", "api-token"],
             Some(&format!("{TYPED}\n{TYPED}\n")),
             &[],
@@ -87,8 +87,15 @@ mod linux {
             }),
         );
 
-        let observed = trace(&fixture, SAFIX, &["generate", "ana"], None, &[], &[MINTED])
-            .unwrap_or_else(|reason| panic!("{reason}"));
+        let observed = trace(
+            &fixture,
+            safix(),
+            &["generate", "ana"],
+            None,
+            &[],
+            &[MINTED],
+        )
+        .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
             fixture.value(ANA_FILE, "api-token"),
@@ -114,12 +121,12 @@ mod linux {
 
         let outcome = trace(
             &fixture,
-            SHIM,
+            shim(),
             &["set", "ana", "api-token"],
             Some(&format!("{TYPED}\n{TYPED}\n")),
             &[
                 ("SAFIX_SHIM_ROLE", "mutate"),
-                ("SAFIX_SHIM_TARGET", SAFIX),
+                ("SAFIX_SHIM_TARGET", safix()),
                 ("SAFIX_SHIM_MUTATION", "plaintext"),
                 ("SAFIX_SHIM_VALUE", TYPED),
             ],
