@@ -184,7 +184,9 @@ fn confirm_cascade(
         count.saturating_sub(1),
     );
     for name in cascade {
-        announcement.push_str(&format!("    {name}\n"));
+        announcement.push_str("    ");
+        announcement.push_str(name);
+        announcement.push('\n');
     }
     announcement.push_str(
         "\nEach commits as it goes. Leaving them alone would leave values derived\n\

@@ -34,6 +34,12 @@ tokio = { workspace = true, features = ["rt-multi-thread", "process", "sync"] }
 # otherwise be `unsafe` in a crate that forbids it; nothing here opens a
 # terminal or catches a signal, which stay the command's.
 rustix.workspace = true
+# The one regular expression this runtime evaluates, and it is not one of ours:
+# `adduser` holds a name to the alphabet `flake.safix.lib.nameRegex` publishes,
+# so the pattern arrives from the nix half and has to be compiled rather than
+# recognized. `regex-lite` is the dependency-free member of the family, which is
+# what a single anchored character-class pattern is worth.
+regex-lite.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

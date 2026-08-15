@@ -30,11 +30,13 @@
 //! harness rather than scheduled; see
 //! `openspec/changes/rewrite-runtime-in-rust/`.
 
+pub mod adduser;
 pub mod check;
 mod error;
 pub mod fix;
 pub mod git;
 pub mod inputs;
+pub mod keygen;
 pub mod model;
 pub mod nix;
 mod probe;

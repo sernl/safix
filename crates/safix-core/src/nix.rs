@@ -210,6 +210,28 @@ impl Nix {
         command
     }
 
+    /// Whether nix can parse this file at all.
+    ///
+    /// `nix-instantiate --parse` rather than an evaluation: the question is
+    /// whether the bytes are a nix expression, and a scaffold that is not one
+    /// would be committed beside a regenerated policy and found at the next
+    /// evaluation, with the recipient policy already moved.
+    ///
+    /// Not routed through `SAFIX_NIX`, because that variable names the `nix`
+    /// binary and this is a different one; a nix that cannot be found is a file
+    /// that cannot be shown to parse, which is the same answer.
+    #[must_use]
+    pub fn parses(&self, path: &Path) -> bool {
+        Command::new("nix-instantiate")
+            .arg("--parse")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
     /// Standard error is inherited: nix's own diagnosis of a broken
     /// declaration is the useful half of the failure, and a refusal of ours
     /// that swallowed it would leave the operator with "could not evaluate".

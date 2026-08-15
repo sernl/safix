@@ -299,7 +299,7 @@ impl Workspace {
 /// A subprocess rather than a library call because that is what the shell
 /// runtime does, and the two have to answer the same on a machine where the
 /// environment and the password database disagree.
-fn login_name() -> String {
+pub(crate) fn login_name() -> String {
     if let Ok(user) = std::env::var("USER")
         && !user.is_empty()
     {
