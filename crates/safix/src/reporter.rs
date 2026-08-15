@@ -272,6 +272,28 @@ mod tests {
                 key: "ops_tooling".into(),
                 cause: "invalid unicode code point".into(),
             },
+            Code::ClanUnavailable => Error::ClanUnavailable {
+                program: "clan".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::ClanPipeMissing => Error::ClanPipeMissing,
+            Code::ClanVarUnknown => Error::ClanVarUnknown {
+                mapping: "ntfy-token".into(),
+                machine: "ana-workstation".into(),
+                generator: "ntfy".into(),
+                file: "token".into(),
+            },
+            Code::ClanCommandFailed => Error::ClanCommandFailed {
+                mapping: "ntfy-token".into(),
+                machine: "ana-workstation".into(),
+                var_id: "ntfy/token".into(),
+                output: "Error: Machine ana-workstation does not exist".into(),
+            },
+            Code::UnknownMapping => Error::UnknownMapping {
+                mapping: "ntfy-tokne".into(),
+                declared: vec!["ntfy-token".into(), "wg-key".into()],
+            },
+            Code::NoClanFlake => Error::NoClanFlake,
             Code::FileUnreadable => Error::FileUnreadable {
                 path: "secrets/safix/users/ana/secrets.yaml.safix-tmp.4213.yaml".into(),
                 cause: io::Error::from(io::ErrorKind::PermissionDenied),

@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: no clan is declared, so there is nothing to transfer with.
+
+Set flake.safix.bridge.clanFlake to the clan this consumer bridges to. It is
+declared once for the consumer rather than once per mapping.

@@ -216,6 +216,71 @@ pub enum Error {
         cause: String,
     },
 
+    /// The clan binary could not be run.
+    ///
+    /// Raised before any mapping is transferred rather than at the mapping that
+    /// needed it, because a partial run reports "unchanged" for every mapping
+    /// it never reached.
+    #[error("{}", prose::clan_unavailable(program))]
+    ClanUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// clan was started with a pipe that was not there to use.
+    #[error("clan produced no usable pipe")]
+    ClanPipeMissing,
+
+    /// clan has no such var.
+    ///
+    /// The one thing evaluation could not check: the clan half of a mapping
+    /// lives in another flake, so a typo in it is a sentence here rather than a
+    /// refusal at build time.
+    #[error("{}", prose::clan_var_unknown(mapping, machine, generator, file))]
+    ClanVarUnknown {
+        /// The mapping whose clan side does not resolve.
+        mapping: String,
+        /// The machine the mapping names.
+        machine: String,
+        /// The generator the mapping names.
+        generator: String,
+        /// The file the mapping names.
+        file: String,
+    },
+
+    /// clan ran and refused, and this is what it said.
+    ///
+    /// clan's own message is carried verbatim rather than reworded: it is the
+    /// authority on its own store, and a guess at what it meant would be a
+    /// second, worse account of a failure it has already described.
+    #[error("{}", prose::clan_command_failed(mapping, machine, var_id, output))]
+    ClanCommandFailed {
+        /// The mapping being transferred.
+        mapping: String,
+        /// The machine the mapping names.
+        machine: String,
+        /// The var id as clan's command line spells it.
+        var_id: String,
+        /// clan's own standard error, verbatim.
+        output: String,
+    },
+
+    /// A verb was given a mapping name the declarations do not carry.
+    #[error("{}", prose::unknown_mapping(mapping, &declared.join(", ")))]
+    UnknownMapping {
+        /// The name that was asked for.
+        mapping: String,
+        /// Every mapping that is declared.
+        declared: Vec<String>,
+    },
+
+    /// A transfer was asked for and no clan is declared to transfer with.
+    #[error("{}", prose::no_clan_flake())]
+    NoClanFlake,
+
     /// A file could not be read.
     #[error("could not read {path}")]
     FileUnreadable {

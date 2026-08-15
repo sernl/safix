@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: could not run clan, and clan is the authority on its own store.
+
+Nothing was transferred. safix does not read, write, encrypt or decrypt
+a file clan placed: every value crosses that boundary through clan's own
+command, in both directions, so a run without it does none of its
+mappings rather than some of them. A run that did some would report the
+rest as unchanged, which is a claim about a side it never looked at.
+
+Install clan, or name the one to use in SAFIX_CLAN.

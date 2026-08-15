@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the mapping 'ntfy-token' names a var clan does not have.
+
+    machine     ana-workstation
+    generator   ntfy
+    file        token
+
+Evaluation could not have caught this. The clan half of a mapping lives
+in another flake, and the only thing that can answer whether it resolves
+is clan itself.
+
+Check the three names against clan's own list:
+
+    clan vars list ana-workstation

@@ -177,3 +177,84 @@ and runs after the scaffolding is committed:
     '';
 
 Or drop --host: onboarding without it succeeds, having done less.";
+
+/// clan is not there, and both verbs stop before touching anything.
+pub(super) fn clan_unavailable(program: &str) -> String {
+    format!(
+        "could not run {program}, and clan is the authority on its own store.\n\
+        \n\
+        Nothing was transferred. safix does not read, write, encrypt or decrypt\n\
+        a file clan placed: every value crosses that boundary through clan's own\n\
+        command, in both directions, so a run without it does none of its\n\
+        mappings rather than some of them. A run that did some would report the\n\
+        rest as unchanged, which is a claim about a side it never looked at.\n\
+        \n\
+        Install clan, or name the one to use in SAFIX_CLAN."
+    )
+}
+
+/// The clan half of a mapping names something clan does not have.
+pub(super) fn clan_var_unknown(
+    mapping: &str,
+    machine: &str,
+    generator: &str,
+    file: &str,
+) -> String {
+    format!(
+        "the mapping '{mapping}' names a var clan does not have.\n\
+        \n\
+        \x20   machine     {machine}\n\
+        \x20   generator   {generator}\n\
+        \x20   file        {file}\n\
+        \n\
+        Evaluation could not have caught this. The clan half of a mapping lives\n\
+        in another flake, and the only thing that can answer whether it resolves\n\
+        is clan itself.\n\
+        \n\
+        Check the three names against clan's own list:\n\
+        \n\
+        \x20   clan vars list {machine}"
+    )
+}
+
+/// clan refused, and what it said is carried rather than reworded.
+pub(super) fn clan_command_failed(
+    mapping: &str,
+    machine: &str,
+    var_id: &str,
+    output: &str,
+) -> String {
+    format!(
+        "clan refused {machine} {var_id}, transferring the mapping '{mapping}'.\n\
+        \n\
+        clan said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// A mapping name nothing declares.
+pub(super) fn unknown_mapping(mapping: &str, declared: &str) -> String {
+    if declared.is_empty() {
+        return format!(
+            "'{mapping}' is not a declared mapping, and no mapping is declared.\n\
+            \n\
+            A mapping is a declaration rather than an argument. Declare one under\n\
+            flake.safix.bridge.mappings, naming both endpoints and a direction."
+        );
+    }
+    format!(
+        "'{mapping}' is not a declared mapping.\n\
+        \n\
+        Declared: {declared}"
+    )
+}
+
+/// A transfer with no clan to transfer with.
+pub(super) fn no_clan_flake() -> String {
+    "no clan is declared, so there is nothing to transfer with.\n\
+    \n\
+    Set flake.safix.bridge.clanFlake to the clan this consumer bridges to. It is\n\
+    declared once for the consumer rather than once per mapping."
+        .to_owned()
+}

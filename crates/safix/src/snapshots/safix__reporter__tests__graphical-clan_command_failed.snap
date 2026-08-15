@@ -1,0 +1,12 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::clan_command_failed
+
+  × clan refused ana-workstation ntfy/token, transferring the mapping 'ntfy-
+  │ token'.
+  │ 
+  │ clan said:
+  │ 
+  │ Error: Machine ana-workstation does not exist
