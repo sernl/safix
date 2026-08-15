@@ -1,8 +1,9 @@
 //! The stable name of a refusal.
 //!
-//! A refusal's message is prose the differential harness holds to the shell
-//! runtime's wording, so it is not something a script can branch on. Its code
-//! is: `safix::recipient_drift` names the same refusal whatever the message
+//! A refusal's message is prose, fixed to the retired shell runtime's wording
+//! and held there by snapshots, so it is not something a script can branch on.
+//! Its code is: `safix::recipient_drift` names the same refusal whatever the
+//! message
 //! grows into, and it is what the graphical reporter prints, what a snapshot is
 //! keyed by, and what a script greps for.
 //!

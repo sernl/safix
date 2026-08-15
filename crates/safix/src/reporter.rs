@@ -2,16 +2,16 @@
 //!
 //! Two renderings of the same value. The graphical one is `miette`'s, with a
 //! diagnostic code and the help text that names the way out; it is what an
-//! operator sees. The plain one is the shell runtime's shape exactly —
-//! `safix: <message>`, no colour, no code, no span — and it exists so that the
-//! differential harness can compare standard error byte for byte instead of
-//! matching a pattern over a graphical rendering, which would be a comparison
-//! whose strictness nobody could state.
+//! operator sees. The plain one is the retired shell runtime's shape exactly —
+//! `safix: <message>`, no colour, no code, no span — and it exists so that
+//! standard error can be asserted byte for byte instead of by a pattern over a
+//! graphical rendering, which would be an assertion whose strictness nobody
+//! could state. The integration suite drives the plain one for that reason and
+//! the graphical one where a refusal's code is the claim.
 //!
 //! Selecting a reporter alters the bytes on standard error and nothing else.
 //! It does not touch standard output, the exit status, or anything the run does
-//! to the repository, and the harness asserts that by running the same
-//! invocation twice.
+//! to the repository.
 
 use std::fmt::Display;
 
@@ -27,10 +27,10 @@ pub const PLAIN: &str = "plain";
 
 /// The program name every refusal is prefixed with.
 ///
-/// A literal rather than `argv[0]`, because the shell runtime uses a literal.
-/// The same binary is installed under two names while the shell runtime is kept
-/// in the tree as the oracle, and a refusal that named itself after the file
-/// would differ from the oracle on every line it prints.
+/// A literal rather than `argv[0]`, because the retired shell runtime used one
+/// and every refusal's wording was fixed against it. A refusal that named itself
+/// after the file it was invoked as would say something different under every
+/// symlink and wrapper, which is not a property a message should have.
 pub const PROGRAM: &str = "safix";
 
 /// A refusal on its way to a terminal.
@@ -152,9 +152,9 @@ pub fn report_plain(message: &dyn Display) {
 ///
 /// The cost is colour, and it is worth paying here. These refusals are
 /// paragraphs rather than annotated source spans, so colour carries little that
-/// the structure does not; and this is the one channel the differential harness
-/// cannot compare against the shell runtime, so being able to pin it against
-/// itself is what keeps it from being unchecked.
+/// the structure does not; and this is the one channel that never had a second
+/// runtime to be compared against, so pinning it against itself is what keeps it
+/// from being unchecked.
 #[must_use]
 pub fn render_graphical(refusal: &Refusal) -> String {
     let mut rendered = String::new();
@@ -202,7 +202,7 @@ mod tests {
     /// snapshot of that value. Nothing in that chain is a habit.
     ///
     /// The values are fixtures throughout: the fleet is `ana`, `bo` and `cy`,
-    /// the one the differential harness drives, and every age string is
+    /// the one every check in this repository drives, and every age string is
     /// synthetic — 58 characters of one bech32 letter, minted by nobody and
     /// opening nothing.
     ///
@@ -472,8 +472,8 @@ mod tests {
         all
     }
 
-    /// The graphical rendering is the one channel the differential harness does
-    /// not compare against the shell runtime, so it is pinned against itself.
+    /// The graphical rendering never had a second runtime to be compared
+    /// against, so it is pinned against itself.
     ///
     /// Both renderings are the functions the command prints through, so what is
     /// held here is what is written, not a third rendering made for the test.

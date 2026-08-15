@@ -1,7 +1,7 @@
 //! The refusals whose message is a page rather than a sentence.
 //!
 //! Every function here renders one variant of [`Error`](super::Error), and each
-//! is the text `modules/flake/safix/safix.sh` prints for the same refusal, less
+//! is the text the retired shell runtime printed for the same refusal, less
 //! the `safix: ` prefix the command's reporter adds and less the trailing
 //! newline it adds after it. They live beside the enum rather than inside its
 //! attributes because a fifteen-line format string is a fifteen-line format

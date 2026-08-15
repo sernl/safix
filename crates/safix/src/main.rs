@@ -8,27 +8,29 @@
 //!
 //! # What this binary does
 //!
-//! Every subcommand `modules/flake/safix/safix.sh` has: the read paths `list`,
-//! `get` and `check`; the write paths `set` and `fix`; the generator graph
-//! behind `generate`; and the two that touch custody itself, `keygen` and
-//! `adduser`. Each appeared here only once the differential harness had
-//! compared it against the shell runtime on standard output, standard error,
-//! exit code and effect on the repository — see `modules/flake/checks/differential.nix`
-//! for the modes and `CHANGELOG.md` for what the comparison does not cover.
+//! Every subcommand the retired shell runtime had: the read paths `list`, `get`
+//! and `check`; the write paths `set` and `fix`; the generator graph behind
+//! `generate`; and the two that touch custody itself, `keygen` and `adduser`.
+//! Each appeared here only once the differential harness had compared it against
+//! that runtime on standard output, standard error, exit code and effect on the
+//! repository. What each subcommand does now is asserted against literals by
+//! `crates/safix/tests/`, driven per mode from `modules/flake/checks/cli.nix`;
+//! `CHANGELOG.md` records the retirement and what the comparison never
+//! covered.
 //!
 //! # Exit codes
 //!
 //! Zero on success and one on a refusal. For `get`, `set` and `fix`, whatever
-//! sops exited with when sops is what refused: the shell runtime lets sops's
-//! status be the command's on all three, and sops's own standard error has
-//! already said why, so nothing of ours is printed over it.
+//! sops exited with when sops is what refused: sops's own standard error has
+//! already said why, so nothing of ours is printed over it, and the retired
+//! shell runtime let sops's status be the command's on all three as well.
 //!
 //! git is the exception to that, and deliberately: a git that refuses is a
 //! refusal like any other here — exit 1, and a line naming the command that
-//! refused — where the shell runtime, running under `set -e`, exits with git's
-//! own status and says nothing of its own. git's message names a lock file or a
+//! refused — where the shell runtime, running under `set -e`, exited with git's
+//! own status and said nothing of its own. git's message names a lock file or a
 //! hook rather than the subcommand safix ran, so the line is what makes the
-//! failure actionable. `safix-differential-write` pins both behaviours.
+//! failure actionable. `CHANGELOG.md` records that divergence as a decision.
 //!
 //! An interrupted run exits 130 and a terminated one 143, having swept up
 //! whatever it had written but not yet moved into place; see [`abort`].

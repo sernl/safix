@@ -8,9 +8,9 @@
 //! killed rather than unwound.
 //!
 //! So `SIGINT` and `SIGTERM` are caught. The handler sweeps the scratch registry
-//! and exits 130 or 143, which are the codes `modules/flake/safix/safix.sh`
-//! routes the same two signals to and therefore the codes an operator's shell
-//! already reports for an interrupted `safix`.
+//! and exits 130 or 143, which are the codes a shell reports for a process
+//! ended by those two signals and therefore the codes an operator already reads
+//! for an interrupted `safix`.
 //!
 //! The sweep runs on an ordinary thread rather than inside a signal handler:
 //! `signal-hook`'s iterator delivers through a self-pipe, so what runs here is

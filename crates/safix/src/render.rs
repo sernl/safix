@@ -1,9 +1,10 @@
 //! The prose a drift report is printed as.
 //!
 //! [`safix_core::check`] answers the questions and returns findings; this turns
-//! each finding into the paragraph the shell runtime prints for it, word for
-//! word, because that prose is the tested contract and the differential harness
-//! compares it.
+//! each finding into the paragraph the retired shell runtime printed for it,
+//! word for word. That prose is the tested contract: it was held to the shell
+//! runtime's byte for byte while both existed, and is now held to the literals
+//! the integration suite asserts.
 //!
 //! The shape is the shell's two functions. A finding is a blank line, then its
 //! headline; detail lines under it are indented two spaces, and the items they

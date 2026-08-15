@@ -30,11 +30,13 @@
 //! values reach its script, and [`scratch`] is what an aborted write must not
 //! leave behind.
 //!
-//! Every one of them was compared against `modules/flake/safix/safix.sh` by the
-//! differential harness before it shipped — standard output, standard error,
-//! exit code and effect on the repository, over one fixture fleet. That shell
-//! runtime is still in the tree as the oracle those comparisons run against;
-//! see `openspec/changes/rewrite-runtime-in-rust/`.
+//! Every one of them was compared against a shell runtime by the differential
+//! harness before it shipped — standard output, standard error, exit code and
+//! effect on the repository, over one fixture fleet. Both that runtime and that
+//! harness were retired once the port completed and the claims they carried were
+//! written as assertions against literals; see
+//! `openspec/changes/rewrite-runtime-in-rust/` for the port and
+//! `openspec/changes/rust-only-runtime/` for the retirement.
 
 pub mod adduser;
 pub mod check;

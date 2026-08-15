@@ -4,8 +4,8 @@
 //! encrypt and re-wrap goes through the binary, and the file format, its MAC,
 //! its initialization-vector reuse rule and its key wrapping are not
 //! reimplemented here. [`document`] is the one exception in appearance only —
-//! it reads the two metadata fields the python readers read, without
-//! decrypting, and reads nothing else about the format.
+//! it reads two metadata fields without decrypting, and reads nothing else about
+//! the format.
 //!
 //! A decrypted value comes back as a [`Secret`], so it is zeroed when dropped
 //! and cannot be rendered, logged or serialized on the way past. The value

@@ -1,13 +1,13 @@
 //! What `-h` prints, for the subcommands this binary implements.
 //!
-//! One text per ported subcommand, word for word from
-//! `modules/flake/safix/safix.sh`, because the help is part of what the
-//! differential harness compares and the shell runtime is the oracle. It goes
-//! to standard error and the process exits zero, which is also the shell
-//! runtime's shape.
+//! One text per subcommand, word for word from the retired shell runtime,
+//! because the help was part of what the differential harness compared while
+//! both existed and is a contract an operator's habits are built on. It goes to
+//! standard error and the process exits zero, which was that runtime's shape
+//! too.
 //!
-//! [`SCAFFOLD`] is the shell's own general usage, unabridged, because this
-//! binary now implements every subcommand it lists.
+//! [`SCAFFOLD`] is that runtime's general usage, unabridged, because this binary
+//! implements every subcommand it lists.
 
 /// `safix set -h`.
 pub const SET: &str = "\

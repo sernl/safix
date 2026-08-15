@@ -5,9 +5,9 @@
 //! said before the operator is asked for a value. That ordering is why this is a
 //! sink handed in rather than a transcript handed back.
 //!
-//! The text is built here rather than at the sink, because it is the shell
-//! runtime's prose and the differential harness compares it byte for byte. A
-//! sink that formatted would be a second author of a tested string.
+//! The text is built here rather than at the sink, because it is prose the
+//! checks read byte for byte. A sink that formatted would be a second author of
+//! a tested string.
 
 use std::sync::Mutex;
 

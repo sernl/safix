@@ -7,7 +7,7 @@
 //! file an operator could mistake for it.
 //!
 //! The registry is process-wide and the removal is driven from one place, for
-//! the reason `modules/flake/safix/safix.sh` gives for its single `EXIT` trap: a
+//! the reason the retired shell runtime gave for its single `EXIT` trap: a
 //! cleanup scoped to a function does not run when the process dies between the
 //! write and the return, which is the abort a file actually survives. [`Guard`]
 //! covers every return and every panic; a signal is the command's to catch, and
@@ -87,7 +87,7 @@ static INTERRUPTED_WITH: AtomicI32 = AtomicI32::new(0);
 /// Nothing is swept while this is held.
 ///
 /// Held across each `sops` invocation, and it is what makes an interruption
-/// mean the same thing here as it does in `modules/flake/safix/safix.sh`. Bash
+/// mean the same thing here as it did in the retired shell runtime. Bash
 /// runs a trap between commands, so a `SIGINT` arriving while `sops` is writing
 /// the candidate document is acted on only once `sops` has been waited on —
 /// never while it still has the file open. A sweep from a handler thread has no

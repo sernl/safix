@@ -6,12 +6,12 @@
 //! prose, and it is why rendering lives in the command rather than here.
 //!
 //! The wording is not ours to choose freely. Each message below is the message
-//! `modules/flake/safix/safix.sh` prints for the same refusal, because the
-//! shell runtime is the oracle the differential harness compares against and
-//! its prose is tested. A [`Display`](std::fmt::Display) rendering here is
-//! everything the shell prints after `safix: `, including the blank lines and
-//! the indented continuations, and it carries no trailing newline — the
-//! command's reporter adds that.
+//! the retired shell runtime printed for the same refusal: its prose was the
+//! oracle while both existed, and it is now the tested contract in its own
+//! right. A [`Display`](std::fmt::Display) rendering here is everything that
+//! runtime printed after `safix: `, including the blank lines and the indented
+//! continuations, and it carries no trailing newline — the command's reporter
+//! adds that.
 
 mod code;
 mod prose;

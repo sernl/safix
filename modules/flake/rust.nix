@@ -1,13 +1,18 @@
 # Builds the rust workspace and carries every promise the rust half makes as a
 # check of this flake.
 #
-# `packages.safix` is this binary. It became this binary when the differential
-# harness had compared every subcommand the shell runtime has against it on
-# standard output, standard error, exit code and effect on the repository, with
-# the divergences it did find recorded and pinned rather than reconciled — see
-# `modules/flake/checks/differential.nix` and the CHANGELOG. The shell runtime
-# stays in the tree as `packages.safix-sh`, because it is what those modes
-# compare against: retiring the oracle would retire the evidence.
+# `packages.safix` is this binary, and now the only one. It became this binary
+# when the differential harness had compared every subcommand the shell runtime
+# had against it on standard output, standard error, exit code and effect on the
+# repository, with the divergences it did find recorded and pinned rather than
+# reconciled; `CHANGELOG.md` records that and names the commit it was green at.
+#
+# Keeping the oracle alive would not have preserved that evidence. A comparison's
+# result is a fact about a state of the tree, which is what version control
+# holds; a retained oracle produces a new fact on each run about a pair of
+# runtimes only one of which anyone runs. What replaced it is
+# `checks.safix-integration` below and the checks that name one of its tests:
+# claims against literals rather than against a second implementation.
 #
 # The advisory scan is a check of its own rather than a fourth `cargo-deny`
 # section. The advisory database is a network resource and the build sandbox has

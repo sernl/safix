@@ -11,12 +11,12 @@
 //! public key, and both are public data. That is what lets `check` judge files
 //! belonging to people whose identities the machine running it does not hold.
 //!
-//! This is a port of `modules/flake/safix/sops_recipients.py` and
-//! `modules/flake/safix/sops_keys.py`, which remain the differential oracle
-//! until the harness reports the two agreeing on every fixture. It reads the
-//! same two fields those readers read and nothing else about the format; the
-//! format itself stays sops's, per `openspec/changes/rewrite-runtime-in-rust`
-//! design decision D6.
+//! This began as a port of two python readers, `sops_recipients.py` and
+//! `sops_keys.py`, which the differential harness held it to agreeing with on
+//! every fixture before either was retired. All three are gone from the tree and
+//! reachable at 8409f15; this reads the same two fields they read and nothing
+//! else about the format, and the format itself stays sops's, per
+//! `openspec/changes/rewrite-runtime-in-rust` design decision D6.
 
 use std::collections::{BTreeMap, BTreeSet};
 

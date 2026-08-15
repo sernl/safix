@@ -18,8 +18,8 @@
 //! new recipient set on the terminal. A confirmation cannot be fanned out — two
 //! prompts competing for one standard input is not a faster confirmation, it is
 //! an unanswerable one — so that path runs one file at a time with all three
-//! streams inherited, which is also exactly what `modules/flake/safix/safix.sh`
-//! does.
+//! streams inherited, which is also exactly what the retired shell runtime
+//! did.
 //!
 //! With `--yes` there is no prompt, and the files are independent: each is one
 //! document, re-wrapped from its own creation rule, and no two of them are the

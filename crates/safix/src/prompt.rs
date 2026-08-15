@@ -19,8 +19,8 @@
 //! `bash`'s `read -p` writes its prompt only when the input is a terminal, and
 //! writes the newline after it unconditionally, because the script writes that
 //! newline itself. Both halves are reproduced: on a pipe the two prompts are
-//! absent and the two blank lines are present, which is what the differential
-//! harness sees.
+//! absent and the two blank lines are present, which is what the integration
+//! suite reads and what the differential harness compared before it.
 
 use std::fs::File;
 use std::io::{self, Write as _};

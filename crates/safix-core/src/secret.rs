@@ -27,7 +27,7 @@ const INITIAL_BUFFER: usize = 4096;
 ///
 /// The reason is the runtime this replaces. In shell a value is a string, and a
 /// string can be spelled into a herestring, a command substitution, an argument
-/// or a log with no diagnostic at all — which is why `safix.sh` carries four
+/// or a log with no diagnostic at all — which is why that runtime carried four
 /// comments saying do not, one at each place where the natural spelling is the
 /// leaking one. Here those four mistakes are absent constructors and absent
 /// traits, and the compiler is what enforces them.
