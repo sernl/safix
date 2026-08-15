@@ -9,6 +9,7 @@
 # Write-path modes: write refuse guard converge abort pipes
 # Generator modes:  generate regenerate genrefuse
 # Custody modes:    keygen adduser
+# Syscall proof:    strace (linux only)
 # Self-drill mode:  drills
 #
 # The gate that permits retiring the shell runtime is not a claim that the two
@@ -1219,6 +1220,107 @@ keygen_mints() { # <label> <argv>...
   note "[$label] both runtimes appended one identity, printed its public half alone, and left the repository alone"
 }
 
+# --- The syscall proof ---------------------------------------------------------------
+# Every value this fixture's traced runs handle, so that a leak of any of them is
+# caught rather than only a leak of the one the invocation was about.
+STRACE_VALUES=()
+
+# Run one invocation under strace and hold every plaintext write to a pipe.
+#
+# `-y` is what makes the assertion possible: it resolves each descriptor to what
+# it refers to, so `write(4<pipe:[12345]>, ...)` says where the bytes went
+# without this script having to reconstruct the process's descriptor table. `-f`
+# follows every child, which is where most of the writing happens — sops, the
+# generator's shell, and the readers.
+#
+# A run that produced no matching write at all would satisfy the assertion
+# vacuously, so the count is asserted too.
+strace_traces() { # <side> <argv>... ; input on stdin
+  local side="$1"
+  shift
+  local dir="$work/strace/$side-$1" line head value seen=0 matched status=0
+  rm -rf "$dir"
+  mkdir -p "$dir/tmp" "$dir/home"
+  cp -a "$REPO" "$dir/repo"
+  cat >"$dir/feed"
+
+  runtime_env "$dir/repo" "$dir/tmp" "$dir/home"
+  if [ "$side" = sh ]; then
+    env "${RUNTIME_ENV[@]}" strace -f -y -s 512 -e trace=write -o "$dir/trace" \
+      bash "$SAFIX_SH" "$@" <"$dir/feed" >"$dir/out" 2>"$dir/err" || status=$?
+  else
+    env "${RUNTIME_ENV[@]}" SAFIX_ERROR_FORMAT=plain \
+      strace -f -y -s 512 -e trace=write -o "$dir/trace" \
+      "$SAFIX_RS" "$@" <"$dir/feed" >"$dir/out" 2>"$dir/err" || status=$?
+  fi
+  [ "$status" = 0 ] || { cat "$dir/err" >&2; fail "the $side runtime's [strace/$*] exited $status"; }
+  [ -s "$dir/trace" ] || fail "strace produced no trace for the $side runtime's [strace/$*]"
+
+  while IFS= read -r line; do
+    case "$line" in
+      *"write("[0-9]*) ;;
+      *) continue ;;
+    esac
+    matched=0
+    for value in "${STRACE_VALUES[@]}"; do
+      case "$line" in
+        *"$value"*) matched=1 ;;
+      esac
+    done
+    [ "$matched" = 1 ] || continue
+    seen=$((seen + 1))
+    # Everything up to the first comma is the descriptor and its resolution,
+    # which is what `-y` annotates; the buffer follows it and may itself hold
+    # commas, so the split is deliberate rather than incidental.
+    head="${line%%,*}"
+    case "$head" in
+      *"<pipe:["*) ;;
+      *) fail "the $side runtime wrote a plaintext value to something other than a pipe: $head" ;;
+    esac
+  done <"$dir/trace"
+
+  [ "$seen" -gt 0 ] \
+    || fail "no plaintext write was observed for the $side runtime's [strace/$*], so the assertion is vacuous"
+  residue_free "$dir/tmp" "$side" "strace/$*"
+  no_scratch_left "$dir/repo" "$side" "strace/$*"
+  COMPARED=$((COMPARED + 1))
+  note "[strace/$side/$*] $seen plaintext write(s) observed, every one of them to a pipe"
+}
+
+# The assertion shown to fail, on the mutation it exists to catch.
+#
+# A runtime that writes a plaintext value to a regular file is exactly what
+# `-y` is there to see, and a trace-reading loop that quietly matched nothing
+# would pass over it. So one is put in the rust side's place and the assertion
+# has to catch it, and catch it on the pipe test rather than incidentally on the
+# residue sweep or the exit status.
+strace_drill() {
+  local real="$SAFIX_RS" output status=0
+  emit_stub "$work/bin/strace-drill" <<'SH'
+status=0
+"$REAL_RS" "$@" || status=$?
+printf 'strace-typed-value' >"$SAFIX_REPO_ROOT/a-plaintext-note"
+exit "$status"
+SH
+  export REAL_RS="$real"
+  SAFIX_RS="$work/bin/strace-drill"
+  output="$(strace_traces rs set ana ana-alone <<'FEED' 2>&1
+strace-typed-value
+strace-typed-value
+FEED
+  )" || status=$?
+  SAFIX_RS="$real"
+  [ "$status" != 0 ] \
+    || fail "the strace drill was not caught: a plaintext write to a regular file passed"
+  case "$output" in
+    *"to something other than a pipe"*)
+      COMPARED=$((COMPARED + 1))
+      note "[strace/drill] a plaintext write to a regular file was caught, by the pipe assertion"
+      ;;
+    *) fail "the strace drill was caught by something other than the pipe assertion: $output" ;;
+  esac
+}
+
 # --- A divergence this harness records rather than reconciles ------------------------
 # The shell runtime has no --version: it reaches the unknown-subcommand refusal.
 # The rust runtime answers it, which is the convention for a compiled binary and
@@ -1765,6 +1867,47 @@ JSON
     EXTRA_ENV=()
     ;;
 
+  # Every plaintext byte a run writes, observed at the system call.
+  #
+  # `pipes` reads the sops process's own argv and environment, which shows that
+  # the value did not travel by either of those two routes. This shows the
+  # positive: every `write` carrying a fixture value goes to a descriptor strace
+  # resolves as a pipe, so no plaintext reaches a regular file, a socket or a
+  # terminal on the way through. Both runtimes are held to it — the claim is one
+  # `safix.sh` carries in a comment, and a comment is not a check.
+  #
+  # `set` and `generate` together, because they are the two paths a plaintext
+  # value takes: one typed in and handed to sops, one minted by a script, read
+  # back off its standard output, and handed to sops. A generator's prompt and a
+  # generator's dependency are both in the second, which is the whole descriptor
+  # discipline in one run.
+  strace)
+    prepare
+    seed_generator_fleet
+    setup_repo_generators
+
+    # Distinctive enough that a match is this fixture's value and not a
+    # coincidence in a store path, and short enough to survive strace's own
+    # truncation of the buffer it prints.
+    STRACE_VALUES=(strace-typed-value strace-prompt-seed rotated-strace-prompt-seed)
+
+    strace_traces sh set ana ana-alone <<'FEED'
+strace-typed-value
+strace-typed-value
+FEED
+    strace_traces rs set ana ana-alone <<'FEED'
+strace-typed-value
+strace-typed-value
+FEED
+    strace_traces sh generate ana <<'FEED'
+strace-prompt-seed
+FEED
+    strace_traces rs generate ana <<'FEED'
+strace-prompt-seed
+FEED
+    strace_drill
+    ;;
+
   # The harness is not trusted until it has been shown to fail. Each drill puts
   # a deliberately wrong runtime in the rust side's place and asserts that the
   # comparison fails, and that it fails on the channel that exists to catch that
@@ -1846,6 +1989,10 @@ case "$mode" in
   pipes)
     [ "$COMPARED" -gt 0 ] || fail "no runtime was observed"
     note "$COMPARED runtime(s) observed; the value reached sops down a pipe and no other way."
+    ;;
+  strace)
+    [ "$COMPARED" -gt 0 ] || fail "no run was traced"
+    note "$COMPARED run(s) traced; every plaintext write went to a pipe."
     ;;
   *)
     [ "$COMPARED" -gt 0 ] || fail "no invocation was compared"

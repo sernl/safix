@@ -54,6 +54,9 @@
         # SAFIX_NIX rather than found on PATH.
         pkgs.nix
         pkgs.sops
+        # The syscall proof's observer. Linux only, which is why the check that
+        # uses it is too.
+        pkgs.strace
         readers.sops-recipients-of
         readers.sops-keys-of
         pkgs.util-linux
@@ -68,6 +71,26 @@
             bash ${../safix/safix-differential.sh} ${mode}
           touch "$out"
         '';
+
+      # `strace` needs ptrace, which is a linux capability and has no darwin
+      # equivalent — `dtruss` needs to disable system integrity protection, which
+      # a build sandbox cannot. So the syscall proof is a linux check and the
+      # attribute is simply absent elsewhere, rather than present and trivially
+      # green.
+      # A derivation on linux, and a trivially-passing one elsewhere. Making the
+      # attribute absent on darwin would be cleaner, but `checks` is merged from
+      # several modules here and an attribute defined conditionally in one of
+      # them collides with the unconditional definitions beside it; a check that
+      # says what it did not do is at least honest about it.
+      onLinuxOnly =
+        derivation:
+        if pkgs.stdenv.hostPlatform.isLinux then
+          derivation
+        else
+          pkgs.runCommand "safix-differential-strace-skipped" { } ''
+            echo "the syscall proof needs ptrace, which is linux only; nothing was observed here." >&2
+            touch "$out"
+          '';
     in
     {
       # Every value set, the policy in step, nothing anywhere it should not be.
@@ -171,5 +194,14 @@
       # each of which must be caught, and caught by its own channel rather than
       # incidentally by another.
       checks.safix-differential-drills = differential "safix-differential-drills" "drills";
+
+      # Every plaintext byte a `set` and a `generate` write, observed at the
+      # system call and held to going down a pipe. `pipes` shows the two routes
+      # the value did NOT take; this shows the one it did, for both runtimes, and
+      # carries its own drill: a runtime writing a value to a regular file has to
+      # be caught, and caught by the pipe assertion rather than incidentally.
+      checks.safix-differential-strace = onLinuxOnly (
+        differential "safix-differential-strace" "strace"
+      );
     };
 }
