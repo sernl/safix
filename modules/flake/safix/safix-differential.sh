@@ -341,6 +341,14 @@ runtime_env() { # <repo> <tmpdir> [<home>]
   RUNTIME_ENV=(
     "PATH=$work/bin:$PATH"
     "HOME=${3:-$work/home}"
+    # Set explicitly rather than left to HOME, and it is not tidiness. `keygen`
+    # resolves its identity file as ${SAFIX_AGE_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt},
+    # so a caller whose own XDG_CONFIG_HOME is exported — which is every
+    # interactive shell on a desktop, and is not the case in the build sandbox
+    # this normally runs in — has the runtimes append a throwaway identity to
+    # their REAL age identity file. The variable is pinned here so no run of this
+    # harness can reach one, on any machine.
+    "XDG_CONFIG_HOME=${3:-$work/home}/.config"
     "TMPDIR=$2"
     "USER=ana"
     "SAFIX_NIX=$work/bin/nix"
@@ -593,6 +601,9 @@ normalize_run() { # <repo> <file>...
   for file in "$@"; do
     [ -e "$file" ] || continue
     sed -i "s|$repo|<repo>|g" "$file"
+    if [ -n "${NORMALIZE_HOME:-}" ]; then
+      sed -i "s|$NORMALIZE_HOME|<home>|g" "$file"
+    fi
     index=0
     for hash in ${made+"${made[@]}"}; do
       sed -i "s/$hash/<commit-$index>/g" "$file"
@@ -1185,13 +1196,16 @@ keygen_mints() { # <label> <argv>...
       || fail "the $side runtime's [$label] changed the repository"
   done
 
+  # The recipient and the identity file's path are each a function of the side
+  # rather than of the runtime: two correct runs mint two different keys into two
+  # different homes. Both are normalized away, and what is left is the prose.
   NORMALIZE_KEYS=1
-  normalize_run "$work/keygen/sh/repo" "$work/keygen/sh/out" "$work/keygen/sh/err"
-  normalize_run "$work/keygen/rs/repo" "$work/keygen/rs/out" "$work/keygen/rs/err"
+  for side in sh rs; do
+    NORMALIZE_HOME="$work/keygen/$side"
+    normalize_run "$work/keygen/$side/repo" "$work/keygen/$side/out" "$work/keygen/$side/err"
+  done
   NORMALIZE_KEYS=""
-  # Each side names its own home, which differs by construction.
-  sed -i "s|$work/keygen/sh|<home>|g" "$work/keygen/sh/out" "$work/keygen/sh/err"
-  sed -i "s|$work/keygen/rs|<home>|g" "$work/keygen/rs/out" "$work/keygen/rs/err"
+  NORMALIZE_HOME=""
 
   cmp -s "$work/keygen/sh/out" "$work/keygen/rs/out" || {
     diff -u "$work/keygen/sh/out" "$work/keygen/rs/out" >&2 || true
@@ -1236,6 +1250,17 @@ version_diverges() {
 # that pre-filled their outputs would compare two runtimes doing nothing.
 setup_repo_generators() {
   set_value ana ana-alone value-ana-alone
+}
+
+# Every generator run once against the fixture itself, through the oracle, so
+# that the modes drilling a second run are drilling one — and so that what the
+# fixture holds is the oracle's own output rather than this script's idea of it.
+seed_generated_values() {
+  mkdir -p "$work/home" "$work/settmp"
+  runtime_env "$REPO" "$work/settmp"
+  printf 'seed-value\n' \
+    | env "${RUNTIME_ENV[@]}" bash "$SAFIX_SH" generate ana >/dev/null 2>&1 \
+    || fail "the oracle refused to run ana's generators while building the fixture"
 }
 
 prepare() {
@@ -1575,11 +1600,17 @@ SH
 
     with_input seed-value
     expect_oracle generate 'generating api-token for ana' generate ana
+    expect_oracle generate 'generating paired, paired-pub for ana' generate ana
     compare generate/bulk generate ana
+
+    seed_generated_values
 
     no_input
     expect_oracle generate 'already holds a value for every output' generate ana api-token
     compare generate/already-held generate ana api-token
+    compare generate/bulk-again generate ana
+    compare generate/one-name generate ana derived
+    compare generate/by-second-output generate ana paired-pub
 
     compare generate/nothing-to-do generate bo
     compare generate/unknown-user generate dee
@@ -1596,6 +1627,7 @@ SH
 
     with_input seed-value
     compare regenerate/mint generate ana
+    seed_generated_values
 
     no_input
     expect_oracle regenerate 'rotation retires the input of' generate --regenerate ana api-token
@@ -1628,6 +1660,15 @@ JSON
   "runtimeInputs": ["coreutils"], "script": "printf too-short",
   "validation": "read -r v; [ \"${#v}\" -ge 32 ]" }
 JSON
+    # A dependency the declarations place in a file nobody has run sops on, so
+    # the run refuses before it opens anything rather than handing the script an
+    # empty descriptor.
+    add_plain_output absent "secrets/safix/users/ana/extra.yaml"
+    add_generator orphaned "$ANA_FILE" <<'JSON'
+{ "dependencies": ["absent"], "description": null, "files": [], "prompts": {},
+  "runtimeInputs": ["coreutils"], "script": "cat \"$in_absent\"", "validation": null }
+JSON
+
     add_plain_output halfpair-pub "$ANA_FILE"
     add_generator halfpair "$ANA_FILE" <<'JSON'
 { "dependencies": [], "description": null, "files": ["halfpair-pub"], "prompts": {},
@@ -1662,8 +1703,8 @@ JSON
 
     # A dependency whose file does not exist at all.
     no_input
-    expect_oracle genrefuse 'has no value yet' generate ana derived
-    compare genrefuse/dependency-missing generate ana derived
+    expect_oracle genrefuse 'has no value yet' generate ana orphaned
+    compare genrefuse/dependency-missing generate ana orphaned
     ;;
 
   # Minting an identity, and refusing to mint one for somebody else.
