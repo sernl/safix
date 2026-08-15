@@ -6,11 +6,13 @@
 //! other than what its message says, then staging and committing exactly the
 //! paths that were written and no others.
 //!
-//! Staging and committing exist here and are reached by no subcommand yet: the
-//! read paths are the ones ported so far, and a write path appears only once
-//! the differential harness has compared it. They are tested against a
-//! throwaway repository all the same, because a driver whose first exercise is
-//! the port of `set` is a driver debugged while something else is being judged.
+//! Staging and committing are reached by [`set`](crate::set),
+//! [`generate`](crate::generate) and [`adduser`](crate::adduser), each through
+//! [`commit_written_files`] and each naming exactly the paths it wrote: the one
+//! file `set` moved into place, the one-or-more outputs of a generator run, and
+//! the scaffold together with the policy regenerated beside it. Nothing here
+//! commits a path a caller did not name, which is what keeps a message naming
+//! one secret from carrying somebody else's staged change.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
