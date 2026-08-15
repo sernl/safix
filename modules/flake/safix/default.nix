@@ -16,6 +16,7 @@ let
   resolve = import ./resolve.nix { inherit lib; };
   policy = import ./policy.nix { inherit lib; };
   checks = import ./checks.nix { inherit lib; };
+  bridgeLib = import ./bridge.nix { inherit lib; };
 
   cfg = config.flake.safix;
 
@@ -167,6 +168,23 @@ in
     # adds, because `root` is what a check has to be able to vary.
     publicValue = resolve.publicValueOf cfg.users cfg.catalogue self;
     outputPath = resolve.outputPathOf cfg.users cfg.catalogue;
+
+    # The declared bridge, flattened into what `safix import` and `safix export`
+    # read: the clan flake reference, and one record per mapping carrying the
+    # attribute name it was declared under.
+    #
+    # The id travels inside the record rather than as the key of a map, because
+    # every consumer of it — a report line, a commit message, a refusal — needs
+    # the id and the endpoints together, and a map would make the runtime carry
+    # the key alongside the value everywhere it passes one.
+    #
+    # `clanFlake` is stringified here. The option is a path so that a consumer
+    # writes `./.` and gets their own flake, and the runtime hands the result
+    # to clan's `--flake`, which takes a reference rather than a nix value.
+    bridge = {
+      clanFlake = if cfg.bridge.clanFlake == null then null else toString cfg.bridge.clanFlake;
+      mappings = bridgeLib.mappingsOf cfg.bridge;
+    };
 
     # The alphabet a user, anchor or secret name must be drawn from, as the
     # unanchored pattern resolve.nix matches with. `safix adduser` reads it to
