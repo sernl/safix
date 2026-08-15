@@ -204,6 +204,9 @@ impl Fixture {
         let repo = work.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::create_dir_all(work.join("tmp")).unwrap();
+        let staging = work.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        permit_owner_only(&staging);
 
         let key_file = work.join("age-key.txt");
         run_to_success(
@@ -481,18 +484,42 @@ impl Fixture {
         &self.work
     }
 
-    /// Every staging root left behind under a directory a run was pointed at.
+    /// The directory every run of this fixture stages plaintext in.
     ///
-    /// Named by the prefix `staging.rs` gives them. A run that shredded its root
-    /// leaves none, and one that did not leaves a directory holding plaintext.
+    /// A tmpfs directory belonging to this fixture alone, named to every run
+    /// through `SAFIX_STAGING_DIR` — which *replaces* the conventional
+    /// candidates rather than preceding them, so a run of this fixture cannot
+    /// stage anywhere else.
+    ///
+    /// This is what makes the residue assertions mean something under
+    /// concurrency. They used to snapshot `/dev/shm` and `/run/user`, which are
+    /// shared with every other test in this binary and with everything else the
+    /// machine is running: a root another test held in flight was
+    /// indistinguishable from residue this run left, so the assertions were
+    /// written as a before-and-after comparison — and a comparison against a
+    /// baseline that is itself moving is a comparison that passes for the wrong
+    /// reason as often as it fails for one. Scoped here, the claim is the strong
+    /// one: after the run, this directory is empty.
+    pub fn staging_dir(&self) -> PathBuf {
+        self.work.join("staging")
+    }
+
+    /// Every staging root this fixture's runs left behind.
+    ///
+    /// Named by the prefix `staging.rs` gives them, and looked for only where
+    /// this fixture's runs can put them — see [`Fixture::staging_dir`].
     pub fn staging_roots(&self) -> Vec<PathBuf> {
-        let mut found = roots_under(&self.work);
-        // The default locations too, because a run this fixture did not point at
-        // its own directory stages in one of these, and a leftover there is the
-        // same defect.
-        for shared in ["/dev/shm", "/run/user"] {
-            found.extend(roots_under(Path::new(shared)));
-        }
+        let mut found = roots_under(&self.staging_dir());
+        found.sort();
+        found
+    }
+
+    /// Every staging root directly under a directory a drill pointed a run at.
+    ///
+    /// For the drills that override `SAFIX_STAGING_DIR` themselves, whose
+    /// residue is therefore not under [`Fixture::staging_dir`].
+    pub fn roots_in(directory: &Path) -> Vec<PathBuf> {
+        let mut found = roots_under(directory);
         found.sort();
         found
     }
@@ -644,6 +671,7 @@ impl Fixture {
             .env("USER", "ana")
             .env("SOPS_AGE_KEY_FILE", &self.key_file)
             .env("SAFIX_REPO_ROOT", &self.repo)
+            .env("SAFIX_STAGING_DIR", self.staging_dir())
             .env("SAFIX_NIX", nix_stub())
             .env(
                 "SAFIX_FIXTURE_PLACEMENTS",
@@ -925,6 +953,82 @@ enum Reporter {
     Plain,
     /// The graphical renderer, which names the refusal's code.
     Graphical,
+}
+
+/// The filesystem type mounted at the deepest mount point covering this path,
+/// read from `/proc/mounts`.
+///
+/// An oracle independent of the runtime, and that independence is the whole
+/// reason it exists. `staging::memory_backed` is the code under test wherever a
+/// drill needs a disk-backed directory, and a drill that *selected* its fixture
+/// with the function under test cannot fail when that function is defeated: a
+/// probe that answered "memory-backed" for everything would make the selection
+/// find nothing, and a drill that finds nothing to drill reports that it was
+/// skipped and passes. So the selection is made here, from the kernel's own
+/// mount table, and the runtime's probe is then held against it.
+///
+/// The deepest covering mount point rather than an exact match, because the
+/// paths a drill hands this are directories inside a mount rather than mount
+/// points themselves.
+#[must_use]
+pub fn mounted_filesystem(path: &Path) -> Option<String> {
+    let target = std::fs::canonicalize(path).ok()?;
+    let mounts = std::fs::read_to_string("/proc/mounts").ok()?;
+    let mut best: Option<(usize, String)> = None;
+    for line in mounts.lines() {
+        let mut fields = line.split_whitespace();
+        let (_, point, kind) = (fields.next()?, fields.next()?, fields.next()?);
+        // `/proc/mounts` octal-escapes a space in a mount point; a path holding
+        // one is not a path this suite makes, and treating the escape as
+        // literal would only ever fail to match.
+        let point = PathBuf::from(point);
+        if target.starts_with(&point) {
+            let depth = point.components().count();
+            if best.as_ref().is_none_or(|(seen, _)| depth > *seen) {
+                best = Some((depth, kind.to_owned()));
+            }
+        }
+    }
+    best.map(|(_, kind)| kind)
+}
+
+/// Filesystems the kernel keeps entirely in memory.
+///
+/// `tmpfs` and `ramfs` are what `staging.rs` admits by magic number. `devtmpfs`
+/// is here as well and is not a widening: it is a tmpfs instance the kernel
+/// mounts for `/dev`, and it reports the tmpfs magic to `statfs`, so a table
+/// reading that called it disk-backed would disagree with the probe about a
+/// mount both are right about.
+const MEMORY_FILESYSTEMS: &[&str] = &["tmpfs", "ramfs", "devtmpfs"];
+
+/// Whether the kernel says this path's filesystem keeps its pages in memory.
+///
+/// Answered from the mount table rather than from `statfs`, so this reading and
+/// the runtime's share no code.
+#[must_use]
+pub fn kernel_says_memory_backed(path: &Path) -> Option<bool> {
+    let kind = mounted_filesystem(path)?;
+    Some(MEMORY_FILESYSTEMS.contains(&kind.as_str()))
+}
+
+/// A directory the kernel's mount table reports as disk-backed, if one is
+/// reachable.
+///
+/// `None` where every candidate is memory-backed, which is a real state — a
+/// build sandbox whose whole tree is a tmpfs is one — and is reported rather
+/// than treated as a pass.
+#[must_use]
+pub fn disk_backed_directory(extra: &[PathBuf]) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = vec![
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        std::env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/var/tmp"),
+    ];
+    candidates.extend_from_slice(extra);
+    candidates
+        .into_iter()
+        .find(|path| kernel_says_memory_backed(path) == Some(false))
 }
 
 /// Every staging root sitting directly under one directory, by the prefix

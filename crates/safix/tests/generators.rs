@@ -321,10 +321,7 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
             .expect_success("staging under the acknowledgement");
         assert_eq!(fixture.value(ANA_FILE, "staged"), "staged");
         assert!(
-            fixture
-                .staging_roots()
-                .iter()
-                .all(|root| !root.starts_with(fixture.work_dir())),
+            Fixture::roots_in(std::path::Path::new(&disk_backed)).is_empty(),
             "an acknowledged disk-backed run left its staging root behind"
         );
     } else {
@@ -712,25 +709,17 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
         .says("is a public output");
 }
 
-/// A directory the kernel reports as disk-backed, if this machine has one the
-/// suite can reach.
+/// A directory the kernel's mount table reports as disk-backed, if this machine
+/// has one the suite can reach.
 ///
-/// Asked of the kernel through the same probe the runtime uses, over candidates
-/// in decreasing order of how likely they are to be disk-backed: the source tree
-/// the suite was built from, the host temporary directory, and the fixture's own
-/// scratch. `None` where every one of them is memory-backed, which is a real
-/// state — a build sandbox whose `/build` is a tmpfs is one — and is reported
-/// rather than treated as a pass.
+/// Asked of `/proc/mounts` through the harness rather than of
+/// `staging::memory_backed`, and that is the whole point. Selecting the fixture
+/// with the function under test made this drill unable to fail: a probe stuck at
+/// "memory-backed" found no candidate, the drill reported itself skipped, and
+/// the suite passed having asserted nothing about the rule. `memory_backing.rs`
+/// holds the two readings against each other; this only borrows the independent
+/// one.
 fn disk_backed_directory(fixture: &Fixture) -> Option<String> {
-    let mut candidates: Vec<std::path::PathBuf> = vec![
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        std::env::temp_dir(),
-        std::path::PathBuf::from("/tmp"),
-    ];
-    candidates.push(fixture.work_dir().to_path_buf());
-
-    candidates
-        .into_iter()
-        .find(|path| safix_core::staging::memory_backed(path) == Some(false))
+    harness::disk_backed_directory(&[fixture.work_dir().to_path_buf()])
         .map(|path| path.to_string_lossy().into_owned())
 }

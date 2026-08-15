@@ -80,8 +80,32 @@ enum Outcome {
     Ran,
     /// Every output already held a value and no rotation was asked for.
     Skipped,
-    /// `sops` refused, with this status, before anything was renamed.
+    /// The run stopped before anything was renamed, and this is the status it
+    /// is to end with.
+    ///
+    /// Two things reach here. `sops` refusing, with its own status, which the
+    /// command exits with because sops has already said why. And a signal,
+    /// with 130 or 143, which is not a refusal of anything and must not be
+    /// reported as one — see [`Step`].
     Refused(i32),
+}
+
+/// A step a signal can cut short.
+///
+/// The distinction this carries is the one an interrupted generator lost. A
+/// script killed by the `SIGINT` the operator sent is waited on like any other
+/// child, and what `wait` reports is a process that died on a signal: no exit
+/// code, which the surrounding code reads as a failure and reports as "the
+/// generator failed". It did not fail. It was interrupted, and the run has to
+/// end with 130 or 143 rather than with 1 and a sentence blaming the script.
+///
+/// So every wait in this module answers with this, and the interrupt is read
+/// before the status is interpreted.
+enum Step<T> {
+    /// The step finished, with this.
+    Done(T),
+    /// The run was asked to stop, and is to end with this status.
+    Stopped(i32),
 }
 
 /// Run one user's generators, or the one that writes a named secret.
@@ -319,7 +343,7 @@ fn run_one(
     let names = outputs.join(", ");
     log(progress, &format!("safix: generating {names} for {user}"));
 
-    let values = mint(
+    let values = match mint(
         workspace,
         interaction,
         user,
@@ -327,7 +351,10 @@ fn run_one(
         record,
         &outputs,
         options,
-    )?;
+    )? {
+        Step::Done(values) => values,
+        Step::Stopped(status) => return Ok(Outcome::Refused(status)),
+    };
 
     // Every candidate is judged before any is written. A validation that ran
     // after the first write would leave one output committed and the rest
@@ -339,8 +366,11 @@ fn run_one(
                 output: output.clone(),
             });
         }
-        if let Some(validation) = record.validation.as_deref().filter(|text| !text.is_empty()) {
-            validate(workspace, record, validation, generator, output, value)?;
+        if let Some(validation) = record.validation.as_deref().filter(|text| !text.is_empty())
+            && let Step::Stopped(status) =
+                validate(workspace, record, validation, generator, output, value)?
+        {
+            return Ok(Outcome::Refused(status));
         }
     }
 
@@ -390,7 +420,7 @@ fn mint(
     record: &Generator,
     outputs: &[String],
     options: Options,
-) -> Result<Vec<Secret>> {
+) -> Result<Step<Vec<Secret>>> {
     let plan = workspace.generator_plan()?;
     let declared = plan
         .for_user(user)
@@ -482,16 +512,33 @@ fn mint(
         generator: generator.to_owned(),
         status,
     };
-    let status = command
-        .status()
-        .map_err(|_| failed(127))?
-        .code()
-        .unwrap_or(1);
+
+    // Held across the script for the reason `set` holds it across sops, and for
+    // one more that is specific to here. The shared reason is ordering: bash
+    // runs a trap between commands, so an interruption is acted on once the
+    // foreground child has been waited on, and a sweep from the handler thread
+    // borrows that discipline rather than having one of its own. The reason
+    // specific to here is that the thing the sweep would remove is the staging
+    // root the script is still writing into.
+    let finished = {
+        let _quiet = scratch::quiet();
+        command.status().map_err(|_| failed(127))?
+    };
+
+    // Before the status is interpreted, not after. A script the operator
+    // interrupted is a child that died on a signal, so it has no exit code and
+    // reads as a failure; reporting it as one would blame the script for the
+    // operator's Ctrl-C and would end the run with 1 where 130 is the answer.
+    if let Some(status) = scratch::interrupted() {
+        return Ok(Step::Stopped(status));
+    }
+
+    let status = finished.code().unwrap_or(1);
     if status != 0 {
         return Err(failed(status));
     }
 
-    tree.collect(generator, outputs)
+    Ok(Step::Done(tree.collect(generator, outputs)?))
 }
 
 /// The entry's validation fragment, judging one candidate value.
@@ -507,7 +554,7 @@ fn validate(
     generator: &str,
     output: &str,
     value: &Secret,
-) -> Result<()> {
+) -> Result<Step<()>> {
     let mut command =
         workspace
             .nix()
@@ -527,8 +574,21 @@ fn validate(
     if let Some(mut stdin) = child.stdin.take() {
         let _ = value.write_to(&mut stdin);
     }
-    if child.wait().map_err(|_| rejected())?.success() {
-        Ok(())
+
+    let finished = {
+        let _quiet = scratch::quiet();
+        child.wait().map_err(|_| rejected())?
+    };
+
+    // The same reading as in `mint`: an interrupted validation is a child that
+    // died on a signal, and calling that a rejected candidate would tell the
+    // operator their value was judged and found wanting when nothing judged it.
+    if let Some(status) = scratch::interrupted() {
+        return Ok(Step::Stopped(status));
+    }
+
+    if finished.success() {
+        Ok(Step::Done(()))
     } else {
         Err(rejected())
     }
