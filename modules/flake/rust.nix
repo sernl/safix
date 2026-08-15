@@ -59,6 +59,8 @@
       withArtifacts = common // {
         inherit cargoArtifacts;
       };
+
+      integration = import ./checks/integration.nix { inherit pkgs; };
     in
     {
       packages.safix = craneLib.buildPackage (
@@ -76,7 +78,71 @@
       checks = {
         safix-rs-build = config.packages.safix;
 
-        safix-rs-test = craneLib.cargoTest withArtifacts;
+        # The in-crate tests alone. `--lib --bins` rather than everything,
+        # because the integration suite needs backends this derivation has no
+        # reason to carry, and a fast check over the pure logic is worth keeping
+        # separable from one that mints keys and runs sops.
+        safix-rs-test = craneLib.cargoTest (
+          withArtifacts // { cargoTestExtraArgs = "--lib --bins"; }
+        );
+
+        # The integration suite: compiled once, run whole, and left in the output
+        # so that every check naming one behavioural mode runs one test of this
+        # build rather than compiling its own.
+        #
+        # `HOME` is the build directory because git refuses to record a commit
+        # without somewhere to look for a configuration, and the fixtures commit.
+        # The suite stages plaintext on `/dev/shm`, which the sandbox provides as
+        # tmpfs; it refuses rather than staging on disk if that is ever untrue.
+        safix-integration = craneLib.mkCargoDerivation (
+          withArtifacts
+          // {
+            pnameSuffix = "-integration";
+            nativeBuildInputs = integration.backends ++ [ pkgs.jq ];
+            doInstallCargoArtifacts = false;
+
+            buildPhaseCargoCommand = ''
+              cargoWithProfile test --locked --no-run --message-format json >artifacts.json
+            '';
+
+            doCheck = true;
+            checkPhaseCargoCommand = ''
+              export HOME="$PWD"
+              cargoWithProfile test --locked
+            '';
+
+            # The test binaries carry a hash in their file name and the programs
+            # they drive do not, so each is installed under the name cargo gave
+            # the target. `.profile.test` is what separates the suite's own
+            # binaries from the three programs it invokes.
+            installPhaseCommand = ''
+              install -d "$out/bin" "$out/libexec"
+
+              jq -r 'select(.reason == "compiler-artifact" and .executable != null
+                            and .profile.test == true
+                            and (.target.kind | index("test")))
+                     | "\(.target.name)\t\(.executable)"' artifacts.json \
+                | while IFS=$'\t' read -r target executable; do
+                    install -Dm555 "$executable" "$out/bin/$target"
+                  done
+
+              jq -r 'select(.reason == "compiler-artifact" and .executable != null
+                            and .profile.test == false
+                            and (.target.kind | index("bin")))
+                     | "\(.target.name)\t\(.executable)"' artifacts.json \
+                | while IFS=$'\t' read -r target executable; do
+                    install -Dm555 "$executable" "$out/libexec/$target"
+                  done
+
+              for required in safix safix-nix-stub safix-test-shim; do
+                [ -x "$out/libexec/$required" ] \
+                  || { echo "the suite did not build $required" >&2; exit 1; }
+              done
+              [ -n "$(ls -A "$out/bin")" ] \
+                || { echo "the suite built no test binaries" >&2; exit 1; }
+            '';
+          }
+        );
 
         safix-rs-clippy = craneLib.cargoClippy (
           withArtifacts
