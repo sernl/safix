@@ -37,11 +37,12 @@ thiserror = "2"
 tokio = { version = "1", default-features = false }
 zeroize = "1"
 
-# Terminal control for the two prompts of `set`, and the two signals an aborted
-# `set` has to shred its scratch file on. Both are safe wrappers over what would
-# otherwise be `unsafe` in a crate that forbids it, and both are confined to the
-# command: a library embedder gets neither a terminal nor a signal handler.
-rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe"] }
+# Terminal control for the two prompts of `set`, the two signals an aborted
+# `set` has to shred its scratch file on, and `statfs`, which is how the staging
+# root asks the kernel whether a mount is memory-backed rather than inferring it
+# from the path. All are safe wrappers over what would otherwise be `unsafe` in a
+# crate that forbids it.
+rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 insta = "1"

@@ -31,6 +31,7 @@ const SHRED_CHUNK: usize = 4096;
 struct Registry {
     files: Vec<PathBuf>,
     dirs: Vec<PathBuf>,
+    trees: Vec<PathBuf>,
     floor: Option<PathBuf>,
 }
 
@@ -55,6 +56,22 @@ pub fn register_file(path: &Path) {
 /// directory leaves no evidence and a populated one is never at risk.
 pub fn register_dir(path: &Path) {
     with_registry(|registry| registry.dirs.push(path.to_path_buf()));
+}
+
+/// Register a whole tree to be overwritten and removed, before creating it.
+///
+/// Where [`register_dir`] removes a directory only while it is still empty —
+/// which is what an aborted first write into a new audience directory needs —
+/// this removes the directory and everything under it, shredding each file on
+/// the way. It is what a plaintext staging root is registered through, and the
+/// difference is that a staging root's whole point is to be populated: leaving
+/// it alone because something is in it would leave exactly the plaintext the
+/// sweep exists to remove.
+///
+/// Registered before creation, for the reason the module note gives: a
+/// registration after creation opens exactly the window a signal arrives in.
+pub fn register_tree(path: &Path) {
+    with_registry(|registry| registry.trees.push(path.to_path_buf()));
 }
 
 /// The directory the upward sweep stops at, which is the repository root.
@@ -148,10 +165,11 @@ pub fn interrupted() -> Option<i32> {
 /// here must not mask the failure that led to it.
 pub fn cleanup() {
     let _quiet = quiet();
-    let (files, dirs, floor) = with_registry(|registry| {
+    let (files, dirs, trees, floor) = with_registry(|registry| {
         (
             std::mem::take(&mut registry.files),
             std::mem::take(&mut registry.dirs),
+            std::mem::take(&mut registry.trees),
             registry.floor.clone(),
         )
     });
@@ -159,8 +177,49 @@ pub fn cleanup() {
     for file in &files {
         shred(file);
     }
+    for tree in &trees {
+        sweep_tree(tree);
+    }
     for dir in &dirs {
         remove_empty_upwards(dir, floor.as_deref());
+    }
+}
+
+/// Overwrite every file under a directory, then remove the directory.
+///
+/// Depth-first over an explicit stack rather than by recursion, and reading each
+/// entry with `symlink_metadata` so a link inside the tree is unlinked rather
+/// than followed — a staging root a generator dropped a symlink into must not
+/// become a way to overwrite whatever it points at.
+///
+/// Best-effort, like the rest of this module: it runs on the way out of a failed
+/// run and from a signal handler, and a failure here must not mask the failure
+/// that led to it.
+pub fn sweep_tree(root: &Path) {
+    let mut pending = vec![root.to_path_buf()];
+    let mut directories: Vec<PathBuf> = Vec::new();
+
+    while let Some(current) = pending.pop() {
+        let Ok(metadata) = std::fs::symlink_metadata(&current) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            directories.push(current.clone());
+            if let Ok(entries) = std::fs::read_dir(&current) {
+                pending.extend(entries.flatten().map(|entry| entry.path()));
+            }
+        } else if metadata.is_file() {
+            shred(&current);
+        } else {
+            let _ = std::fs::remove_file(&current);
+        }
+    }
+
+    // A directory is recorded before its children are visited, so a child always
+    // sits later in the list than its parent and removing from the back removes
+    // depth-first.
+    while let Some(directory) = directories.pop() {
+        let _ = std::fs::remove_dir(&directory);
     }
 }
 

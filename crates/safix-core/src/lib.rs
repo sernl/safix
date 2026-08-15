@@ -50,10 +50,12 @@ pub mod model;
 pub mod nix;
 mod probe;
 pub mod progress;
+pub mod public;
 pub mod scratch;
 mod secret;
 pub mod set;
 pub mod sops;
+pub mod staging;
 mod workspace;
 
 pub use error::{Code, Error, Result};

@@ -1,194 +1,252 @@
-//! How a generator's inputs reach its script.
+//! How a generator's inputs and outputs reach its script.
 //!
-//! Each prompt and each dependency reaches the script as `$in_<identifier>`,
-//! holding the path of a read-only file descriptor this process opened and the
-//! script inherits. The identifier is the resolver's — `-` mapped to `_`, so it
-//! is a spellable shell name — and two inputs colliding under that mapping are
-//! refused at evaluation, so the script's name space is injective.
+//! This is clan's contract, adopted so that a generator written for either
+//! system runs under the other. It was read off
+//! `pkgs/clan-cli/clan_lib/vars/generator.py` rather than off clan's
+//! documentation, and the places where clan's behaviour is surprising are
+//! matched and recorded here rather than corrected.
 //!
-//! # Why a descriptor and not a directory of files
+//! One run gets one staging root, and inside it:
 //!
-//! The directory shape needs `TMPDIR` to be memory-backed to be equivalent, and
-//! on a machine where it is not, plaintext written there is plaintext on a disk,
-//! surviving in free blocks after any unlink. So the value goes down a pipe and
-//! is never a file at all. The consequence to know when writing a generator: a
-//! pipe is read once, so `cat "$in_x"` twice gives the value and then nothing.
+//! ```text
+//! <root>/in/<producing generator>/<output name>   a dependency's plaintext
+//! <root>/prompts/<prompt name>                    one answered prompt
+//! <root>/out/<output name>                        what the script writes
+//! ```
 //!
-//! # How a descriptor comes to be inherited
+//! `$in` and `$out` name the first and third; `$prompts` names the second and
+//! is set only when the generator declares prompts. The script's working
+//! directory is the root. All three are what clan sets, so `$out/publickey` and
+//! `$in/openssh-ca/id_ed25519` mean here what they mean there.
 //!
-//! Everything this process opens is close-on-exec, which is the right default
-//! and the reason a descriptor has to be handed over deliberately. The flag is
-//! cleared on the read end alone, immediately before the generator is spawned,
-//! and the parent's own copy is dropped immediately after — see
-//! [`Inputs::release`] for what that ordering buys.
+//! # What is not clan's, and why
 //!
-//! The window between clearing the flag and the spawn is a window in which any
-//! other process this program started would inherit the same descriptor. The
-//! generator graph is walked one generator at a time for that reason among
-//! others, and it is why nothing on this path fans out.
+//! *Only declared dependencies are materialized.* clan's dependency edge names
+//! a generator and materializes every file that generator writes, so a script
+//! depending on a keypair's public half is handed the private half as well.
+//! safix's edge names an entry, and materializing an entry's siblings would hand
+//! a script plaintext it never declared — the property the whole isolation
+//! discipline exists for. The directory is still keyed by the *producing
+//! generator*, which is what makes the path spelling clan's; what differs is
+//! which files appear under it.
+//!
+//! *`$prompts` is removed from the environment when no prompts are declared.*
+//! clan copies the ambient environment and sets `prompts` only when there are
+//! any, so an ambient `$prompts` survives into the script. Here it is cleared,
+//! so a script cannot distinguish "none declared" from "directory missing" by
+//! reading a variable somebody else set.
+//!
+//! # What the earlier interface bought and this one does not
+//!
+//! Until 0.2 every input reached the script as `$in_<name>`, the path of a
+//! read-once file descriptor, and no plaintext was ever a file. That absolute
+//! cannot survive a contract whose inputs and outputs are addressed by path.
+//! What stands in its place is [`crate::staging`]: a mode-`0700` directory on a
+//! filesystem verified to be memory-backed, shredded on every exit path. It is
+//! bounded containment rather than an absolute, and that module states what it
+//! does not achieve.
 
-use std::collections::BTreeMap;
-use std::fs::File;
-
-use std::os::fd::{AsRawFd as _, OwnedFd};
-use std::path::Path;
-use std::process::{Child, Command};
-use std::thread::JoinHandle;
-
-use rustix::io::{FdFlags, fcntl_setfd};
-use rustix::pipe::{PipeFlags, pipe_with};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::error::{Error, Result};
 use crate::secret::Secret;
 use crate::sops::Sops;
+use crate::staging::{self, Staging};
 
-/// The descriptors one generator run was given, and what is feeding them.
+/// The directory a dependency's outputs are placed under.
+const INPUT: &str = "in";
+
+/// The directory a generator writes its outputs into.
+const OUTPUT: &str = "out";
+
+/// The directory one answered prompt per file is placed under.
+const PROMPTS: &str = "prompts";
+
+/// One generator run's staging tree, and the guard that removes it.
 ///
-/// Dropping this closes every descriptor the parent still holds and lets each
-/// feeding thread and subprocess end. That is the whole of the isolation
-/// property: a descriptor surviving into a later generator's process would be
-/// that generator holding plaintext it never declared.
-#[derive(Default)]
-pub struct Inputs {
-    held: Vec<OwnedFd>,
-    writers: Vec<JoinHandle<()>>,
-    producers: Vec<Child>,
-    environment: BTreeMap<String, String>,
+/// Dropping this shreds every file under the root and removes it, whether the
+/// drop comes from a return, an error, or a panic unwinding through it.
+#[derive(Debug)]
+pub struct Tree {
+    staging: Staging,
+    prompts: Option<PathBuf>,
 }
 
-impl std::fmt::Debug for Inputs {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Inputs")
-            .field("identifiers", &self.environment.keys().collect::<Vec<_>>())
-            .finish_non_exhaustive()
-    }
-}
-
-impl Inputs {
-    /// No inputs yet.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// An answered prompt, on a descriptor of its own.
+impl Tree {
+    /// Establish the tree for one generator run.
     ///
-    /// The value is written by a thread rather than before the spawn, because a
-    /// value longer than the pipe's buffer would otherwise block this process
-    /// against a reader that has not started. The thread owns the value and
-    /// drops it when it is done, so it is zeroed whether the generator read it
-    /// or not.
+    /// `in` and `out` always exist; `prompts` exists only when the generator
+    /// declares any. That is clan's behaviour and is copied deliberately: a
+    /// script cannot then distinguish "no prompts declared" from "the prompts
+    /// directory is missing", so no script can come to rely on the difference.
     ///
     /// # Errors
     ///
-    /// [`Error::GeneratorPipe`] when a pipe cannot be made or handed over.
-    pub fn add_prompt(&mut self, identifier: &str, value: Secret) -> Result<()> {
-        let (reader, writer) =
-            pipe_with(PipeFlags::CLOEXEC).map_err(|cause| Error::GeneratorPipe {
-                identifier: identifier.to_owned(),
-                cause: cause.to_string(),
-            })?;
-
-        self.writers.push(std::thread::spawn(move || {
-            let mut sink = File::from(writer);
-            // A generator that never reads its input leaves this writing into a
-            // pipe nobody will drain; the failure that ends it is the reader
-            // going away, which is not a failure of the run.
-            let _ = value.write_to(&mut sink);
-        }));
-
-        self.hand_over(identifier, reader)
+    /// [`Error::StagingNotMemoryBacked`] when no memory-backed mount is
+    /// available and the acknowledgement was not given, and
+    /// [`Error::StagingUnusable`] when the tree cannot be created.
+    pub fn establish(allow_disk_staging: bool, declares_prompts: bool) -> Result<Self> {
+        let staging = Staging::establish(allow_disk_staging)?;
+        staging.directory(Path::new(INPUT))?;
+        staging.directory(Path::new(OUTPUT))?;
+        let prompts = if declares_prompts {
+            Some(staging.directory(Path::new(PROMPTS))?)
+        } else {
+            None
+        };
+        Ok(Self { staging, prompts })
     }
 
-    /// Another secret's plaintext, on a descriptor of its own.
+    /// The directory a generator writes its outputs into.
+    #[must_use]
+    pub fn output(&self) -> PathBuf {
+        self.staging.root().join(OUTPUT)
+    }
+
+    /// One answered prompt, at `$prompts/<key>`.
     ///
-    /// The producing `sops` writes straight into the pipe the generator reads,
-    /// so the value is never a file and is never this process's to hold.
+    /// Written with nothing added and nothing removed, which is clan's
+    /// `write_text(value)`. A newline convention on this boundary would silently
+    /// corrupt a value whose last byte matters, and there is no way for the
+    /// script to tell a convention from an answer.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::StagingUnusable`] when the file cannot be written, and
+    /// [`Error::NixSchemaMismatch`] for a prompt name that is not one path
+    /// component — which the resolver's own name rule already forbids.
+    pub fn add_prompt(&self, key: &str, value: &Secret) -> Result<()> {
+        refuse_traversal(key)?;
+        self.staging.write(&Path::new(PROMPTS).join(key), value)?;
+        Ok(())
+    }
+
+    /// One dependency's plaintext, at `$in/<producer>/<name>`.
+    ///
+    /// The producing `sops` writes to a pipe this reads into a value that zeroes
+    /// itself, which is then written to the staged file. The intermediate copy
+    /// exists so that the bytes are zeroed if anything between here and the
+    /// write fails; the staged file itself is what [`Tree`]'s drop shreds.
     ///
     /// # Errors
     ///
     /// [`Error::DependencyHasNoValue`] when the file the dependency is placed in
     /// does not exist, [`Error::SopsUnavailable`] when sops cannot be run, and
-    /// [`Error::GeneratorPipe`] when the descriptor cannot be handed over.
+    /// [`Error::StagingUnusable`] when the staged file cannot be written.
     pub fn add_dependency(
-        &mut self,
-        identifier: &str,
+        &self,
+        producer: &str,
+        name: &str,
         sops: &Sops,
         relative: &str,
         absolute: &Path,
         key: &str,
     ) -> Result<()> {
+        refuse_traversal(producer)?;
+        refuse_traversal(name)?;
+
         if !absolute.exists() {
             return Err(Error::DependencyHasNoValue {
-                identifier: identifier.to_owned(),
+                name: name.to_owned(),
+                producer: producer.to_owned(),
                 file: relative.to_owned(),
             });
         }
 
         let mut child = sops.decrypt_key_streaming(absolute, key)?;
-        let stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
-        self.producers.push(child);
-        self.hand_over(identifier, OwnedFd::from(stdout))
-    }
+        let value = {
+            let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
+            Secret::read_from(&mut stdout)?
+        };
+        // A sops that failed has already said why on its own standard error, and
+        // the empty value it leaves is what the script will fail on — naming the
+        // script, which is the failure worth reporting.
+        let _ = child.wait();
 
-    /// Name a descriptor in the environment the script will read, and clear the
-    /// flag that would otherwise close it across the exec.
-    fn hand_over(&mut self, identifier: &str, reader: OwnedFd) -> Result<()> {
-        fcntl_setfd(&reader, FdFlags::empty()).map_err(|cause| Error::GeneratorPipe {
-            identifier: identifier.to_owned(),
-            cause: cause.to_string(),
-        })?;
-        self.environment.insert(
-            format!("in_{identifier}"),
-            format!("/dev/fd/{}", reader.as_raw_fd()),
-        );
-        self.held.push(reader);
+        self.staging
+            .write(&Path::new(INPUT).join(producer).join(name), &value)?;
         Ok(())
     }
 
-    /// Name every descriptor in the command's environment.
+    /// Name the three directories in the command's environment and put its
+    /// working directory at the root.
+    ///
+    /// `prompts` is *removed* rather than left alone when no prompts are
+    /// declared. clan leaves whatever the ambient environment held, which means
+    /// a script can read a `$prompts` somebody else set; removing it is the one
+    /// place this executor is deliberately stricter than the one it copies.
     pub fn apply(&self, command: &mut Command) {
-        for (name, path) in &self.environment {
-            command.env(name, path);
-        }
+        let root = self.staging.root();
+        command.current_dir(root);
+        command.env(INPUT, root.join(INPUT));
+        command.env(OUTPUT, root.join(OUTPUT));
+        match &self.prompts {
+            Some(path) => command.env(PROMPTS, path),
+            None => command.env_remove(PROMPTS),
+        };
     }
 
-    /// Drop the parent's own copy of every descriptor, once the generator holds
-    /// its own.
+    /// Read every declared output back, refusing the run if any is absent.
     ///
-    /// Called immediately after the spawn and not later, and that ordering is
-    /// what prevents a deadlock rather than tidiness. A generator that never
-    /// reads a dependency leaves the producing `sops` blocked on a full pipe;
-    /// with the parent still holding a read end, no reader would ever close and
-    /// sops would block for as long as the run does. Dropping here means the
-    /// generator's exit closes the last read end, sops fails on the write, and
-    /// the run ends.
-    pub fn release(&mut self) {
-        self.held.clear();
-    }
+    /// The presence of *all* of them is established before any is read, which is
+    /// what makes a partial generator refuse having written nothing: the values
+    /// reach neither sops nor the public store until the whole set is known to
+    /// exist.
+    ///
+    /// Bytes exactly as the script wrote them. Nothing is stripped, and that is a
+    /// change from 0.1, where one trailing newline came off a single-output
+    /// value so that an `echo`-shaped one-liner stored what it looked like it
+    /// stored. Under this contract the file *is* the value — it is what clan
+    /// reads with `read_bytes()` — and a convention that removed a byte would
+    /// corrupt every key whose last byte is a newline while looking like it had
+    /// tidied one up. A generator that wants no trailing newline writes with
+    /// `printf` rather than `echo`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::GeneratorOutputMissing`] naming the first absent output and
+    /// listing what the directory did hold, and whatever reading a present one
+    /// failed with.
+    pub fn collect(&self, generator: &str, outputs: &[String]) -> Result<Vec<Secret>> {
+        let directory = self.output();
 
-    /// Let every feeder end, and reap it.
-    ///
-    /// A producing `sops` that failed is not reported here: its own standard
-    /// error is inherited and has already said why, and the generator reading an
-    /// empty input is what makes the run fail with the generator's own status —
-    /// which is the failure worth reporting, because it names the script.
-    pub fn finish(&mut self) {
-        self.held.clear();
-        for mut producer in std::mem::take(&mut self.producers) {
-            let _ = producer.wait();
+        let mut paths = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            refuse_traversal(output)?;
+            let path = directory.join(output);
+            if !staging::is_output(&path) {
+                return Err(Error::GeneratorOutputMissing {
+                    generator: generator.to_owned(),
+                    output: output.clone(),
+                    produced: staging::names_in(&directory),
+                });
+            }
+            paths.push(path);
         }
-        for writer in std::mem::take(&mut self.writers) {
-            let _ = writer.join();
-        }
+
+        paths
+            .iter()
+            .map(|path| self.staging.read(path))
+            .collect::<Result<Vec<Secret>>>()
     }
 }
 
-impl Drop for Inputs {
-    fn drop(&mut self) {
-        self.finish();
+/// Refuse a name that would reach outside the staging root.
+///
+/// Every name arriving here comes from the resolver, which admits
+/// `[a-z0-9][a-z0-9_-]*` and refuses everything else, so this cannot fire on a
+/// declared name. It is here because "cannot fire" is a claim about a rule two
+/// files away, and this is the one place where a name carrying `/` or `..`
+/// would write plaintext outside the directory that gets shredded.
+fn refuse_traversal(name: &str) -> Result<()> {
+    if staging::is_one_component(name) {
+        return Ok(());
     }
+    Err(Error::NixSchemaMismatch {
+        attribute: "flake.safix.lib.generatorPlan",
+        cause: format!("'{name}' is not a single path component, so it cannot name a staged file"),
+    })
 }
 
 #[cfg(test)]
@@ -196,78 +254,141 @@ mod tests {
     use std::io::Cursor;
     use std::process::Stdio;
 
-    use super::Inputs;
-    use crate::secret::Secret;
+    use super::*;
 
     fn value(bytes: &[u8]) -> Secret {
-        Secret::read_from(&mut Cursor::new(bytes.to_vec())).expect("a cursor can be read")
+        Secret::read_from(&mut Cursor::new(bytes.to_vec())).unwrap_or_else(|_| {
+            unreachable!("a cursor over a literal reads to its end");
+        })
+    }
+
+    /// A shell fragment, run the way the executor runs one, without nix in the
+    /// way. What is under test is the tree and the environment, not the shell.
+    fn run(tree: &Tree, script: &str) -> std::process::Output {
+        let mut command = Command::new("bash");
+        command
+            .arg("-euo")
+            .arg("pipefail")
+            .arg("-c")
+            .arg(script)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        tree.apply(&mut command);
+        command.output().unwrap_or_else(|_| {
+            unreachable!("bash is on PATH wherever these tests run");
+        })
     }
 
     #[test]
-    fn a_prompt_reaches_a_child_as_a_descriptor_it_can_read_once() {
-        let mut inputs = Inputs::new();
-        inputs
-            .add_prompt("seed", value(b"a fixture value"))
-            .expect("a pipe can be made");
+    fn a_prompt_is_a_file_the_script_may_read_twice() {
+        let Ok(tree) = Tree::establish(false, true) else {
+            return;
+        };
+        let Ok(()) = tree.add_prompt("seed", &value(b"a fixture value")) else {
+            return;
+        };
 
-        let mut command = std::process::Command::new("sh");
-        command
-            .arg("-c")
-            .arg(r#"cat "$in_seed"; printf ' | '; cat "$in_seed""#)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        inputs.apply(&mut command);
-
-        let child = command.spawn().expect("sh is on PATH");
-        inputs.release();
-        let produced = child
-            .wait_with_output()
-            .expect("the child can be waited on");
-        inputs.finish();
-
+        let produced = run(&tree, r#"cat "$prompts/seed"; printf ' | '; cat "$prompts/seed""#);
         assert_eq!(
             String::from_utf8_lossy(&produced.stdout),
-            "a fixture value | "
+            "a fixture value | a fixture value",
+            "a prompt was not re-readable, which the descriptor interface it replaced was not"
         );
     }
 
     #[test]
-    fn a_descriptor_is_not_inherited_by_a_child_spawned_after_the_release() {
-        let mut inputs = Inputs::new();
-        inputs
-            .add_prompt("seed", value(b"a fixture value"))
-            .expect("a pipe can be made");
-        let path = inputs
-            .environment
-            .get("in_seed")
-            .expect("the identifier is named")
-            .clone();
+    fn a_prompts_directory_is_absent_and_unnamed_when_none_are_declared() {
+        let Ok(tree) = Tree::establish(false, false) else {
+            return;
+        };
+        let produced = run(&tree, r#"printf '%s' "${prompts-unset}""#);
+        assert_eq!(String::from_utf8_lossy(&produced.stdout), "unset");
+        assert!(!tree.staging.root().join(PROMPTS).exists());
+    }
 
-        let mut first = std::process::Command::new("sh");
-        first
+    #[test]
+    fn an_ambient_prompts_variable_does_not_reach_a_generator_that_declares_none() {
+        let Ok(tree) = Tree::establish(false, false) else {
+            return;
+        };
+        let mut command = Command::new("bash");
+        command
+            .arg("-euo")
+            .arg("pipefail")
             .arg("-c")
-            .arg("exit 0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        inputs.apply(&mut first);
-        let mut running = first.spawn().expect("sh is on PATH");
-        inputs.release();
-        let _ = running.wait();
-        inputs.finish();
-
-        let later = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("cat {path}"))
+            .arg(r#"printf '%s' "${prompts-unset}""#)
+            .env("prompts", "/somewhere/else")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .expect("sh is on PATH");
-        assert!(
-            !later.status.success(),
-            "a later child could still open the released descriptor"
+            .stderr(Stdio::null());
+        tree.apply(&mut command);
+        let produced = command.output().unwrap_or_else(|_| {
+            unreachable!("bash is on PATH wherever these tests run");
+        });
+        assert_eq!(
+            String::from_utf8_lossy(&produced.stdout),
+            "unset",
+            "an ambient $prompts reached a generator that declares none"
         );
+    }
+
+    #[test]
+    fn the_working_directory_is_the_root_holding_the_three_directories() {
+        let Ok(tree) = Tree::establish(false, true) else {
+            return;
+        };
+        let produced = run(&tree, r#"printf '%s' "$(ls | sort | tr '\n' ' ')""#);
+        assert_eq!(String::from_utf8_lossy(&produced.stdout), "in out prompts ");
+    }
+
+    #[test]
+    fn an_output_is_read_back_byte_for_byte_including_a_trailing_newline() {
+        let Ok(tree) = Tree::establish(false, false) else {
+            return;
+        };
+        let produced = run(&tree, r#"echo -n unstripped > "$out/a"; echo padded > "$out/b""#);
+        assert!(produced.status.success());
+
+        let Ok(values) = tree.collect("paired", &["a".to_owned(), "b".to_owned()]) else {
+            unreachable!("both outputs were written");
+        };
+        let [first, second] = values.as_slice() else {
+            unreachable!("two outputs were asked for");
+        };
+        assert_eq!(first.len(), "unstripped".len());
+        assert_eq!(
+            second.len(),
+            "padded\n".len(),
+            "a trailing newline was stripped, which would corrupt a key that meant it"
+        );
+    }
+
+    #[test]
+    fn a_missing_output_refuses_and_names_what_was_produced() {
+        let Ok(tree) = Tree::establish(false, false) else {
+            return;
+        };
+        let produced = run(&tree, r#"printf x > "$out/written"; printf y > "$out/also""#);
+        assert!(produced.status.success());
+
+        let refused = tree.collect("paired", &["written".to_owned(), "absent".to_owned()]);
+        let Err(Error::GeneratorOutputMissing {
+            output, produced, ..
+        }) = refused
+        else {
+            unreachable!("a declared output was absent and the run did not refuse");
+        };
+        assert_eq!(output, "absent");
+        assert_eq!(produced, ["also", "written"]);
+    }
+
+    #[test]
+    fn a_name_reaching_outside_the_root_is_refused_before_anything_is_written() {
+        let Ok(tree) = Tree::establish(false, true) else {
+            return;
+        };
+        assert!(tree.add_prompt("../escape", &value(b"fixture")).is_err());
+        assert!(tree.collect("g", &["../escape".to_owned()]).is_err());
     }
 }

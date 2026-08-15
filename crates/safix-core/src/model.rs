@@ -74,6 +74,14 @@ pub struct Prompt {
     pub description: String,
 }
 
+/// One further output a generator writes, and whether it is encrypted.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratorFile {
+    /// Whether the value is encrypted, or stored in the repository in the clear.
+    pub secret: bool,
+}
+
 /// What mints an entry's value, as data rather than as a derivation.
 ///
 /// The whole generator travels inside the placement map, because the command
@@ -86,8 +94,9 @@ pub struct Generator {
     pub dependencies: Vec<String>,
     /// What this generator mints, shown by `list` and `check`.
     pub description: Option<String>,
-    /// The further outputs the script writes beyond the entry carrying it.
-    pub files: Vec<String>,
+    /// The further outputs the script writes beyond the entry carrying it,
+    /// each with its own secrecy.
+    pub files: BTreeMap<String, GeneratorFile>,
     /// What the operator is asked for, by the name the script addresses.
     pub prompts: BTreeMap<String, Prompt>,
     /// nixpkgs attribute names put on `PATH` while the script runs.
@@ -95,8 +104,30 @@ pub struct Generator {
     pub runtime_inputs: Vec<String>,
     /// The shell fragment that produces the value.
     pub script: String,
+    /// Whether every entry this generator writes is shared.
+    ///
+    /// Derived by the resolver from the entries rather than authored here, and
+    /// refused at evaluation when the outputs disagree. It is the field a bridge
+    /// to clan compares against clan's own `share`, and deriving it is what
+    /// keeps one fact from having two authoring surfaces.
+    pub share: bool,
     /// A shell fragment judging a candidate value, or none.
     pub validation: Option<String>,
+}
+
+impl Generator {
+    /// Whether this output's value is encrypted.
+    ///
+    /// The entry a generator is declared on is always secret and has no slot to
+    /// say otherwise: its placement — a file, a key inside it and an audience —
+    /// is what the whole custody model is expressed in, and an entry with no
+    /// ciphertext would have none of the three. A generator that wants to mint a
+    /// public value declares it under `files`, which is how clan's own keypair
+    /// samples are written.
+    #[must_use]
+    pub fn is_secret(&self, output: &str) -> bool {
+        self.files.get(output).is_none_or(|file| file.secret)
+    }
 }
 
 /// Where one name lives for one user, and what serves it.
@@ -115,6 +146,15 @@ pub struct Placement {
     pub shared: bool,
     /// What mints the value, when anything does.
     pub generator: Option<Generator>,
+    /// The repository-relative path of the plaintext value, when this entry is
+    /// an output some generator declares as not secret.
+    ///
+    /// Computed by the resolver so that the layout has one implementation rather
+    /// than one here and one in `resolve.nix`, and `null` for every entry whose
+    /// value is encrypted. When it is set, [`Placement::file`] and
+    /// [`Placement::key`] describe a document that is never written: a public
+    /// value has no ciphertext, no recipients and no creation rule.
+    pub public: Option<String>,
 }
 
 /// `user -> name -> placement`, the whole of what the command resolves against.

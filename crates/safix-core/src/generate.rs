@@ -11,31 +11,34 @@
 //! Three things depend on it. A prompt is read from one standard input, and two
 //! generators prompting at once is not a faster question but an unanswerable
 //! one. Each generator commits as it goes, so the order of the commits is the
-//! order of the plan and not of the scheduler. And a generator's inputs reach it
-//! on inherited descriptors, which means any process spawned between the
-//! handover and the exec would inherit them too — see [`crate::inputs`]. A
-//! fan-out over independent branches would buy latency and give up the third,
-//! which is the isolation the whole descriptor discipline exists for.
+//! order of the plan and not of the scheduler. And each generator's plaintext
+//! lives in a staging root for the duration of its run — see [`crate::inputs`]
+//! and [`crate::staging`] — so a fan-out would buy latency at the price of
+//! several roots holding plaintext at once, over a longer window, with no
+//! ordering between the shreds.
 //!
 //! # What a run leaves when it stops
 //!
 //! Nothing, up to the generator it stopped in. Each generator's outputs are
-//! staged into candidate documents beside their targets and renamed into place
-//! together, so a run that refuses partway through one generator leaves that
-//! generator's files as it found them. Generators that already committed stay
-//! committed, which is what the cascade confirmation warns about before it
-//! starts rather than after.
+//! staged into candidates beside their targets and renamed into place together,
+//! so a run that refuses partway through one generator leaves that generator's
+//! files as it found them. A generator's outputs resolve to one audience, so a
+//! multi-output write is one staged document and one rename, and the window a
+//! crash between two renames used to open for a keypair is closed. It is not
+//! closed in general: a `--regenerate` cascade still commits per generator, so
+//! generators that already committed stay committed, which is what the cascade
+//! confirmation warns about before it starts rather than after.
 
 use std::process::Stdio;
 
 use crate::error::{Error, Result};
-use crate::inputs::Inputs;
+use crate::inputs::Tree;
 use crate::model::{Generator, PromptKind};
 use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::sops::document;
 use crate::workspace::Workspace;
-use crate::{git, scratch, set};
+use crate::{git, public, scratch, set};
 
 /// Where a generator's prompts are answered and its cascade confirmed.
 ///
@@ -67,6 +70,8 @@ pub struct Options {
     pub regenerate: bool,
     /// Answer the cascade confirmation in advance.
     pub assume_yes: bool,
+    /// Accept that plaintext will be staged on a disk-backed filesystem.
+    pub allow_disk_staging: bool,
 }
 
 /// What running one generator came to.
@@ -214,6 +219,37 @@ fn confirm_cascade(
     Err(Error::CascadeDeclined)
 }
 
+/// Where one declared output's value is written.
+///
+/// The fork is the generator's own `files.<name>.secret`, resolved by the nix
+/// half into [`crate::model::Placement::public`] so that the layout of the
+/// plaintext store has one implementation rather than two that can disagree
+/// about where a value is.
+#[derive(Debug, Clone)]
+enum Target {
+    /// Into an encrypted document, under a key inside it.
+    Secret {
+        /// The repository-relative path of the document.
+        file: String,
+        /// The key the value is written under.
+        key: String,
+    },
+    /// Into the repository in the clear, at a path of its own.
+    Public {
+        /// The repository-relative path of the `value` file.
+        file: String,
+    },
+}
+
+impl Target {
+    /// The repository-relative path a commit names for this output.
+    fn file(&self) -> &str {
+        match self {
+            Self::Secret { file, .. } | Self::Public { file } => file,
+        }
+    }
+}
+
 /// One generator: its inputs, its run, its outputs, and one commit.
 fn run_one(
     workspace: &Workspace,
@@ -230,16 +266,21 @@ fn run_one(
     })?;
     let outputs = mine.outputs.get(generator).cloned().unwrap_or_default();
 
-    let mut files = Vec::with_capacity(outputs.len());
-    let mut keys = Vec::with_capacity(outputs.len());
+    let mut targets = Vec::with_capacity(outputs.len());
     let mut missing = 0_usize;
     for output in &outputs {
         let placement = workspace.resolve(user, output)?;
-        if !holds_a_value(workspace, &placement.file, &placement.key)? {
+        let target = match &placement.public {
+            Some(file) => Target::Public { file: file.clone() },
+            None => Target::Secret {
+                file: placement.file.clone(),
+                key: placement.key.clone(),
+            },
+        };
+        if !holds_a_value(workspace, &target)? {
             missing = missing.saturating_add(1);
         }
-        files.push(placement.file.clone());
-        keys.push(placement.key.clone());
+        targets.push(target);
     }
 
     if missing == 0 && !options.regenerate {
@@ -252,13 +293,14 @@ fn run_one(
         return Ok(Outcome::Skipped);
     }
 
-    // Distinct files first, because the preflight and the write both work per
-    // file and two outputs of one generator share a file whenever they share an
-    // audience.
+    // Distinct paths first, because the preflight and the write both work per
+    // file: two secret outputs of one generator share a document whenever they
+    // share an audience, which — since a generator's outputs are constrained to
+    // one audience — is always.
     let mut distinct: Vec<String> = Vec::new();
-    for file in &files {
-        if !distinct.contains(file) {
-            distinct.push(file.clone());
+    for target in &targets {
+        if !distinct.iter().any(|file| file == target.file()) {
+            distinct.push(target.file().to_owned());
         }
     }
     for file in &distinct {
@@ -277,9 +319,19 @@ fn run_one(
     let names = outputs.join(", ");
     log(progress, &format!("safix: generating {names} for {user}"));
 
-    let produced = mint(workspace, interaction, user, generator, record)?;
-    let values = split(generator, &outputs, produced)?;
+    let values = mint(
+        workspace,
+        interaction,
+        user,
+        generator,
+        record,
+        &outputs,
+        options,
+    )?;
 
+    // Every candidate is judged before any is written. A validation that ran
+    // after the first write would leave one output committed and the rest
+    // refused, which for a keypair is the state where the halves do not match.
     for (output, value) in outputs.iter().zip(values.iter()) {
         if value.is_empty() {
             return Err(Error::GeneratorProducedNothing {
@@ -297,42 +349,56 @@ fn run_one(
         progress,
         &format!("chore(safix): generate {names} for {user}"),
         &distinct,
-        &files,
-        &keys,
+        &targets,
         &values,
     )
 }
 
-/// Whether a name already holds a value, answered off the ciphertext.
+/// Whether an output already holds a value.
 ///
-/// `check` asks this about people whose files it cannot decrypt, so it may not
-/// decrypt to find out; `generate` asks it to decide whether a run is a mint or a
-/// rotation, and asking the same way keeps the two from disagreeing about one
-/// file.
-fn holds_a_value(workspace: &Workspace, relative: &str, key: &str) -> Result<bool> {
-    let Some(text) = workspace.read_relative(relative)? else {
-        return Ok(false);
-    };
-    Ok(document::keys_of(&text)?
-        .get(key)
-        .is_some_and(|state| !state.empty))
+/// For an encrypted output, answered off the ciphertext: `check` asks the same
+/// question about people whose files it cannot decrypt, so it may not decrypt to
+/// find out, and asking the same way keeps the two from disagreeing about one
+/// file. For a public output, answered off the file, and an empty file counts as
+/// holding nothing for the same reason an empty key does — it is the state a
+/// truncated write leaves behind.
+fn holds_a_value(workspace: &Workspace, target: &Target) -> Result<bool> {
+    match target {
+        Target::Secret { file, key } => {
+            let Some(text) = workspace.read_relative(file)? else {
+                return Ok(false);
+            };
+            Ok(document::keys_of(&text)?
+                .get(key)
+                .is_some_and(|state| !state.empty))
+        }
+        Target::Public { file } => Ok(public::holds_a_value(&workspace.absolute(file))),
+    }
 }
 
-/// Open every input, run the script, and take what it printed.
+/// Stage every input, run the script, and read every declared output back.
+///
+/// The staging tree is established before a prompt is asked, so an operator who
+/// answers a prompt has already had the refusal a disk-backed host would raise.
+/// It is dropped when this returns, however it returns, which is what shreds the
+/// answers and the outputs once they are values in memory.
 fn mint(
     workspace: &Workspace,
     interaction: &mut dyn Interaction,
     user: &str,
     generator: &str,
     record: &Generator,
-) -> Result<Secret> {
+    outputs: &[String],
+    options: Options,
+) -> Result<Vec<Secret>> {
     let plan = workspace.generator_plan()?;
     let declared = plan
         .for_user(user)
         .and_then(|mine| mine.inputs.get(generator));
 
-    let mut inputs = Inputs::new();
-    for (identifier, input) in declared.into_iter().flatten() {
+    let tree = Tree::establish(options.allow_disk_staging, !record.prompts.is_empty())?;
+
+    for input in declared.into_iter().flatten().map(|(_, input)| input) {
         match input.kind {
             crate::model::InputKind::Prompt => {
                 let asked =
@@ -352,13 +418,28 @@ fn mint(
                         name: input.name.clone(),
                     });
                 }
-                inputs.add_prompt(identifier, answer)?;
+                tree.add_prompt(&input.name, &answer)?;
             }
             crate::model::InputKind::Dependency => {
+                // Keyed by the generator that produces the dependency, which is
+                // the directory name clan's contract uses, so `$in/openssh/…`
+                // means here what it means there. Only the declared dependency
+                // is placed under it: clan materializes every file of the
+                // dependency generator, which would hand a script depending on a
+                // keypair's public half the private half as well.
+                let producer = plan
+                    .for_user(user)
+                    .and_then(|mine| mine.producer_of(&input.name))
+                    .ok_or_else(|| Error::NoGenerator {
+                        user: user.to_owned(),
+                        name: input.name.clone(),
+                    })?
+                    .to_owned();
                 let placement = workspace.resolve(user, &input.name)?;
                 let absolute = workspace.absolute(&placement.file);
-                inputs.add_dependency(
-                    identifier,
+                tree.add_dependency(
+                    &producer,
+                    &input.name,
                     workspace.sops(),
                     &placement.file,
                     &absolute,
@@ -369,103 +450,45 @@ fn mint(
     }
 
     // Standard input is `/dev/null`, and that is part of the interface rather
-    // than tidiness. A generator's inputs are its descriptors; this command's
-    // own standard input is where an operator's prompt answers arrive, and a
-    // script that read it would eat the answers to every prompt after it —
+    // than tidiness. A generator's inputs are files under its staging root; this
+    // command's own standard input is where an operator's prompt answers arrive,
+    // and a script that read it would eat the answers to every prompt after it —
     // silently, since a prompt reading end-of-input looks exactly like one
-    // nobody answered.
+    // nobody answered. That property held under the descriptor interface too,
+    // but it held there for a different reason, so it is re-asserted rather than
+    // assumed to have carried over.
+    //
+    // Standard output is inherited rather than captured, because it is no longer
+    // where a value travels: a script's output is diagnostic now, and capturing
+    // it would hide a `set -x` trace the operator asked for.
     let mut command =
         workspace
             .nix()
             .generator_shell(workspace.root(), &record.runtime_inputs, &record.script);
     command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    inputs.apply(&mut command);
+    tree.apply(&mut command);
 
     // A nix that cannot be run at all is reported as the generator exiting 127,
     // which is what the shell runtime records for it: there the failure is the
     // subshell's status, and 127 is what a shell exits with for a command it
     // could not find.
-    let mut child = command.spawn().map_err(|_| Error::GeneratorFailed {
+    let failed = |status: i32| Error::GeneratorFailed {
         generator: generator.to_owned(),
-        status: 127,
-    })?;
-    inputs.release();
-
-    let produced = {
-        let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
-        Secret::read_from(&mut stdout)?
+        status,
     };
-    let status = child
-        .wait()
-        .map_err(|_| Error::GeneratorFailed {
-            generator: generator.to_owned(),
-            status: 127,
-        })?
+    let status = command
+        .status()
+        .map_err(|_| failed(127))?
         .code()
         .unwrap_or(1);
-    inputs.finish();
-
     if status != 0 {
-        return Err(Error::GeneratorFailed {
-            generator: generator.to_owned(),
-            status,
-        });
-    }
-    Ok(produced)
-}
-
-/// One output takes the script's standard output; several take a JSON object.
-///
-/// No newline comes off a value read out of the JSON form. JSON states a string
-/// exactly, so there is no echo-shaped artifact to remove and removing one would
-/// corrupt a value that meant it.
-fn split(generator: &str, outputs: &[String], produced: Secret) -> Result<Vec<Secret>> {
-    if outputs.len() == 1 {
-        return Ok(vec![produced.without_echoed_newline()]);
+        return Err(failed(status));
     }
 
-    let not_an_object = || Error::GeneratorNotAnObject {
-        generator: generator.to_owned(),
-        outputs: outputs.len(),
-    };
-    let mut members = produced
-        .json_members()
-        .map_err(|_| not_an_object())?
-        .ok_or_else(not_an_object)?;
-
-    let mut sorted = outputs.to_vec();
-    sorted.sort();
-    let declared = render(&sorted);
-    let actual = render(&members.keys().cloned().collect::<Vec<_>>());
-    if declared != actual {
-        return Err(Error::GeneratorKeysDiffer {
-            generator: generator.to_owned(),
-            actual,
-            declared,
-        });
-    }
-
-    outputs
-        .iter()
-        .map(|output| {
-            members
-                .remove(output)
-                .ok_or_else(|| Error::GeneratorKeysDiffer {
-                    generator: generator.to_owned(),
-                    actual: actual.clone(),
-                    declared: declared.clone(),
-                })
-        })
-        .collect()
-}
-
-/// A list of names as `jq -c` renders it, which is how the refusal quotes both
-/// sides.
-fn render(names: &[String]) -> String {
-    serde_json::to_string(names).unwrap_or_else(|_| String::from("[]"))
+    tree.collect(generator, outputs)
 }
 
 /// The entry's validation fragment, judging one candidate value.
@@ -510,13 +533,19 @@ fn validate(
 
 /// Stage every output into a candidate beside its target, judge the recipients,
 /// then move them all into place and commit once.
+///
+/// Public outputs take the same staging discipline as encrypted ones and are
+/// renamed in the same pass, so a generator writing a private half and a public
+/// half lands both or neither. What they do not take is sops: no creation rule
+/// covers the public store, so an encrypted public output would be a document
+/// nothing has a rule for — which is exactly what `safix-public-no-rule` checks
+/// stays impossible.
 fn write(
     workspace: &Workspace,
     progress: &dyn Progress,
     message: &str,
     distinct: &[String],
-    files: &[String],
-    keys: &[String],
+    targets: &[Target],
     values: &[Secret],
 ) -> Result<Outcome> {
     let mut candidates = Vec::with_capacity(distinct.len());
@@ -524,6 +553,23 @@ fn write(
         let absolute = workspace.absolute(relative);
         let candidate = set::candidate_path(&absolute);
         scratch::register_file(&candidate);
+
+        let written = targets.iter().zip(values.iter()).filter(|(target, _)| {
+            let Target::Secret { file, .. } = target else {
+                return false;
+            };
+            file == relative
+        });
+
+        if let Some((_, value)) = targets
+            .iter()
+            .zip(values.iter())
+            .find(|(target, _)| matches!(target, Target::Public { file } if file == relative))
+        {
+            public::stage(&candidate, value)?;
+            candidates.push(candidate);
+            continue;
+        }
 
         if absolute.exists() {
             std::fs::copy(&absolute, &candidate).map_err(|cause| Error::FileUnwritable {
@@ -540,11 +586,12 @@ fn write(
                     cause,
                 })?;
             }
-            let first = files
+            let first = targets
                 .iter()
-                .zip(keys.iter())
-                .find(|(file, _)| *file == relative)
-                .map(|(_, key)| key.clone())
+                .find_map(|target| match target {
+                    Target::Secret { file, key } if file == relative => Some(key.clone()),
+                    _ => None,
+                })
                 .unwrap_or_default();
             note(
                 progress,
@@ -561,10 +608,10 @@ fn write(
             )?;
         }
 
-        for ((file, key), value) in files.iter().zip(keys.iter()).zip(values.iter()) {
-            if file != relative {
+        for (target, value) in written {
+            let Target::Secret { key, .. } = target else {
                 continue;
-            }
+            };
             let status = {
                 let _quiet = scratch::quiet();
                 workspace.sops().set_key(&candidate, key, value)?

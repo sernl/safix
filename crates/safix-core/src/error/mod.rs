@@ -409,25 +409,76 @@ pub enum Error {
     },
 
     /// A generator reads a secret whose file does not exist.
-    #[error("the dependency behind $in_{identifier} has no value yet: {file} does not exist")]
+    #[error(
+        "the dependency '{name}' has no value yet, so $in/{producer}/{name} cannot be \
+        written: {file} does not exist"
+    )]
     DependencyHasNoValue {
-        /// The script identifier the dependency would have arrived under.
-        identifier: String,
+        /// The declared name of the dependency.
+        name: String,
+        /// The generator whose output it is, which names its input directory.
+        producer: String,
         /// The file the declarations place the dependency in.
         file: String,
     },
 
-    /// A descriptor carrying an input could not be made or handed over.
+    /// No memory-backed filesystem could be found to stage plaintext on.
     ///
-    /// About this process rather than about a declaration: the value it would
-    /// have carried never left the memory it was read into, and the run stops
-    /// before anything is written.
-    #[error("could not open the descriptor $in_{identifier} carries: {cause}")]
-    GeneratorPipe {
-        /// The script identifier the value would have arrived under.
-        identifier: String,
-        /// What the system call objected to.
-        cause: String,
+    /// Raised before anything is produced. There is deliberately no fallback to
+    /// a conventional temporary directory: this fleet's is disk-backed, so a
+    /// silent fallback would be the exact failure the rule prevents, occurring
+    /// under a code path that looks like it succeeded.
+    #[error(
+        "no memory-backed filesystem is available to stage plaintext on; nothing ran.\n\
+        \n\
+        A generator's inputs and outputs are files, and safix places them in a\n\
+        private directory on tmpfs so that no plaintext reaches a block device.\n\
+        Tried:{}\n\
+        Of those, disk-backed:{}\n\
+        \n\
+        Re-run with --allow-disk-staging to accept that plaintext will be\n\
+        written to a disk-backed filesystem, where an unlink leaves the bytes\n\
+        in free blocks. Set SAFIX_STAGING_DIR to name a tmpfs mount instead.",
+        bulleted(.candidates),
+        bulleted(.disk_backed)
+    )]
+    StagingNotMemoryBacked {
+        /// Every location that was tried, in the order they were tried.
+        candidates: Vec<String>,
+        /// Those of them that answered, and answered disk-backed.
+        disk_backed: Vec<String>,
+    },
+
+    /// The staging root, or something inside it, could not be created.
+    #[error("could not stage plaintext at {path}")]
+    StagingUnusable {
+        /// The path that could not be created or written.
+        path: String,
+        /// What the filesystem objected to.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// A generator exited without writing one of its declared outputs.
+    ///
+    /// The listing of what the output directory did contain is clan's, and is
+    /// copied deliberately: a refusal naming only what is absent leaves the
+    /// operator to guess between a script that wrote nothing, one that wrote
+    /// somewhere else, and one that misspelled a name.
+    #[error(
+        "'{generator}' did not write a file for '{output}' at $out/{output}; \
+        nothing was written.\n\
+        \n\
+        $out held:{}",
+        bulleted(.produced)
+    )]
+    GeneratorOutputMissing {
+        /// The generator that was run.
+        generator: String,
+        /// The declared output that is absent.
+        output: String,
+        /// Every name the output directory did hold, in name order.
+        produced: Vec<String>,
     },
 
     /// The stream carrying a prompt's answer ended before the answer did.
@@ -454,37 +505,6 @@ pub enum Error {
         generator: String,
         /// What its script exited with.
         status: i32,
-    },
-
-    /// A generator writing several outputs printed something other than a JSON
-    /// object.
-    ///
-    /// The fork between one output and several is not a convenience: a shell's
-    /// standard output is a byte stream with no way to say "these two values",
-    /// and a stream carrying a separator would make every value that could
-    /// contain the separator unstorable.
-    #[error(
-        "'{generator}' writes {outputs} outputs, so its script must print a JSON object \
-        keyed by output name; it printed something else"
-    )]
-    GeneratorNotAnObject {
-        /// The generator that printed it.
-        generator: String,
-        /// How many outputs it declares.
-        outputs: usize,
-    },
-
-    /// A generator's document is keyed by something other than its outputs.
-    #[error(
-        "'{generator}' printed keys {actual} but declares outputs {declared}; nothing was written"
-    )]
-    GeneratorKeysDiffer {
-        /// The generator that printed it.
-        generator: String,
-        /// The keys the document carries, as the shell renders them.
-        actual: String,
-        /// The outputs the declarations name, as the shell renders them.
-        declared: String,
     },
 
     /// A generator produced an empty value for one of its outputs.
@@ -517,6 +537,33 @@ pub enum Error {
     /// The operator declined the cascade a rotation carries.
     #[error("declined; nothing was written. Pass --yes to answer this in advance.")]
     CascadeDeclined,
+
+    /// Neither editor variable is set, so there is no editor to open.
+    ///
+    /// No fallback to a named program, and that absence is the decision rather
+    /// than an omission. Dropping an operator who has never used it into `vi`,
+    /// with a secret in the buffer, produces either an accidental write or an
+    /// accidental abandonment — and safix cannot tell the two apart, so the
+    /// value it stores would be one nobody chose.
+    #[error(
+        "neither $VISUAL nor $EDITOR is set, so there is no editor to open; \
+        nothing was decrypted or staged.\n\
+        \n\
+        Set one of them and re-run. safix opens no editor of its own choosing: \
+        a program you did not pick, holding your plaintext, can be left or \
+        saved by accident and safix cannot tell which happened."
+    )]
+    NoEditor,
+
+    /// The editor exited non-zero, so its buffer is not a value.
+    #[error(
+        "the editor exited {status}; nothing was written and nothing was committed. \
+        The staged buffer has been shredded."
+    )]
+    EditorFailed {
+        /// What the editor exited with.
+        status: i32,
+    },
 
     /// `keygen` was asked to mint an identity for somebody else.
     #[error("{}", keygen_for_someone_else(.user))]
