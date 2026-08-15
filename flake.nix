@@ -55,12 +55,12 @@
         ./modules/flake/checks/cli.nix
         ./modules/flake/checks/consumption.nix
         ./modules/flake/checks/custody.nix
-        ./modules/flake/checks/differential.nix
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/generators.nix
         ./modules/flake/checks/materialization.nix
         ./modules/flake/checks/namespace.nix
         ./modules/flake/checks/policy.nix
+        ./modules/flake/checks/single-runtime.nix
         ./modules/flake/devshell.nix
         ./modules/flake/rust.nix
         ./modules/flake/safix
