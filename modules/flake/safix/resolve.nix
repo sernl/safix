@@ -294,6 +294,53 @@ let
       ) sources
     ) users;
 
+  # The two accessors a consuming module reads an output through, as functions
+  # of a root rather than of the flake, so a check can point them at a fixture
+  # tree and watch each of the three answers happen.
+  #
+  # `outputPathOf` answers for every output and is a path, never a value: for a
+  # secret it is the document the provisioner decrypts, for a public output the
+  # file holding its bytes.
+  outputPathOf =
+    users: catalogue: user: name:
+    let
+      placement = placementOrThrow users catalogue user name "has no path";
+    in
+    if placement.public != null then placement.public else placement.file;
+
+  # `publicValueOf` reads the file at evaluation, which is the whole reason
+  # `files.<n>.secret = false` exists: a public key or a fingerprint reaches a
+  # module without a deployment-time indirection.
+  #
+  # Three answers, and two of them are throws. An ungenerated public output names
+  # the command that would produce it, because an evaluation failing with "run
+  # `safix generate ana wg-public`" is strictly better than one failing with a
+  # path that is not there — that message is clan's and is copied.
+  #
+  # A secret output is where this departs from clan, which leaves the option
+  # undefined under `mkIf (secret == false)` and so produces nix's generic
+  # "option used but not defined". The cost of a stated refusal is one evaluated
+  # thunk; what it buys is that the likeliest authoring mistake in this surface —
+  # reaching for a value on a secret because the sibling public output has one —
+  # produces a sentence saying what to do instead.
+  publicValueOf =
+    users: catalogue: root: user: name:
+    let
+      placement = placementOrThrow users catalogue user name "has no value to read";
+      path = "${toString root}/${placement.public}";
+    in
+    if placement.public == null then
+      throw "safix public: '${name}' of flake.safix.users.${user} is a secret, so it has no value readable at evaluation — that is what being encrypted means. Use flake.safix.lib.outputPath \"${user}\" \"${name}\" for the path the decrypted file is placed at, or declare the output with files.${name}.secret = false if it is meant to be public."
+    else if builtins.pathExists path then
+      builtins.readFile path
+    else
+      throw "safix public: '${name}' of flake.safix.users.${user} has not been generated yet, so ${placement.public} does not exist. Run `safix generate ${user} ${name}`.";
+
+  placementOrThrow =
+    users: catalogue: user: name: what:
+    (placementsOf users catalogue).${user}.${name}
+      or (throw "safix public: flake.safix.users.${user} holds no secret named '${name}', so it ${what}");
+
   # Every path the public store holds, over every user. What the recipient
   # policy is checked against: no generated creation rule may match any of them.
   publicPathsOf =
@@ -1249,6 +1296,8 @@ in
     placementsOf
     publicFileOf
     publicPathsOf
+    publicValueOf
+    outputPathOf
     recipientsOf
     sourcesOf
     selectFor

@@ -243,6 +243,33 @@
         };
       };
 
+      # A tree holding one generated public value, and one holding none, so the
+      # accessor's two throws and its one read are each reached over a root this
+      # file wrote rather than over the repository.
+      publicLeaf = "public/safix/users/ana/keys-pub";
+
+      generatedRoot = pkgs.runCommand "safix-public-fixture" { } ''
+        mkdir -p "$out/${publicLeaf}"
+        printf 'a public key, in the clear\n' > "$out/${publicLeaf}/value"
+      '';
+
+      emptyRoot = pkgs.runCommand "safix-public-fixture-empty" { } ''
+        mkdir -p "$out"
+      '';
+
+      # A creation rule pointed at the public store, which is the perturbation
+      # both non-interaction checks exist to catch. Written as a plan rather than
+      # produced by the renderer, because the renderer is what is being held to
+      # never producing one.
+      reachingPlan = {
+        rules = [
+          {
+            audience = [ "ana" ];
+            pathRegex = "^public/safix/.*";
+          }
+        ];
+      };
+
       # A generator whose two outputs land in two audiences, which needs a shared
       # catalogue entry and so a second user to carry it — a fleet rather than a
       # bare `private` record.
@@ -327,6 +354,36 @@
 
           # A public output resolves to a path in the plaintext store, an
           # encrypted one to null, and the two prefixes do not overlap.
+          # ── the accessors, over a fixture tree ──
+          # A root holding one generated public value, so `publicValueOf` has a
+          # file to read and the "not generated yet" answer has a name it does
+          # not hold. Reading it at evaluation is the whole point of declaring an
+          # output public, and this is that read.
+          publicValueReadsTheFile =
+            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } generatedRoot "ana"
+              "keys-pub";
+          publicValueOnAnUngeneratedOutput = fires (
+            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } emptyRoot "ana" "keys-pub"
+          );
+          publicValueOnASecretOutput = fires (
+            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } generatedRoot "ana" "keys"
+          );
+          # `path` answers for both, and answers with a path rather than a value.
+          pathOfThePublicHalf = resolve.outputPathOf (fleetOf fixtures.publicOutput) { } "ana" "keys-pub";
+          pathOfTheSecretHalf = resolve.outputPathOf (fleetOf fixtures.publicOutput) { } "ana" "keys";
+
+          # ── severity: a rule that would reach the public store ──
+          # Both checks have to fail, and which one fails is recorded rather than
+          # summarised: one asks whether a rule reaches the public store, the
+          # other whether a rule reaches anywhere nothing is placed. A refactor
+          # weakening one is unlikely to weaken both.
+          reachingRuleFailsPublicCheck =
+            checks.publicRuleMessagesOf {
+              plan = reachingPlan;
+              publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
+            } != [ ];
+          reachingRuleFailsCatchAll = checks.catchAllMessagesOf reachingPlan != [ ];
+
           publicMessages = violationsOf fixtures.publicOutput;
           publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
           publicOnTheEncryptedHalf =
@@ -420,6 +477,15 @@
             "flake.safix.users.ana's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs resolve to one audience, so one file, so one write. Make them agree, or split this into two generators and have the second depend on the first."
           ];
           shareDisagreementFires = true;
+
+          publicValueReadsTheFile = "a public key, in the clear\n";
+          publicValueOnAnUngeneratedOutput = true;
+          publicValueOnASecretOutput = true;
+          pathOfThePublicHalf = "public/safix/users/ana/keys-pub/value";
+          pathOfTheSecretHalf = "secrets/safix/users/ana/secrets.yaml";
+
+          reachingRuleFailsPublicCheck = true;
+          reachingRuleFailsCatchAll = true;
 
           publicMessages = [ ];
           publicPaths = [ "public/safix/users/ana/keys-pub/value" ];
