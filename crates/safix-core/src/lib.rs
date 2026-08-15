@@ -32,14 +32,19 @@
 
 pub mod check;
 mod error;
+pub mod fix;
 pub mod git;
 pub mod model;
 pub mod nix;
 mod probe;
+pub mod progress;
+pub mod scratch;
 mod secret;
+pub mod set;
 pub mod sops;
 mod workspace;
 
 pub use error::{Error, Result};
+pub use progress::Progress;
 pub use secret::Secret;
 pub use workspace::Workspace;

@@ -59,6 +59,15 @@ impl Attribute {
     }
 }
 
+/// The flake reference `nix eval` is handed: the repository, then the
+/// attribute.
+fn target(root: &Path, attribute: Attribute) -> OsString {
+    let mut target = OsString::from(root);
+    target.push("#");
+    target.push(attribute.as_str());
+    target
+}
+
 /// The nix binary, and how it is reached.
 ///
 /// `SAFIX_NIX` overrides the program so that a hermetic check can drive the
@@ -116,18 +125,56 @@ impl Nix {
         })
     }
 
+    /// Evaluate one attribute whose value is a string, straight into a file.
+    ///
+    /// The file is created and truncated before nix runs and is left behind when
+    /// nix fails, which is what the shell runtime's `>` redirection does. The
+    /// caller renames it into place on success, so a failed evaluation never
+    /// half-writes the file it was going to replace.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::FileUnwritable`] when the destination cannot be created, and
+    /// [`Error::NixEvalFailed`] when nix cannot be run or exits non-zero.
+    pub fn eval_raw_to(&self, root: &Path, attribute: Attribute, destination: &Path) -> Result<()> {
+        let out = std::fs::File::create(destination).map_err(|cause| Error::FileUnwritable {
+            path: destination.display().to_string(),
+            cause,
+        })?;
+
+        let status = Command::new(&self.program)
+            .arg("eval")
+            .arg("--raw")
+            .arg(target(root, attribute))
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(out))
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|cause| Error::NixEvalFailed {
+                attribute: attribute.declared_as(),
+                root: root.display().to_string(),
+                cause: Some(cause),
+            })?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(Error::NixEvalFailed {
+                attribute: attribute.declared_as(),
+                root: root.display().to_string(),
+                cause: None,
+            })
+        }
+    }
+
     /// Standard error is inherited: nix's own diagnosis of a broken
     /// declaration is the useful half of the failure, and a refusal of ours
     /// that swallowed it would leave the operator with "could not evaluate".
     fn eval(&self, root: &Path, attribute: Attribute, format: &str) -> Result<Vec<u8>> {
-        let mut target = OsString::from(root);
-        target.push("#");
-        target.push(attribute.as_str());
-
         let output = Command::new(&self.program)
             .arg("eval")
             .arg(format)
-            .arg(&target)
+            .arg(target(root, attribute))
             .stdin(Stdio::null())
             .stderr(Stdio::inherit())
             .output()

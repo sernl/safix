@@ -107,6 +107,38 @@ impl Secret {
         Self::read_from(&mut io::stdin().lock())
     }
 
+    /// Read one line, without the newline that ended it.
+    ///
+    /// One byte at a time, deliberately. The two prompts of `set` read two
+    /// consecutive lines from one stream, so a reader that buffered ahead would
+    /// swallow the confirmation into the first read's buffer and then find the
+    /// stream empty — which is why `bash`'s own `read` builtin reads a byte at a
+    /// time from a pipe, and why matching it here is the faithful spelling
+    /// rather than the slow one.
+    ///
+    /// `None` when the stream ended before a newline arrived, which is what
+    /// `read` returning non-zero means: whatever bytes had arrived are zeroed
+    /// rather than returned, because a value the operator did not finish typing
+    /// is not a value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::SecretRead`] if the stream fails.
+    pub fn read_line_from<R: Read>(source: &mut R) -> Result<Option<Self>> {
+        let (buffer, filled, complete) =
+            read_line_zeroizing(source).map_err(|cause| Error::SecretRead { cause })?;
+
+        if !complete {
+            return Ok(None);
+        }
+
+        let exact = buffer.get(..filled).ok_or_else(|| Error::SecretRead {
+            cause: io::Error::other("read more bytes than the buffer holds"),
+        })?;
+
+        Ok(Some(Self(SecretSlice::new(Box::from(exact)))))
+    }
+
     /// Write the value to a sink — in practice the piped standard input of the
     /// backend. This is the type's only egress.
     ///
@@ -115,6 +147,45 @@ impl Secret {
     /// Returns the sink's own failure.
     pub fn write_to<W: Write>(&self, sink: &mut W) -> io::Result<()> {
         sink.write_all(self.0.expose_secret())
+    }
+
+    /// Write the value as a JSON string, which is the shape `sops set
+    /// --value-stdin` takes.
+    ///
+    /// The second egress, and it exists so that the encoding happens here rather
+    /// than in a `jq` subprocess: the shell runtime pipes the value through
+    /// `jq -Rs .` on its way to `sops`, which puts a copy of it in a second
+    /// process. This produces the same bytes `jq -Rs .` produces, including its
+    /// replacement of ill-formed UTF-8 with U+FFFD, and the intermediate is
+    /// zeroed when this returns.
+    ///
+    /// # Errors
+    ///
+    /// Returns the sink's own failure.
+    pub fn write_json_to<W: Write>(&self, sink: &mut W) -> io::Result<()> {
+        let text = Zeroizing::new(String::from_utf8_lossy(self.0.expose_secret()).into_owned());
+        serde_json::to_writer(sink, text.as_str()).map_err(io::Error::other)
+    }
+
+    /// Whether two values are the same, without branching on where they differ.
+    ///
+    /// The length is compared first and is therefore leaked, which is what
+    /// comparing two strings in shell also leaks and is not what this is
+    /// defending: the two values being compared are the operator's two entries
+    /// of one secret, and the question is whether a mistyped confirmation can be
+    /// narrowed down from how long the comparison took.
+    #[must_use]
+    pub fn equals(&self, other: &Self) -> bool {
+        let left = self.0.expose_secret();
+        let right = other.0.expose_secret();
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut difference = 0_u8;
+        for (one, two) in left.iter().zip(right.iter()) {
+            difference |= one ^ two;
+        }
+        difference == 0
     }
 
     /// The value's length in bytes.
@@ -176,6 +247,50 @@ fn read_zeroizing<R: Read>(source: &mut R) -> io::Result<(Zeroizing<Vec<u8>>, us
     }
 
     Ok((buffer, filled))
+}
+
+/// Read up to and including one newline, a byte at a time, into a buffer that is
+/// zeroed on every path out.
+///
+/// Returns the buffer, how much of it is the line without its newline, and
+/// whether a newline was reached at all.
+fn read_line_zeroizing<R: Read>(source: &mut R) -> io::Result<(Zeroizing<Vec<u8>>, usize, bool)> {
+    let mut buffer = Zeroizing::new(vec![0_u8; INITIAL_BUFFER]);
+    let mut filled: usize = 0;
+
+    loop {
+        if filled == buffer.len() {
+            let grown = buffer
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| io::Error::other("line too long to buffer"))?;
+
+            let mut bigger = Zeroizing::new(vec![0_u8; grown]);
+            let head = bigger
+                .get_mut(..filled)
+                .ok_or_else(|| io::Error::other("grown buffer is shorter than the old one"))?;
+            head.copy_from_slice(buffer.as_slice());
+            buffer = bigger;
+        }
+
+        let window = buffer
+            .get_mut(filled..filled.saturating_add(1))
+            .ok_or_else(|| io::Error::other("read past the end of the buffer"))?;
+
+        match source.read(window) {
+            Ok(0) => return Ok((buffer, filled, false)),
+            Ok(_) => {
+                if window.first() == Some(&b'\n') {
+                    return Ok((buffer, filled, true));
+                }
+                filled = filled
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("line too long to buffer"))?;
+            }
+            Err(cause) if cause.kind() == io::ErrorKind::Interrupted => {}
+            Err(cause) => return Err(cause),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -290,5 +405,83 @@ mod tests {
             .write_to(&mut sink)
             .expect("writing a vec cannot fail");
         assert_eq!(sink, b"not truncated");
+    }
+
+    fn line(input: &[u8]) -> (Option<Vec<u8>>, Vec<u8>) {
+        let mut source = Cursor::new(input.to_vec());
+        let read = Secret::read_line_from(&mut source).expect("reading a cursor cannot fail");
+        let mut rest = Vec::new();
+        source.read_to_end(&mut rest).expect("a cursor can be read");
+        let value = read.map(|secret| {
+            let mut sink = Vec::new();
+            secret
+                .write_to(&mut sink)
+                .expect("writing a vec cannot fail");
+            sink
+        });
+        (value, rest)
+    }
+
+    #[test]
+    fn a_line_read_stops_at_the_newline_and_leaves_the_rest_of_the_stream() {
+        let (value, rest) = line(b"first\nsecond\n");
+        assert_eq!(value.as_deref(), Some(b"first".as_slice()));
+        assert_eq!(rest, b"second\n");
+    }
+
+    #[test]
+    fn a_stream_that_ends_before_a_newline_yields_no_line() {
+        assert_eq!(line(b"unfinished").0, None);
+        assert_eq!(line(b"").0, None);
+    }
+
+    #[test]
+    fn an_empty_line_is_a_value_and_not_an_absent_one() {
+        assert_eq!(line(b"\nrest").0.as_deref(), Some(b"".as_slice()));
+    }
+
+    #[test]
+    fn a_line_longer_than_the_buffer_survives_the_growth() {
+        let mut input = vec![b'x'; INITIAL_BUFFER.saturating_mul(2).saturating_add(9)];
+        let expected = input.clone();
+        input.push(b'\n');
+        assert_eq!(line(&input).0.as_deref(), Some(expected.as_slice()));
+    }
+
+    fn json_of(input: &[u8]) -> String {
+        let secret =
+            Secret::read_from(&mut Cursor::new(input.to_vec())).expect("a cursor can be read");
+        let mut sink = Vec::new();
+        secret
+            .write_json_to(&mut sink)
+            .expect("writing a vec cannot fail");
+        String::from_utf8(sink).expect("the encoding is valid utf-8 by construction")
+    }
+
+    /// The expected values here are what `printf %s <value> | jq -Rs .` prints,
+    /// which is the pipeline the shell runtime hands `sops set --value-stdin`.
+    #[test]
+    fn the_json_encoding_is_the_one_the_shell_runtime_pipes() {
+        assert_eq!(json_of(b"plain"), r#""plain""#);
+        assert_eq!(
+            json_of(br#"a "quoted" \ back"#),
+            r#""a \"quoted\" \\ back""#
+        );
+        assert_eq!(json_of(b"tab\there"), r#""tab\there""#);
+        assert_eq!(json_of(b"bell\x07"), "\"bell\\u0007\"");
+        assert_eq!(json_of("caf\u{e9}".as_bytes()), "\"caf\u{e9}\"");
+        assert_eq!(json_of(b"\xff"), "\"\u{fffd}\"");
+    }
+
+    #[test]
+    fn two_values_are_equal_exactly_when_their_bytes_are() {
+        let of = |bytes: &[u8]| {
+            Secret::read_from(&mut Cursor::new(bytes.to_vec())).expect("a cursor can be read")
+        };
+        assert!(of(b"same").equals(&of(b"same")));
+        assert!(of(b"").equals(&of(b"")));
+        assert!(!of(b"same").equals(&of(b"samf")));
+        assert!(!of(b"same").equals(&of(b"same ")));
+        assert!(!of(b"").equals(&of(b"a")));
     }
 }

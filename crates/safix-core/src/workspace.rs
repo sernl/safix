@@ -86,6 +86,12 @@ impl Workspace {
         &self.sops
     }
 
+    /// The nix driver.
+    #[must_use]
+    pub fn nix(&self) -> &Nix {
+        &self.nix
+    }
+
     /// The absolute path of a repository-relative one.
     #[must_use]
     pub fn absolute(&self, relative: &str) -> PathBuf {

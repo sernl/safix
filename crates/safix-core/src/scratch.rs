@@ -1,0 +1,202 @@
+//! What an aborted write must not leave behind.
+//!
+//! A write lands through a rename from a scratch file beside the target, so an
+//! abort leaves either the previous file or no file and never a truncated one.
+//! The scratch file holds ciphertext rather than plaintext, and is shredded all
+//! the same: a stray `secrets.yaml.safix-tmp.4213.yaml` beside the real one is a
+//! file an operator could mistake for it.
+//!
+//! The registry is process-wide and the removal is driven from one place, for
+//! the reason `modules/flake/safix/safix.sh` gives for its single `EXIT` trap: a
+//! cleanup scoped to a function does not run when the process dies between the
+//! write and the return, which is the abort a file actually survives. [`Guard`]
+//! covers every return and every panic; a signal is the command's to catch, and
+//! `safix` catches `SIGINT` and `SIGTERM` and calls [`cleanup`] from the handler
+//! before exiting 130 or 143 — the same two codes the shell runtime exits with.
+//!
+//! A path is registered *before* the file at it is created, never after. The
+//! window a registration after creation would open is exactly the one a signal
+//! arrives in.
+
+use std::fs::OpenOptions;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock, PoisonError};
+
+/// How much is written at a time when overwriting a scratch file.
+const SHRED_CHUNK: usize = 4096;
+
+#[derive(Default)]
+struct Registry {
+    files: Vec<PathBuf>,
+    dirs: Vec<PathBuf>,
+    floor: Option<PathBuf>,
+}
+
+fn registry() -> &'static Mutex<Registry> {
+    static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(Registry::default()))
+}
+
+fn with_registry<T>(act: impl FnOnce(&mut Registry) -> T) -> T {
+    let mut held = registry().lock().unwrap_or_else(PoisonError::into_inner);
+    act(&mut held)
+}
+
+/// Register a file to be shredded, before creating it.
+pub fn register_file(path: &Path) {
+    with_registry(|registry| registry.files.push(path.to_path_buf()));
+}
+
+/// Register a directory this run created, before creating it.
+///
+/// Removed only while still empty, so an aborted first write into a new audience
+/// directory leaves no evidence and a populated one is never at risk.
+pub fn register_dir(path: &Path) {
+    with_registry(|registry| registry.dirs.push(path.to_path_buf()));
+}
+
+/// The directory the upward sweep stops at, which is the repository root.
+///
+/// `rmdir -p` stops at the first ancestor that is not empty, and the repository
+/// root always holds `.git`, so this is belt and braces — but the sweep walks
+/// toward `/` and the cost of the belt is one comparison.
+pub fn set_floor(path: &Path) {
+    with_registry(|registry| registry.floor = Some(path.to_path_buf()));
+}
+
+/// Forget the registered directories, keeping them.
+///
+/// Called once a write has landed: the directory now holds the file it was made
+/// for, and is no longer this run's to remove.
+pub fn keep_dirs() {
+    with_registry(|registry| registry.dirs.clear());
+}
+
+/// Shred every registered file and remove every registered directory that is
+/// still empty.
+///
+/// Best-effort throughout: a file that is already gone, a directory that has
+/// since been filled, and a path that cannot be opened are all left alone. This
+/// runs on the way out of a failed run and from a signal handler, and a failure
+/// here must not mask the failure that led to it.
+pub fn cleanup() {
+    let (files, dirs, floor) = with_registry(|registry| {
+        (
+            std::mem::take(&mut registry.files),
+            std::mem::take(&mut registry.dirs),
+            registry.floor.clone(),
+        )
+    });
+
+    for file in &files {
+        shred(file);
+    }
+    for dir in &dirs {
+        remove_empty_upwards(dir, floor.as_deref());
+    }
+}
+
+/// Overwrite a file's bytes, then remove it.
+///
+/// Not a guarantee that the bytes are unrecoverable: a copy-on-write or
+/// log-structured filesystem writes the zeroes elsewhere and leaves the original
+/// blocks intact, and this makes no claim about them. It is the same best effort
+/// the shell runtime makes with `shred -u`, and its value is that the file is
+/// gone from the tree rather than that the medium is clean.
+fn shred(path: &Path) {
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && metadata.is_file()
+        && let Ok(mut file) = OpenOptions::new().write(true).open(path)
+    {
+        let zeroes = [0_u8; SHRED_CHUNK];
+        let mut remaining = metadata.len();
+        while remaining > 0 {
+            let take = usize::try_from(remaining)
+                .unwrap_or(SHRED_CHUNK)
+                .min(SHRED_CHUNK);
+            let Some(chunk) = zeroes.get(..take) else {
+                break;
+            };
+            if file.write_all(chunk).is_err() {
+                break;
+            }
+            remaining = remaining.saturating_sub(take as u64);
+        }
+        let _ = file.sync_all();
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+/// `rmdir -p`: remove this directory and each empty ancestor, stopping at the
+/// first that is not empty and at the floor.
+fn remove_empty_upwards(leaf: &Path, floor: Option<&Path>) {
+    let mut current = leaf.to_path_buf();
+    loop {
+        if floor == Some(current.as_path()) {
+            return;
+        }
+        if std::fs::remove_dir(&current).is_err() {
+            return;
+        }
+        match current.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => current = parent.to_path_buf(),
+            _ => return,
+        }
+    }
+}
+
+/// Runs [`cleanup`] when it goes out of scope, however it goes out of scope.
+///
+/// Held across a write so that an early return, a refusal and a panic all leave
+/// the tree as they found it.
+#[derive(Debug, Default)]
+pub struct Guard;
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        cleanup();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One test per behaviour would race: the registry is process-wide and
+    /// `cargo test` runs a module's tests on several threads, so the whole
+    /// lifecycle is exercised in one test rather than being made thread-local
+    /// for the tests' sake — the process-wide registry is the thing under test.
+    #[test]
+    fn the_lifecycle_shreds_files_and_removes_only_the_directories_it_made() {
+        let root = std::env::temp_dir().join(format!("safix-scratch-{}", std::process::id()));
+        let made = root.join("deep").join("audience");
+        let kept = root.join("kept");
+        std::fs::create_dir_all(&kept).expect("a temporary directory can be made");
+
+        set_floor(&root);
+
+        let doomed = made.join("secrets.yaml.safix-tmp.yaml");
+        register_file(&doomed);
+        register_dir(&made);
+        std::fs::create_dir_all(&made).expect("a temporary directory can be made");
+        std::fs::write(&doomed, b"ciphertext").expect("a temporary file can be written");
+
+        let survivor = kept.join("keep-me");
+        register_dir(&kept);
+        std::fs::write(&survivor, b"not ours").expect("a temporary file can be written");
+
+        cleanup();
+
+        assert!(!doomed.exists(), "the scratch file survived the cleanup");
+        assert!(!made.exists(), "the directory this run made survived");
+        assert!(
+            !root.join("deep").exists(),
+            "the empty ancestor survived, so the sweep did not walk up"
+        );
+        assert!(root.exists(), "the sweep walked past its floor");
+        assert!(survivor.exists(), "a populated directory was emptied");
+
+        std::fs::remove_dir_all(&root).expect("the fixture can be removed");
+    }
+}

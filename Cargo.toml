@@ -32,7 +32,17 @@ serde_json = "1"
 # nothing about the format beyond them; see `sops::document`.
 serde_norway = "0.9"
 thiserror = "2"
+# No default features anywhere: the default set pulls a full runtime in, and
+# what is wanted is the multi-threaded scheduler, subprocesses and a semaphore.
+tokio = { version = "1", default-features = false }
 zeroize = "1"
+
+# Terminal control for the two prompts of `set`, and the two signals an aborted
+# `set` has to shred its scratch file on. Both are safe wrappers over what would
+# otherwise be `unsafe` in a crate that forbids it, and both are confined to the
+# command: a library embedder gets neither a terminal nor a signal handler.
+rustix = { version = "1", default-features = false, features = ["std", "termios"] }
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 insta = "1"
 proptest = "1"

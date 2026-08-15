@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
+use crate::progress::{Progress, note};
 
 /// The states a commit must not be made in.
 ///
@@ -238,6 +239,54 @@ impl Git {
             })
         }
     }
+}
+
+/// Stage these paths and commit them alone, or say that there was nothing to
+/// commit.
+///
+/// One decision point, and it is git's rather than a byte comparison of our own:
+/// `sops set --idempotent` leaves an unchanged value's file untouched, so a
+/// re-run moves a byte-identical file into place and git has nothing staged.
+///
+/// Scoped to the paths written on both halves. An unscoped staged-changes test
+/// would read another path's staged change as this command's work and commit on
+/// a run that wrote nothing, and an unscoped commit would carry that path into a
+/// commit whose message names one secret; committing the paths alone leaves the
+/// rest of the index staged where it was.
+///
+/// More than one path only ever arrives from one generator writing more than one
+/// output. A keypair split across two commits is a state in which the tree holds
+/// a private half and a public half that do not match, so the outputs of one run
+/// go in together or not at all.
+///
+/// # Errors
+///
+/// [`Error::GitCommandFailed`] when git refuses, and [`Error::GitUnavailable`]
+/// when it cannot be run.
+pub fn commit_written_files(
+    git: &Git,
+    root: &Path,
+    progress: &dyn Progress,
+    message: &str,
+    paths: &[String],
+) -> Result<()> {
+    git.stage(root, paths)?;
+    if !git.has_staged_changes(root, paths)? {
+        note(
+            progress,
+            "unchanged — the file already holds this value, so nothing was committed.",
+        );
+        return Ok(());
+    }
+    git.commit_paths(root, message, paths)?;
+    note(
+        progress,
+        &format!(
+            "committed {} — the value is not in the message.",
+            git.head_short(root)?
+        ),
+    );
+    Ok(())
 }
 
 fn describe(arguments: &[OsString]) -> String {

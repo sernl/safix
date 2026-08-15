@@ -24,6 +24,11 @@ zeroize.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_norway.workspace = true
+# The one asynchronous corner: the bounded fan-out `fix --yes` re-wraps
+# governed files through. Every other path is sequential because the staging
+# discipline is sequential, so the feature list is the three that fan-out needs
+# and nothing that would make reaching for it elsewhere convenient.
+tokio = { workspace = true, features = ["rt-multi-thread", "process", "sync"] }
 
 [dev-dependencies]
 insta.workspace = true

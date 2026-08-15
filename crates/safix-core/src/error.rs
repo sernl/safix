@@ -272,6 +272,152 @@ pub enum Error {
         /// git's porcelain status for that path, as git printed it.
         status: String,
     },
+
+    /// The stream carrying the value ended before the value did.
+    #[error("no value read")]
+    NoValueRead,
+
+    /// The stream carrying the confirmation ended before it did.
+    #[error("no confirmation read")]
+    NoConfirmationRead,
+
+    /// The operator entered nothing.
+    ///
+    /// Refused rather than stored, because a key holding the empty string is
+    /// indistinguishable from the placeholder `set` creates a file with, and
+    /// `check` reads that placeholder as "declared, no value yet".
+    #[error("the value is empty; refusing to store it")]
+    EmptyValue,
+
+    /// The two entries do not match.
+    #[error("the two entries differ; nothing was written")]
+    EntriesDiffer,
+
+    /// A file could not be written.
+    #[error("could not write {path}")]
+    FileUnwritable {
+        /// The path that was being written.
+        path: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The declarations place a secret in a file they compute no audience for.
+    ///
+    /// Nothing to hold the candidate document's recipients to, so the drift gate
+    /// cannot run — and a write that skipped the gate would be a write with no
+    /// gate on it.
+    #[error(
+        "flake.safix.lib.audiences declares no audience for {file}, \
+        so there is nothing to hold its recipients to"
+    )]
+    NoAudienceForFile {
+        /// The repository-relative path.
+        file: String,
+    },
+
+    /// The candidate document's recipients could not be read.
+    #[error("could not read the recipients of the document prepared for {file}")]
+    CandidateRecipientsUnreadable {
+        /// The repository-relative path the document was prepared for.
+        file: String,
+        /// What the reader objected to.
+        #[source]
+        cause: Box<Error>,
+    },
+
+    /// The document about to be written names recipients the declarations do
+    /// not.
+    ///
+    /// The reason this refusal exists at write time rather than being left to
+    /// `check` and `fix` is in the message: `sops set` on an existing file takes
+    /// the file's recipients from the file's own metadata, so a drifted file
+    /// would wrap a value minted now for an audience that has since changed —
+    /// and `set` commits what it writes.
+    #[error("{}", drifted(.file, .extra, .missing))]
+    RecipientDrift {
+        /// The repository-relative path.
+        file: String,
+        /// Can open it and is not in its audience.
+        extra: Vec<String>,
+        /// Is in its audience and cannot open it.
+        missing: Vec<String>,
+    },
+
+    /// No creation rule covers the path a new file would occupy.
+    #[error(
+        ".sops.yaml has no creation rule for {file}\n\
+        \n\
+        The recipient policy is generated from the declarations, and a file with\n\
+        no rule must fail closed rather than acquire a default recipient set:\n\
+        there is deliberately no catch-all rule to fall back on.\n\
+        \n\
+        Regenerate it, review the diff, then re-run:\n\
+        \n\
+        \x20   safix fix\n\
+        \x20   git diff .sops.yaml"
+    )]
+    NoCreationRule {
+        /// The repository-relative path the file would occupy.
+        file: String,
+    },
+
+    /// A bounded re-wrap could not be scheduled or could not be joined.
+    ///
+    /// About the executor rather than about sops: no re-wrap the operator asked
+    /// for was refused, and a run that reaches this has converged over some
+    /// prefix of the governed set and not over the rest.
+    #[error("a governed file's re-wrap could not be run: {cause}")]
+    RewrapUnschedulable {
+        /// What the executor objected to.
+        cause: String,
+    },
+
+    /// sops refused to create the file, for a reason of its own.
+    ///
+    /// The reason is sops's own text, carried rather than summarized: this is
+    /// the one sops failure the runtime intercepts instead of letting through,
+    /// and intercepting it must not cost the operator what sops said.
+    #[error("sops could not create {file}:\n{output}")]
+    SopsCreateFailed {
+        /// The repository-relative path.
+        file: String,
+        /// What sops wrote to its standard error, less one trailing newline.
+        output: String,
+    },
+}
+
+/// The recipient-drift refusal, whose two lists are each present or absent.
+///
+/// `safix` is spelled out rather than taken from the command, because this is
+/// the library and the shell runtime spells its own `$PROG` into the same
+/// sentence.
+fn drifted(file: &str, extra: &[String], missing: &[String]) -> String {
+    let mut message = format!("{file} is not encrypted to the audience declared for it.\n\n");
+    if !extra.is_empty() {
+        message.push_str("Can open it and is not in its audience:");
+        message.push_str(&bulleted(extra));
+        message.push_str("\n\n");
+    }
+    if !missing.is_empty() {
+        message.push_str("Is in its audience and cannot open it:");
+        message.push_str(&bulleted(missing));
+        message.push_str("\n\n");
+    }
+    message.push_str(
+        "Nothing was written. A value set now would be wrapped for the recipients\n\
+        above rather than for the declared audience, and this command commits what\n\
+        it writes, so a reader the audience no longer names would read a value\n\
+        minted after their removal straight out of git history.\n\
+        \n\
+        Re-wrap the file to its declared audience, review the diff, then re-run:\n\
+        \n\
+        \x20   safix fix\n",
+    );
+    message.push_str("    git diff -- ");
+    message.push_str(file);
+    message
 }
 
 /// The one-per-line bulleted continuation the shell writes with `sed 's/^/  - /'`.
