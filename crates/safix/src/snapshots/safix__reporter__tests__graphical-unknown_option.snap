@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::unknown_option
+
+  × unknown option '--force' (expected --host or --yes)
+  help: `safix <subcommand> -h` explains one of them.

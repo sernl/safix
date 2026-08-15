@@ -1,0 +1,18 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × 'bo' is not you, and this writes a private key into your own
+  │ identity file.
+  │ 
+  │ An age identity is custody: everything encrypted to its public half is
+  │ readable by whoever holds this private half. Minting one for another
+  │ person on your machine means you hold their key, which is the opposite of
+  │ the independent custody this package is built on. They should run this
+  │ themselves and hand you the public half.
+  │ 
+  │ If you have decided otherwise anyway, say so:
+  │ 
+  │     safix keygen --for-someone-else bo

@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × declined; nothing was written. Pass --yes to answer this in advance.

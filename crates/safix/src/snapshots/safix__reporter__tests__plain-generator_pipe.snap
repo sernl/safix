@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: could not open the descriptor $in_seed carries: Too many open files (os error 24)

@@ -129,7 +129,13 @@ pub fn run(
         // walks every generator in this same order.
         if options.regenerate {
             let cascade = mine.map(|mine| mine.cascade(&producer)).unwrap_or_default();
-            confirm_cascade(progress, interaction, &producer, &cascade, options.assume_yes)?;
+            confirm_cascade(
+                progress,
+                interaction,
+                &producer,
+                &cascade,
+                options.assume_yes,
+            )?;
             cascade
         } else {
             vec![producer]
@@ -196,7 +202,10 @@ fn confirm_cascade(
     progress.write(&announcement);
 
     if assume_yes {
-        log(progress, &format!("safix: --yes given; re-running all {count}."));
+        log(
+            progress,
+            &format!("safix: --yes given; re-running all {count}."),
+        );
         return Ok(());
     }
     if interaction.confirm(&format!("  re-run all {count}? [y/N] "))? {
@@ -236,7 +245,9 @@ fn run_one(
     if missing == 0 && !options.regenerate {
         note(
             progress,
-            &format!("{generator} already holds a value for every output; --regenerate rotates it."),
+            &format!(
+                "{generator} already holds a value for every output; --regenerate rotates it."
+            ),
         );
         return Ok(Outcome::Skipped);
     }
@@ -324,15 +335,17 @@ fn mint(
     for (identifier, input) in declared.into_iter().flatten() {
         match input.kind {
             crate::model::InputKind::Prompt => {
-                let asked = record.prompts.get(&input.name).ok_or_else(|| {
-                    Error::NixSchemaMismatch {
-                        attribute: "flake.safix.lib.generatorPlan",
-                        cause: format!(
-                            "the plan names a prompt '{}' the entry does not declare",
-                            input.name
-                        ),
-                    }
-                })?;
+                let asked =
+                    record
+                        .prompts
+                        .get(&input.name)
+                        .ok_or_else(|| Error::NixSchemaMismatch {
+                            attribute: "flake.safix.lib.generatorPlan",
+                            cause: format!(
+                                "the plan names a prompt '{}' the entry does not declare",
+                                input.name
+                            ),
+                        })?;
                 let answer = interaction.prompt(asked.kind, &input.name, &asked.description)?;
                 if answer.is_empty() {
                     return Err(Error::PromptUnanswered {
@@ -438,11 +451,13 @@ fn split(generator: &str, outputs: &[String], produced: Secret) -> Result<Vec<Se
     outputs
         .iter()
         .map(|output| {
-            members.remove(output).ok_or_else(|| Error::GeneratorKeysDiffer {
-                generator: generator.to_owned(),
-                actual: actual.clone(),
-                declared: declared.clone(),
-            })
+            members
+                .remove(output)
+                .ok_or_else(|| Error::GeneratorKeysDiffer {
+                    generator: generator.to_owned(),
+                    actual: actual.clone(),
+                    declared: declared.clone(),
+                })
         })
         .collect()
 }
@@ -538,9 +553,12 @@ fn write(
                 ),
             );
             let _quiet = scratch::quiet();
-            workspace
-                .sops()
-                .create_empty_document(workspace.root(), relative, &first, &candidate)?;
+            workspace.sops().create_empty_document(
+                workspace.root(),
+                relative,
+                &first,
+                &candidate,
+            )?;
         }
 
         for ((file, key), value) in files.iter().zip(keys.iter()).zip(values.iter()) {
@@ -575,6 +593,12 @@ fn write(
     }
     scratch::keep_dirs();
 
-    git::commit_written_files(workspace.git(), workspace.root(), progress, message, distinct)?;
+    git::commit_written_files(
+        workspace.git(),
+        workspace.root(),
+        progress,
+        message,
+        distinct,
+    )?;
     Ok(Outcome::Ran)
 }

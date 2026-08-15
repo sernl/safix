@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the generator for 'api-token' exited 3; nothing was written. Its diagnostics are above, on stderr.

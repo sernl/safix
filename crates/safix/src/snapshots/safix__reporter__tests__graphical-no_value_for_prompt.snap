@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × no value read for prompt 'seed'

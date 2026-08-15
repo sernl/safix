@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × the onboarding hook exited 2. The scaffold and the policy are committed;
+  │ whatever the hook left behind is yours to review.

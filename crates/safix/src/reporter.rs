@@ -27,10 +27,10 @@ pub const PLAIN: &str = "plain";
 
 /// The program name every refusal is prefixed with.
 ///
-/// A literal rather than `argv[0]`, because the shell runtime uses a literal:
-/// the binary is installed as `safix-rs` for as long as the port is in
-/// progress, and a refusal that named itself after the file would differ from
-/// the oracle on every line it prints.
+/// A literal rather than `argv[0]`, because the shell runtime uses a literal.
+/// The same binary is installed under two names while the shell runtime is kept
+/// in the tree as the oracle, and a refusal that named itself after the file
+/// would differ from the oracle on every line it prints.
 pub const PROGRAM: &str = "safix";
 
 /// A refusal on its way to a terminal.
@@ -63,16 +63,15 @@ pub enum Refusal {
         subcommand: String,
     },
 
-    /// A subcommand the shell runtime has and this binary has not reached yet.
-    ///
-    /// Not a divergence to be fixed by widening this binary: the shell runtime
-    /// is what ships, and a subcommand appears here only once the differential
-    /// harness has compared it. It refuses rather than approximating, because
-    /// an approximation of `set` writes ciphertext.
-    #[error("`{PROGRAM} {subcommand}` is not ported to the rust runtime yet")]
-    NotPorted {
-        /// The subcommand that was asked for.
-        subcommand: String,
+    /// `--host` was the last argument, so no hostname followed it.
+    #[error("--host takes a hostname")]
+    HostNeedsHostname,
+
+    /// An option `adduser` does not take.
+    #[error("unknown option '{option}' (expected --host or --yes)")]
+    UnknownOption {
+        /// What was asked for.
+        option: String,
     },
 }
 
@@ -82,19 +81,18 @@ impl Diagnostic for Refusal {
             Self::Runtime(error) => code_of(error),
             Self::Usage { .. } => "safix::usage",
             Self::UnknownSubcommand { .. } => "safix::unknown_subcommand",
-            Self::NotPorted { .. } => "safix::not_ported",
+            Self::HostNeedsHostname => "safix::host_needs_hostname",
+            Self::UnknownOption { .. } => "safix::unknown_option",
         }))
     }
 
     fn help(&self) -> Option<Box<dyn Display + '_>> {
         let help = match self {
             Self::Runtime(error) => help_of(error)?,
-            Self::Usage { .. } | Self::UnknownSubcommand { .. } => {
-                "`safix <subcommand> -h` explains one of them."
-            }
-            Self::NotPorted { .. } => {
-                "the shell runtime is the one that ships: run the flake's `safix` package. This binary is `safix-rs`, and it takes over one subcommand at a time as each passes the differential harness."
-            }
+            Self::Usage { .. }
+            | Self::UnknownSubcommand { .. }
+            | Self::HostNeedsHostname
+            | Self::UnknownOption { .. } => "`safix <subcommand> -h` explains one of them.",
         };
         Some(Box::new(help))
     }
@@ -249,6 +247,8 @@ mod tests {
     fn runtime_refusals() -> Vec<(&'static str, Refusal)> {
         let mut all = read_path_refusals();
         all.extend(write_path_refusals());
+        all.extend(generator_refusals());
+        all.extend(custody_refusals());
         all
     }
 
@@ -421,6 +421,155 @@ mod tests {
         ]
     }
 
+    /// The refusals reachable from `generate`.
+    fn generator_refusals() -> Vec<(&'static str, Refusal)> {
+        vec![
+            (
+                "no_generator",
+                Refusal::Runtime(Error::NoGenerator {
+                    user: "ana".into(),
+                    name: "api-token".into(),
+                }),
+            ),
+            (
+                "dependency_has_no_value",
+                Refusal::Runtime(Error::DependencyHasNoValue {
+                    identifier: "base_pub".into(),
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                }),
+            ),
+            (
+                "generator_pipe",
+                Refusal::Runtime(Error::GeneratorPipe {
+                    identifier: "seed".into(),
+                    cause: "Too many open files (os error 24)".into(),
+                }),
+            ),
+            (
+                "no_value_for_prompt",
+                Refusal::Runtime(Error::NoValueForPrompt {
+                    name: "seed".into(),
+                }),
+            ),
+            (
+                "prompt_unanswered",
+                Refusal::Runtime(Error::PromptUnanswered {
+                    name: "seed".into(),
+                }),
+            ),
+            (
+                "generator_failed",
+                Refusal::Runtime(Error::GeneratorFailed {
+                    generator: "api-token".into(),
+                    status: 3,
+                }),
+            ),
+            (
+                "generator_not_an_object",
+                Refusal::Runtime(Error::GeneratorNotAnObject {
+                    generator: "paired".into(),
+                    outputs: 2,
+                }),
+            ),
+            (
+                "generator_keys_differ",
+                Refusal::Runtime(Error::GeneratorKeysDiffer {
+                    generator: "paired".into(),
+                    actual: r#"["paired","stray"]"#.into(),
+                    declared: r#"["paired","paired-pub"]"#.into(),
+                }),
+            ),
+            (
+                "generator_produced_nothing",
+                Refusal::Runtime(Error::GeneratorProducedNothing {
+                    generator: "blank".into(),
+                    output: "blank".into(),
+                }),
+            ),
+            (
+                "validation_rejected",
+                Refusal::Runtime(Error::ValidationRejected {
+                    generator: "unvalidated".into(),
+                    output: "unvalidated".into(),
+                }),
+            ),
+            ("cascade_declined", Refusal::Runtime(Error::CascadeDeclined)),
+        ]
+    }
+
+    /// The refusals reachable from `keygen` and `adduser`.
+    ///
+    /// Every age string here is synthetic: 58 characters of one bech32 letter,
+    /// minted by nobody and opening nothing.
+    fn custody_refusals() -> Vec<(&'static str, Refusal)> {
+        vec![
+            (
+                "keygen_for_someone_else",
+                Refusal::Runtime(Error::KeygenForSomeoneElse { user: "bo".into() }),
+            ),
+            ("keygen_failed", Refusal::Runtime(Error::KeygenFailed)),
+            (
+                "keygen_no_public_key",
+                Refusal::Runtime(Error::KeygenNoPublicKey {
+                    file: "/home/ana/.config/sops/age/keys.txt".into(),
+                }),
+            ),
+            (
+                "bad_user_name",
+                Refusal::Runtime(Error::BadUserName {
+                    name: "Ana Smith".into(),
+                    pattern: "[a-z0-9][a-z0-9_-]*".into(),
+                }),
+            ),
+            (
+                "hardware_recipient",
+                Refusal::Runtime(Error::HardwareRecipient {
+                    recipient: format!("age1yubikey1{}", "q".repeat(58)),
+                }),
+            ),
+            (
+                "bad_recipient",
+                Refusal::Runtime(Error::BadRecipient {
+                    recipient: "age1-not-a-key".into(),
+                }),
+            ),
+            (
+                "already_declared",
+                Refusal::Runtime(Error::AlreadyDeclared { user: "ana".into() }),
+            ),
+            (
+                "scaffold_exists",
+                Refusal::Runtime(Error::ScaffoldExists {
+                    file: "safix/users/dee.nix".into(),
+                }),
+            ),
+            (
+                "host_without_hook",
+                Refusal::Runtime(Error::HostWithoutHook),
+            ),
+            (
+                "unparsable",
+                Refusal::Runtime(Error::Unparsable {
+                    path: "/srv/fleet/safix/users/dee.nix".into(),
+                }),
+            ),
+            (
+                "scaffold_declined",
+                Refusal::Runtime(Error::ScaffoldDeclined),
+            ),
+            (
+                "policy_eval_after_scaffold",
+                Refusal::Runtime(Error::PolicyEvalAfterScaffold {
+                    root: "/srv/fleet".into(),
+                }),
+            ),
+            (
+                "hook_failed",
+                Refusal::Runtime(Error::HookFailed { status: 2 }),
+            ),
+        ]
+    }
+
     /// The command's own, about how it was invoked.
     fn command_refusals() -> Vec<(&'static str, Refusal)> {
         vec![
@@ -436,10 +585,11 @@ mod tests {
                     subcommand: "rotate".into(),
                 },
             ),
+            ("host_needs_hostname", Refusal::HostNeedsHostname),
             (
-                "not_ported",
-                Refusal::NotPorted {
-                    subcommand: "set".into(),
+                "unknown_option",
+                Refusal::UnknownOption {
+                    option: "--force".into(),
                 },
             ),
         ]

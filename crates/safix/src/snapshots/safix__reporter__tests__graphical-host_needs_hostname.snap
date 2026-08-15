@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::host_needs_hostname
+
+  × --host takes a hostname
+  help: `safix <subcommand> -h` explains one of them.

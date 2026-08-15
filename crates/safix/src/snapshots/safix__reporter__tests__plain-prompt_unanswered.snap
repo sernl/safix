@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: prompt 'seed' was answered with nothing; refusing to generate from an empty input

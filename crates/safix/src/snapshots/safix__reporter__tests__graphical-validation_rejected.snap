@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × the validation for 'unvalidated' rejected the candidate value for
+  │ 'unvalidated'; nothing was written

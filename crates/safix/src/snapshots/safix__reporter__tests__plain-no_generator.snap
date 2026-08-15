@@ -1,0 +1,15 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'api-token' has no generator, so there is nothing to run.
+
+A generator is declared on the entry, beside its mode and its path:
+
+    generator.script = "openssl rand -base64 32";
+    generator.runtimeInputs = [ "openssl" ];
+
+Only a value you are free to choose can have one. A credential some
+server already knows is set by hand:
+
+    safix set ana api-token

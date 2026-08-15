@@ -6,17 +6,15 @@
 //! interaction, and the rendering of refusals. No decision about custody,
 //! drift, ordering or writing is made here.
 //!
-//! # What this binary does today
+//! # What this binary does
 //!
-//! The read paths — `list`, `get` and `check` — and the two write paths that
-//! change no declaration: `set`, which writes one value, and `fix`, which
-//! converges the policy and the ciphertext onto the declarations. The runtime
-//! is being ported from `modules/flake/safix/safix.sh` one subcommand at a
-//! time, and a subcommand appears here only once a differential harness has
+//! Every subcommand `modules/flake/safix/safix.sh` has: the read paths `list`,
+//! `get` and `check`; the write paths `set` and `fix`; the generator graph
+//! behind `generate`; and the two that touch custody itself, `keygen` and
+//! `adduser`. Each appeared here only once the differential harness had
 //! compared it against the shell runtime on standard output, standard error,
-//! exit code and effect on the repository. Until every subcommand has passed,
-//! the flake's `safix` package builds the shell script and this binary ships
-//! beside it as `safix-rs`.
+//! exit code and effect on the repository — see `modules/flake/checks/differential.nix`
+//! for the modes and `CHANGELOG.md` for what the comparison does not cover.
 //!
 //! # Exit codes
 //!
@@ -38,12 +36,9 @@ mod usage;
 use std::io::Write;
 use std::process::ExitCode;
 
-use safix_core::{Error, Progress, Workspace, check, fix, set};
+use safix_core::{Error, Progress, Workspace, adduser, check, fix, generate, keygen, set};
 
 use reporter::Refusal;
-
-/// The subcommands the shell runtime has and this binary has not reached.
-const NOT_PORTED: [&str; 3] = ["generate", "keygen", "adduser"];
 
 /// Where a run's commentary and a subprocess's output go.
 ///
@@ -101,9 +96,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
         "set" => set_command(rest),
         "check" => check_command(rest),
         "fix" => fix_command(rest),
-        other if NOT_PORTED.contains(&other) => Err(Refusal::NotPorted {
-            subcommand: other.to_owned(),
-        }),
+        "generate" => generate_command(rest),
+        "keygen" => keygen_command(rest),
+        "adduser" => adduser_command(rest),
         other => Err(Refusal::UnknownSubcommand {
             subcommand: other.to_owned(),
         }),
@@ -129,6 +124,9 @@ fn help_requested(subcommand: &str, rest: &[String]) -> Option<&'static str> {
         "list" => usage::LIST,
         "check" => usage::CHECK,
         "fix" => usage::FIX,
+        "generate" => usage::GENERATE,
+        "keygen" => usage::KEYGEN,
+        "adduser" => usage::ADDUSER,
         _ => usage::SCAFFOLD,
     })
 }
@@ -256,4 +254,125 @@ fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     } else {
         ExitCode::from(1)
     })
+}
+
+/// Every generator with something to mint, or the one that writes a name.
+///
+/// Both flags are read before the positional arguments and in either order,
+/// because `--yes` answers a question `--regenerate` is what raises.
+fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "generate [--regenerate] [--yes] [<user>] [<name>]";
+    let mut options = generate::Options::default();
+    let mut rest = arguments;
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            "--regenerate" => options.regenerate = true,
+            "--yes" => options.assume_yes = true,
+            _ => break,
+        }
+        rest = tail;
+    }
+
+    let workspace = Workspace::discover()?;
+    let (user, name) = match rest {
+        [] => (workspace.default_user()?, None),
+        // The one argument is a user when it names one, and a secret otherwise.
+        // A secret whose name is also a person's is reachable by naming both:
+        // this is the only subcommand whose single optional argument could be
+        // either, because it is the only one that means something with no secret
+        // named at all.
+        [only] if workspace.placements()?.declares(only) => (only.clone(), None),
+        [only] => (workspace.default_user()?, Some(only.clone())),
+        [user, name] => (user.clone(), Some(name.clone())),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    let status = generate::run(
+        &workspace,
+        &Terminal,
+        &mut prompt::Prompted,
+        &user,
+        name.as_deref(),
+        options,
+    )?;
+    Ok(abort::exit_code(status))
+}
+
+/// An age identity for a person who has none.
+fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "keygen [--for-someone-else] [<user>]";
+    let (for_someone_else, rest) = match arguments.split_first() {
+        Some((first, tail)) if first == "--for-someone-else" => (true, tail),
+        _ => (false, arguments),
+    };
+
+    let workspace = Workspace::discover()?;
+    let user = match rest {
+        [] => workspace.default_user()?,
+        [user] => user.clone(),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    keygen::run(&workspace, &Terminal, &user, for_someone_else)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Declare a person who holds nothing yet.
+///
+/// Flags are read in any order and around the two positionals, because `--host`
+/// is repeatable and a caller adding a second one should not have to know where
+/// the name and the recipient sit.
+fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "adduser <name> <age-recipient> [--host <hostname>]... [--yes]";
+    let mut hosts = Vec::new();
+    let mut assume_yes = false;
+    let mut positional: Vec<String> = Vec::new();
+    let mut rest = arguments;
+
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            "--host" => match tail.split_first() {
+                Some((host, after)) => {
+                    hosts.push(host.clone());
+                    rest = after;
+                }
+                None => return Err(Refusal::HostNeedsHostname),
+            },
+            "--yes" => {
+                assume_yes = true;
+                rest = tail;
+            }
+            "--" => {
+                positional.extend(tail.iter().cloned());
+                rest = &[];
+            }
+            option if option.starts_with('-') => {
+                return Err(Refusal::UnknownOption {
+                    option: option.to_owned(),
+                });
+            }
+            _ => {
+                positional.push(first.clone());
+                rest = tail;
+            }
+        }
+    }
+
+    let [name, recipient] = positional.as_slice() else {
+        return Err(Refusal::Usage { form: FORM });
+    };
+
+    let workspace = Workspace::discover()?;
+    adduser::run(
+        &workspace,
+        &Terminal,
+        &mut prompt::Prompted,
+        &adduser::Request {
+            name: name.clone(),
+            recipient: recipient.clone(),
+            hosts,
+            assume_yes,
+        },
+    )?;
+    Ok(ExitCode::SUCCESS)
 }

@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × age1-not-a-key is not a well-formed age recipient.
+  │ 
+  │ An age X25519 recipient is age1 followed by 58 bech32 characters
+  │ (no 1, b, i or o). This checks the shape and nothing else: whether anyone
+  │ holds the private half is not knowable from here.
+  │ 
+  │ They mint one with safix keygen on their own machine, or convert an
+  │ ed25519 ssh key they already hold:
+  │ 
+  │     ssh-to-age -i ~/.ssh/id_ed25519.pub

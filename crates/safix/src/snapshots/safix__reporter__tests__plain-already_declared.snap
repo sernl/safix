@@ -1,0 +1,11 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: ana is already a declared user.
+
+Editing an existing person is not what this does.
+
+What they hold is safix list ana; changing their recipient is an edit to
+flake.safix.users.ana.recipient followed by safix fix, which re-wraps every
+file their audience names and is explicitly not revocation.

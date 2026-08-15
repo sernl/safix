@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × 'paired' writes 2 outputs, so its script must print a JSON object keyed by
+  │ output name; it printed something else

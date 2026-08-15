@@ -34,6 +34,7 @@ pub mod adduser;
 pub mod check;
 mod error;
 pub mod fix;
+pub mod generate;
 pub mod git;
 pub mod inputs;
 pub mod keygen;

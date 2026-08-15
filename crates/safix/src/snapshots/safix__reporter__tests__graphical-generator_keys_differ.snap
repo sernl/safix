@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × 'paired' printed keys ["paired","stray"] but declares outputs
+  │ ["paired","paired-pub"]; nothing was written

@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'blank' produced nothing for 'blank'; an empty value is the state a truncated write leaves behind, so it is refused

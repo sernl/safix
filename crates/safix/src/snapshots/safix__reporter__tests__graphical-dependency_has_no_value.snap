@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::refusal
+
+  × the dependency behind $in_base_pub has no value yet: secrets/safix/users/
+  │ ana/secrets.yaml does not exist

@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: `safix set` is not ported to the rust runtime yet
+safix: aborted; nothing was written

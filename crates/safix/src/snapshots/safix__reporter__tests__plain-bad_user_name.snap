@@ -1,0 +1,14 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: Ana Smith is not a well-formed user name.
+
+A user name is interpolated into the path of the file their secrets are
+placed in and into the path_regex of a .sops.yaml creation rule, so the
+alphabet excludes everything that could act as a path separator or as a
+regex metacharacter. A widened rule is how a sops updatekeys sweep
+reaches a file it was never meant to touch.
+
+Names match [a-z0-9][a-z0-9_-]*, anchored: lowercase letters and digits, then any of
+those plus underscore and hyphen.

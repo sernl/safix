@@ -1,0 +1,20 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: a recipient that needs a physical interaction cannot be the
+primary one.
+
+Decrypting to age1yubikey1qqqqqqqq...
+requires the card present, a PIN and a touch, once per file. Activation
+decrypts non-interactively, with the identity sops.age.sshKeyPaths
+names, so a profile whose only recipient is a hardware key cannot
+activate at all — and the failure lands at switch time on their
+machine, not here.
+
+A card belongs in the same person's recoveryRecipients, which is
+additive: every file their audience names is encrypted to it as well as
+to recipient, so the card opens their files after the activation key is
+lost and is needed at no other time.
+
+Pass their software recipient here, then add the card by hand.
