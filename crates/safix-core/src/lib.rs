@@ -40,6 +40,7 @@
 
 pub mod adduser;
 pub mod check;
+pub mod edit;
 mod error;
 pub mod fix;
 pub mod generate;

@@ -45,7 +45,7 @@ mod usage;
 use std::io::Write;
 use std::process::ExitCode;
 
-use safix_core::{Error, Progress, Workspace, adduser, check, fix, generate, keygen, set};
+use safix_core::{Error, Progress, Workspace, adduser, check, edit, fix, generate, keygen, set};
 
 use reporter::Refusal;
 
@@ -103,6 +103,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
         "list" => list(rest),
         "get" => get(rest),
         "set" => set_command(rest),
+        "edit" => edit_command(rest),
         "check" => check_command(rest),
         "fix" => fix_command(rest),
         "generate" => generate_command(rest),
@@ -129,6 +130,7 @@ fn help_requested(subcommand: &str, rest: &[String]) -> Option<&'static str> {
     }
     Some(match subcommand {
         "set" => usage::SET,
+        "edit" => usage::EDIT,
         "get" => usage::GET,
         "list" => usage::LIST,
         "check" => usage::CHECK,
@@ -224,6 +226,39 @@ fn set_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(abort::exit_code(status))
 }
 
+/// One value, opened in the operator's editor, written and committed.
+fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "edit [--allow-disk-staging] [<user>] <name>";
+    let mut options = edit::Options::default();
+    let mut positional: Vec<String> = Vec::new();
+    let mut rest = arguments;
+
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
+                options.allow_disk_staging = true;
+            }
+            option if option.starts_with('-') => {
+                return Err(Refusal::UnknownOption {
+                    option: option.to_owned(),
+                });
+            }
+            _ => positional.push(first.clone()),
+        }
+        rest = tail;
+    }
+
+    let workspace = Workspace::discover()?;
+    let (user, name) = match positional.as_slice() {
+        [name] => (workspace.default_user()?, name.clone()),
+        [user, name] => (user.clone(), name.clone()),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    let status = edit::run(&workspace, &Terminal, &user, &name, options)?;
+    Ok(abort::exit_code(status))
+}
+
 /// The policy regenerated, and every governed file re-wrapped to it.
 fn fix_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let assume_yes = match arguments {
@@ -270,13 +305,17 @@ fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// Both flags are read before the positional arguments and in either order,
 /// because `--yes` answers a question `--regenerate` is what raises.
 fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "generate [--regenerate] [--yes] [<user>] [<name>]";
+    const FORM: &str =
+        "generate [--regenerate] [--yes] [--allow-disk-staging] [<user>] [<name>]";
     let mut options = generate::Options::default();
     let mut rest = arguments;
     while let Some((first, tail)) = rest.split_first() {
         match first.as_str() {
             "--regenerate" => options.regenerate = true,
             "--yes" => options.assume_yes = true,
+            flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
+                options.allow_disk_staging = true;
+            }
             _ => break,
         }
         rest = tail;

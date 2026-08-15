@@ -555,6 +555,28 @@ pub enum Error {
     )]
     NoEditor,
 
+    /// `edit` was asked for an output whose value is not encrypted.
+    ///
+    /// A public output has no ciphertext, no key inside a document and no
+    /// creation rule, so there is nothing for the encrypting write path to do
+    /// with it. Refused by name rather than allowed to create a document
+    /// alongside the plaintext, which would leave one value in two places.
+    #[error(
+        "'{name}' is a public output, so its value is already plaintext at {path}; \
+        there is nothing to decrypt and nothing to encrypt.\n\
+        \n\
+        A public output is minted by the generator that declares it. Re-run \
+        `safix generate` to replace it, or edit {path} directly — it is an \
+        ordinary file in the repository, which is what declaring it \
+        `secret = false` means."
+    )]
+    PublicNotEditable {
+        /// The output that was asked for.
+        name: String,
+        /// Where its plaintext is.
+        path: String,
+    },
+
     /// The editor exited non-zero, so its buffer is not a value.
     #[error(
         "the editor exited {status}; nothing was written and nothing was committed. \

@@ -188,6 +188,12 @@ let
   # an uppercase element, which the name alphabet excludes, so no declaration can
   # ever make one of them a real directory and the claim cannot be weakened by
   # someone adding a user.
+  # The last two are the public store's own shape. A rule reaching them is a
+  # rule over a tree nothing is placed *encrypted* in, which is what this check
+  # asks — and it is asked here as well as by `safix-public-no-rule` on purpose.
+  # That one asks "does a rule reach the public store"; this one asks "does a
+  # rule reach anywhere nothing is placed". A refactor that weakened one is
+  # unlikely to weaken both.
   catchAllProbes = [
     "x.yaml"
     "UNCLAIMED.yaml"
@@ -195,6 +201,8 @@ let
     "secrets/safix/users/UNCLAIMED/x.yaml"
     "secrets/safix/shared/UNCLAIMED/x.yaml"
     "some/other/place/UNCLAIMED.yaml"
+    "public/safix/users/UNCLAIMED/x/value"
+    "public/safix/shared/UNCLAIMED/x/value"
   ];
 
   catchAllMessagesOf =
@@ -215,6 +223,44 @@ let
       name = "safix-no-catch-all";
       subject = "safix policy: a generated rule matches a path no declaration places anything in.";
       messages = catchAllMessages users catalogue;
+    };
+
+  # ── the public store is out of the policy's reach ──
+  # A generator output declared `secret = false` is stored in the clear so that
+  # a nix module can read it at evaluation. A creation rule reaching one of those
+  # paths would encrypt the value whose whole purpose is being readable, and it
+  # would do so at the moment somebody ran `sops` against the path rather than at
+  # a point anyone was watching.
+  #
+  # The rules are anchored under `secrets/safix/` and terminate on `\.yaml$`, so
+  # a `value` file under `public/` cannot match either clause — but relying on
+  # that is relying on two independent accidents staying true. Asserted by
+  # matching each rule against each real public path rather than by reading a
+  # pattern as a string: a pattern read as text says what it looks like, and a
+  # match says what sops will do with it.
+  publicRuleMessagesOf =
+    { plan, publicPaths }:
+    lib.concatMap (
+      r:
+      map (
+        p:
+        "${r.pathRegex} matches ${p}, which is a public output stored in the clear, so a value declared readable at evaluation would be encrypted to ${lib.concatStringsSep ", " r.audience} the next time sops was run against that path"
+      ) (lib.filter (matches r.pathRegex) publicPaths)
+    ) plan.rules;
+
+  publicRuleMessages =
+    users: catalogue:
+    publicRuleMessagesOf {
+      plan = policy.plan users catalogue;
+      publicPaths = resolve.publicPathsOf users catalogue;
+    };
+
+  mkPublicRuleCheck =
+    pkgs: users: catalogue:
+    mkMessageCheck pkgs {
+      name = "safix-public-no-rule";
+      subject = "safix policy: a generated rule matches a path the public store holds in the clear.";
+      messages = publicRuleMessages users catalogue;
     };
 
   # ── the audience separator ──
@@ -317,6 +363,7 @@ let
       safix-generator-tools = mkGeneratorToolCheck pkgs users catalogue;
       safix-rule-shape = mkRuleShapeCheck pkgs users catalogue;
       safix-no-catch-all = mkNoCatchAllCheck pkgs users catalogue;
+      safix-public-no-rule = mkPublicRuleCheck pkgs users catalogue;
       safix-audience-separator = mkSeparatorCheck pkgs users catalogue;
     }
     // lib.optionalAttrs (committedPolicy != null) {
@@ -341,12 +388,15 @@ in
     catchAllMessages
     catchAllMessagesOf
     catchAllProbes
+    publicRuleMessages
+    publicRuleMessagesOf
     separatorMessages
     separatorMessagesOf
     mkCustodyCheck
     mkGeneratorToolCheck
     mkRuleShapeCheck
     mkNoCatchAllCheck
+    mkPublicRuleCheck
     mkSeparatorCheck
     mkPathCollisionCheck
     mkChecks

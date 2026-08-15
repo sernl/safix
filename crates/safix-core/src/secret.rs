@@ -296,6 +296,18 @@ impl Secret {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// No value at all.
+    ///
+    /// Not a conversion and not a constructor from data — it carries none — so
+    /// it does not weaken the absence [the probes above](#compile-time-probes)
+    /// hold. It exists because `edit` opens on an empty buffer when the entry
+    /// holds nothing yet, and "holds nothing yet" has to be a value of this type
+    /// rather than an `Option` the write path would have to branch on.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::from_slice(&[])
+    }
 }
 
 /// Read to end of stream into a buffer that is zeroed on every path out,

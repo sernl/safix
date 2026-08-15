@@ -1,5 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_plain(&refusal)
----
-safix: 'paired' printed keys ["paired","stray"] but declares outputs ["paired","paired-pub"]; nothing was written

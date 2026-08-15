@@ -87,7 +87,7 @@ from the document's structure, and nothing on this path decrypts.
 
 /// `safix generate -h`.
 pub const GENERATE: &str = "\
-safix generate [--regenerate] [--yes] [<user>] [<name>]
+safix generate [--regenerate] [--yes] [--allow-disk-staging] [<user>] [<name>]
 
 Run <user>'s generators, in the dependency order the declarations compute, for
 every declared secret with no value yet. --regenerate re-runs over values that
@@ -113,28 +113,54 @@ commits as it goes and declining afterwards takes nothing back out of history.
 cascade and asks nothing.
 
 \u{2500}\u{2500} what a generator script sees \u{2500}\u{2500}
-Each prompt and each dependency is `$in_<name>`, holding the path of a
-read-only file descriptor carrying that value. A hyphen in the name becomes an
-underscore. Nothing reaches argv, the environment or a file, and a descriptor is
-read once \u{2014} read it into a variable if the script needs it twice.
+A staging directory, with the script's working directory at its root:
 
-That describes how the value arrives, not a sandbox it stays inside. The script
-runs with the caller's filesystem and network: one that redirects `$in_<name>`
-into a file, or echoes it to standard error, has put plaintext somewhere this
-command does not know about and cannot shred. What the script does with a value
-is the script author's to get right.
+  $out/<name>              write each declared output here
+  $prompts/<name>          one answered prompt per file, when any are declared
+  $in/<generator>/<name>   a dependency's plaintext, keyed by its producer
+
+This is the interface clan's own generators are written against, so a script
+written for either system runs under the other. Only the dependencies a
+generator declares appear under $in \u{2014} clan places every file of the dependency
+generator, which would hand a script depending on a keypair's public half the
+private half as well.
+
+Every declared output must exist when the script exits. A missing one refuses
+the whole run and lists what $out did contain, and nothing is written until all
+of them are present. Bytes are stored exactly as written: `echo` leaves a
+trailing newline and `printf` does not, and nothing here removes one.
 
 `runtimeInputs` is prepended to PATH. Name every tool the script runs, or it
 works for whoever wrote it and fails for everyone else.
 
-One output: the script's standard output is the value, and one trailing newline
-comes off a single-line one. Several outputs: the script prints a JSON object
-keyed by output name, and nothing is stripped from a value read out of it.
+An output declared `files.<name>.secret = false` is written to the repository in
+the clear under public/, is given no creation rule, and is readable at
+evaluation. That is what a public key or a fingerprint is for.
 
-Standard error reaches you, so diagnostics go there and never into the value.
+\u{2500}\u{2500} where the plaintext is \u{2500}\u{2500}
+The staging directory is mode 0700 on a filesystem this command asks the kernel
+about rather than infers from its name, and it is overwritten and removed
+however the run ends \u{2014} on return, on error, on panic, and on interrupt or
+terminate. There is no fallback to /tmp: on a host whose /tmp is disk-backed a
+silent fallback would put plaintext in free blocks under a code path that looks
+like it succeeded. Where no memory-backed filesystem is available the run
+refuses, and --allow-disk-staging accepts a disk-backed one. SAFIX_STAGING_DIR
+names a mount to try first, and it is verified like any other.
+
+What that bounds, and what it does not. Overwriting a page of a memory-backed
+filesystem does not reach a copy already written to swap. A mode-0700 directory
+is readable by every process running as you for the length of the run, where the
+pipe this replaced was readable by neither a third process nor a shell.
+
+And it is not a sandbox. The script runs with the caller's filesystem and
+network: one that copies $in/dep/name elsewhere, or writes an output outside
+$out, has put plaintext somewhere this command does not look. What the script
+does with a value is the script author's to get right.
+
+Standard error and standard output both reach you, so diagnostics are free and
+neither is a value.
 ";
 
-/// `safix keygen -h`.
 pub const KEYGEN: &str = "\
 safix keygen [--for-someone-else] [<user>]
 
@@ -198,10 +224,51 @@ without a hook succeeds, having done less.
 ///
 /// The shell runtime's own general usage, word for word: this binary implements
 /// every subcommand it lists.
+pub const EDIT: &str = "\
+safix edit [--allow-disk-staging] [<user>] <name>
+
+Open $VISUAL, or $EDITOR when that is unset, on <name>'s value. Neither set is a
+refusal naming both: this command opens no editor of its own choosing, because
+dropping you into one you did not pick with a secret in the buffer produces
+either an accidental write or an accidental abandonment, and nothing here can
+tell those apart.
+
+The command is split on whitespace and run directly rather than through a shell,
+so EDITOR=\"code --wait\" works. The staged file's path is an argument; the value
+is not.
+
+An entry that holds no value yet opens on an empty buffer, so this is an
+authoring verb as well as an amending one.
+
+\u{2500}\u{2500} what each outcome writes \u{2500}\u{2500}
+  editor exits non-zero   nothing written, nothing committed
+  buffer unchanged        nothing written, nothing committed
+  buffer emptied          refused \u{2014} an empty value is what a truncated write
+                          leaves behind
+  buffer changed          written through the same path `safix set` writes
+                          through, and committed
+
+\u{2500}\u{2500} where the buffer is \u{2500}\u{2500}
+Inside the same private staging directory `safix generate` uses: mode 0700 on a
+filesystem verified to be memory-backed, removed however the run ends.
+--allow-disk-staging accepts a disk-backed one where none is available.
+
+What the editor leaves beside the buffer \u{2014} swap files, backups, undo history
+\u{2014} goes with it, because what is removed is the directory and not the one file
+this command made. An editor configured to write undo history or backups to a
+directory of its own has put plaintext where this command does not look. That is
+the limit of the containment, and it is stated here rather than left to be
+discovered.
+
+A public output is not editable here: it is already plaintext in the repository,
+and the generator declaring it is what mints it.
+";
+
 pub const SCAFFOLD: &str = "\
 safix \u{2014} the whole lifecycle of one secret, by name and never by file.
 
   safix set      [<user>] <name>                    write a value you type
+  safix edit     [<user>] <name>                    author a value in your editor
   safix get      [<user>] <name>                    decrypt one key to stdout
   safix list     [<user>]                           every name a user holds
   safix generate [--regenerate] [--yes] [<user>] [<name>]

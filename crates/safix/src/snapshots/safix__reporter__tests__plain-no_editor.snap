@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: neither $VISUAL nor $EDITOR is set, so there is no editor to open; nothing was decrypted or staged.
+
+Set one of them and re-run. safix opens no editor of its own choosing: a program you did not pick, holding your plaintext, can be left or saved by accident and safix cannot tell which happened.

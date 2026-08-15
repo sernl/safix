@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::staging_unusable
+
+  × could not stage plaintext at /dev/shm/safix-stage-4213-0/out
+  ╰─▶ permission denied

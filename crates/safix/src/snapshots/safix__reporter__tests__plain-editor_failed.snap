@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the editor exited 1; nothing was written and nothing was committed. The staged buffer has been shredded.

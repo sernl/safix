@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the dependency behind $in_base_pub has no value yet: secrets/safix/users/ana/secrets.yaml does not exist
+safix: the dependency 'base-pub' has no value yet, so $in/base/base-pub cannot be written: secrets/safix/users/ana/secrets.yaml does not exist

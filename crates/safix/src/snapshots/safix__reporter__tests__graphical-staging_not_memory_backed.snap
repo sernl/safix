@@ -1,0 +1,20 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::staging_not_memory_backed
+
+  × no memory-backed filesystem is available to stage plaintext on; nothing
+  │ ran.
+  │ 
+  │ A generator's inputs and outputs are files, and safix places them in a
+  │ private directory on tmpfs so that no plaintext reaches a block device.
+  │ Tried:
+  │   - /dev/shm
+  │   - /run/user/1000
+  │ Of those, disk-backed:
+  │   - /dev/shm
+  │ 
+  │ Re-run with --allow-disk-staging to accept that plaintext will be
+  │ written to a disk-backed filesystem, where an unlink leaves the bytes
+  │ in free blocks. Set SAFIX_STAGING_DIR to name a tmpfs mount instead.

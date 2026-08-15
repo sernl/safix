@@ -334,12 +334,22 @@ mod tests {
                 name: "api-token".into(),
             },
             Code::DependencyHasNoValue => Error::DependencyHasNoValue {
-                identifier: "base_pub".into(),
+                name: "base-pub".into(),
+                producer: "base".into(),
                 file: "secrets/safix/users/ana/secrets.yaml".into(),
             },
-            Code::GeneratorPipe => Error::GeneratorPipe {
-                identifier: "seed".into(),
-                cause: "Too many open files (os error 24)".into(),
+            Code::StagingNotMemoryBacked => Error::StagingNotMemoryBacked {
+                candidates: vec!["/dev/shm".into(), "/run/user/1000".into()],
+                disk_backed: vec!["/dev/shm".into()],
+            },
+            Code::StagingUnusable => Error::StagingUnusable {
+                path: "/dev/shm/safix-stage-4213-0/out".into(),
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::GeneratorOutputMissing => Error::GeneratorOutputMissing {
+                generator: "wg-private".into(),
+                output: "wg-public".into(),
+                produced: vec!["wg-private".into()],
             },
             Code::NoValueForPrompt => Error::NoValueForPrompt {
                 name: "seed".into(),
@@ -351,15 +361,6 @@ mod tests {
                 generator: "api-token".into(),
                 status: 3,
             },
-            Code::GeneratorNotAnObject => Error::GeneratorNotAnObject {
-                generator: "paired".into(),
-                outputs: 2,
-            },
-            Code::GeneratorKeysDiffer => Error::GeneratorKeysDiffer {
-                generator: "paired".into(),
-                actual: r#"["paired","stray"]"#.into(),
-                declared: r#"["paired","paired-pub"]"#.into(),
-            },
             Code::GeneratorProducedNothing => Error::GeneratorProducedNothing {
                 generator: "blank".into(),
                 output: "blank".into(),
@@ -369,6 +370,12 @@ mod tests {
                 output: "unvalidated".into(),
             },
             Code::CascadeDeclined => Error::CascadeDeclined,
+            Code::NoEditor => Error::NoEditor,
+            Code::PublicNotEditable => Error::PublicNotEditable {
+                name: "wg-public".into(),
+                path: "public/safix/users/ana/wg-public/value".into(),
+            },
+            Code::EditorFailed => Error::EditorFailed { status: 1 },
             Code::KeygenForSomeoneElse => Error::KeygenForSomeoneElse { user: "bo".into() },
             Code::KeygenFailed => Error::KeygenFailed,
             Code::KeygenNoPublicKey => Error::KeygenNoPublicKey {

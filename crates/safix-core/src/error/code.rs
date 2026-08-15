@@ -120,6 +120,7 @@ refusal_codes! {
     ValidationRejected => "safix::validation_rejected",
     CascadeDeclined => "safix::cascade_declined",
     NoEditor => "safix::no_editor",
+    PublicNotEditable => "safix::public_not_editable",
     EditorFailed => "safix::editor_failed",
     KeygenForSomeoneElse => "safix::keygen_for_someone_else",
     KeygenFailed => "safix::keygen_failed",

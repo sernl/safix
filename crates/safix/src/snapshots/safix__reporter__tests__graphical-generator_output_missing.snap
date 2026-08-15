@@ -1,0 +1,11 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::generator_output_missing
+
+  × 'wg-private' did not write a file for 'wg-public' at $out/wg-public;
+  │ nothing was written.
+  │ 
+  │ $out held:
+  │   - wg-private
