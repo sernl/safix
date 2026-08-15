@@ -1180,7 +1180,11 @@ pub fn disk_backed_directory(extra: &[PathBuf]) -> Option<PathBuf> {
 /// plaintext bytes never reach a regular file, and the stub reproduces that one
 /// property so the syscall reading stays a statement about safix.
 fn to_hex(value: &str) -> String {
-    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+    value.bytes().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }
 
 fn from_hex(text: &str) -> Option<String> {

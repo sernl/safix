@@ -211,7 +211,11 @@ fn stored(machine: &str, id: &str) -> Option<Vec<u8>> {
 /// only way to keep it green would be to widen the reading to admit a plaintext
 /// write to an arbitrary path — which is the whole thing it exists to refuse.
 fn encoded(value: &[u8]) -> String {
-    value.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write as _;
+    value.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }
 
 fn decoded(text: &str) -> Option<Vec<u8>> {
