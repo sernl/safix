@@ -178,6 +178,21 @@ The stub is a fixture, and the same reasoning that forbids stubbing sops does no
 
 One further check drives the real clan CLI over a throwaway clan if it is present in the check closure, and is absent rather than trivially green when it is not — the same shape the linux-only syscall check uses.
 
+## What the real clan confirmed
+
+Every contract above was read out of clan-cli's source. Before the transfer verbs were written, each was also confirmed against the real `clan` command driven over a miniature clan built with that command — a machine, one `age`-backed generator, a generated identity and a recipient. What that established, and could not have been established by reading alone:
+
+- `clan vars get <machine> <generator>/<file> --flake .` writes the raw value to a pipe with no trailing byte added. The fixture value came back as exactly its own bytes.
+- `clan vars set` fed on standard input succeeds and *commits in clan's repository*, naming the files it wrote: the var's `.age` file and its `.recipients` sidecar. This is the fact D4's comparison is load-bearing because of.
+- A var whose generator is declared but which holds nothing answers `Var <id> has not been generated yet`; an id nothing declares answers `Couldn't find var: <id> for machine: <machine>`. The two are different states with different remedies, and every first export writes into the first — so a runtime that treated them alike would refuse every first export.
+- `clan vars check <machine> --generator <g>` exits zero with "All vars are present and valid." while the recorded validation matches, and after the generator's definition changes exits non-zero with `Generator '<g>' in machine <machine> has outdated invalidation hash.` on standard error at the default log level. This is the surface decision two rests on.
+- With the definition changed, `clan vars get` still returns the old value. That is the hazard stated precisely: nothing observable has gone wrong yet, and the loss happens at the next routine generation.
+- clan's store is `secrets/clan-vars/per-machine/<machine>/<generator>/<file>/<file>.age` with a `.recipients` sidecar beside it — the layout decision one exists in order not to implement.
+
+The suite drives a stub rather than this, and `crates/safix/tests/support/clan-stub.rs` states why: what is under test is the delegation, and a stub can be asked what it was handed. The stub's behaviour is written against the findings above rather than against a reading of the source, which is the point of having made them.
+
+Landing this as a check is task 5.2 and is not done: the miniature clan needs a locked flake, a generated identity and a declared recipient, none of which a build sandbox has.
+
 ## The three decisions
 
 The two questions that gated stage 3 are answered, and one refusal the spec carried is replaced. All three are recorded here as the resolved decision rather than as a recommendation.

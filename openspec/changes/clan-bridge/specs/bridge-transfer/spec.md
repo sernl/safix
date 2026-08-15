@@ -18,7 +18,14 @@ The command SHALL provide a verb that acts on clan-to-safix mappings and a verb 
 
 - **WHEN** a verb is given a mapping's name
 - **THEN** it acts on that mapping alone
-- **AND** when given the all-mappings option it acts on every mapping of its direction
+- **AND** when given no mapping's name it acts on every mapping of its direction
+
+#### Scenario: A mapping named to the verb of the other direction is told which verb acts on it
+
+- **WHEN** a verb is given the name of a mapping declared in the other direction
+- **THEN** it refuses naming the direction the mapping is declared with
+- **AND** it names the verb that does act on it
+- **AND** the refusal is distinct from the one for a name nothing declares
 
 #### Scenario: The verbs appear in the command's help
 
@@ -178,8 +185,14 @@ A transfer SHALL commit each mapping separately, naming the mapping, and SHALL N
 
 #### Scenario: One mapping, one commit
 
-- **WHEN** a run transfers several mappings
+- **WHEN** a run transfers several mappings into safix
 - **THEN** each produces its own commit
+
+#### Scenario: The export direction commits where the value landed
+
+- **WHEN** a run transfers a mapping into clan
+- **THEN** it makes no commit in the consumer's own repository, where nothing changed
+- **AND** each mapping is one invocation of clan's write, which commits what it wrote
 
 #### Scenario: The commit names the mapping and not the value
 

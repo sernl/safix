@@ -27,7 +27,7 @@ Stages: 0 is the decisions, 1 is the surface, 2 is the delegation, 3 is transfer
 ## 2. Delegation to clan
 
 - [x] 2.1 Implement the clan subprocess driver in `crates/safix-core/src/bridge.rs`: resolve clan's command on PATH, invoke read with the value captured from standard output, invoke write with the value supplied on standard input
-- [ ] 2.2 Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
+- [x] 2.2 Establish that the read captured raw bytes rather than a terminal rendering. clan's read command substitutes a printable form when its output is a terminal; assert the captured form rather than relying on a subprocess pipe never being one
 - [x] 2.3 Implement the absent-command refusal: both verbs refuse before transferring anything, the refusal states that clan is the authority on its own store, and no subset of mappings runs
 - [x] 2.4 Surface clan's own failures rather than reinterpreting them — a missing var, an ambiguous id, an ungenerated value each reach the operator as clan's message with safix's mapping name attached
 - [x] 2.5 Add the new refusal variants and codes to `crates/safix-core/src/error/`, with paired plain and graphical snapshots
@@ -36,31 +36,32 @@ Stages: 0 is the decisions, 1 is the surface, 2 is the delegation, 3 is transfer
 
 ## 3. Transfer and convergence
 
-- [ ] 3.1 Implement `safix import`: for each clan-to-safix mapping, read both sides, compare, and write through the existing `set` path when they differ
-- [ ] 3.2 Implement `safix export`: for each safix-to-clan mapping, read both sides, compare, and invoke clan's write only when they differ. Record at the comparison why it is load-bearing rather than an optimisation — clan's write commits unconditionally and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run commits in the clan repository for every mapping
-- [ ] 3.3 Refuse a mapping whose safix side the operator cannot decrypt, rather than writing it. Use the reasoning `check` already applies to other people's files
-- [ ] 3.4 Implement the four outcomes — unchanged, updated, absent at source, refused — and hold every report, refusal and commit message to naming no value
-- [ ] 3.5 Commit per mapping, naming the mapping and the direction. Add `--all` running every mapping of a direction, still committing per mapping
-- [ ] 3.6 Confirm the safix-side write acquires the recipient-drift refusal, the staged write and rename, and the pipe, by driving a drifted fixture through import rather than by inspecting the call
-- [ ] 3.7 Verify: an integration test runs each verb twice and requires the second run to write nothing and commit nothing
-- [ ] 3.8 Severity drill: remove the pre-write comparison from export and confirm the idempotency test fails with a commit per mapping per run
-- [ ] 3.9 Implement 0.3's runtime sibling: export refuses when the source key is absent from the source file, naming the entry, the file, and both remedies. Assert it against a literal beside the evaluation silence it replaces
-- [ ] 3.10 Implement 0.2's refusal: before writing, ask clan whether the mapping's generator has an outdated recorded validation, and refuse the mapping when it has. Read no recorded hash and compute none. The message names the machine, the generator, and both remedies
-- [ ] 3.11 Bare `safix import` and `safix export` converge every mapping of their direction, reporting changed, unchanged and failed per mapping; a mapping id narrows the run to one. An unknown id is refused naming what is declared
+- [x] 3.1 Implement `safix import`: for each clan-to-safix mapping, read both sides, compare, and write through the existing `set` path when they differ
+- [x] 3.2 Implement `safix export`: for each safix-to-clan mapping, read both sides, compare, and invoke clan's write only when they differ. Record at the comparison why it is load-bearing rather than an optimisation — clan's write commits unconditionally and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run commits in the clan repository for every mapping
+- [x] 3.3 Refuse a mapping whose safix side the operator cannot decrypt, rather than writing it. Use the reasoning `check` already applies to other people's files
+- [x] 3.4 Implement the four outcomes — unchanged, updated, absent at source, refused — and hold every report, refusal and commit message to naming no value
+- [x] 3.5 Commit per mapping, naming the mapping and the direction. Landed without an `--all` flag: a bare verb converges every mapping of its direction and a mapping id narrows the run to one. A flag would be the only spelling of what the verb is for, and a verb whose bare form does nothing is one an operator has to remember a flag for. The export direction commits nothing here, because nothing in this repository changed — clan commits what it wrote, one invocation per mapping, so the single-intent discipline holds across the boundary rather than being restated on this side of it
+- [x] 3.6 Confirm the safix-side write acquires the recipient-drift refusal, the staged write and rename, and the pipe, by driving a drifted fixture through import rather than by inspecting the call
+- [x] 3.7 Verify: an integration test runs each verb twice and requires the second run to write nothing and commit nothing
+- [x] 3.8 Severity drill: remove the pre-write comparison from export and confirm the idempotency test fails with a commit per mapping per run
+- [x] 3.9 Implement 0.3's runtime sibling: export refuses when the source key is absent from the source file, naming the entry, the file, and both remedies. Assert it against a literal beside the evaluation silence it replaces
+- [x] 3.10 Implement 0.2's refusal: before writing, ask clan whether the mapping's generator has an outdated recorded validation, and refuse the mapping when it has. Read no recorded hash and compute none. The message names the machine, the generator, and both remedies
+- [x] 3.11 Bare `safix import` and `safix export` converge every mapping of their direction, reporting changed, unchanged and failed per mapping; a mapping id narrows the run to one. An unknown id is refused naming what is declared
 
 ## 4. The audit
 
-- [ ] 4.1 Add bridge rows to `check`: each mapping whose two sides no longer agree is a finding naming the mapping and no value
-- [ ] 4.2 Record in the export documentation the condition under which an exported value is silently discarded: changing the clan-side generator's definition invalidates clan's recorded validation, and clan's next routine generation replaces the value. State that a routine generation without a definition change does not, and that an explicit regeneration does and is the operator's action
-- [ ] 4.3 Confirm by search that nothing writes clan's validation record, and record why: it would mean writing clan's store directly, and the value would be a function of clan's own definition
+- [ ] 4.1 USER-RUN: decide before building. Adding bridge rows to `check` breaks two properties `check` currently has and documents. `check` answers every question from the structure of the ciphertext and decrypts nothing, which is what lets one machine judge files belonging to people whose keys it does not have; comparing a mapping's two sides requires decrypting the safix side. And `check` needs no clan, where a bridge row needs one per mapping. Three shapes are available: bridge rows only for mappings the caller can decrypt, silently skipping the rest; a separate verb; or rows behind a flag. The comparison itself is written and tested — it is the transfer's own — so this is a question about `check`'s contract rather than about the code
+- [ ] 4.1a Add bridge rows to `check` in whichever shape 4.1 settles: each mapping whose two sides no longer agree is a finding naming the mapping and no value
+- [x] 4.2 Record in the export documentation the condition under which an exported value is silently discarded: changing the clan-side generator's definition invalidates clan's recorded validation, and clan's next routine generation replaces the value. State that a routine generation without a definition change does not, and that an explicit regeneration does and is the operator's action
+- [x] 4.3 Confirm by search that nothing writes clan's validation record, and record why: it would mean writing clan's store directly, and the value would be a function of clan's own definition
 - [ ] 4.4 Verify: a fixture with a diverged export mapping produces the finding, and one in step produces none
 
 ## 5. Testing, the record, and the follow-up
 
-- [ ] 5.1 Build the stub clan command as a fixture: answers reads with known bytes, records what writes received on standard input, and can be made to fail in each way the real one does. Record why stubbing clan is permitted where stubbing sops is not — sops is what safix's claims are about, clan is a boundary safix delegates across, and the delegation is what is under test
-- [ ] 5.2 Add a check driving the real clan command over a throwaway clan when it is present in the check closure, absent rather than trivially green when it is not, following the shape the platform-conditional check already uses
-- [ ] 5.3 Update `README.md` with the bridge surface, both verbs, and the direction vocabulary
-- [ ] 5.4 Write the bridge into `CHANGELOG.md`, including the decision recorded in 0.1
+- [x] 5.1 Build the stub clan command as a fixture: answers reads with known bytes, records what writes received on standard input, and can be made to fail in each way the real one does. Record why stubbing clan is permitted where stubbing sops is not — sops is what safix's claims are about, clan is a boundary safix delegates across, and the delegation is what is under test
+- [ ] 5.2 Add a check driving the real clan command over a throwaway clan when it is present in the check closure, absent rather than trivially green when it is not, following the shape the platform-conditional check already uses. A miniature clan *was* built with the real CLI outside the sandbox and every contract this change rests on was confirmed against it — see the note at the end of `design.md` — but that clan needs a locked flake, an age identity and a recipient, none of which a build sandbox has. Landing it as a check is its own piece of work
+- [x] 5.3 Update `README.md` with the bridge surface, both verbs, and the direction vocabulary
+- [x] 5.4 Write the bridge into `CHANGELOG.md`, including the decision recorded in 0.1
 - [ ] 5.5 Name the dotfiles follow-up `retire-agents-mirror` in this change's impact: `modules/flake/agents/agents.sh` loses its mirror half — its `sops set --value-stdin` write, its secret-tempfile registry and shredder, its trunk guard and its `MIRROR_SOPS_KEY` table — and keeps its remote provisioning. Do not build it here; it spans two repositories and depends on `safix-full-switch`
 - [ ] 5.6 Record question 3 from design's open questions as answered or still open: the ordering constraint that this change lands after `clan-generator-contract`
-- [ ] 5.7 Verify: `openspec validate clan-bridge --strict` passes
+- [x] 5.7 Verify: `openspec validate clan-bridge --strict` passes
