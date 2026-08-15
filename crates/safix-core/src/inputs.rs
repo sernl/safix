@@ -61,7 +61,7 @@ impl std::fmt::Debug for Inputs {
         formatter
             .debug_struct("Inputs")
             .field("identifiers", &self.environment.keys().collect::<Vec<_>>())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

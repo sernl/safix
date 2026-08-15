@@ -171,7 +171,7 @@ pub fn run(
 /// cross-filesystem copy that can be interrupted half-written, and keeping the
 /// `.yaml` suffix, because sops reads a document's format off the extension and
 /// would parse a `*.tmp.1234` YAML file as JSON.
-fn candidate_path(absolute: &Path) -> PathBuf {
+pub(crate) fn candidate_path(absolute: &Path) -> PathBuf {
     let mut name = absolute.as_os_str().to_owned();
     name.push(format!(".safix-tmp.{}.yaml", std::process::id()));
     PathBuf::from(name)
