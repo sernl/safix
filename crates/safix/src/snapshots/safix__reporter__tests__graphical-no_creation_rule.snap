@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_creation_rule
+
+  × .sops.yaml has no creation rule for secrets/safix/shared/ana,bo/
+  │ secrets.yaml
+  │ 
+  │ The recipient policy is generated from the declarations, and a file with
+  │ no rule must fail closed rather than acquire a default recipient set:
+  │ there is deliberately no catch-all rule to fall back on.
+  │ 
+  │ Regenerate it, review the diff, then re-run:
+  │ 
+  │     safix fix
+  │     git diff .sops.yaml

@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_audience_for_file
+
+  × flake.safix.lib.audiences declares no audience for secrets/elsewhere/
+  │ notes.yaml, so there is nothing to hold its recipients to

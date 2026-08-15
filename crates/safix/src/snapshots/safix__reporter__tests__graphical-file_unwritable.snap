@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::file_unwritable
+
+  × could not write secrets/safix/users/ana/secrets.yaml
+  ╰─▶ permission denied

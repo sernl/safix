@@ -127,6 +127,17 @@ fn code_of(error: &Error) -> &'static str {
         Error::MidOperation { .. } => "safix::mid_operation",
         Error::ConflictEntries { .. } => "safix::conflict_entries",
         Error::UncommittedChanges { .. } => "safix::uncommitted_changes",
+        Error::NoValueRead => "safix::no_value_read",
+        Error::NoConfirmationRead => "safix::no_confirmation_read",
+        Error::EmptyValue => "safix::empty_value",
+        Error::EntriesDiffer => "safix::entries_differ",
+        Error::FileUnwritable { .. } => "safix::file_unwritable",
+        Error::NoAudienceForFile { .. } => "safix::no_audience_for_file",
+        Error::CandidateRecipientsUnreadable { .. } => "safix::candidate_recipients_unreadable",
+        Error::RecipientDrift { .. } => "safix::recipient_drift",
+        Error::RewrapUnschedulable { .. } => "safix::rewrap_unschedulable",
+        Error::NoCreationRule { .. } => "safix::no_creation_rule",
+        Error::SopsCreateFailed { .. } => "safix::sops_create_failed",
         _ => "safix::refusal",
     }
 }
@@ -324,6 +335,68 @@ mod tests {
                 Refusal::Runtime(Error::UncommittedChanges {
                     file: "secrets/safix/users/ana/secrets.yaml".into(),
                     status: " M secrets/safix/users/ana/secrets.yaml".into(),
+                }),
+            ),
+            ("no_value_read", Refusal::Runtime(Error::NoValueRead)),
+            (
+                "no_confirmation_read",
+                Refusal::Runtime(Error::NoConfirmationRead),
+            ),
+            ("empty_value", Refusal::Runtime(Error::EmptyValue)),
+            ("entries_differ", Refusal::Runtime(Error::EntriesDiffer)),
+            (
+                "file_unwritable",
+                Refusal::Runtime(Error::FileUnwritable {
+                    path: "secrets/safix/users/ana/secrets.yaml".into(),
+                    cause: io::Error::from(io::ErrorKind::PermissionDenied),
+                }),
+            ),
+            (
+                "no_audience_for_file",
+                Refusal::Runtime(Error::NoAudienceForFile {
+                    file: "secrets/elsewhere/notes.yaml".into(),
+                }),
+            ),
+            (
+                "candidate_recipients_unreadable",
+                Refusal::Runtime(Error::CandidateRecipientsUnreadable {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    cause: Box::new(Error::SopsStanzaUnreadable),
+                }),
+            ),
+            (
+                "recipient_drift",
+                Refusal::Runtime(Error::RecipientDrift {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    extra: vec!["age1cy".into()],
+                    missing: vec!["age1escrow".into()],
+                }),
+            ),
+            (
+                "recipient_drift_one_sided",
+                Refusal::Runtime(Error::RecipientDrift {
+                    file: "secrets/safix/users/bo/secrets.yaml".into(),
+                    extra: Vec::new(),
+                    missing: vec!["age1bo".into()],
+                }),
+            ),
+            (
+                "rewrap_unschedulable",
+                Refusal::Runtime(Error::RewrapUnschedulable {
+                    cause: "task panicked".into(),
+                }),
+            ),
+            (
+                "no_creation_rule",
+                Refusal::Runtime(Error::NoCreationRule {
+                    file: "secrets/safix/shared/ana,bo/secrets.yaml".into(),
+                }),
+            ),
+            (
+                "sops_create_failed",
+                Refusal::Runtime(Error::SopsCreateFailed {
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    output: "Failed to get the data key: no key could be obtained".into(),
                 }),
             ),
             (

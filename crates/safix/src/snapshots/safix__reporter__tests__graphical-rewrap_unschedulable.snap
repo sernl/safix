@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::rewrap_unschedulable
+
+  × a governed file's re-wrap could not be run: task panicked

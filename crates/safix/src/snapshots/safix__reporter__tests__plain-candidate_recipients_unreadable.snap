@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: could not read the recipients of the document prepared for secrets/safix/users/ana/secrets.yaml

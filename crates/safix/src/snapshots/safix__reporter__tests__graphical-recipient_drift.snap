@@ -1,0 +1,24 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::recipient_drift
+
+  × secrets/safix/users/ana/secrets.yaml is not encrypted to the audience
+  │ declared for it.
+  │ 
+  │ Can open it and is not in its audience:
+  │   - age1cy
+  │ 
+  │ Is in its audience and cannot open it:
+  │   - age1escrow
+  │ 
+  │ Nothing was written. A value set now would be wrapped for the recipients
+  │ above rather than for the declared audience, and this command commits what
+  │ it writes, so a reader the audience no longer names would read a value
+  │ minted after their removal straight out of git history.
+  │ 
+  │ Re-wrap the file to its declared audience, review the diff, then re-run:
+  │ 
+  │     safix fix
+  │     git diff -- secrets/safix/users/ana/secrets.yaml

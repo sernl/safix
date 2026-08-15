@@ -11,6 +11,41 @@
 //! advertise five it refuses. A bare invocation of this binary says which three
 //! it has instead.
 
+/// `safix set -h`.
+pub const SET: &str = "\
+safix set [<user>] <name>
+
+Prompt for a value twice without echoing it, write it into the file the
+declarations place <name> in, then stage and commit that file alone.
+
+Values are single-line and stored exactly as typed, with no trailing newline. A
+multi-line value is `sops <file>`, or a generator — `generate` stores what a
+script produces, newlines and all.
+
+This is the hand-typed case, and it stays separate from `generate` on purpose: a
+credential some server already knows cannot be minted, only transcribed.
+";
+
+/// `safix fix -h`.
+pub const FIX: &str = "\
+safix fix [--yes]
+
+Regenerate .sops.yaml from the declarations, then re-wrap each governed file's
+data key to the audience that policy declares. --yes answers sops' confirmation.
+
+The order is not interchangeable: re-wrapping first re-wraps to a policy that is
+about to change.
+
+The governed set is the union of the files the declarations imply and the ones
+named in flake.safix.extraGovernedFiles. A file left out of it is a file a change
+of audience reaches for every other file and not for that one.
+
+It does not commit: re-wrapping every governed file is a diff worth reading
+first. It does not revoke either. A person removed from an audience has already
+read every value in the file, and re-wrapping the data key does not unread it;
+revoking means a new value, which is `generate --regenerate` or `sops <file>`.
+";
+
 /// `safix get -h`.
 pub const GET: &str = "\
 safix get [<user>] <name>
@@ -60,9 +95,11 @@ from the document's structure, and nothing on this path decrypts.
 pub const SCAFFOLD: &str = "\
 safix-rs — the rust runtime, mid-port. Not what ships.
 
+  safix set   [<user>] <name>   write a value you type
   safix get   [<user>] <name>   decrypt one key to stdout
   safix list  [<user>]          every name a user holds
   safix check [<user>]          report drift, change nothing
+  safix fix   [--yes]           converge policy and ciphertext
 
 Every other subcommand is still the shell runtime's: run the flake's `safix`
 package for those. A subcommand appears here only once the differential harness

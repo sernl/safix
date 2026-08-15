@@ -21,6 +21,12 @@ thiserror.workspace = true
 # confined to the command: the library's refusals are data, and an embedder
 # takes none of this.
 miette = { workspace = true, features = ["fancy"] }
+# The terminal and the two signals, both confined here. `#![forbid(unsafe_code)]`
+# holds in this crate as it does in the library, so turning echo off and catching
+# a signal are reached through crates that carry the `unsafe` rather than
+# through an escape hatch opened for them.
+rustix.workspace = true
+signal-hook.workspace = true
 
 [dev-dependencies]
 # The graphical rendering of every refusal is held by a snapshot. It is the one
