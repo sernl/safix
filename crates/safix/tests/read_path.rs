@@ -26,10 +26,11 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password"]);
     fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
 
-    let read = fixture.run(&["get", "ana", "api-token"]).expect_success("get");
+    let read = fixture
+        .run(&["get", "ana", "api-token"])
+        .expect_success("get");
     assert_eq!(
-        read.stdout,
-        b"fixture-value-for-api-token",
+        read.stdout, b"fixture-value-for-api-token",
         "get did not round-trip the fixture value"
     );
 
@@ -159,7 +160,11 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
         "shared-tooling-token: \"fixture-value-for-tooling\"\n",
     );
     let report = fixture.run(&["check"]);
-    assert_eq!(report.code, Some(1), "check did not report the unruled path");
+    assert_eq!(
+        report.code,
+        Some(1),
+        "check did not report the unruled path"
+    );
     report.says("no creation rule's directory covers it");
 }
 
