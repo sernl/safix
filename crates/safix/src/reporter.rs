@@ -77,13 +77,13 @@ pub enum Refusal {
 
 impl Diagnostic for Refusal {
     fn code(&self) -> Option<Box<dyn Display + '_>> {
-        Some(Box::new(match self {
-            Self::Runtime(error) => code_of(error),
-            Self::Usage { .. } => "safix::usage",
-            Self::UnknownSubcommand { .. } => "safix::unknown_subcommand",
-            Self::HostNeedsHostname => "safix::host_needs_hostname",
-            Self::UnknownOption { .. } => "safix::unknown_option",
-        }))
+        Some(match self {
+            Self::Runtime(error) => Box::new(error.code()) as Box<dyn Display + '_>,
+            Self::Usage { .. } => Box::new("safix::usage"),
+            Self::UnknownSubcommand { .. } => Box::new("safix::unknown_subcommand"),
+            Self::HostNeedsHostname => Box::new("safix::host_needs_hostname"),
+            Self::UnknownOption { .. } => Box::new("safix::unknown_option"),
+        })
     }
 
     fn help(&self) -> Option<Box<dyn Display + '_>> {
@@ -95,48 +95,6 @@ impl Diagnostic for Refusal {
             | Self::UnknownOption { .. } => "`safix <subcommand> -h` explains one of them.",
         };
         Some(Box::new(help))
-    }
-}
-
-/// The stable name of a refusal, which is what a script greps for and what a
-/// snapshot is keyed by.
-fn code_of(error: &Error) -> &'static str {
-    match error {
-        Error::SecretRead { .. } => "safix::secret_unreadable",
-        Error::NotInsideRepository => "safix::not_a_repository",
-        Error::NixEvalFailed { .. } => "safix::nix_eval_failed",
-        Error::NixSchemaMismatch { .. } => "safix::nix_schema_mismatch",
-        Error::UnknownUser { .. } => "safix::unknown_user",
-        Error::UnknownName { .. } => "safix::unknown_name",
-        Error::NoFileForName { .. } => "safix::no_file_for_name",
-        Error::NotAYamlPath { .. } => "safix::not_a_yaml_path",
-        Error::NoDefaultUser { .. } => "safix::no_default_user",
-        Error::NoValueYet { .. } => "safix::no_value_yet",
-        Error::RecipientsUnreadable { .. } => "safix::recipients_unreadable",
-        Error::SopsDocumentUnreadable { .. } => "safix::document_unreadable",
-        Error::SopsStanzaUnreadable => "safix::stanza_unreadable",
-        Error::SopsUnavailable { .. } => "safix::sops_unavailable",
-        Error::SopsPipeMissing => "safix::sops_pipe_missing",
-        Error::SopsKeyIndex { .. } => "safix::sops_key_index",
-        Error::FileUnreadable { .. } => "safix::file_unreadable",
-        Error::GitUnavailable { .. } => "safix::git_unavailable",
-        Error::GitCommandFailed { .. } => "safix::git_command_failed",
-        Error::GitOutputNotText { .. } => "safix::git_output_not_text",
-        Error::MidOperation { .. } => "safix::mid_operation",
-        Error::ConflictEntries { .. } => "safix::conflict_entries",
-        Error::UncommittedChanges { .. } => "safix::uncommitted_changes",
-        Error::NoValueRead => "safix::no_value_read",
-        Error::NoConfirmationRead => "safix::no_confirmation_read",
-        Error::EmptyValue => "safix::empty_value",
-        Error::EntriesDiffer => "safix::entries_differ",
-        Error::FileUnwritable { .. } => "safix::file_unwritable",
-        Error::NoAudienceForFile { .. } => "safix::no_audience_for_file",
-        Error::CandidateRecipientsUnreadable { .. } => "safix::candidate_recipients_unreadable",
-        Error::RecipientDrift { .. } => "safix::recipient_drift",
-        Error::RewrapUnschedulable { .. } => "safix::rewrap_unschedulable",
-        Error::NoCreationRule { .. } => "safix::no_creation_rule",
-        Error::SopsCreateFailed { .. } => "safix::sops_create_failed",
-        _ => "safix::refusal",
     }
 }
 
@@ -230,347 +188,242 @@ pub fn report(refusal: &Refusal) {
 mod tests {
     use std::io;
 
-    use safix_core::Error;
+    use safix_core::{Code, Error};
 
     use super::*;
 
-    /// One value of every refusal the read paths can produce, so that adding a
-    /// variant without a snapshot is a test that does not exist rather than one
-    /// that silently passes.
-    fn every_refusal() -> Vec<(&'static str, Refusal)> {
-        let mut all = runtime_refusals();
-        all.extend(command_refusals());
-        all
-    }
-
-    /// The library's refusals, which an embedder also receives.
-    fn runtime_refusals() -> Vec<(&'static str, Refusal)> {
-        let mut all = read_path_refusals();
-        all.extend(write_path_refusals());
-        all.extend(generator_refusals());
-        all.extend(custody_refusals());
-        all
-    }
-
-    /// The refusals reachable from `list`, `get` and `check`.
-    fn read_path_refusals() -> Vec<(&'static str, Refusal)> {
-        vec![
-            (
-                "not_a_repository",
-                Refusal::Runtime(Error::NotInsideRepository),
-            ),
-            (
-                "nix_eval_failed",
-                Refusal::Runtime(Error::NixEvalFailed {
-                    attribute: "flake.safix.lib.placements",
-                    root: "/srv/fleet".into(),
-                    cause: None,
-                }),
-            ),
-            (
-                "nix_schema_mismatch",
-                Refusal::Runtime(Error::NixSchemaMismatch {
-                    attribute: "flake.safix.lib.placements",
-                    cause: "unknown field `mode`".into(),
-                }),
-            ),
-            (
-                "unknown_user",
-                Refusal::Runtime(Error::UnknownUser {
-                    user: "dee".into(),
-                    declared: vec!["ana".into(), "bo".into(), "cy".into()],
-                }),
-            ),
-            (
-                "unknown_name",
-                Refusal::Runtime(Error::UnknownName {
-                    user: "ana".into(),
-                    name: "no-such-secret".into(),
-                    held: vec!["ana-alone".into(), "team-vault".into()],
-                }),
-            ),
-            (
-                "no_file_for_name",
-                Refusal::Runtime(Error::NoFileForName {
-                    name: "ana-alone".into(),
-                }),
-            ),
-            (
-                "not_a_yaml_path",
-                Refusal::Runtime(Error::NotAYamlPath {
-                    name: "bad-path".into(),
-                    file: "secrets/safix/users/bo/notes.txt".into(),
-                }),
-            ),
-            (
-                "no_default_user",
-                Refusal::Runtime(Error::NoDefaultUser {
-                    login: "builder".into(),
-                    holders: 2,
-                }),
-            ),
-            (
-                "no_value_yet",
-                Refusal::Runtime(Error::NoValueYet {
-                    file: "secrets/safix/users/bo/secrets.yaml".into(),
-                    name: "bo-service".into(),
-                    user: "bo".into(),
-                }),
-            ),
-            (
-                "recipients_unreadable",
-                Refusal::Runtime(Error::RecipientsUnreadable {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                    cause: Box::new(Error::SopsStanzaUnreadable),
-                }),
-            ),
-            (
-                "mid_operation",
-                Refusal::Runtime(Error::MidOperation {
-                    state: "rebase-merge",
-                    marker: "/srv/fleet/.git/rebase-merge".into(),
-                }),
-            ),
-            (
-                "conflict_entries",
-                Refusal::Runtime(Error::ConflictEntries {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                }),
-            ),
-            (
-                "uncommitted_changes",
-                Refusal::Runtime(Error::UncommittedChanges {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                    status: " M secrets/safix/users/ana/secrets.yaml".into(),
-                }),
-            ),
-            (
-                "secret_unreadable",
-                Refusal::Runtime(Error::SecretRead {
-                    cause: io::Error::from(io::ErrorKind::UnexpectedEof),
-                }),
-            ),
-        ]
-    }
-
-    /// The refusals reachable from `set` and `fix`.
-    fn write_path_refusals() -> Vec<(&'static str, Refusal)> {
-        vec![
-            ("no_value_read", Refusal::Runtime(Error::NoValueRead)),
-            (
-                "no_confirmation_read",
-                Refusal::Runtime(Error::NoConfirmationRead),
-            ),
-            ("empty_value", Refusal::Runtime(Error::EmptyValue)),
-            ("entries_differ", Refusal::Runtime(Error::EntriesDiffer)),
-            (
-                "file_unwritable",
-                Refusal::Runtime(Error::FileUnwritable {
-                    path: "secrets/safix/users/ana/secrets.yaml".into(),
-                    cause: io::Error::from(io::ErrorKind::PermissionDenied),
-                }),
-            ),
-            (
-                "no_audience_for_file",
-                Refusal::Runtime(Error::NoAudienceForFile {
-                    file: "secrets/elsewhere/notes.yaml".into(),
-                }),
-            ),
-            (
-                "candidate_recipients_unreadable",
-                Refusal::Runtime(Error::CandidateRecipientsUnreadable {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                    cause: Box::new(Error::SopsStanzaUnreadable),
-                }),
-            ),
-            (
-                "recipient_drift",
-                Refusal::Runtime(Error::RecipientDrift {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                    extra: vec!["age1cy".into()],
-                    missing: vec!["age1escrow".into()],
-                }),
-            ),
-            (
-                "recipient_drift_one_sided",
-                Refusal::Runtime(Error::RecipientDrift {
-                    file: "secrets/safix/users/bo/secrets.yaml".into(),
-                    extra: Vec::new(),
-                    missing: vec!["age1bo".into()],
-                }),
-            ),
-            (
-                "rewrap_unschedulable",
-                Refusal::Runtime(Error::RewrapUnschedulable {
-                    cause: "task panicked".into(),
-                }),
-            ),
-            (
-                "no_creation_rule",
-                Refusal::Runtime(Error::NoCreationRule {
-                    file: "secrets/safix/shared/ana,bo/secrets.yaml".into(),
-                }),
-            ),
-            (
-                "sops_create_failed",
-                Refusal::Runtime(Error::SopsCreateFailed {
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                    output: "Failed to get the data key: no key could be obtained".into(),
-                }),
-            ),
-        ]
-    }
-
-    /// The refusals reachable from `generate`.
-    fn generator_refusals() -> Vec<(&'static str, Refusal)> {
-        vec![
-            (
-                "no_generator",
-                Refusal::Runtime(Error::NoGenerator {
-                    user: "ana".into(),
-                    name: "api-token".into(),
-                }),
-            ),
-            (
-                "dependency_has_no_value",
-                Refusal::Runtime(Error::DependencyHasNoValue {
-                    identifier: "base_pub".into(),
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
-                }),
-            ),
-            (
-                "generator_pipe",
-                Refusal::Runtime(Error::GeneratorPipe {
-                    identifier: "seed".into(),
-                    cause: "Too many open files (os error 24)".into(),
-                }),
-            ),
-            (
-                "no_value_for_prompt",
-                Refusal::Runtime(Error::NoValueForPrompt {
-                    name: "seed".into(),
-                }),
-            ),
-            (
-                "prompt_unanswered",
-                Refusal::Runtime(Error::PromptUnanswered {
-                    name: "seed".into(),
-                }),
-            ),
-            (
-                "generator_failed",
-                Refusal::Runtime(Error::GeneratorFailed {
-                    generator: "api-token".into(),
-                    status: 3,
-                }),
-            ),
-            (
-                "generator_not_an_object",
-                Refusal::Runtime(Error::GeneratorNotAnObject {
-                    generator: "paired".into(),
-                    outputs: 2,
-                }),
-            ),
-            (
-                "generator_keys_differ",
-                Refusal::Runtime(Error::GeneratorKeysDiffer {
-                    generator: "paired".into(),
-                    actual: r#"["paired","stray"]"#.into(),
-                    declared: r#"["paired","paired-pub"]"#.into(),
-                }),
-            ),
-            (
-                "generator_produced_nothing",
-                Refusal::Runtime(Error::GeneratorProducedNothing {
-                    generator: "blank".into(),
-                    output: "blank".into(),
-                }),
-            ),
-            (
-                "validation_rejected",
-                Refusal::Runtime(Error::ValidationRejected {
-                    generator: "unvalidated".into(),
-                    output: "unvalidated".into(),
-                }),
-            ),
-            ("cascade_declined", Refusal::Runtime(Error::CascadeDeclined)),
-        ]
-    }
-
-    /// The refusals reachable from `keygen` and `adduser`.
+    /// One value of every refusal the runtime can raise, keyed by its code.
     ///
-    /// Every age string here is synthetic: 58 characters of one bech32 letter,
-    /// minted by nobody and opening nothing.
-    fn custody_refusals() -> Vec<(&'static str, Refusal)> {
-        vec![
-            (
-                "keygen_for_someone_else",
-                Refusal::Runtime(Error::KeygenForSomeoneElse { user: "bo".into() }),
-            ),
-            ("keygen_failed", Refusal::Runtime(Error::KeygenFailed)),
-            (
-                "keygen_no_public_key",
-                Refusal::Runtime(Error::KeygenNoPublicKey {
-                    file: "/home/ana/.config/sops/age/keys.txt".into(),
-                }),
-            ),
-            (
-                "bad_user_name",
-                Refusal::Runtime(Error::BadUserName {
-                    name: "Ana Smith".into(),
-                    pattern: "[a-z0-9][a-z0-9_-]*".into(),
-                }),
-            ),
-            (
-                "hardware_recipient",
-                Refusal::Runtime(Error::HardwareRecipient {
-                    recipient: format!("age1yubikey1{}", "q".repeat(58)),
-                }),
-            ),
-            (
-                "bad_recipient",
-                Refusal::Runtime(Error::BadRecipient {
-                    recipient: "age1-not-a-key".into(),
-                }),
-            ),
-            (
-                "already_declared",
-                Refusal::Runtime(Error::AlreadyDeclared { user: "ana".into() }),
-            ),
-            (
-                "scaffold_exists",
-                Refusal::Runtime(Error::ScaffoldExists {
-                    file: "safix/users/dee.nix".into(),
-                }),
-            ),
-            (
-                "host_without_hook",
-                Refusal::Runtime(Error::HostWithoutHook),
-            ),
-            (
-                "unparsable",
-                Refusal::Runtime(Error::Unparsable {
-                    path: "/srv/fleet/safix/users/dee.nix".into(),
-                }),
-            ),
-            (
-                "scaffold_declined",
-                Refusal::Runtime(Error::ScaffoldDeclined),
-            ),
-            (
-                "policy_eval_after_scaffold",
-                Refusal::Runtime(Error::PolicyEvalAfterScaffold {
-                    root: "/srv/fleet".into(),
-                }),
-            ),
-            (
-                "hook_failed",
-                Refusal::Runtime(Error::HookFailed { status: 2 }),
-            ),
-        ]
+    /// This match has no wildcard arm, and that is what holds the snapshots to
+    /// the type rather than to a list somebody maintains. A variant added to
+    /// [`Error`] reaches [`Code`] first — the table assigning codes refuses to
+    /// compile without it — and then reaches here, which refuses to compile
+    /// without a value to render; `insta` then refuses to pass without a
+    /// snapshot of that value. Nothing in that chain is a habit.
+    ///
+    /// The values are fixtures throughout: the fleet is `ana`, `bo` and `cy`,
+    /// the one the differential harness drives, and every age string is
+    /// synthetic — 58 characters of one bech32 letter, minted by nobody and
+    /// opening nothing.
+    ///
+    /// The arms are in the order [`Error`] declares its variants, which is the
+    /// order [`Code::ALL`] iterates and the order the refusals were ported in:
+    /// the read paths, then the write paths, then the generator graph, then
+    /// custody.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per refusal, and the compiler checking that there is one for each is \
+                  the point; splitting the table would mean a wildcard arm to split it at"
+    )]
+    fn sample(code: Code) -> Error {
+        match code {
+            Code::SecretRead => Error::SecretRead {
+                cause: io::Error::from(io::ErrorKind::UnexpectedEof),
+            },
+            Code::NotInsideRepository => Error::NotInsideRepository,
+            Code::NixEvalFailed => Error::NixEvalFailed {
+                attribute: "flake.safix.lib.placements",
+                root: "/srv/fleet".into(),
+                cause: None,
+            },
+            Code::NixSchemaMismatch => Error::NixSchemaMismatch {
+                attribute: "flake.safix.lib.placements",
+                cause: "unknown field `mode`".into(),
+            },
+            Code::UnknownUser => Error::UnknownUser {
+                user: "dee".into(),
+                declared: vec!["ana".into(), "bo".into(), "cy".into()],
+            },
+            Code::UnknownName => Error::UnknownName {
+                user: "ana".into(),
+                name: "no-such-secret".into(),
+                held: vec!["ana-alone".into(), "team-vault".into()],
+            },
+            Code::NoFileForName => Error::NoFileForName {
+                name: "ana-alone".into(),
+            },
+            Code::NotAYamlPath => Error::NotAYamlPath {
+                name: "bad-path".into(),
+                file: "secrets/safix/users/bo/notes.txt".into(),
+            },
+            Code::NoDefaultUser => Error::NoDefaultUser {
+                login: "builder".into(),
+                holders: 2,
+            },
+            Code::NoValueYet => Error::NoValueYet {
+                file: "secrets/safix/users/bo/secrets.yaml".into(),
+                name: "bo-service".into(),
+                user: "bo".into(),
+            },
+            Code::RecipientsUnreadable => Error::RecipientsUnreadable {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                cause: Box::new(Error::SopsStanzaUnreadable),
+            },
+            Code::SopsDocumentUnreadable => Error::SopsDocumentUnreadable {
+                cause: "invalid type: string \"a note\", expected a map at line 1 column 1".into(),
+            },
+            Code::SopsStanzaUnreadable => Error::SopsStanzaUnreadable,
+            Code::SopsUnavailable => Error::SopsUnavailable {
+                program: "sops".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::SopsPipeMissing => Error::SopsPipeMissing,
+            Code::SopsKeyIndex => Error::SopsKeyIndex {
+                key: "ops_tooling".into(),
+                cause: "invalid unicode code point".into(),
+            },
+            Code::FileUnreadable => Error::FileUnreadable {
+                path: "secrets/safix/users/ana/secrets.yaml.safix-tmp.4213.yaml".into(),
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::GitUnavailable => Error::GitUnavailable {
+                program: "git".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::GitCommandFailed => Error::GitCommandFailed {
+                arguments: "commit -q -m chore(safix): set ana-alone for ana \
+                    -- secrets/safix/users/ana/secrets.yaml"
+                    .into(),
+            },
+            Code::GitOutputNotText => Error::GitOutputNotText {
+                cause: "invalid utf-8 sequence of 1 bytes from index 12".into(),
+            },
+            Code::MidOperation => Error::MidOperation {
+                state: "rebase-merge",
+                marker: "/srv/fleet/.git/rebase-merge".into(),
+            },
+            Code::ConflictEntries => Error::ConflictEntries {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+            },
+            Code::UncommittedChanges => Error::UncommittedChanges {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                status: " M secrets/safix/users/ana/secrets.yaml".into(),
+            },
+            Code::NoValueRead => Error::NoValueRead,
+            Code::NoConfirmationRead => Error::NoConfirmationRead,
+            Code::EmptyValue => Error::EmptyValue,
+            Code::EntriesDiffer => Error::EntriesDiffer,
+            Code::FileUnwritable => Error::FileUnwritable {
+                path: "secrets/safix/users/ana/secrets.yaml".into(),
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::NoAudienceForFile => Error::NoAudienceForFile {
+                file: "secrets/elsewhere/notes.yaml".into(),
+            },
+            Code::CandidateRecipientsUnreadable => Error::CandidateRecipientsUnreadable {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                cause: Box::new(Error::SopsStanzaUnreadable),
+            },
+            Code::RecipientDrift => Error::RecipientDrift {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                extra: vec!["age1cy".into()],
+                missing: vec!["age1escrow".into()],
+            },
+            Code::NoCreationRule => Error::NoCreationRule {
+                file: "secrets/safix/shared/ana,bo/secrets.yaml".into(),
+            },
+            Code::RewrapUnschedulable => Error::RewrapUnschedulable {
+                cause: "task panicked".into(),
+            },
+            Code::SopsCreateFailed => Error::SopsCreateFailed {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                output: "Failed to get the data key: no key could be obtained".into(),
+            },
+            Code::NoGenerator => Error::NoGenerator {
+                user: "ana".into(),
+                name: "api-token".into(),
+            },
+            Code::DependencyHasNoValue => Error::DependencyHasNoValue {
+                identifier: "base_pub".into(),
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+            },
+            Code::GeneratorPipe => Error::GeneratorPipe {
+                identifier: "seed".into(),
+                cause: "Too many open files (os error 24)".into(),
+            },
+            Code::NoValueForPrompt => Error::NoValueForPrompt {
+                name: "seed".into(),
+            },
+            Code::PromptUnanswered => Error::PromptUnanswered {
+                name: "seed".into(),
+            },
+            Code::GeneratorFailed => Error::GeneratorFailed {
+                generator: "api-token".into(),
+                status: 3,
+            },
+            Code::GeneratorNotAnObject => Error::GeneratorNotAnObject {
+                generator: "paired".into(),
+                outputs: 2,
+            },
+            Code::GeneratorKeysDiffer => Error::GeneratorKeysDiffer {
+                generator: "paired".into(),
+                actual: r#"["paired","stray"]"#.into(),
+                declared: r#"["paired","paired-pub"]"#.into(),
+            },
+            Code::GeneratorProducedNothing => Error::GeneratorProducedNothing {
+                generator: "blank".into(),
+                output: "blank".into(),
+            },
+            Code::ValidationRejected => Error::ValidationRejected {
+                generator: "unvalidated".into(),
+                output: "unvalidated".into(),
+            },
+            Code::CascadeDeclined => Error::CascadeDeclined,
+            Code::KeygenForSomeoneElse => Error::KeygenForSomeoneElse { user: "bo".into() },
+            Code::KeygenFailed => Error::KeygenFailed,
+            Code::KeygenNoPublicKey => Error::KeygenNoPublicKey {
+                file: "/home/ana/.config/sops/age/keys.txt".into(),
+            },
+            Code::BadUserName => Error::BadUserName {
+                name: "Ana Smith".into(),
+                pattern: "[a-z0-9][a-z0-9_-]*".into(),
+            },
+            Code::HardwareRecipient => Error::HardwareRecipient {
+                recipient: format!("age1yubikey1{}", "q".repeat(58)),
+            },
+            Code::BadRecipient => Error::BadRecipient {
+                recipient: "age1-not-a-key".into(),
+            },
+            Code::AlreadyDeclared => Error::AlreadyDeclared { user: "ana".into() },
+            Code::ScaffoldExists => Error::ScaffoldExists {
+                file: "safix/users/dee.nix".into(),
+            },
+            Code::HostWithoutHook => Error::HostWithoutHook,
+            Code::Unparsable => Error::Unparsable {
+                path: "/srv/fleet/safix/users/dee.nix".into(),
+            },
+            Code::ScaffoldDeclined => Error::ScaffoldDeclined,
+            Code::PolicyEvalAfterScaffold => Error::PolicyEvalAfterScaffold {
+                root: "/srv/fleet".into(),
+            },
+            Code::HookFailed => Error::HookFailed { status: 2 },
+        }
+    }
+
+    /// A second shape of a refusal whose message branches on its own data.
+    ///
+    /// [`sample`] holds one value per variant, which is what the compiler can
+    /// check for it. A variant that reads differently over different data is
+    /// held here as well, under a name of its own, because the branch is in the
+    /// prose rather than in the type and nothing but a second value pins it.
+    fn further_shapes() -> Vec<(&'static str, Refusal)> {
+        vec![(
+            "recipient_drift_one_sided",
+            Refusal::Runtime(Error::RecipientDrift {
+                file: "secrets/safix/users/bo/secrets.yaml".into(),
+                extra: Vec::new(),
+                missing: vec!["age1bo".into()],
+            }),
+        )]
     }
 
     /// The command's own, about how it was invoked.
+    ///
+    /// Not driven by [`Code`], because these are not the library's refusals:
+    /// they are [`Refusal`]'s own variants, and [`Refusal`] is closed and
+    /// declared in this file, so the two matches in its [`Diagnostic`]
+    /// implementation already refuse to compile when one arrives without a code
+    /// and a help.
     fn command_refusals() -> Vec<(&'static str, Refusal)> {
         vec![
             (
@@ -595,11 +448,37 @@ mod tests {
         ]
     }
 
+    /// Every refusal, keyed by the snapshot holding it.
+    ///
+    /// One value per [`Code`], which is the part the compiler maintains, then
+    /// the further shapes and the command's own. A sample filed under a code
+    /// that is not its own is refused here rather than silently snapshotted
+    /// under the wrong name.
+    fn every_refusal() -> Vec<(&'static str, Refusal)> {
+        let mut all: Vec<(&'static str, Refusal)> = Code::ALL
+            .iter()
+            .map(|&code| {
+                let error = sample(code);
+                assert_eq!(
+                    error.code(),
+                    code,
+                    "the value sampled for {code} is a different refusal"
+                );
+                (code.name(), Refusal::Runtime(error))
+            })
+            .collect();
+        all.extend(further_shapes());
+        all.extend(command_refusals());
+        all
+    }
+
     /// The graphical rendering is the one channel the differential harness does
     /// not compare against the shell runtime, so it is pinned against itself.
     ///
     /// Both renderings are the functions the command prints through, so what is
     /// held here is what is written, not a third rendering made for the test.
+    /// Each runtime refusal is filed under its own code, so the file naming the
+    /// rendering and the string a script greps for cannot drift apart.
     #[test]
     fn every_refusal_renders_the_same_under_both_reporters() {
         for (name, refusal) in every_refusal() {

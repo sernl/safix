@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::prompt_unanswered
 
   × prompt 'seed' was answered with nothing; refusing to generate from an
   │ empty input

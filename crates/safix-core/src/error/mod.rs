@@ -13,9 +13,12 @@
 //! the indented continuations, and it carries no trailing newline — the
 //! command's reporter adds that.
 
+mod code;
 mod prose;
 
 use std::io;
+
+pub use code::Code;
 
 use prose::{
     HOST_WITHOUT_HOOK, already_declared, bad_recipient, bad_user_name, bulleted, drifted,
@@ -25,7 +28,9 @@ use prose::{
 /// A refusal from the safix runtime.
 ///
 /// The variant list grows as the runtime is ported; it is marked non-exhaustive
-/// so that adding one is not a breaking change for a matching embedder.
+/// so that adding one is not a breaking change for a matching embedder. Every
+/// variant carries a [`Code`], and the table assigning them has no wildcard
+/// arm, so a variant added here without one does not compile.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {

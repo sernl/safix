@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::host_without_hook
 
   × --host was given and flake.safix.onboardingHook is unset.
   │ 

@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::unparsable
 
   × generated /srv/fleet/safix/users/dee.nix does not parse; nothing was
   │ staged

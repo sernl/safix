@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::keygen_for_someone_else
 
   × 'bo' is not you, and this writes a private key into your own
   │ identity file.

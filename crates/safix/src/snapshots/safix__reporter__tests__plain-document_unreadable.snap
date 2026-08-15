@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(refusal)
+---
+safix: the document is not readable as YAML: invalid type: string "a note", expected a map at line 1 column 1

@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::validation_rejected
 
   × the validation for 'unvalidated' rejected the candidate value for
   │ 'unvalidated'; nothing was written

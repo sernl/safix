@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(refusal)
+---
+safix::sops_key_index
+
+  × could not build the extraction index for 'ops_tooling': invalid unicode
+  │ code point

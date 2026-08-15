@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(refusal)
+---
+safix: git printed output that is not text: invalid utf-8 sequence of 1 bytes from index 12

@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::generator_failed
 
   × the generator for 'api-token' exited 3; nothing was written. Its
   │ diagnostics are above, on stderr.

@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::no_generator
 
   × 'api-token' has no generator, so there is nothing to run.
   │ 

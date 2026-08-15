@@ -54,7 +54,7 @@ pub mod set;
 pub mod sops;
 mod workspace;
 
-pub use error::{Error, Result};
+pub use error::{Code, Error, Result};
 pub use progress::Progress;
 pub use secret::Secret;
 pub use workspace::Workspace;

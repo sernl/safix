@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::policy_eval_after_scaffold
 
   × could not evaluate flake.safix.lib.policyText in /srv/fleet; the scaffold
   │ is written but .sops.yaml is untouched and nothing is committed

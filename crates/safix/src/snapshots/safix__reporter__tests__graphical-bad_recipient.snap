@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::bad_recipient
 
   × age1-not-a-key is not a well-formed age recipient.
   │ 

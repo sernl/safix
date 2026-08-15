@@ -2,6 +2,6 @@
 source: crates/safix/src/reporter.rs
 expression: render_graphical(&refusal)
 ---
-safix::refusal
+safix::cascade_declined
 
   × declined; nothing was written. Pass --yes to answer this in advance.

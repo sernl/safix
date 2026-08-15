@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(refusal)
+---
+safix::sops_pipe_missing
+
+  × sops produced no readable output

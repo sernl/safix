@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(refusal)
+---
+safix: could not build the extraction index for 'ops_tooling': invalid unicode code point
