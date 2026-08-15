@@ -16,7 +16,48 @@ A refusal's prose is a tested string, so it changes when a test changes, and the
 The nix half — `flake.safix.*`, the flake module, and the consumption modules — is the option surface consumers write against.
 A change to it is a breaking change whether or not any rust changed.
 
-## [Unreleased]
+## [0.2.0] — unreleased
+
+`Cargo.toml` still reads `0.1.0`.
+Cutting the version is a release decision and is not made by this section.
+
+### Removed
+
+- The shell runtime, `modules/flake/safix/safix.sh`, 2149 lines, and `packages.safix-sh` with it.
+  The package set is now `[ "safix" ]` alone.
+- The behavioural suite `safix-selftest.sh`, 1741 lines, and the comparative harness `safix-differential.sh`, 2153 lines.
+- The python ciphertext readers `sops_recipients.py` and `sops_keys.py`, 81 lines each, and `readers.nix` which packaged them.
+  python3 and pyyaml leave this repository's closures entirely.
+- `package.nix`, which built the shell runtime, and `checks/differential.nix`, which drove the comparison.
+- The nineteen `checks.safix-differential-*` attributes.
+  Four survive under new names; see Changed.
+- bash, util-linux, diffutils, findutils, gnugrep, gnused and jq leave the check harnesses with the scripts that needed them.
+
+The oracle's service, recorded because retiring it retires nothing else.
+At commit `8409f15` the differential gate was green across every subcommand the shell runtime had, over nineteen modes — `clean`, `missing`, `drift`, `orphan`, `unknown`, `norule`, `write`, `refuse`, `guard`, `converge`, `abort`, `pipes`, `generate`, `regenerate`, `genrefuse`, `keygen`, `adduser`, `drills` and `strace` — comparing standard output byte for byte, standard error byte for byte under the plain reporter, exit codes as numbers, and the repository through one projection applied to both sides.
+That is a fact about a state of the tree, and facts about past states are what version control holds: the harness, the runtime and the readers are all reachable at `8409f15`.
+Keeping the oracle alive would not have preserved that fact; it would have produced a new one on each run, about a pair of runtimes only one of which anyone runs.
+
+### Added
+
+- `crates/safix/tests/`, the integration suite: 36 tests across ten targets, driving the built binary against throwaway repositories with real sops, real age, real git and a real `nix-instantiate --parse`.
+  Only `nix` is stubbed, by a binary the suite builds itself which asserts the attribute path it was asked for.
+  Each of the eighteen retired behavioural modes is one test asserting against a literal — the value that should be at that key, the paths that should be in that commit, the files that should not exist after that abort — rather than against a second implementation.
+- `checks.safix-integration`, which compiles the suite once, runs it whole in the sandbox, and leaves the test binaries and the three programs they drive in its output.
+  Every check naming one mode runs one test of that build; the runner reads the result line rather than the exit status, because libtest exits zero having run nothing when a filter names no test.
+- The suite stages plaintext in a mode-700 directory on tmpfs, verified as tmpfs at runtime rather than assumed, and removed on every exit path including a panicking one.
+  A platform without one refuses unless `SAFIX_TEST_DISK_STAGING` says the caller accepts disk-backed staging.
+
+### Changed
+
+- The eighteen `checks.safix-*` behavioural attributes keep their names and change their subject: from a shell script judged against a fixture to the shipped binary judged against a literal.
+  A consumer's CI keeps running the check it configured.
+- Four differential modes were never comparisons and are re-expressed as single-runtime checks: `safix-differential-abort` becomes `safix-abort-residue`, `-pipes` becomes `safix-value-pipe`, `-strace` becomes `safix-syscall-proof`, and `-drills` becomes `safix-channel-drills`.
+  `safix-channel-drills` gains the exit-status channel, which a comparison got for nothing and a single runtime must assert deliberately, and now requires each mutation to be caught by its own channel and by no other.
+- `checks.safix-rs-test` runs `--lib --bins`.
+  It had been running every target since the integration suite landed, without the backends those tests need.
+
+## [0.1.0] — unreleased
 
 ### Added
 

@@ -168,6 +168,48 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
     report.says("no creation rule's directory covers it");
 }
 
+/// `--version` is answered, on standard output, and exits zero.
+///
+/// A decision rather than an observation, and one that had a single pin. The
+/// retired shell runtime reached its unknown-subcommand refusal for `--version`
+/// and exited 1; this binary answers it, because that is the convention for a
+/// compiled binary and a strictly wider surface rather than a different answer
+/// to a question both were asked. The comparative check that recorded the
+/// divergence went with the oracle, so the decision is asserted here instead of
+/// nowhere.
+///
+/// Standard output rather than standard error, and a version-shaped string
+/// rather than any string, because a caller reading `safix --version | cut -d\  -f2`
+/// is the whole reason a compiled binary answers it.
+#[test]
+fn version_is_answered_on_standard_output_and_is_not_an_unknown_subcommand() {
+    let fixture = Fixture::new();
+
+    let answered = fixture.run(&["--version"]).expect_success("--version");
+
+    let printed = answered.output();
+    let printed = printed.trim_end_matches('\n');
+    let (name, version) = printed.split_once(' ').unwrap_or_else(|| {
+        panic!("--version printed {printed:?}, which is not '<name> <version>'")
+    });
+    assert_eq!(
+        name, "safix",
+        "--version named something other than the binary"
+    );
+    assert_eq!(
+        version.split('.').count(),
+        3,
+        "--version printed {version:?}, which is not three dot-separated parts"
+    );
+    assert!(
+        version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())),
+        "--version printed {version:?}, which is not a version"
+    );
+    answered.silent_about("unknown subcommand");
+}
+
 /// One row of a rendered table, split into its cells.
 fn row<'a>(table: &'a str, name: &str) -> Vec<&'a str> {
     table
