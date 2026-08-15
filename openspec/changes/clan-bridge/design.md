@@ -38,7 +38,9 @@ Delegating gives:
 - a pipe on both legs, since `get` writes to stdout and `set` reads from stdin, which is worth noting after `clan-generator-contract` made staging files necessary elsewhere;
 - and a refusal surface that is clan's own, so a missing var, an ambiguous id, or an ungenerated value produces clan's message rather than safix's guess at one.
 
-The recommendation is therefore symmetric delegation, and it deviates from the brief in the import direction. Recorded as a question for the operator rather than settled silently.
+The recommendation is therefore symmetric delegation, and it deviates from the brief in the import direction.
+
+**Decided: symmetric delegation.** See "The three decisions" below. The committed spec's prohibition — the runtime reads, writes, decrypts, encrypts and parses none of clan's stored files — stands unqualified and covers the import direction too.
 
 ### Refusing when clan is absent
 
@@ -140,13 +142,25 @@ For `safix export` the consequence is precise and needs stating rather than gues
 
 The third is the real hazard: it is silent, and it is triggered by editing a nix file rather than by running a command.
 
-Two responses, and only the first is taken here.
+Three responses. Two are taken and one is refused.
 
-Taken: `safix check` reports an export mapping whose clan-side value no longer matches the safix-side value, which detects the loss after it happens and names it. This costs one `clan vars get` per export mapping and is the same comparison the transfer already does.
+Taken: `safix export` refuses the mapping outright when clan already considers the generator's recorded validation stale, before writing anything. This is the decision recorded in "The three decisions" below, and it converts a silent later loss into a refusal at the moment the operator asks for the write.
+
+Taken: `safix check` reports an export mapping whose clan-side value no longer matches the safix-side value, which catches a loss that happened between two runs and names it. This costs one `clan vars get` per export mapping and is the same comparison the transfer already does. It remains necessary after the refusal, because a definition can change *after* a successful export.
 
 Not taken: writing clan's validation hash from safix. It would prevent the loss, and it is refused because it means writing clan's store directly — the one thing this change exists to avoid — and because the hash it would need to write is a function of clan's definition, which safix would then be computing.
 
 Whether clan should grow a "this var is externally supplied" concept, and whether that is worth raising upstream, is recorded as a question rather than answered.
+
+### How the comparison is made without reading clan's store
+
+The recorded validation hash is a file in clan's store — `VALIDATION_HASH_NAME` under the generator's directory, written by `StoreBase.set_validation` and read by `StoreBase.get_validation` in `clan_lib/vars/_types.py`. Reading it directly is exactly what D1 forbids, so the comparison is delegated like every other clan-side read.
+
+`clan vars check <machine> --generator <generator>` is the surface. `clan_lib/vars/check.py` runs the comparison safix would otherwise have to run — `hash_is_valid(generator.key, generator.validation())` against both stores, where `validation()` is the `validationHash` nix exported for that generator's definition — and reports a generator that fails it under "outdated invalidation hash", at the default log level, on standard error.
+
+So safix computes no hash, reads no hash, and writes no hash. It asks clan the question clan already answers for itself, and refuses when the answer is that this generator is stale.
+
+The coupling is to clan's wording, and it is the same coupling `clan.rs` already carries for the ungenerated-var and unknown-var lines, recorded there with the same reasoning: the alternative is treating clan's exit status alone as the answer, and that status is also non-zero for a var that has not been generated yet — which is the ordinary state of a var about to be exported into for the first time, and not a refusal.
 
 ## D6. The dotfiles mirror becomes a consumer
 
@@ -164,8 +178,43 @@ The stub is a fixture, and the same reasoning that forbids stubbing sops does no
 
 One further check drives the real clan CLI over a throwaway clan if it is present in the check closure, and is absent rather than trivially green when it is not — the same shape the linux-only syscall check uses.
 
+## The three decisions
+
+The two questions that gated stage 3 are answered, and one refusal the spec carried is replaced. All three are recorded here as the resolved decision rather than as a recommendation.
+
+### One. Symmetric delegation
+
+Both directions reach clan's store only through clan's own command, and the runtime reads, writes, decrypts, encrypts and parses none of clan's stored files.
+
+Every clan-side read is `clan vars get` run as a subprocess with its standard output captured on a pipe, and the capture is asserted to be the raw-value path rather than assumed to be: `clan_cli/vars/get.py` branches on `sys.stdout.isatty()` and prints `var.printable_value` on the terminal branch, so a `get` that inherited a terminal would hand back a rendering in place of the value. Every clan-side write is `clan vars set` with the value on standard input and nowhere else.
+
+This settles the deviation D1 argued for. The brief's asymmetry — import decrypting clan material with the operator's admin identity — is not taken, and the committed spec's prohibition stands unqualified in both directions. The consequence accepted with it is that a consumer without clan-cli cannot import either: both verbs refuse before touching any mapping, with a named refusal saying that clan is the authority on its own store.
+
+What this buys beyond principle is that the bridge is backend-agnostic. It works over `age`, which is what this fleet sets at `modules/clan/vars.nix:80` in dotfiles, over `sops`, over `password-store`, and over whatever clan adds, with no code in safix and no second decryption path to hold correct for a store safix does not own.
+
+### Two. Refuse on definition drift
+
+`safix export` refuses a mapping whose clan-side generator clan already considers stale, rather than writing a value clan's next routine generation would silently discard.
+
+The refusal carries its own code and its own message, and the message names both remedies: update the clan-side definition so the recorded validation matches it again, or declare the mapping `clan-to-safix` instead, which is the right shape when clan's generator is the producer.
+
+There is no override flag in 0.2. A flag would be the third state — "export anyway, knowing the value is scheduled for replacement" — and 0.2 has no way to record that intent anywhere the next `clan vars generate` would read it, so the flag would amount to a switch that turns a refusal into a silent loss. Whether 0.2 was right to omit it is a question the audit's findings will answer with evidence rather than one to settle now.
+
+The comparison itself is delegated, for the reason given at the end of D5: the recorded hash lives in clan's store, and reading it would break decision one to enforce decision two. Nothing safix runs writes clan's validation record.
+
+### Three. The eval refusal with no referent, replaced by its runtime sibling
+
+The bridge-surface spec required evaluation to refuse "a `safix-to-clan` mapping whose source entry has neither a generator nor a declared value". That requirement is deleted, because at evaluation it has no referent.
+
+A safix entry is a declaration that a name is held, a file it lives in, and a key inside that file. It is not a declaration that the key holds anything. An entry with no generator is exactly the hand-set case — `safix set` writes it, and it is the ordinary thing to export — so "has no declared value" describes every hand-set entry before its first write and none of them after, and nothing at evaluation can tell the two apart. Refusing on it would refuse the ordinary export.
+
+`modules/flake/checks/bridge.nix` already asserts this: `handSetExportMessages` holds a `safix-to-clan` mapping over `ana`'s hand-set `tok` and expects no message. That assertion stays true and is correct.
+
+What replaces it is a runtime refusal with a real referent: export refuses when the source key is absent from the source sops file, naming `safix set` and `safix generate` as the two remedies. The question "does this entry hold a value" is answerable exactly once, at the moment something tries to read it, and that is where the refusal now lives.
+
+The two are siblings rather than a move: the eval check asserts that the hand-set export produces no evaluation message, and the runtime check asserts that the same mapping over an unwritten entry refuses when a transfer reaches it. Neither is redundant, and the first would be vacuous without the second.
+
 ## Open questions for the operator
 
-1. The import-direction deviation in D1: symmetric delegation through the clan CLI, versus the brief's direct decryption with the admin identity. The evidence for delegation is that this fleet's clan backend is `age`, not sops.
-2. Whether a `safix export` should refuse outright when the clan-side generator's definition could invalidate it (D5), rather than exporting and letting `check` catch the loss afterwards. Refusing would be safer and would forbid a legitimate case.
-3. Whether the ordering constraint is acceptable: this change depends on `clan-generator-contract` for `share` agreement between the two systems, so it lands after it.
+1. Whether the ordering constraint is acceptable: this change depends on `clan-generator-contract` for `share` agreement between the two systems, so it lands after it.
+2. Whether clan should grow a "this var is externally supplied" concept, so that an exported value survives a definition change rather than requiring the refusal decision two installs. This is an upstream question and is not safix's to answer.
