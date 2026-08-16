@@ -10,9 +10,10 @@
 # Four of them asserted something about the rust runtime in its own right and
 # were only ever incidentally comparative, so they keep their claims and lose the
 # `differential-` infix: `safix-abort-residue`, `safix-value-pipe`,
-# `safix-syscall-proof` and `safix-channel-drills`. `safix-memory-backing` and
-# `safix-bridge-transfer` have no differential ancestor and are here because they
-# are the same shape of claim rather than because anything was retired into them.
+# `safix-syscall-proof` and `safix-channel-drills`. `safix-memory-backing`,
+# `safix-bridge-transfer` and `safix-bridge-audit` have no differential ancestor
+# and are here because they are the same shape of claim rather than because
+# anything was retired into them.
 #
 # Each is one test target of the integration suite, because each is a single
 # claim made of several windows or several channels and splitting it across
@@ -94,5 +95,14 @@
       # nothing, and each refusal for its own reason. The stub states why
       # stubbing clan is permitted where stubbing sops is not.
       checks.safix-bridge-transfer = claim "safix-bridge-transfer" "bridge";
+
+      # The report over the same declarations, which is a separate claim from
+      # the transfer rather than more of it: a mapping whose two sides hold
+      # different values is a finding naming the mapping and neither value, one
+      # whose sides agree is not, and a mapping the caller cannot decrypt is a
+      # finding rather than a mapping quietly left out. That last one is what
+      # keeps a clean report meaning the mappings agree instead of meaning the
+      # ones this operator could open agree.
+      checks.safix-bridge-audit = claim "safix-bridge-audit" "audit";
     };
 }
