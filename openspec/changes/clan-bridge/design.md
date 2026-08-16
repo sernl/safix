@@ -55,7 +55,7 @@ That is rejected because a bridge is a standing relationship, not an event.
 A declaration is diffable, so adding a mapping shows up in review as a line naming both endpoints.
 It is repeatable, so a run has no arguments to get wrong and no operator has to remember the pairs.
 It is checkable, so evaluation refuses a mapping whose safix side does not exist.
-And it is enumerable, so `safix check` can report the whole bridge's state without being told what the bridge is.
+And it is enumerable, so a report can state the whole bridge's condition without being told what the bridge is.
 
 The shape:
 
@@ -146,7 +146,7 @@ Three responses. Two are taken and one is refused.
 
 Taken: `safix export` refuses the mapping outright when clan already considers the generator's recorded validation stale, before writing anything. This is the decision recorded in "The three decisions" below, and it converts a silent later loss into a refusal at the moment the operator asks for the write.
 
-Taken: `safix check` reports an export mapping whose clan-side value no longer matches the safix-side value, which catches a loss that happened between two runs and names it. This costs one `clan vars get` per export mapping and is the same comparison the transfer already does. It remains necessary after the refusal, because a definition can change *after* a successful export.
+Taken: a report of an export mapping whose clan-side value no longer matches the safix-side value, which catches a loss that happened between two runs and names it. This costs one `clan vars get` per export mapping and is the same comparison the transfer already does. It remains necessary after the refusal, because a definition can change *after* a successful export. Which verb makes that report was stage 4's own question and is decided in "The audit's shape, and its name" below: `safix audit`, not `safix check`.
 
 Not taken: writing clan's validation hash from safix. It would prevent the loss, and it is refused because it means writing clan's store directly — the one thing this change exists to avoid — and because the hash it would need to write is a function of clan's definition, which safix would then be computing.
 
@@ -228,6 +228,38 @@ A safix entry is a declaration that a name is held, a file it lives in, and a ke
 What replaces it is a runtime refusal with a real referent: export refuses when the source key is absent from the source sops file, naming `safix set` and `safix generate` as the two remedies. The question "does this entry hold a value" is answerable exactly once, at the moment something tries to read it, and that is where the refusal now lives.
 
 The two are siblings rather than a move: the eval check asserts that the hand-set export produces no evaluation message, and the runtime check asserts that the same mapping over an unwritten entry refuses when a transfer reaches it. Neither is redundant, and the first would be vacuous without the second.
+
+## The audit's shape, and its name
+
+Stage 4 had a gating question of its own, and it is a different kind from the three above: nothing about the comparison was in doubt.
+The comparison is the transfer's own, written and tested in stage 3, so what had to be decided was where its findings go.
+
+Adding bridge rows to `safix check` breaks two properties `check` has and documents.
+`check` answers every question from the structure of the ciphertext and decrypts nothing, which is what lets one machine judge files belonging to people whose keys it does not have — and comparing a mapping's two sides decrypts the safix side.
+`check` also needs no clan, where a bridge row needs one `clan vars get` per mapping.
+Three shapes were available: bridge rows only for the mappings the caller can decrypt, silently skipping the rest; rows behind a flag; or a verb of its own.
+
+**Decided: a verb of its own, `safix audit`.**
+
+Both of `check`'s documented properties stay unconditionally true, and that is the whole of the reason.
+The new verb owns the two powers `check` refuses — it decrypts the safix side of each mapping, and it requires clan, refusing the whole run through the same named refusal `import` and `export` use — and owning a power is what a verb is for.
+`clan-generator-contract`'s D6 records the general form of this in deciding `edit` as a subcommand rather than a flag on `set`: a flag that inverts a requirement is worse than a verb that has a different one.
+A `--bridge` flag on `check` would be exactly that, and it would leave `check`'s two sentences about itself true only while the flag is absent, which is a property no documented guarantee should have.
+
+Skipping the mappings the caller cannot decrypt was rejected outright, and it is the shape worth naming because it is the one that looks harmless.
+It makes the report a function of who ran it: the same declarations, the same repository, two operators, two clean reports that mean different things.
+A clean report would stop meaning that the mappings agree and start meaning that the mappings this person can open agree, with nothing in the report saying which.
+So a mapping whose safix side does not decrypt is a finding of its own, and `crates/safix/tests/audit.rs` carries the drill for it: skipping it leaves every other test in that target green, which is why it is a test rather than a sentence.
+
+The name is `audit`, and it sits in the bridge group beside `import` and `export`.
+Every verb this command has is one word, the table's order is the operator-facing one — write, read, converge, bridge, custody — and a report over the bridge belongs where the bridge is.
+It takes the narrowing argument the transfer verbs take, with one difference: a mapping of either direction may be named, because there is no wrong verb to have asked of a comparison.
+
+What it reports is four states rather than one, and the fourth is what makes the other three worth reading.
+Two sides holding different values is the finding D5 asked for.
+One side holding a value the other does not is the same disagreement in the state a bridge is in before its first transfer; where the empty side is the source, the report names minting it rather than the transfer verb, because the verb would refuse.
+Neither side holding a value is not a finding at all — that is a bridge nobody has bootstrapped, and reporting it would make a correctly declared bridge red on its first run under a remedy the report cannot name.
+And a mapping that could not be judged is the fourth, for the reason above.
 
 ## Open questions for the operator
 

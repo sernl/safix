@@ -20,7 +20,7 @@ That is the shape this change replaces: the mapping becomes a declaration, and t
 - `safix export` moves declared `safix-to-clan` mappings into clan by invoking the clan CLI as a subprocess with the value on a pipe. Nothing here reimplements clan's store, its encryption, or its layout, exactly as nothing in safix reimplements the sops file format.
 - Both directions read the clan side through the clan CLI. This is a deviation from the brief and is argued below rather than assumed.
 - Both verbs converge. A mapping whose two sides already agree is not written and not committed; a run reports per mapping whether it was unchanged, updated, absent at source, or refused; and a second run immediately after a successful one writes nothing.
-- `safix check` gains bridge rows, reporting a mapping whose two sides have diverged since the last transfer.
+- `safix audit` reports each mapping whose two sides have diverged since the last transfer. A verb of its own rather than rows in `safix check`, because the comparison decrypts the safix side and needs clan, and `check` documents needing neither; the decision and the two shapes it was taken over are recorded in the design.
 - If the clan CLI is not on PATH, both verbs refuse loudly, naming that clan is the authority on its own store.
 - The dotfiles mirror becomes a consumer of this rather than a second implementation. That is named here and built in a dotfiles follow-up, not in this change.
 
