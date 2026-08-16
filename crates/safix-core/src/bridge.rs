@@ -36,6 +36,13 @@
 //! message names the mapping and the direction. Neither names a value, and the
 //! comparison that decides between `Unchanged` and `Updated` is
 //! [`Secret::equals`] over two values that are zeroed when this returns.
+//!
+//! # The same reads answer the audit
+//!
+//! [`crate::audit`] reports the mappings whose two sides no longer agree, and
+//! reaches both sides through this module's own reads rather than through a
+//! second pair of its own. A report about a transfer that judged agreement
+//! differently from the transfer would be a report about nothing.
 
 use crate::clan::{Clan, Reading};
 use crate::error::{Error, Result};
@@ -242,15 +249,12 @@ fn run(
             Direction::ClanToSafix => one_import(workspace, progress, &clan, mapping),
             Direction::SafixToClan => one_export(workspace, progress, &clan, mapping),
         };
+        let (clan_side, safix_side) = endpoints(mapping);
         transferred.push(Transferred {
             mapping: mapping.id.clone(),
             direction,
-            clan: format!(
-                "{} {}",
-                mapping.clan.machine,
-                Clan::var_id(&mapping.clan.generator, &mapping.clan.file)
-            ),
-            safix: format!("{}.{}", mapping.safix.user, mapping.safix.name),
+            clan: clan_side,
+            safix: safix_side,
             outcome: outcome.unwrap_or_else(Outcome::Refused),
         });
         if scratch::interrupted().is_some() {
@@ -396,6 +400,22 @@ fn one_export(
     Ok(Outcome::Updated)
 }
 
+/// A mapping's two endpoints, as every report of it names them.
+///
+/// One function rather than a pair of `format!` calls in each report: the
+/// transfer's report and the audit's name the same two endpoints, and a
+/// difference between them would be a difference with nothing behind it.
+pub(crate) fn endpoints(mapping: &Mapping) -> (String, String) {
+    (
+        format!(
+            "{} {}",
+            mapping.clan.machine,
+            Clan::var_id(&mapping.clan.generator, &mapping.clan.file)
+        ),
+        format!("{}.{}", mapping.safix.user, mapping.safix.name),
+    )
+}
+
 /// What safix holds for a mapping's entry, or nothing when the key is not there.
 ///
 /// Absence is answered from the document's own structure rather than from a
@@ -403,7 +423,7 @@ fn one_export(
 /// with an empty value before it asks for one, so "the file exists and the key
 /// decrypts to nothing" is a state a value has never been written into and is
 /// not distinguishable from a value that is legitimately empty by decrypting.
-fn held_by_safix(workspace: &Workspace, mapping: &Mapping) -> Result<Option<Secret>> {
+pub(crate) fn held_by_safix(workspace: &Workspace, mapping: &Mapping) -> Result<Option<Secret>> {
     let placement = workspace.resolve(&mapping.safix.user, &mapping.safix.name)?;
     let key = placement.key.clone();
     let relative = placement.file.clone();

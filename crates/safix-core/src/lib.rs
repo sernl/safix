@@ -18,8 +18,10 @@
 //! [`Workspace`] is one run's view of one repository: it finds the repository,
 //! evaluates the attributes of `flake.safix.lib` the runtime reads, and
 //! resolves a name to the file and key holding it. [`check`] is the drift
-//! report over that view. [`sops`] and [`git`] are the two subprocess drivers,
-//! and [`Secret`] is what a decrypted value comes back as.
+//! report over that view, and [`audit`] the one over the clan bridge — two
+//! reports rather than one because the second needs the decryption and the clan
+//! the first is defined by refusing. [`sops`] and [`git`] are the two subprocess
+//! drivers, and [`Secret`] is what a decrypted value comes back as.
 //!
 //! # What is here
 //!
@@ -39,6 +41,7 @@
 //! `openspec/changes/rust-only-runtime/` for the retirement.
 
 pub mod adduser;
+pub mod audit;
 pub mod bridge;
 pub mod check;
 pub mod clan;
