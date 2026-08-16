@@ -59,7 +59,20 @@ pub enum Disagreement {
     /// One side holds a value and the other holds none.
     OneSided(Side),
 
-    /// The two sides could not be compared, and this is why.
+    /// safix's side of the mapping did not decrypt for whoever is running.
+    ///
+    /// Carried as data rather than as the refusal that produced it.
+    /// [`bridge::held_by_safix`] raises [`Error::SourceUnreadable`], whose
+    /// sentence is the export path's: it says the mapping exports the entry and
+    /// that the mapping was refused rather than transferred. Neither is true
+    /// here — the safix side of a `clan-to-safix` mapping is the destination,
+    /// and a report transfers nothing — so what the report says about this is
+    /// the report's own, and sops has said why on its own standard error either
+    /// way.
+    SafixSideUnreadable,
+
+    /// The two sides could not be compared for a reason of clan's, and these
+    /// are clan's words for it.
     Unjudgeable(Error),
 }
 
@@ -191,6 +204,7 @@ fn compare(workspace: &Workspace, clan: &Clan, mapping: &Mapping) -> Option<Disa
 
     let ours = match bridge::held_by_safix(workspace, mapping) {
         Ok(held) => held,
+        Err(Error::SourceUnreadable { .. }) => return Some(Disagreement::SafixSideUnreadable),
         Err(reason) => return Some(Disagreement::Unjudgeable(reason)),
     };
 

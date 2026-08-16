@@ -478,6 +478,32 @@ fn push_disagreement(out: &mut String, finding: &audit::Finding) {
 
         Disagreement::OneSided(side) => push_one_sided(out, finding, *side),
 
+        Disagreement::SafixSideUnreadable => {
+            headline(
+                out,
+                &format!(
+                    "flake.safix.bridge.mappings.{mapping} could not be judged: {safix} did not \
+                     decrypt for you, so what it holds could not be compared with {clan}.",
+                    mapping = finding.mapping,
+                    safix = finding.safix,
+                    clan = finding.clan,
+                ),
+            );
+            detail(
+                out,
+                "sops has said why on its own standard error, above this.",
+            );
+            detail(
+                out,
+                "A mapping you cannot open is reported rather than left out: a report that",
+            );
+            detail(
+                out,
+                "dropped them would be a report about who ran it, and a clean one would mean",
+            );
+            detail(out, "less than it reads as.");
+        }
+
         Disagreement::Unjudgeable(reason) => {
             let (from, to) = flow(finding);
             headline(
