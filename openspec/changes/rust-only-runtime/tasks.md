@@ -76,10 +76,11 @@ Each task names the rows it waits on.
 - [x] 5.2 Rewrite the `Known differences` section in the single-runtime voice — each entry becomes what the rust runtime does, with the shell behaviour it diverged from named as history. These are decisions rather than observations and are the one part of the harness whose content outlives it
 - [x] 5.3 Update `CONTRIBUTING.md`, which references `safix-selftest`, to describe the integration suite and how to run one test of it locally
 - [x] 5.4 Record in `design.md` the scripting survivors as finally landed, with any survivor discovered during the work added to the table with its own justification
-- [ ] 5.5 Surface, rather than fix, the two dotfiles python files (`modules/flake/secrets/sops_recipients.py`, `modules/flake/secrets/sops-recipients-check.py`): they are the same tooling under the same rule and are outside this repository. Name them in `safix-full-switch`'s impact and ask the operator whether they route through the safix bridge or are deleted with the vocabulary
+- [x] 5.5 Surface, rather than fix, the two dotfiles python files (`modules/flake/secrets/sops_recipients.py`, `modules/flake/secrets/sops-recipients-check.py`): they are the same tooling under the same rule and are outside this repository. Name them in `safix-full-switch`'s impact and ask the operator whether they route through the safix bridge or are deleted with the vocabulary
 - [x] 5.6 Verify: `openspec validate rust-only-runtime --strict` passes and the parity table has no open row
 
-5.5 is open because it is an edit to a change in the dotfiles repository, and the work that landed the rest of this change was not authorized to write there.
+5.5 was open because it is an edit to a change in the dotfiles repository, and the work that landed the rest of this change was not authorized to write there.
 The two files are `modules/flake/secrets/sops_recipients.py` and `modules/flake/secrets/sops-recipients-check.py`.
 They are the same tooling by the same test — a wrong answer from either decides whether a write is refused — and the rule that deleted this repository's two copies reaches them.
-The routing question is the operator's: through the safix bridge, or deleted with the vocabulary they serve.
+The routing question was the operator's: through the safix bridge, or deleted with the vocabulary they serve.
+The operator answered — the switch is full, safix and nothing else — so both files are deleted with the vocabulary, and `safix-full-switch`'s impact records the decision and names them as deleted (dotfiles commit `daaa8022`).
