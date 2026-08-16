@@ -46,7 +46,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use safix_core::{
-    Error, Progress, Workspace, adduser, bridge, check, edit, fix, generate, keygen, set,
+    Error, Progress, Workspace, adduser, audit, bridge, check, edit, fix, generate, keygen, set,
 };
 
 use reporter::Refusal;
@@ -151,6 +151,11 @@ const VERBS: &[Verb] = &[
         name: "export",
         help: usage::EXPORT,
         run: export_command,
+    },
+    Verb {
+        name: "audit",
+        help: usage::AUDIT,
+        run: audit_command,
     },
     Verb {
         name: "keygen",
@@ -476,6 +481,40 @@ fn transfer(
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    })
+}
+
+/// The bridge report.
+///
+/// A verb rather than rows in `check`, and the exit codes are `check`'s: zero
+/// when every declared mapping's two sides agree, one when any of them does
+/// not. The narrowing argument is the transfer verbs' own, so an operator who
+/// can name a mapping to `export` can name it here — and to either direction's,
+/// because comparing a mapping is the same act whichever way its value moves.
+fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    let only = match arguments {
+        [] => None,
+        [option] if option.starts_with('-') => {
+            return Err(Refusal::UnknownOption {
+                option: option.clone(),
+            });
+        }
+        [mapping] => Some(mapping.clone()),
+        _ => {
+            return Err(Refusal::Usage {
+                form: "audit [<mapping>]",
+            });
+        }
+    };
+
+    let workspace = Workspace::discover()?;
+    let report = audit::run(&workspace, only.as_deref())?;
+    eprint!("{}", render::audit(&report));
+
+    Ok(if report.is_clean() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     })
 }
 

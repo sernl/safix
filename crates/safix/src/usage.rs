@@ -91,6 +91,38 @@ generation would replace whatever was exported without saying so; there is no
 option that exports anyway.
 ";
 
+/// `safix audit -h`.
+pub const AUDIT: &str = "\
+safix audit [<mapping>]
+
+Compare both sides of every declared mapping, or the one named, and change
+nothing. Exits non-zero when any mapping's two sides disagree, and each finding
+names the mapping, its two endpoints and the command that converges it.
+
+A mapping agrees when both sides hold the same bytes, and also when neither side
+holds a value yet — that is a bridge nothing has bootstrapped rather than a
+disagreement. It is a finding when the two sides hold different values, when one
+side holds a value the other does not, or when the comparison could not be made.
+
+This is a verb of its own rather than four more rows in `check`, and the reason
+is what `check` is. `check` decrypts nothing, which is what lets one machine
+judge files belonging to people whose keys it does not have, and it needs no
+clan. This comparison needs both of those powers: it decrypts the safix side of
+each mapping, and it runs clan's own command once per mapping. Carrying them
+here is what keeps both of `check`'s properties unconditionally true.
+
+So it requires clan exactly as `import` and `export` do, and refuses the whole
+run before any mapping is compared when clan cannot be run.
+
+A mapping this operator cannot decrypt is reported as one that could not be
+judged rather than skipped. A report that dropped those would be a report about
+who ran it, and a clean one would mean `what I could see agrees` while reading
+as `the mappings agree`.
+
+Nothing here writes, in either repository. No value, and no digest of one,
+reaches the report.
+";
+
 /// `safix get -h`.
 pub const GET: &str = "\
 safix get [<user>] <name>
@@ -327,6 +359,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix fix      [--yes]                            converge policy and ciphertext
   safix import   [<mapping>]                        clan-to-safix declared mappings
   safix export   [<mapping>]                        safix-to-clan declared mappings
+  safix audit    [<mapping>]                        report bridge drift, change nothing
   safix keygen   [--for-someone-else] [<user>]      an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
 
@@ -352,6 +385,10 @@ They are not a plaintext dump and restore. Writing every value out as a tree
 serves migrating between backends, and that tree outlives the migration that
 made it, on a disk \u{2014} which is the shape this command exists to avoid. There
 is nothing here that writes one.
+
+`safix audit` is the report over the same declarations: it compares both sides
+of each mapping and writes nothing. It is separate from `check` because it needs
+what `check` refuses \u{2014} a decryption of the safix side, and a clan.
 
 \u{2500}\u{2500} one verb that does not exist here, and why \u{2500}\u{2500}
   upload   a tool that pushes generated values to a machine over ssh exists

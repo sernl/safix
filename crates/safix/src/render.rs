@@ -12,7 +12,9 @@
 //! error — `check` writes nothing to standard output, which is what lets it be
 //! run with output redirected and still be read.
 
+use safix_core::audit::{self, Disagreement, Side};
 use safix_core::check::{Finding, Mint};
+use safix_core::model::Direction;
 
 use crate::reporter::PROGRAM;
 
@@ -415,4 +417,146 @@ pub fn transfer(run: &safix_core::bridge::Run) -> String {
     );
     out.push_str(&closing);
     out
+}
+
+/// What an audit found, one paragraph per mapping whose two sides disagree.
+///
+/// The shape is [`report`]'s, because this is the same kind of report over a
+/// different question: a finding is a blank line and a headline, the lines
+/// explaining it are indented two spaces, and the command that converges it is
+/// indented four. Every headline names the mapping and its two endpoints, and
+/// none of them names a value.
+#[must_use]
+pub fn audit(report: &audit::Report) -> String {
+    let mut out = String::new();
+    for finding in &report.findings {
+        push_disagreement(&mut out, finding);
+    }
+    if report.findings.is_empty() {
+        out.push_str(&agreed(report.examined));
+    } else {
+        let closing = format!(
+            "\n{PROGRAM}: {} finding(s) over {} mapping(s).\n",
+            report.findings.len(),
+            report.examined,
+        );
+        out.push_str(&closing);
+    }
+    out
+}
+
+/// The one line a run with nothing to report prints.
+///
+/// A bridge with no mapping declared and a bridge whose every mapping agrees
+/// are different states. One sentence covering both would be read as the second
+/// by a consumer who is in the first, which is the failure a report of nothing
+/// is most able to hide.
+fn agreed(examined: usize) -> String {
+    if examined == 0 {
+        format!("{PROGRAM}: no mapping is declared.\n")
+    } else {
+        format!("{PROGRAM}: no disagreement. All {examined} declared mapping(s) agree.\n")
+    }
+}
+
+/// One mapping's paragraph, by what was found about it.
+fn push_disagreement(out: &mut String, finding: &audit::Finding) {
+    match &finding.disagreement {
+        Disagreement::Values => {
+            let (from, to) = flow(finding);
+            headline(
+                out,
+                &format!(
+                    "flake.safix.bridge.mappings.{mapping} is {direction}, from {from} to {to}, \
+                     and the two hold different values.",
+                    mapping = finding.mapping,
+                    direction = finding.direction,
+                ),
+            );
+            remedy(out, &converging(finding));
+        }
+
+        Disagreement::OneSided(side) => push_one_sided(out, finding, *side),
+
+        Disagreement::Unjudgeable(reason) => {
+            let (from, to) = flow(finding);
+            headline(
+                out,
+                &format!(
+                    "flake.safix.bridge.mappings.{mapping} could not be judged, so whether {from} \
+                     and {to} agree is not known.",
+                    mapping = finding.mapping,
+                ),
+            );
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+        }
+    }
+}
+
+/// One side holds a value and the other does not.
+///
+/// Which of the two is the source is what decides the remedy, and it comes off
+/// the direction rather than off the side. A destination holding nothing is a
+/// mapping nothing has transferred yet, and running the verb resolves it. A
+/// source holding nothing is a mapping with nothing to send, and the verb would
+/// refuse it — so what this names is minting the source first.
+fn push_one_sided(out: &mut String, finding: &audit::Finding, side: Side) {
+    let (holder, empty) = match side {
+        Side::Clan => (&finding.clan, &finding.safix),
+        Side::Safix => (&finding.safix, &finding.clan),
+    };
+
+    if side.is_source_of(finding.direction) {
+        headline(
+            out,
+            &format!(
+                "flake.safix.bridge.mappings.{mapping} is {direction}, and {holder} holds a value \
+                 that {empty} does not.",
+                mapping = finding.mapping,
+                direction = finding.direction,
+            ),
+        );
+        remedy(out, &converging(finding));
+        return;
+    }
+
+    headline(
+        out,
+        &format!(
+            "flake.safix.bridge.mappings.{mapping} is {direction}, and its source {empty} holds no \
+             value while {holder} holds one.",
+            mapping = finding.mapping,
+            direction = finding.direction,
+        ),
+    );
+    detail(
+        out,
+        "The direction says the value comes from the source, so there is nothing to send",
+    );
+    detail(
+        out,
+        "and nothing here decides which of the two sides should win.",
+    );
+    remedy(out, &format!("mint the source at {empty}, then:"));
+    remedy(out, &format!("    {}", converging(finding)));
+}
+
+/// A mapping's two endpoints in the order its value moves between them.
+fn flow(finding: &audit::Finding) -> (&String, &String) {
+    match finding.direction {
+        Direction::ClanToSafix => (&finding.clan, &finding.safix),
+        Direction::SafixToClan => (&finding.safix, &finding.clan),
+    }
+}
+
+/// The command that converges one mapping: its own direction's verb, named at
+/// it.
+fn converging(finding: &audit::Finding) -> String {
+    format!(
+        "{PROGRAM} {verb} {mapping}",
+        verb = finding.direction.verb(),
+        mapping = finding.mapping,
+    )
 }
