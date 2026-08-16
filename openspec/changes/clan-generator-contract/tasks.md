@@ -68,5 +68,5 @@ Stages: 1 is containment, 2 is the executor, 3 is public outputs, 4 is the edito
 
 - [x] 6.1 Write the invariant change into `CHANGELOG.md` as a breaking change, leading with what it costs rather than with what it enables — the comparison table in design D1 is the content
 - [x] 6.2 Update `README.md`'s generator section to the new contract, including the public-output accessors and the editor verb
-- [ ] 6.3 USER-RUN (open): decide the sandbox question in design's open question — whether adopting clan's default generator sandbox is its own 0.2 change or deliberately out of scope for safix. It changes what an existing network-reaching generator may do, so it is not foldable into this change
+- [x] 6.3 USER-RUN (answered): decide the sandbox question in design's open question — whether adopting clan's default generator sandbox is its own 0.2 change or deliberately out of scope for safix. It changes what an existing network-reaching generator may do, so it is not foldable into this change. Decided: its own change, `adopt-generator-sandbox`, opened immediately rather than deferred; the resolution is recorded under design's open question
 - [x] 6.4 Verify: `openspec validate clan-generator-contract --strict` passes

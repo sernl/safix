@@ -201,3 +201,8 @@ safix 0.1 runs the fragment with the caller's filesystem and network and says so
 
 Adopting clan's sandbox would be a second material change to what a generator may do, would break existing generators that reach the network (an ACME or API-token generator, for instance), and is separable from the interface change.
 It is **not** in this change, and the question is whether it should be its own 0.2 change or is deliberately out of scope for safix.
+
+Answered by the operator: its own change rather than out of scope, and opened immediately as `adopt-generator-sandbox`.
+The operator's position is that generators behave securely by default.
+Two facts make now the cheap moment: the fleet declares no network-reaching generator today, so the default changes while breaking nothing, and the interop this change establishes is incomplete without the envelope — clan runs the shared fragment interface sandboxed by default, so a fragment written against safix's open executor does not in fact run under the other system unmodified.
+Any escape rides on the generator's declaration rather than on the invocation, for D6's reason; the shape itself is `adopt-generator-sandbox`'s to design.
