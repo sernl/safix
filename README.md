@@ -335,6 +335,7 @@ $ safix get NAME   # read one value to stdout
 $ safix generate   # mint whatever has a recipe
 $ safix import     # pull declared clan vars into safix
 $ safix export     # push declared safix values into clan
+$ safix audit      # report which declared mappings' two sides disagree
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
 ```
@@ -557,6 +558,16 @@ A source entry that holds no value is refused rather than exported as nothing �
 And a mapping whose clan-side generator clan already considers outdated is refused, because clan records a validation per generator and its next routine `clan vars generate` would replace whatever was exported without saying so.
 There is no option that exports anyway: safix has nowhere to record that a var is externally supplied, so the flag would turn a refusal into a silent loss.
 The refusal names both remedies — bring clan's side back into agreement, or declare the mapping `clan-to-safix`, which is the right shape when clan's generator is the producer.
+
+**`safix audit` is the report over the same declarations.**
+It compares both sides of every declared mapping, or the one named in either direction, and changes nothing on either side of the boundary.
+A mapping agrees when both sides hold the same bytes, and also when neither side holds a value yet, which is a bridge nobody has bootstrapped rather than a disagreement.
+It is a finding when the two sides hold different values, when one side holds a value the other does not, or when the comparison could not be made — and each finding names the mapping, its two endpoints and the command that converges it, and never a value.
+
+It is a verb of its own rather than more rows in `check`, and the reason is what `check` is.
+`check` decrypts nothing, which is what lets one machine judge files belonging to people whose keys it does not have, and it needs no clan.
+Comparing a mapping's two sides needs both of those: it decrypts the safix side, and it runs clan's own command once per mapping.
+So the verb that needs them carries them, `check` keeps both of its properties, and a mapping you cannot decrypt is reported as one that could not be judged rather than quietly left out — a report that dropped those would be a report about who ran it.
 
 ## The checks safix hands you
 

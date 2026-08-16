@@ -17,6 +17,22 @@ A refusal's prose is a tested string, so it changes when a test changes, and the
 The nix half — `flake.safix.*`, the flake module, and the consumption modules — is the option surface consumers write against.
 A change to it is a breaking change whether or not any rust changed.
 
+## [Unreleased]
+
+### Added
+
+- `safix audit`: the report over the clan bridge.
+  It compares both sides of every declared mapping, or the one named in either direction, and changes nothing on either side of the boundary.
+  A mapping agrees when both sides hold the same bytes and when neither side holds a value yet; it is a finding when the two hold different values, when one side holds a value the other does not, or when the comparison could not be made at all.
+  Each finding names the mapping, its two endpoints and the command that converges it, and never a value or a digest of one.
+  Its exit codes are `check`'s: zero when every mapping agrees, one when any does not.
+- A verb rather than rows in `safix check`, which is a decision about `check`'s contract rather than about the comparison — the comparison is the transfer's own and was already tested.
+  `check` decrypts nothing, which is what lets one machine judge files belonging to people whose keys it does not have, and it needs no clan; this needs both, so the verb that needs them carries them and both of `check`'s properties stay unconditionally true.
+  A mapping this operator cannot decrypt is reported as one that could not be judged rather than skipped, because a report that dropped those would be a report about who ran it.
+  `openspec/changes/clan-bridge/design.md` records the decision under "The audit's shape, and its name", together with the two shapes it was taken over.
+- `safix-bridge-audit`, one more single-runtime check, running `crates/safix/tests/audit.rs`.
+  Its two drills were observed red: making two present values compare equal fails the diverged-mapping test and the one that transfers between two audits, and skipping the mapping that will not decrypt fails only the test written for it and leaves the rest of the target green.
+
 ## [0.2.0] — 2026-08-16
 
 `Cargo.toml` still reads `0.1.0`.
