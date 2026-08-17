@@ -194,7 +194,7 @@ This is phase A of the program `openspec/changes/extend-custody-subjects/` shape
   The first holds every subject-model refusal on the message it produces and on the resolution throwing, and every resolution on the file and the recipients it derives; the recipient lists are what make a growth, a shrink and a change of owner observable as re-wraps of one file rather than as migrations.
   The second holds design decision D6: every one of those refusals and resolutions runs over a NixOS system, a home-manager profile inside NixOS and a standalone home-manager profile, and a divergence between the three is a red check.
   Its answers are compared to each other and to the literal they agree on, because agreement alone would be satisfied by three shapes resolving nothing.
-- `safix-audience-narrowed` and `safix-audience-orphan`, over `crates/safix/tests/subjects.rs`.
+- `safix-audience-narrowed`, `safix-audience-widened` and `safix-audience-orphan`, over `crates/safix/tests/subjects.rs`: the narrowing reported as a revocation, the widening converged by a real `sops updatekeys`, and a key on the file answering to no declared subject reported apart from the subjects that did match.
 
 ### Changed
 
