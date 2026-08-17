@@ -205,8 +205,7 @@
       # shown to happen by a run given one line and refused for want of a
       # confirmation. Three tests rather than one, because the fork is what is
       # under test and each side has to be reachable on its own.
-      checks.safix-value-source =
-        mode "safix-value-source" "value_source" "";
+      checks.safix-value-source = mode "safix-value-source" "value_source" "";
 
       # `get` round-trips a value by digest, for a secret of the user's own and
       # for one shared from another owner, and resolves the same file for both
