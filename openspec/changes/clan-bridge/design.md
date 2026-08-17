@@ -264,4 +264,5 @@ And a mapping that could not be judged is the fourth, for the reason above.
 ## Open questions for the operator
 
 1. Whether the ordering constraint is acceptable: this change depends on `clan-generator-contract` for `share` agreement between the two systems, so it lands after it.
+   Answered by events: `clan-generator-contract` completed on 2026-08-17 before this change's audit landed, so the constraint was accepted and is satisfied in fact; only the archive order remains to honour it.
 2. Whether clan should grow a "this var is externally supplied" concept, so that an exported value survives a definition change rather than requiring the refusal decision two installs. This is an upstream question and is not safix's to answer.

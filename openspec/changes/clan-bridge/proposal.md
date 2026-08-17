@@ -65,9 +65,11 @@ Affected code:
 - Modified: `modules/flake/safix/checks.nix` — the bridge message family, instantiated over a consumer's mappings the same way custody and generator-tool messages already are.
 - New: `crates/safix-core/src/bridge.rs` — mapping consumption, the clan subprocess driver, convergence.
 - Modified: `crates/safix/src/main.rs`, `usage.rs` — the two verbs.
-- Modified: `crates/safix-core/src/check.rs` — bridge divergence rows.
+- New: `crates/safix-core/src/audit.rs`, with its prose in `crates/safix/src/render.rs` — the divergence report as a verb of its own; `check.rs` is untouched (stage 4's decision).
 - Modified: `crates/safix-core/src/error/` — the new refusals and their codes, with paired reporter snapshots.
 
 Affected checks: `safix-bridge-refusals` is new; the integration suite gains bridge tests driving a stub clan CLI whose behaviour is asserted, and one check driving the real clan CLI if it is available in the check closure.
 
 Affected consumers: dotfiles' `modules/flake/agents/agents.sh` loses its mirror half, in a follow-up change named `retire-agents-mirror` and not built here.
+What that follow-up removes is the mirror machinery alone — the `sops set --value-stdin` write, the secret-tempfile registry and its shredder, the trunk guard, and the `MIRROR_SOPS_KEY` table — and what it keeps is the remote provisioning.
+It spans two repositories and depended on `safix-full-switch`, which archived on 2026-08-17, so the follow-up is now unblocked.
