@@ -68,7 +68,7 @@ Landing means the file a profile reads at activation, by default the secret prov
 Everything below is a different answer to the first two questions.
 
 The distinction that does the work is placement versus custody.
-Custody is who holds a secret, and it is a property of a subject — a person, a machine, or a group of subjects: for a person it is the same on every host they log into.
+Custody is who holds a secret, and it is a property of a subject — a person, a machine, a service, a group of subjects, or an organization: for a person it is the same on every host they log into.
 Placement is where the decrypted value shows up, and it is a property of a configuration.
 Every refusal safix makes comes from keeping those two apart.
 
@@ -165,11 +165,11 @@ The secret is still alice's everywhere; it simply does not land on that host.
 This is why a carrier of a shared entry who omits it on one host stays in the audience: omitting is about placement, and custody is about carrying.
 Reaching an entry only through a `perHost` or `perTag` `add` is refused, because a host-scoped selection puts nobody in any audience and would leave that person resolving a file they are not encrypted to.
 
-## Subjects: machines, services, groups, silos, ownership
+## Subjects: machines, services, groups, silos, ownership, organizations
 
 Everything above is a person sharing with a person.
-The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, a service running on machines, or a group of subjects.
-Nothing in this section changes anything until you declare it, and declaring a machine, a service, a group or a silo that no audience names generates the same policy, the same rules and the same files, byte for byte.
+The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, a service running on machines, a group of subjects, or an organization holding recovery custody.
+Nothing in this section changes anything until you declare it, and declaring a machine, a service, a group, a silo or an organization that nothing references generates the same policy, the same rules and the same files, byte for byte.
 
 ### A machine is a subject
 
@@ -271,7 +271,41 @@ The grant resolves through `flake.safix.machines.deck.owner`, and the audience d
 The old owner's loss of future access is reported with the same disclosure as any narrowing.
 
 The record confers nothing else.
-An owner does not thereby read the machine's entries or manage its users, because a record that silently granted either would be the escrowed custody safix already warns about, arrived at by accident rather than declared.
+An owner does not thereby read the machine's entries or manage its users, because a record that silently granted either would be escrowed custody arrived at by accident rather than declared — and `escrowedTo` below is the declared form.
+
+### An organization is a principal that holds recovery custody
+
+```nix
+flake.safix.organizations.acme.custody.acme-escrow = {
+  key = "age1...";
+  note = "acme's escrow — held offline by the operator";
+};
+
+flake.safix.users.alice.escrowedTo = [ "acme" ];
+```
+
+Read the consent in alice's own view, because it is her declaration: acme's custody can open everything she holds, and withdrawing it revokes nothing already readable.
+That is the trade-off `recoveryRecipients` carries as a warning, written down in the record of the person whose files it widens — and acme cannot establish it from its side, so nothing an organization declares widens anyone's audience.
+
+The keys arrive beside her `recoveryRecipients` rather than inside it, which is what buys the property raw-key escrow never had.
+acme rotates a custody key in its own declaration, one `safix fix` re-wraps every consenting person's files, and no person's declaration changes.
+Withdrawal is a narrowing like any other: `safix check` reports it as the revocation it is, with rotation as the remedy.
+
+An organization is also an owner and an audience element:
+
+```nix
+flake.safix.machines.rack.owner = "acme";
+flake.safix.users.alice.sharedWith.acme.corp-token = { };
+flake.safix.users.alice.sharedWith."ownerOf.rack".corp-handover = { };
+```
+
+```console
+$ sops secrets/safix/shared/=acme,alice/secrets.yaml
+```
+
+`ownerOf` resolves through the record to acme's custody keys exactly as it resolves to a person's own, and `=` marks the organization the way `@` marks a group.
+A group may not contain one — a principal is not a member, and an audience wanting acme's custody names acme.
+An organization whose custody is empty is refused everywhere it is reached: by an `escrowedTo`, by a grant, by an ownership resolution.
 
 ## Generators: the value writes itself
 
@@ -564,6 +598,7 @@ Whether that independence is real is decided by one field, and the disclosure li
 Leaving it empty keeps their custody independent and has a cost no later edit undoes: with only their activation key, losing it makes their files unopenable by every party including the operator, because adding a recipient to an existing file requires decrypting it first.
 Listing an operator-held identity there instead buys recoverability at the price of that operator reading everything the person holds.
 The mitigation that keeps independence is a second recipient the person themselves holds.
+Where that operator is an organization, `escrowedTo` is how the same trade-off is declared rather than assembled out of raw keys — the same breadth, named, in the person's own record, and rotated in one place.
 
 ## Enrolling a hardware key: `safix enroll`
 
