@@ -118,6 +118,7 @@ refusal_codes! {
     NoCreationRule => "safix::no_creation_rule",
     RewrapUnschedulable => "safix::rewrap_unschedulable",
     SopsCreateFailed => "safix::sops_create_failed",
+    GeneratorCycle => "safix::generator_cycle",
     NoGenerator => "safix::no_generator",
     DependencyHasNoValue => "safix::dependency_has_no_value",
     StagingNotMemoryBacked => "safix::staging_not_memory_backed",

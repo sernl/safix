@@ -13,7 +13,7 @@
 //! The cost is that adding an option to the nix half requires a matching field
 //! here, in the same change, which is the intended coupling.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
 
@@ -239,7 +239,9 @@ pub struct UserPlan {
 ///
 /// The order and the edges are the resolver's, not this runtime's: the nix half
 /// is what refuses a cycle, and an order existing at all is that refusal's
-/// postcondition. Nothing here re-derives either.
+/// postcondition. Nothing here derives an order of its own; what it does do is
+/// check that postcondition on the order it was handed, which is
+/// [`UserPlan::cycle`].
 #[derive(Debug, Clone, Deserialize)]
 #[serde(transparent)]
 pub struct GeneratorPlan(pub BTreeMap<String, UserPlan>);
@@ -266,12 +268,95 @@ impl UserPlan {
             .map(|(generator, _)| generator.as_str())
     }
 
+    /// The generators one has to run after, out of the ones the order carries.
+    ///
+    /// The producers of every dependency it reads. A dependency nobody
+    /// generates resolves to no producer and contributes no edge, exactly as it
+    /// contributes none at evaluation. A dependency this generator produces
+    /// itself does contribute one, where `resolve.nix` drops that edge and
+    /// refuses the declaration by name instead: the two arrive at the same
+    /// refusal from opposite ends, and a plan reaching this runtime with a
+    /// self-edge in it came from neither.
+    ///
+    /// Restricted to the generators [`UserPlan::order`] carries, because those
+    /// are the ones a run walks. Sorted and then reversed so that the caller
+    /// below, which pops, meets them in name order: the cycle a refusal names
+    /// is then a function of the plan rather than of the traversal.
+    fn prerequisites(&self, generator: &str) -> Vec<&str> {
+        let Some(inputs) = self.inputs.get(generator) else {
+            return Vec::new();
+        };
+        let mut producers: Vec<&str> = inputs
+            .values()
+            .filter(|input| input.kind == InputKind::Dependency)
+            .filter_map(|input| self.producer_of(&input.name))
+            .filter(|producer| self.order.iter().any(|name| name == producer))
+            .collect();
+        producers.sort_unstable();
+        producers.dedup();
+        producers.reverse();
+        producers
+    }
+
+    /// One cycle among the generators the order carries, when it carries one,
+    /// as the participating generators with the one it closes on repeated.
+    ///
+    /// The resolver answers this question at evaluation and refuses there, and
+    /// the generators inside a cycle are then left out of the order rather than
+    /// placed in it, so a plan that reached this runtime through
+    /// `flake.safix.lib.generatorPlan` never carries one. Two callers are not
+    /// that plan: a stand-in for nix, and a program embedding this crate, for
+    /// which [`GeneratorPlan`] is a value with public fields rather than
+    /// something a refusal has already been thrown over. This is where the
+    /// order's own claim is checked for them.
+    ///
+    /// A depth-first walk rather than the resolver's own trick of following one
+    /// prerequisite per node, which is sound only inside its stuck set: a
+    /// generator reached through its second prerequisite is on no path that
+    /// following first prerequisites alone ever takes.
+    #[must_use]
+    pub fn cycle(&self) -> Option<Vec<String>> {
+        let mut settled: BTreeSet<&str> = BTreeSet::new();
+        for start in &self.order {
+            if settled.contains(start.as_str()) {
+                continue;
+            }
+            let mut open: Vec<(&str, Vec<&str>)> =
+                vec![(start.as_str(), self.prerequisites(start))];
+            while !open.is_empty() {
+                let descend = open.last_mut().and_then(|(_, pending)| pending.pop());
+                let Some(next) = descend else {
+                    if let Some((exhausted, _)) = open.pop() {
+                        settled.insert(exhausted);
+                    }
+                    continue;
+                };
+                if settled.contains(next) {
+                    continue;
+                }
+                if let Some(from) = open.iter().position(|(node, _)| *node == next) {
+                    let mut cycle: Vec<String> = open
+                        .iter()
+                        .skip(from)
+                        .map(|(node, _)| (*node).to_owned())
+                        .collect();
+                    cycle.push(next.to_owned());
+                    return Some(cycle);
+                }
+                let prerequisites = self.prerequisites(next);
+                open.push((next, prerequisites));
+            }
+        }
+        None
+    }
+
     /// Every generator that would derive from this one's output, it first, in
     /// the plan's own order.
     ///
     /// One forward pass over [`UserPlan::order`] is sufficient because that
     /// order is topological — a generator appears after everything it reads —
-    /// which is the resolver's claim and is what its cycle refusal guarantees. A
+    /// which is the resolver's claim, is what its cycle refusal guarantees, and
+    /// is what [`UserPlan::cycle`] checks before a run walks anything. A
     /// dependency nobody generates resolves to no producer and contributes no
     /// edge, exactly as it contributes none at evaluation.
     #[must_use]
@@ -605,6 +690,106 @@ mod tests {
         assert_eq!(ana.cascade("base"), ["base", "derived", "far"]);
         assert_eq!(ana.cascade("derived"), ["derived", "far"]);
         assert_eq!(ana.cascade("aside"), ["aside"]);
+    }
+
+    /// One user's plan, as the four fields and nothing else.
+    fn plan_of(order: &str, outputs: &str, inputs: &str) -> UserPlan {
+        let document =
+            format!(r#"{{ "order": {order}, "outputs": {outputs}, "inputs": {inputs} }}"#);
+        serde_json::from_str(&document).unwrap()
+    }
+
+    /// The plan every other test here drives carries no cycle.
+    ///
+    /// Asserted rather than assumed, because a cycle check answering "yes"
+    /// unconditionally would refuse every run and one answering "no"
+    /// unconditionally would be the vacuous half of the pair below.
+    #[test]
+    fn a_topological_order_carries_no_cycle() {
+        let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
+        assert_eq!(plan.for_user("ana").unwrap().cycle(), None);
+    }
+
+    /// Two generators each reading the other's output.
+    #[test]
+    fn a_cycle_in_the_order_is_reported_as_the_generators_participating_in_it() {
+        let plan = plan_of(
+            r#"["a", "b"]"#,
+            r#"{ "a": ["a"], "b": ["b"] }"#,
+            r#"{
+              "a": { "b": { "kind": "dependency", "name": "b" } },
+              "b": { "a": { "kind": "dependency", "name": "a" } }
+            }"#,
+        );
+
+        assert_eq!(plan.cycle(), Some(vec!["a".into(), "b".into(), "a".into()]));
+    }
+
+    /// A cycle reached only through a second prerequisite.
+    ///
+    /// `resolve.nix` finds its cycle by following one prerequisite per node,
+    /// which is sound inside the set it has already established is stuck and
+    /// unsound over a graph in general. Here `a` reads what `b` and `c` write and
+    /// `c` reads what `a` writes: following `a`'s first prerequisite alone ends
+    /// at `b`, which reads nothing, and no walk from `b` or from `c` returns to
+    /// its own start either. The cycle is real and only a walk that backtracks
+    /// meets it.
+    #[test]
+    fn a_cycle_behind_a_second_prerequisite_is_still_reported() {
+        let plan = plan_of(
+            r#"["a", "b", "c"]"#,
+            r#"{ "a": ["a"], "b": ["b"], "c": ["c"] }"#,
+            r#"{
+              "a": {
+                "b": { "kind": "dependency", "name": "b" },
+                "c": { "kind": "dependency", "name": "c" }
+              },
+              "b": {},
+              "c": { "a": { "kind": "dependency", "name": "a" } }
+            }"#,
+        );
+
+        assert_eq!(plan.cycle(), Some(vec!["a".into(), "c".into(), "a".into()]));
+    }
+
+    /// A generator reading an output of its own is the cycle of length one.
+    ///
+    /// `resolve.nix` refuses that declaration by name before it walks the graph,
+    /// and drops the self-edge so the walk cannot report it as a cycle nobody
+    /// wrote. This runtime cannot tell the two refusals apart from the plan
+    /// alone, and does not need to: either way the generator would be waiting on
+    /// a value it is the one to write.
+    #[test]
+    fn a_generator_reading_its_own_output_is_a_cycle_of_length_one() {
+        let plan = plan_of(
+            r#"["solo"]"#,
+            r#"{ "solo": ["solo", "solo-pub"] }"#,
+            r#"{ "solo": { "solo-pub": { "kind": "dependency", "name": "solo-pub" } } }"#,
+        );
+
+        assert_eq!(plan.cycle(), Some(vec!["solo".into(), "solo".into()]));
+    }
+
+    /// A cycle among generators the order leaves out is not this walk's.
+    ///
+    /// The refusal is about the order a run walks, and a generator absent from
+    /// it never runs. `resolve.nix` emits no such plan — it refuses the whole
+    /// evaluation when anything is stuck rather than emitting an order for the
+    /// rest — so this is about what the check does not claim rather than about a
+    /// shape it has to tolerate.
+    #[test]
+    fn a_cycle_outside_the_order_is_not_reported() {
+        let plan = plan_of(
+            r#"["ok"]"#,
+            r#"{ "ok": ["ok"], "x": ["x"], "y": ["y"] }"#,
+            r#"{
+              "ok": {},
+              "x": { "y": { "kind": "dependency", "name": "y" } },
+              "y": { "x": { "kind": "dependency", "name": "x" } }
+            }"#,
+        );
+
+        assert_eq!(plan.cycle(), None);
     }
 
     #[test]

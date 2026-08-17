@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the run order for flake.safix.users.ana carries a cycle of generators:
+'base' -> 'derived' -> 'base'. Nothing can run first, so nothing runs.
+
+Nothing was written. The order is flake.safix.lib.generatorPlan's and
+this runtime derives none of its own: a cycle is refused at evaluation,
+and the generators inside one are left out of the order rather than
+placed in it. An order carrying one therefore did not come from that
+refusal — a stand-in for nix, or a program that built the plan itself.
+
+Refused before the first generator rather than at the one that cannot
+read its input, because this command commits each generator as it goes: a
+cycle met part-way through a run has already committed values and cannot
+finish, and a committed value is a distributed one.

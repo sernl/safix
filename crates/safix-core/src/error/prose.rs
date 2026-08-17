@@ -70,6 +70,34 @@ pub(super) fn no_generator(user: &str, name: &str) -> String {
     )
 }
 
+/// A run order carrying a cycle, which is an order no walk can start.
+///
+/// The path is spelled as the resolver spells its own — each generator quoted,
+/// joined by arrows, closing on the name it re-enters — so an operator who has
+/// seen one refusal reads the other without translating it.
+pub(super) fn generator_cycle(user: &str, cycle: &[String]) -> String {
+    let path = cycle
+        .iter()
+        .map(|node| format!("'{node}'"))
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    format!(
+        "the run order for flake.safix.users.{user} carries a cycle of generators:\n\
+        {path}. Nothing can run first, so nothing runs.\n\
+        \n\
+        Nothing was written. The order is flake.safix.lib.generatorPlan's and\n\
+        this runtime derives none of its own: a cycle is refused at evaluation,\n\
+        and the generators inside one are left out of the order rather than\n\
+        placed in it. An order carrying one therefore did not come from that\n\
+        refusal — a stand-in for nix, or a program that built the plan itself.\n\
+        \n\
+        Refused before the first generator rather than at the one that cannot\n\
+        read its input, because this command commits each generator as it goes: a\n\
+        cycle met part-way through a run has already committed values and cannot\n\
+        finish, and a committed value is a distributed one."
+    )
+}
+
 /// Minting an identity for somebody else, on this machine.
 pub(super) fn keygen_for_someone_else(user: &str) -> String {
     format!(

@@ -379,6 +379,10 @@ mod tests {
                 file: "secrets/safix/users/ana/secrets.yaml".into(),
                 output: "Failed to get the data key: no key could be obtained".into(),
             },
+            Code::GeneratorCycle => Error::GeneratorCycle {
+                user: "ana".into(),
+                cycle: vec!["base".into(), "derived".into(), "base".into()],
+            },
             Code::NoGenerator => Error::NoGenerator {
                 user: "ana".into(),
                 name: "api-token".into(),

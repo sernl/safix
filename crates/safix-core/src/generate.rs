@@ -3,7 +3,14 @@
 //! The order is the resolver's. `flake.safix.lib.generatorPlan` computes a
 //! topological order over one user's generators and refuses a cycle, so an order
 //! existing at all is that refusal's postcondition; this module walks it and
-//! re-derives nothing.
+//! derives no order of its own.
+//!
+//! It does check that postcondition before the first generator runs — see
+//! [`UserPlan::cycle`] — and the reason is the same one that put the question at
+//! evaluation. A run commits as it walks, so a cycle met part-way through has
+//! already committed values it cannot finish deriving from. The plan is a value
+//! with public fields that a stand-in for nix can print and an embedder can
+//! build, and for those two callers the refusal has not already been thrown.
 //!
 //! # One generator at a time
 //!
@@ -33,7 +40,7 @@ use std::process::Stdio;
 
 use crate::error::{Error, Result};
 use crate::inputs::Tree;
-use crate::model::{Generator, PromptKind};
+use crate::model::{Generator, PromptKind, UserPlan};
 use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::sops::document;
@@ -136,6 +143,12 @@ pub fn run(
         declared: placements.users().map(str::to_owned).collect(),
     })?;
     let mine = plan.for_user(user);
+    if let Some(cycle) = mine.and_then(UserPlan::cycle) {
+        return Err(Error::GeneratorCycle {
+            user: user.to_owned(),
+            cycle,
+        });
+    }
 
     let order: Vec<String> = if let Some(want) = name {
         if !held.contains_key(want) {

@@ -22,7 +22,7 @@ pub use code::Code;
 
 use prose::{
     HOST_WITHOUT_HOOK, already_declared, bad_recipient, bad_user_name, bulleted, drifted,
-    hardware_recipient, keygen_for_someone_else, no_generator,
+    generator_cycle, hardware_recipient, keygen_for_someone_else, no_generator,
 };
 
 /// A refusal from the safix runtime.
@@ -533,6 +533,24 @@ pub enum Error {
         file: String,
         /// What sops wrote to its standard error, less one trailing newline.
         output: String,
+    },
+
+    /// The run order handed to this runtime carries a cycle of generators.
+    ///
+    /// Raised before the first generator runs rather than at the one whose input
+    /// is missing, because a run commits as it walks. It has no counterpart in
+    /// the retired shell runtime and no fixture can produce it from
+    /// `flake.safix.lib.generatorPlan`, which refuses a cycle at evaluation and
+    /// leaves the generators inside one out of the order: the callers this
+    /// reaches are a stand-in for nix and a program embedding this crate, for
+    /// which the plan is a value rather than that refusal's postcondition.
+    #[error("{}", generator_cycle(.user, .cycle))]
+    GeneratorCycle {
+        /// The user whose run order carries it.
+        user: String,
+        /// The generators participating, in the order they were walked, with the
+        /// one the walk re-entered repeated at the end.
+        cycle: Vec<String>,
     },
 
     /// The name resolves to an entry nothing mints.
