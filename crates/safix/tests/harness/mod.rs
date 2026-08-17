@@ -754,6 +754,7 @@ impl Fixture {
     pub fn run_on_terminal(&self, arguments: &[&str], feed: &str, extra: &[(&str, &str)]) -> Run {
         use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 
+        refuse_a_real_card(arguments, extra);
         let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("no pseudo-terminal");
         grantpt(&master).expect("could not grant the pseudo-terminal");
         unlockpt(&master).expect("could not unlock the pseudo-terminal");
@@ -1104,6 +1105,7 @@ impl Fixture {
         reporter: Reporter,
         extra: &[(&str, &str)],
     ) -> Run {
+        refuse_a_real_card(arguments, extra);
         let mut command = match (stdin, detached()) {
             (Some(_), Some(setsid)) => {
                 let mut command = Command::new(setsid);
@@ -1640,6 +1642,42 @@ fn rules_block(shared_anchors: &[&str]) -> String {
         writeln!(rules, "          - *{anchor}").unwrap();
     }
     rules
+}
+
+/// Refuse an enrollment run that has not been pointed at the card stub.
+///
+/// A structural guard rather than a convention, because of what forgetting costs.
+/// The machines this suite is developed on have the real `ykman`, the real age
+/// plugin and a real password store on their path, and a hardware key in a reader
+/// holding master identities for everything the fleet owns. A run that reached
+/// those would provision a live card — a new PIN, a new PUK, a management key
+/// nobody recorded — and there is no undoing it.
+///
+/// Every override the runtime reads for that surface has to be present and has to
+/// name the stub. A test that builds its environment any way other than
+/// [`Fixture::card_env`] fails here, loudly, before a process is spawned.
+fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
+    if arguments.first() != Some(&"enroll") {
+        return;
+    }
+    for override_variable in [
+        "SAFIX_YKMAN",
+        "SAFIX_AGE_PLUGIN_YUBIKEY",
+        "SAFIX_SECRET_TOOL",
+        "SAFIX_KEEPASSXC_CLI",
+    ] {
+        let named = extra
+            .iter()
+            .find(|(variable, _)| *variable == override_variable)
+            .map(|(_, value)| *value);
+        assert_eq!(
+            named,
+            Some(card_stub()),
+            "an enrollment run was not pointed at the card stub through \
+             {override_variable}; it would have reached the real tool, and the card in \
+             the reader is not a fixture. Build the environment with Fixture::card_env."
+        );
+    }
 }
 
 /// One age identity, minted into a named file.

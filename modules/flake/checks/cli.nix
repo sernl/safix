@@ -159,6 +159,13 @@
 # Writing a newline after the last value fed to a store rather than only between
 # values fails `enroll-custody` on the round trip, which finds a byte in the
 # stored credential that nobody put there.
+# Dropping one of the four card-surface overrides from a run's environment fails
+# every enrollment check before a process is spawned, on the harness's own guard.
+# That drill was run deliberately and is the one whose failure mode is not a red
+# check: the machines this is developed on have the real ykman and a hardware key
+# in a reader holding master identities, so a run that reached it would provision
+# a live card irreversibly. The guard is structural for that reason rather than a
+# convention to be remembered.
 { ... }:
 {
   perSystem =
