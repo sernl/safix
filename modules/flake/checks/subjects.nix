@@ -64,6 +64,29 @@
 # Applying a service's ownership to the entry and then dropping it at user scope
 # rather than refusing fails `serviceOwnershipAtUserScope.refused`; refusing an
 # ownerless service there fails `ownerlessResolves`.
+# Writing an organization's custody keys into each consenting person's
+# `recoveryRecipients` rather than expanding them at resolution time leaves
+# `escrowedConsent` green and fails `escrowedConsent.recoveryRecipientsUntouched`
+# and `rotationHappensInOnePlace.noDeclarationChanged` — the pair that is design
+# decision D3, and the whole property this phase adds.
+# Giving an organization an audience element of its own on the escrow path fails
+# `escrowedConsent.file` and `escrowedConsent.audience`: consent widens who can
+# open a person's files and never who the files are for, so it moves nothing.
+# Dropping the organization marker from `elementOf` fails
+# `organizationGrant.file` and both organization rows of
+# `markedElementsAreDistinct`, and the second is the severe half for the reason
+# the group one is.
+# Resolving `ownerOf.<machine>` only through `users` fails
+# `organizationOwnership.recipients`, which is what D4 says the name space is
+# checked against; naming that audience's file for the resolved owner instead
+# leaves the recipients right and fails
+# `organizationOwnership.sameFileAfterOwnerChange`.
+# Reporting only the first empty-custody reach fails `emptyCustodyMessages`,
+# whose three sentences are the three ways an organization is reached.
+# Admitting an organization as a group member fails
+# `organizationInAGroupMessages`, and leaving organizations out of the one subject
+# name space fails `organizationNameDeclaredTwiceMessages` and
+# `unsafeOrganizationNameMessages`.
 # Emptying any fixture fleet fails `fixtureRosters`.
 {
   perSystem =
@@ -94,8 +117,9 @@
       # for any of them to open.
       keyOf = name: "age1fixture-${name}-0000000000000000000000000000000000";
 
-      # A fleet, as the six records the resolver reads. `machines`, `services` and
-      # `groups` go through their own submodules for the same reason `users` does.
+      # A fleet, as the seven records the resolver reads. `machines`, `services`,
+      # `groups` and `organizations` go through their own submodules for the same
+      # reason `users` does.
       fleetOf =
         {
           users ? { },
@@ -103,6 +127,7 @@
           machines ? { },
           services ? { },
           groups ? { },
+          organizations ? { },
           silos ? { },
         }:
         {
@@ -111,6 +136,7 @@
           machines = typed (lib.types.attrsOf types.machine) machines;
           services = typed (lib.types.attrsOf types.service) services;
           groups = typed (lib.types.attrsOf types.group) groups;
+          organizations = typed (lib.types.attrsOf types.organization) organizations;
           silos = typed (lib.types.attrsOf types.silo) silos;
         };
 
@@ -185,6 +211,7 @@
           catalogue
           machines
           services
+          organizations
           ;
       };
 
@@ -217,6 +244,12 @@
             "rack"
           ];
         };
+        organizations = typed (lib.types.attrsOf types.organization) (
+          fixture.fleet.organizations
+          // {
+            globex.custody.globex-escrow.key = keyOf "globex-escrow";
+          }
+        );
         silos = typed (lib.types.attrsOf types.silo) {
           corp.groups = [
             "oncall"
@@ -646,6 +679,128 @@
         machines.deck = machine "deck" "alice";
       };
 
+      # ── organizations as principals ──
+      # acme holds one custody key under one anchor. The rotated fleet is the same
+      # declaration with a different key under that anchor, which is what a
+      # rotation is, and the withdrawn fleet is alice's consent removed with acme
+      # untouched.
+      acmeCustody = {
+        acme-escrow.key = keyOf "acme-escrow";
+      };
+      rotatedCustody = {
+        acme-escrow.key = keyOf "acme-rotated";
+      };
+
+      escrowFleet =
+        {
+          custody,
+          consenting ? true,
+        }:
+        fleetOf {
+          users.alice = holder "alice" (lib.optionalAttrs consenting { escrowedTo = [ "acme" ]; });
+          organizations.acme.custody = custody;
+        };
+
+      escrowed = escrowFleet { custody = acmeCustody; };
+      rotatedEscrow = escrowFleet { custody = rotatedCustody; };
+      withdrawnEscrow = escrowFleet {
+        custody = acmeCustody;
+        consenting = false;
+      };
+
+      # A grant naming the organization itself, where the escrow fleet above names
+      # it from alice's record. alice does not consent here, so her own file's
+      # recipients are hers alone and the two mechanisms stay separable.
+      organizationGrant = fleetOf {
+        users.alice = holder "alice" { sharedWith.acme.token = { }; };
+        organizations.acme.custody = acmeCustody;
+      };
+
+      # A machine acme owns, granted through its ownership record. The owner change
+      # is to a person, so one fleet shows the resolution branching on what the name
+      # denotes.
+      ownedMachineFleet =
+        owner:
+        fleetOf {
+          users = {
+            alice = holder "alice" { sharedWith."ownerOf.rack".token = { }; };
+            bob = keyholder "bob";
+          };
+          machines.rack = machine "rack" owner;
+          organizations.acme.custody = acmeCustody;
+        };
+
+      ownedByAcme = ownedMachineFleet "acme";
+      ownedByBobInstead = ownedMachineFleet "bob";
+
+      # Every way of reaching an organization with no custody, in one fleet: alice's
+      # escrow consent, a grant naming it, and a grant resolving through a machine it
+      # owns. One evaluation reports all three, because an operator repairing a
+      # custody declaration one refusal per rebuild does not know how many are left.
+      emptyCustody = fleetOf {
+        users.alice = {
+          recipient = keyOf "alice";
+          private = {
+            token = { };
+            other = { };
+          };
+          escrowedTo = [ "acme" ];
+          sharedWith = {
+            acme.token = { };
+            "ownerOf.rack".other = { };
+          };
+        };
+        machines.rack = machine "rack" "acme";
+        organizations.acme = { };
+      };
+
+      escrowToNobody = fleetOf {
+        users.alice = holder "alice" { escrowedTo = [ "acme" ]; };
+      };
+
+      organizationInAGroup = fleetOf {
+        users.alice = holder "alice" { sharedWith.oncall.token = { }; };
+        groups.oncall.members = [ "acme" ];
+        organizations.acme.custody = acmeCustody;
+      };
+
+      organizationNameDeclaredTwice = fleetOf {
+        users.alice = holder "alice" { };
+        groups.acme.members = [ "alice" ];
+        organizations.acme.custody = acmeCustody;
+      };
+
+      unsafeOrganizationName = fleetOf {
+        users.alice = holder "alice" { };
+        organizations."Acme".custody = acmeCustody;
+      };
+
+      unsafeCustodyAnchor = fleetOf {
+        users.alice = holder "alice" { };
+        organizations.acme.custody."Escrow".key = keyOf "acme-escrow";
+      };
+
+      # One anchor over two keys, across the two records that define anchors. The
+      # generated policy would define it twice and every rule referencing it would
+      # resolve to whichever definition YAML kept.
+      anchorSharedWithAPerson = fleetOf {
+        users.alice = {
+          recipient = keyOf "alice";
+          recoveryRecipients.acme-escrow.key = keyOf "alice-escrow";
+          private.token = { };
+        };
+        organizations.acme.custody = acmeCustody;
+      };
+
+      # One fleet declaring every kind of subject, for the round trip alone.
+      everyKind = fleetOf {
+        users.alice = holder "alice" { };
+        machines.deck = machine "deck" "alice";
+        services.nginx.machines = [ "deck" ];
+        groups.oncall.members = [ "alice" ];
+        organizations.acme.custody = acmeCustody;
+      };
+
       # ── the marked forms ──
       # Two audiences a marker collapsed onto one directory would join into one
       # rule. Every name is well-formed, so nothing else in the registry would
@@ -692,6 +847,28 @@
           ];
           b = [
             "@nginx"
+            "alice"
+          ];
+        }
+        {
+          label = "an organization and a person of that name";
+          a = [
+            "=acme"
+            "alice"
+          ];
+          b = [
+            "acme"
+            "alice"
+          ];
+        }
+        {
+          label = "an organization and a group of that name";
+          a = [
+            "=acme"
+            "alice"
+          ];
+          b = [
+            "@acme"
             "alice"
           ];
         }
@@ -752,6 +929,7 @@
                 machines = sorted (builtins.attrNames f.machines);
                 services = sorted (builtins.attrNames f.services);
                 groups = sorted (builtins.attrNames f.groups);
+                organizations = sorted (builtins.attrNames f.organizations);
                 silos = sorted (builtins.attrNames f.silos);
               })
               {
@@ -762,19 +940,23 @@
                   crossSilo
                   ownedByBo
                   ownsBothSides
+                  escrowed
+                  organizationGrant
+                  ownedByAcme
                   ;
               };
 
           # ── declaration alone is inert ──
-          # Two machines, two groups and a silo declared over the repository's own
-          # fleet, referenced by nothing. Every derived artifact — the policy text
-          # a consumer commits, the audiences, the placements, the public paths —
-          # has to be what it was without them.
+          # Two machines, a service, two groups, an organization and a silo declared
+          # over the repository's own fleet, referenced by nothing. Every derived
+          # artifact — the policy text a consumer commits, the audiences, the
+          # placements, the public paths — has to be what it was without them.
           inertness = {
             declaresSubjects = {
               machines = sorted (builtins.attrNames declaredButUnused.machines);
               services = sorted (builtins.attrNames declaredButUnused.services);
               groups = sorted (builtins.attrNames declaredButUnused.groups);
+              organizations = sorted (builtins.attrNames declaredButUnused.organizations);
               silos = sorted (builtins.attrNames declaredButUnused.silos);
             };
             identical = derivedFrom declaredButUnused == derivedFrom bare;
@@ -1049,6 +1231,91 @@
 
           ownerOfSelfMessages = violationsOf ownerOfSelf;
 
+          # ── escrow is the person's own declaration ──
+          # alice's files gain acme's custody keys and stay in alice's own
+          # directory: consent widens who can open her files and never who they are
+          # for, so there is no element and no migration.
+          #
+          # The two structural fields are design decision D1 and D3 read off the
+          # records rather than described. The consent is a list on alice; the
+          # organization's whole record is its custody, so nothing it declares could
+          # name her; and her `recoveryRecipients` stays empty while acme's key is on
+          # her file, which is the expansion happening beside that record rather than
+          # through it.
+          escrowedConsent = {
+            file = fileOfToken escrowed;
+            audience = (audienceOfToken escrowed).audience;
+            recipients = (audienceOfToken escrowed).recipients;
+            personDeclares = escrowed.users.alice.escrowedTo;
+            organizationDeclares = sorted (builtins.attrNames escrowed.organizations.acme);
+            recoveryRecipientsUntouched = escrowed.users.alice.recoveryRecipients;
+            anchors = map (a: a.anchor) (policy.plan escrowed).anchors;
+            ruleAnchors = map (r: {
+              inherit (r) audience anchors;
+            }) (policy.plan escrowed).rules;
+          };
+
+          # A rotation in the organization's declaration re-wraps the same file
+          # toward the new key, and every person's record is byte-identical across
+          # it. That pair is the whole property this phase exists to add.
+          rotationHappensInOnePlace = {
+            sameFile = fileOfToken rotatedEscrow == fileOfToken escrowed;
+            recipients = (audienceOfToken rotatedEscrow).recipients;
+            noDeclarationChanged = rotatedEscrow.users == escrowed.users;
+          };
+
+          # Withdrawal narrows the same file back to alice's own custody. What it
+          # takes back is nothing: the report of that is `safix check`'s, over the
+          # key left on the ciphertext.
+          withdrawalNarrowsTheSameFile = {
+            sameFile = fileOfToken withdrawnEscrow == fileOfToken escrowed;
+            recipients = (audienceOfToken withdrawnEscrow).recipients;
+          };
+
+          # ── an organization is an audience element ──
+          organizationGrant = {
+            audience = (audienceOfToken organizationGrant).audience;
+            file = fileOfToken organizationGrant;
+            recipients = (audienceOfToken organizationGrant).recipients;
+
+            # The organization resolves nothing. It holds keys rather than entries,
+            # so alice's own resolution is the only one, and a grant to acme moves
+            # her secret into the file acme can open.
+            resolvedByTheOwner = filesFor organizationGrant { user = "alice"; };
+          };
+
+          # ── ownership resolves through an organization ──
+          organizationOwnership = {
+            audience = (audienceOfToken ownedByAcme).audience;
+            file = fileOfToken ownedByAcme;
+            recipients = (audienceOfToken ownedByAcme).recipients;
+            machineResolvesNothing = filesFor ownedByAcme { machine = "rack"; };
+
+            # A change of owner from the organization to a person leaves the file
+            # where it was and re-wraps it, which is what makes the record the thing
+            # the grant resolves through rather than a name it copied.
+            sameFileAfterOwnerChange = fileOfToken ownedByBobInstead == fileOfToken ownedByAcme;
+            recipientsAfterOwnerChange = (audienceOfToken ownedByBobInstead).recipients;
+          };
+
+          # ── what an organization with no custody cannot do ──
+          emptyCustodyMessages = violationsOf emptyCustody;
+          emptyCustodyFires = fires (filesFor emptyCustody { user = "alice"; });
+
+          escrowToNobodyMessages = violationsOf escrowToNobody;
+          escrowToNobodyFires = fires (filesFor escrowToNobody { user = "alice"; });
+
+          organizationInAGroupMessages = violationsOf organizationInAGroup;
+          organizationInAGroupFires = fires (filesFor organizationInAGroup { user = "alice"; });
+
+          organizationNameDeclaredTwiceMessages = violationsOf organizationNameDeclaredTwice;
+
+          unsafeOrganizationNameMessages = violationsOf unsafeOrganizationName;
+
+          unsafeCustodyAnchorMessages = violationsOf unsafeCustodyAnchor;
+
+          anchorSharedWithAPersonMessages = violationsOf anchorSharedWithAPerson;
+
           # ── the marked element forms ──
           # A marker that a name could carry would join two distinct audiences
           # into one directory, so one rule over both audiences' secrets — and
@@ -1068,7 +1335,8 @@
           # Rendering a reference and reading it back is the identity, which is
           # what lets a file's audience be turned into the recipients it is
           # wrapped for.
-          referencesRoundTrip = roundTrips serviceInGroup [
+          referencesRoundTrip = roundTrips everyKind [
+            "acme"
             "alice"
             "deck"
             "nginx"
@@ -1105,6 +1373,9 @@
                   groupGrant
                   nestedGroup
                   ownedByBo
+                  escrowed
+                  organizationGrant
+                  ownedByAcme
                   ;
               };
         };
@@ -1116,6 +1387,7 @@
               machines = [ "deck" ];
               services = [ ];
               groups = [ ];
+              organizations = [ ];
               silos = [ ];
             };
             serviceGrant = {
@@ -1126,6 +1398,7 @@
               ];
               services = [ "nginx" ];
               groups = [ ];
+              organizations = [ ];
               silos = [ ];
             };
             groupGrant = {
@@ -1138,6 +1411,7 @@
               machines = [ ];
               services = [ ];
               groups = [ "oncall" ];
+              organizations = [ ];
               silos = [ ];
             };
             crossSilo = {
@@ -1153,6 +1427,7 @@
                 "partners"
                 "staff"
               ];
+              organizations = [ ];
               silos = [ "corp" ];
             };
             ownedByBo = {
@@ -1164,6 +1439,7 @@
               machines = [ "deck" ];
               services = [ ];
               groups = [ ];
+              organizations = [ ];
               silos = [ ];
             };
             ownsBothSides = {
@@ -1181,13 +1457,42 @@
                 "blue"
                 "red"
               ];
+              organizations = [ ];
               silos = [ "corp" ];
+            };
+            escrowed = {
+              people = [ "alice" ];
+              machines = [ ];
+              services = [ ];
+              groups = [ ];
+              organizations = [ "acme" ];
+              silos = [ ];
+            };
+            organizationGrant = {
+              people = [ "alice" ];
+              machines = [ ];
+              services = [ ];
+              groups = [ ];
+              organizations = [ "acme" ];
+              silos = [ ];
+            };
+            ownedByAcme = {
+              people = [
+                "alice"
+                "bob"
+              ];
+              machines = [ "rack" ];
+              services = [ ];
+              groups = [ ];
+              organizations = [ "acme" ];
+              silos = [ ];
             };
           };
 
           inertness = {
             declaresSubjects = {
               machines = [
+                "acme-host"
                 "deck"
                 "fixture-host"
                 "rack"
@@ -1199,6 +1504,10 @@
               groups = [
                 "infra"
                 "oncall"
+              ];
+              organizations = [
+                "acme"
+                "globex"
               ];
               silos = [ "corp" ];
             };
@@ -1256,12 +1565,12 @@
           keylessMachineFires = true;
 
           machineOwnedByNobodyMessages = [
-            "flake.safix.machines.deck.owner names 'zed', which is not a declared user of flake.safix.users"
+            "flake.safix.machines.deck.owner names 'zed', which is not a declared user of flake.safix.users or an organization of flake.safix.organizations"
           ];
           machineOwnedByNobodyFires = true;
 
           nameDeclaredTwiceMessages = [
-            "'deck' is declared as more than one kind of subject, by flake.safix.users and flake.safix.machines; people, machines, services and groups share one name space"
+            "'deck' is declared as more than one kind of subject, by flake.safix.users and flake.safix.machines; people, machines, services, groups and organizations share one name space"
           ];
           nameDeclaredTwiceFires = true;
 
@@ -1362,11 +1671,11 @@
           serviceOverUndeclaredMachineFires = true;
 
           serviceOwnedByNobodyMessages = [
-            "flake.safix.services.nginx.owner names 'zed', which is not a declared user of flake.safix.users"
+            "flake.safix.services.nginx.owner names 'zed', which is not a declared user of flake.safix.users or an organization of flake.safix.organizations"
           ];
 
           serviceNameDeclaredTwiceMessages = [
-            "'nginx' is declared as more than one kind of subject, by flake.safix.machines and flake.safix.services; people, machines, services and groups share one name space"
+            "'nginx' is declared as more than one kind of subject, by flake.safix.machines and flake.safix.services; people, machines, services, groups and organizations share one name space"
           ];
 
           unsafeServiceNameMessages = [
@@ -1446,7 +1755,7 @@
           emptyGroupFires = true;
 
           unknownMemberMessages = [
-            "flake.safix.groups.oncall.members names 'zed', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
+            "flake.safix.groups.oncall.members names 'zed', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services, flake.safix.groups or flake.safix.organizations"
           ];
           unknownMemberFires = true;
 
@@ -1536,6 +1845,109 @@
             "flake.safix.users.alice.sharedWith.\"ownerOf.deck\" shares 'token' with the owner flake.safix.machines.deck records, which reaches no subject beyond flake.safix.users.alice, so the grant widens nothing"
           ];
 
+          escrowedConsent = {
+            file = "secrets/safix/users/alice/secrets.yaml";
+            audience = [ "alice" ];
+            recipients = [
+              (keyOf "alice")
+              (keyOf "acme-escrow")
+            ];
+            personDeclares = [ "acme" ];
+            organizationDeclares = [ "custody" ];
+            recoveryRecipientsUntouched = { };
+            anchors = [
+              "alice-safix"
+              "acme-escrow"
+            ];
+            ruleAnchors = [
+              {
+                audience = [ "alice" ];
+                anchors = [
+                  "alice-safix"
+                  "acme-escrow"
+                ];
+              }
+            ];
+          };
+
+          rotationHappensInOnePlace = {
+            sameFile = true;
+            recipients = [
+              (keyOf "alice")
+              (keyOf "acme-rotated")
+            ];
+            noDeclarationChanged = true;
+          };
+
+          withdrawalNarrowsTheSameFile = {
+            sameFile = true;
+            recipients = [ (keyOf "alice") ];
+          };
+
+          organizationGrant = {
+            audience = [
+              "=acme"
+              "alice"
+            ];
+            file = "secrets/safix/shared/=acme,alice/secrets.yaml";
+            recipients = [
+              (keyOf "acme-escrow")
+              (keyOf "alice")
+            ];
+            resolvedByTheOwner.token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+          };
+
+          organizationOwnership = {
+            audience = [
+              "@~rack"
+              "alice"
+            ];
+            file = "secrets/safix/shared/@~rack,alice/secrets.yaml";
+            recipients = [
+              (keyOf "acme-escrow")
+              (keyOf "alice")
+            ];
+            machineResolvesNothing = { };
+            sameFileAfterOwnerChange = true;
+            recipientsAfterOwnerChange = [
+              (keyOf "bob")
+              (keyOf "alice")
+            ];
+          };
+
+          emptyCustodyMessages = [
+            "flake.safix.users.alice.escrowedTo names flake.safix.organizations.acme, whose custody is empty, so the escrow would add no recipient to any file they hold"
+            "flake.safix.users.alice.sharedWith.acme shares 'token', but flake.safix.organizations.acme.custody is empty, so the file would be encrypted to nobody"
+            "flake.safix.users.alice.sharedWith.\"ownerOf.rack\" shares 'other' with flake.safix.organizations.acme, reached through the owner flake.safix.machines.rack records, but flake.safix.organizations.acme.custody is empty, so the file would be encrypted to nobody"
+          ];
+          emptyCustodyFires = true;
+
+          escrowToNobodyMessages = [
+            "flake.safix.users.alice.escrowedTo names 'acme', which is not a declared organization of flake.safix.organizations"
+          ];
+          escrowToNobodyFires = true;
+
+          organizationInAGroupMessages = [
+            "flake.safix.groups.oncall.members names flake.safix.organizations.acme, which is a principal rather than a member; an audience wanting its custody names the organization"
+          ];
+          organizationInAGroupFires = true;
+
+          organizationNameDeclaredTwiceMessages = [
+            "'acme' is declared as more than one kind of subject, by flake.safix.groups and flake.safix.organizations; people, machines, services, groups and organizations share one name space"
+          ];
+
+          unsafeOrganizationNameMessages = [
+            "flake.safix.organizations names 'Acme', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
+          ];
+
+          unsafeCustodyAnchorMessages = [
+            "flake.safix.organizations.acme.custody names 'Escrow', which is not [a-z0-9][a-z0-9_-]* and so cannot be a recipient policy anchor"
+          ];
+
+          anchorSharedWithAPersonMessages = [
+            "the declarations give the recipient policy anchor 'acme-escrow' more than one key, declared by flake.safix.users.alice and flake.safix.organizations.acme"
+          ];
+
           markedElementsAreDistinct = [
             {
               label = "a group and a person of that name";
@@ -1561,15 +1973,29 @@
               fileA = "secrets/safix/shared/%nginx,alice/secrets.yaml";
               fileB = "secrets/safix/shared/@nginx,alice/secrets.yaml";
             }
+            {
+              label = "an organization and a person of that name";
+              distinct = true;
+              fileA = "secrets/safix/shared/=acme,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/acme,alice/secrets.yaml";
+            }
+            {
+              label = "an organization and a group of that name";
+              distinct = true;
+              fileA = "secrets/safix/shared/=acme,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/@acme,alice/secrets.yaml";
+            }
           ];
 
           markersOutsideNameAlphabet = {
             group = true;
             owner = true;
             service = true;
+            organization = true;
           };
 
           referencesRoundTrip = [
+            true
             true
             true
             true
@@ -1593,6 +2019,9 @@
                 "groupGrant"
                 "nestedGroup"
                 "ownedByBo"
+                "escrowed"
+                "organizationGrant"
+                "ownedByAcme"
               ]
               (_: {
                 ruleShape = [ ];

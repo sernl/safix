@@ -839,7 +839,7 @@
           ];
 
           unknownRecipientMessages = [
-            "flake.safix.users.alice.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
+            "flake.safix.users.alice.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services, flake.safix.groups or flake.safix.organizations"
           ];
           unknownRecipientFires = true;
 
@@ -854,7 +854,7 @@
           keylessRecipientFires = true;
 
           dormantMessages = [
-            "flake.safix.users.carol.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
+            "flake.safix.users.carol.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services, flake.safix.groups or flake.safix.organizations"
           ];
           dormantFiresForOthers = true;
 
@@ -916,7 +916,7 @@
           ownerWithoutRecipientFires = true;
 
           anchorConflictMessages = [
-            "flake.safix.users gives the recipient policy anchor 'master' more than one key, declared by flake.safix.users.alice and flake.safix.users.dave"
+            "the declarations give the recipient policy anchor 'master' more than one key, declared by flake.safix.users.alice and flake.safix.users.dave"
           ];
           anchorConflictFires = true;
 
