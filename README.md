@@ -601,6 +601,8 @@ safix's own modules are held to that by the `safix-namespace` check: one read of
 
 Secrets are then declared against the projected names, and the two records stay independent — a person can exist in your registry and hold nothing here, or hold secrets here without your registry knowing.
 
+`flake.safix.machines` takes a projection on the same terms, from a host inventory rather than a user registry: safix has no host record of its own to reconcile with yours, and a machine declared by a `mapAttrs` over your inventory is indistinguishable to the resolver from one written by hand.
+
 ## Establishing secrets in a profile
 
 Custody is declared once, at flake level, where every user is visible at the same time.
@@ -873,7 +875,7 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 
 | concern | file |
 |---|---|
-| the two records a consumer declares | `modules/flake/safix/options.nix` |
+| the records a consumer declares | `modules/flake/safix/options.nix` |
 | the option types and their reference documentation | `modules/flake/safix/types.nix` |
 | the resolution algebra | `modules/flake/safix/resolve.nix` |
 | the clan bridge's mappings and their refusals | `modules/flake/safix/bridge.nix` |
