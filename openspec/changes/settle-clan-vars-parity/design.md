@@ -58,4 +58,6 @@ Archive order: after `clan-generator-contract` and `adopt-generator-sandbox`, wh
 ## Open Questions
 
 - USER-RUN: the operator asked for `upload` and clan-style plaintext `import`/`export`; the committed safix-cli spec refuses all three with reasons (`extract-safix-from-dotfiles` spec:132-133, restated by the bridge's reconciling delta). Overturning either is a deliberate spec change to make with that reasoning in view, and it is the operator's, not this change's default. Task 4.1 carries it.
+  Answered: both refusals stand, conditionally on the custody-subjects extension not disturbing them — and it does not, for the reason recorded at 4.1: audiences change who reads, not how values arrive.
 - USER-RUN: whether the absence of clan's flake-level (per-export) generator placement is confirmed as a non-goal — safix's axis is people and custody, not machines or service exports. If confirmed, it is recorded in the safix-cli delta; if not, it becomes its own future change. Task 4.2 carries it.
+  Answered: rejected in the larger direction — the axis itself extends. `extend-custody-subjects` makes machines, services, groups and organizational custody first-class, and the per-export question dissolves into it rather than being recorded as an absence.
