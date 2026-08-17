@@ -118,3 +118,9 @@ The no-backend refusal is tested by hiding the backend from the resolved toolset
 ## Open Questions
 
 - Whether a read-only extra-paths declaration is ever warranted (a fragment consulting a caller-side corpus, say) is deferred until a real fragment asks; it would be a new declared capability with its own change, not a loosening of this one.
+- Whether a staged output may be a symlink, found while implementing and not decided here.
+  `staging::is_output` matches clan's `Path.is_file()`, which follows a symlink, and the rationale recorded for that in 0.2 was that a fragment had the caller's filesystem either way, so a copy and a link were equally available and refusing the link would move the hazard rather than remove it.
+  The envelope removes the copy and not the link: the target does not exist inside the envelope, but the runtime reads the output from outside it, where the link resolves.
+  So a fragment can name a host file the envelope forbids it to read, and the value stored would be that file's bytes.
+  Answering `is_output` from `symlink_metadata` would close it and would diverge from clan on what the shared executor interface admits, which is a decision about the interface rather than a tightening of this change; the code comment in `staging.rs` points here.
+  Left open deliberately: a safix generator is the operator's own declaration, so this is a mistaken fragment producing a wrong value rather than an untrusted one reading a file its author could not, and the fix belongs beside a decision about clan divergence.

@@ -230,8 +230,9 @@ the whole run and lists what $out did contain, and nothing is written until all
 of them are present. Bytes are stored exactly as written: `echo` leaves a
 trailing newline and `printf` does not, and nothing here removes one.
 
-`runtimeInputs` is prepended to PATH. Name every tool the script runs, or it
-works for whoever wrote it and fails for everyone else.
+`runtimeInputs` is prepended to PATH, and inside the envelope below it is the
+whole of what a script can run: name every tool, because the paths PATH
+otherwise carries are not there.
 
 An output declared `files.<name>.secret = false` is written to the repository in
 the clear under public/, is given no creation rule, and is readable at
@@ -255,10 +256,25 @@ filesystem does not reach a copy already written to swap. A mode-0700 directory
 is readable by every process running as you for the length of the run, where the
 pipe this replaced was readable by neither a third process nor a shell.
 
-And it is not a sandbox. The script runs with the caller's filesystem and
-network: one that copies $in/dep/name elsewhere, or writes an output outside
-$out, has put plaintext somewhere this command does not look. What the script
-does with a value is the script author's to get right.
+What the directory no longer has to carry alone is the script. It runs inside a
+sandbox, so a copy of $in/dep/name to somewhere this command does not look fails
+rather than succeeding quietly.
+
+\u{2500}\u{2500} the envelope \u{2500}\u{2500}
+A script and its validation fragments run inside a sandbox: the staging root is
+the only writable path, the nix store is read-only, and there is no network. The
+envelope is clan's own \u{2014} bubblewrap on linux, sandbox-exec on darwin \u{2014} so a
+fragment meets the same confinement under either system's default executor. A
+validation fragment gets it with no writable path at all, because the staging
+root has been shredded by the time a candidate is judged; the candidate still
+arrives on standard input.
+
+`network = true` on the generator re-shares the network and nothing else, for
+the script and the validation alike. The filesystem confinement stays, so what
+remains yours to get right is what a granted connection carries.
+
+There is no --no-sandbox and nothing spelled otherwise. Where no backend runs,
+this refuses before the first fragment and names what it looked for.
 
 Standard error and standard output both reach you, so diagnostics are free and
 neither is a value.

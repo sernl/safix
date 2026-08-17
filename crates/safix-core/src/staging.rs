@@ -328,10 +328,21 @@ pub fn names_in(directory: &Path) -> Vec<String> {
 ///
 /// clan asks `Path.is_file()`, which follows a symlink and answers for its
 /// target, and which answers false for a directory. Both are matched rather than
-/// tightened, and the reason the first is not a hole worth closing is that the
-/// script has the caller's filesystem either way: a generator that wanted to
-/// place `/etc/passwd` in an output could copy it as easily as link to it, so
-/// refusing the link would move the hazard rather than remove it.
+/// tightened, because the executor interface is clan's and a divergence here is a
+/// generator that behaves differently under the two systems.
+///
+/// The reason recorded for the first of those until 0.3 no longer holds, and the
+/// replacement is weaker rather than absent. It used to be that a fragment had
+/// the caller's filesystem either way, so a generator wanting `/etc/passwd` in an
+/// output could copy it as easily as link to it and refusing the link would move
+/// the hazard rather than remove it. Since `sandbox` the copy fails: the target
+/// does not exist inside the envelope. The link still resolves *here*, outside
+/// it, where this call and [`Staging::read`] run — so a symlink out of the
+/// staging root is a read the envelope would otherwise have refused. Whether to
+/// diverge from clan and answer this from `symlink_metadata` is recorded as an
+/// open question in `openspec/changes/adopt-generator-sandbox/design.md`; it is a
+/// change to what the shared interface admits, not a tightening this module can
+/// make on its own.
 #[must_use]
 pub fn is_output(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
