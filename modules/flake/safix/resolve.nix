@@ -248,6 +248,14 @@ let
   # It is the same argument `audienceSeparator` makes: an ambiguous element form is
   # two audiences reaching one directory, so one recipient rule over both
   # audiences' secrets.
+  #
+  # One shell nuance rides the organization marker and is accepted: zsh expands a
+  # word that *begins* with `=` (EQUALS expansion), so a user cd'd into shared/
+  # typing `cat =acme/…` unquoted needs a quote or noequals there. As a path
+  # component after `secrets/…/` — every rendered use — no shell touches it, and
+  # the candidates that avoid the quirk each trip something stronger: `~` and `!`
+  # expand in more shells in more positions, `+` and `.` and `^` are regex atoms
+  # the policy's own path_regex would then have to escape.
   audienceMarkers =
     let
       markers = {
