@@ -30,91 +30,111 @@
 
 mod harness;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use harness::{Fixture, disk_backed_directory, kernel_says_memory_backed};
-use safix_core::staging;
+use harness::{Fixture, disk_backed_directory};
 
-/// Every mount this machine has, as paths the probe can be asked about.
+/// The oracle half, which only linux has an oracle for.
 ///
-/// Read from the mount table rather than guessed at, and filtered to the ones
-/// this process can actually stat: a mount it cannot enter answers `None` from
-/// both readings, which is agreement about nothing.
-fn interrogable_mounts() -> Vec<PathBuf> {
-    let Ok(mounts) = std::fs::read_to_string("/proc/mounts") else {
-        return Vec::new();
-    };
-    let mut found: Vec<PathBuf> = mounts
-        .lines()
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .map(PathBuf::from)
-        .filter(|path| std::fs::metadata(path).is_ok())
-        .collect();
-    found.sort();
-    found.dedup();
-    found
-}
+/// The comparison this module makes needs a reading of the mount table that does
+/// not come from the probe under test, and `/proc/mounts` is that reading. darwin
+/// has no equivalent to offer, so there the comparison would have nothing to
+/// compare and would say so — correctly, but about the platform rather than about
+/// safix. Gated rather than left to fail for that reason, and the check that runs
+/// this target is absent on darwin for the same one; what the platform guarantees
+/// instead is the refusal, which
+/// `staging::tests::establishment_answers_the_mounts_it_found` asserts and
+/// `safix-memory-backing`'s absence records. This gate is what keeps the
+/// whole-suite build honest where the check is absent.
+#[cfg(target_os = "linux")]
+mod kernel_table {
+    use std::path::PathBuf;
 
-/// The runtime's `statfs` probe and the kernel's mount table agree, mount by
-/// mount.
-///
-/// The severe half is the disk-backed direction. A probe that answered
-/// "memory-backed" for everything — which is exactly what defeating the rule
-/// looks like, and exactly what the old drill could not see — fails here on the
-/// first mount the table calls `ext4`, `btrfs`, `xfs`, `overlay` or anything
-/// else that is not one of the two memory filesystems.
-///
-/// Disagreement is asserted per mount and the mount is named, because "some
-/// mount disagrees" is not a report anybody can act on.
-#[test]
-fn the_runtime_probe_agrees_with_the_kernels_own_mount_table() {
-    let mounts = interrogable_mounts();
-    assert!(
-        !mounts.is_empty(),
-        "no mount was readable from /proc/mounts, so this asserted nothing"
-    );
+    use safix_core::staging;
 
-    let mut compared = 0_usize;
-    let mut memory = 0_usize;
-    let mut disk = 0_usize;
+    use crate::harness::kernel_says_memory_backed;
 
-    for mount in &mounts {
-        let (Some(kernel), Some(probe)) = (
-            kernel_says_memory_backed(mount),
-            staging::memory_backed(mount),
-        ) else {
-            continue;
+    /// Every mount this machine has, as paths the probe can be asked about.
+    ///
+    /// Read from the mount table rather than guessed at, and filtered to the ones
+    /// this process can actually stat: a mount it cannot enter answers `None` from
+    /// both readings, which is agreement about nothing.
+    fn interrogable_mounts() -> Vec<PathBuf> {
+        let Ok(mounts) = std::fs::read_to_string("/proc/mounts") else {
+            return Vec::new();
         };
-        assert_eq!(
-            probe,
-            kernel,
-            "the runtime's probe and /proc/mounts disagree about {}",
-            mount.display()
-        );
-        compared = compared.saturating_add(1);
-        if kernel {
-            memory = memory.saturating_add(1);
-        } else {
-            disk = disk.saturating_add(1);
-        }
+        let mut found: Vec<PathBuf> = mounts
+            .lines()
+            .filter_map(|line| line.split_whitespace().nth(1))
+            .map(PathBuf::from)
+            .filter(|path| std::fs::metadata(path).is_ok())
+            .collect();
+        found.sort();
+        found.dedup();
+        found
     }
 
-    assert!(
-        compared > 0,
-        "no mount could be read by both, so the two readings were never compared"
-    );
-    // Both directions have to be present or the agreement is one-sided: a probe
-    // stuck at either answer agrees with a machine that only has mounts of that
-    // kind, and this suite would have proved nothing about it.
-    assert!(
-        memory > 0,
-        "no memory-backed mount was compared, so a probe stuck at 'disk-backed' would pass"
-    );
-    assert!(
-        disk > 0,
-        "no disk-backed mount was compared, so a probe stuck at 'memory-backed' would pass — \
-         which is the exact defeat this file exists to catch"
-    );
+    /// The runtime's `statfs` probe and the kernel's mount table agree, mount by
+    /// mount.
+    ///
+    /// The severe half is the disk-backed direction. A probe that answered
+    /// "memory-backed" for everything — which is exactly what defeating the rule
+    /// looks like, and exactly what the old drill could not see — fails here on
+    /// the first mount the table calls `ext4`, `btrfs`, `xfs`, `overlay` or
+    /// anything else that is not one of the two memory filesystems.
+    ///
+    /// Disagreement is asserted per mount and the mount is named, because "some
+    /// mount disagrees" is not a report anybody can act on.
+    #[test]
+    fn the_runtime_probe_agrees_with_the_kernels_own_mount_table() {
+        let mounts = interrogable_mounts();
+        assert!(
+            !mounts.is_empty(),
+            "no mount was readable from /proc/mounts, so this asserted nothing"
+        );
+
+        let mut compared = 0_usize;
+        let mut memory = 0_usize;
+        let mut disk = 0_usize;
+
+        for mount in &mounts {
+            let (Some(kernel), Some(probe)) = (
+                kernel_says_memory_backed(mount),
+                staging::memory_backed(mount),
+            ) else {
+                continue;
+            };
+            assert_eq!(
+                probe,
+                kernel,
+                "the runtime's probe and /proc/mounts disagree about {}",
+                mount.display()
+            );
+            compared = compared.saturating_add(1);
+            if kernel {
+                memory = memory.saturating_add(1);
+            } else {
+                disk = disk.saturating_add(1);
+            }
+        }
+
+        assert!(
+            compared > 0,
+            "no mount could be read by both, so the two readings were never compared"
+        );
+        // Both directions have to be present or the agreement is one-sided: a
+        // probe stuck at either answer agrees with a machine that only has mounts
+        // of that kind, and this suite would have proved nothing about it.
+        assert!(
+            memory > 0,
+            "no memory-backed mount was compared, so a probe stuck at 'disk-backed' would pass"
+        );
+        assert!(
+            disk > 0,
+            "no disk-backed mount was compared, so a probe stuck at 'memory-backed' would pass — \
+             which is the exact defeat this file exists to catch"
+        );
+    }
 }
 
 /// A run pointed at a directory the *kernel* calls disk-backed is refused.

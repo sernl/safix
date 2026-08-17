@@ -1136,7 +1136,7 @@ impl Fixture {
             }
             _ => Command::new(safix()),
         };
-        command.args(arguments);
+        command.args(acknowledged(arguments));
         self.environment(&mut command, Reporter::Plain);
         for (variable, value) in extra {
             command.env(variable, value);
@@ -1282,7 +1282,7 @@ impl Fixture {
         extra: &[(&str, &str)],
     ) -> Run {
         let mut command = Command::new(safix());
-        command.args(arguments);
+        command.args(acknowledged(arguments));
         self.environment(&mut command, Reporter::Plain);
         for (name, value) in extra {
             command.env(name, value);
@@ -1363,7 +1363,7 @@ impl Fixture {
             }
             None => Command::new(safix()),
         };
-        command.args(arguments);
+        command.args(acknowledged(arguments));
         self.environment(&mut command, Reporter::Plain);
         command.stdin(Stdio::from(terminal.slave));
         command.stdout(Stdio::piped());
@@ -1397,7 +1397,7 @@ impl Fixture {
     /// itself.
     pub fn command(&self, arguments: &[&str]) -> Command {
         let mut command = Command::new(safix());
-        command.args(arguments);
+        command.args(acknowledged(arguments));
         self.environment(&mut command, Reporter::Plain);
         command
     }
@@ -1441,7 +1441,7 @@ impl Fixture {
             .arg(signal)
             .arg(seconds)
             .arg(safix());
-        command.args(arguments);
+        command.args(acknowledged(arguments));
         self.environment(&mut command, Reporter::Plain);
         for (name, value) in extra {
             command.env(name, value);
@@ -1485,7 +1485,13 @@ impl Fixture {
             }
             _ => Command::new(program),
         };
-        command.args(arguments);
+        // `run_program` sends this at `strace` and at the shim as well as at
+        // safix, and neither of those knows the acknowledgement.
+        if program == safix() {
+            command.args(acknowledged(arguments));
+        } else {
+            command.args(arguments);
+        }
         self.environment(&mut command, reporter);
         for (name, value) in extra {
             command.env(name, value);
@@ -2021,6 +2027,50 @@ fn rules_block(shared_anchors: &[&str]) -> String {
         writeln!(rules, "          - *{anchor}").unwrap();
     }
     rules
+}
+
+/// The argument vector a run gets, carrying the acknowledgement where the
+/// platform leaves nothing else.
+///
+/// `SAFIX_TEST_DISK_STAGING` says the caller accepts disk-backed staging — see
+/// [`staging_root`], which reads it for the suite's own scratch directory. The
+/// runtime needs telling the same fact separately, because it decides for itself
+/// where a value may be staged and on a platform with no tmpfs nothing it would
+/// stage into answers memory-backed: `safix_core::staging::memory_backed` reads
+/// `statfs` for linux's tmpfs and ramfs and declines to guess at anything else.
+/// Its answer there is a refusal naming this flag. So where the escape is in
+/// force, a run of a verb that stages carries the acknowledgement, and the suite
+/// exercises the platform's documented mode instead of two dozen copies of its
+/// refusal.
+///
+/// The three verbs are the three places `Staging::establish` is reached from —
+/// `edit`, `generate` and `enroll` — so the list is closed by the runtime rather
+/// than chosen. Every other verb refuses an option it does not know, or worse
+/// reads it as a positional, which is why this is not a flag to add blindly.
+///
+/// Inserted after the verb rather than before it, for two reasons that are both
+/// load-bearing: `generate` stops reading flags at its first positional, and
+/// [`refuse_a_real_card`] and [`refuse_a_real_database`] identify a run by
+/// `arguments.first()`, which anything prepended would disarm.
+///
+/// A vector already carrying the flag is returned untouched, which leaves the
+/// acknowledged leg of `the_acknowledgement_is_the_only_way_past_the_refusal`
+/// saying what it says. Its refusing leg needs a run *without* the flag and keeps
+/// one: that drill names a directory the kernel calls disk-backed, and where no
+/// mount table can be read none can be named, so it reports itself skipped on
+/// exactly the platforms this escape is in force on.
+fn acknowledged(arguments: &[&str]) -> Vec<String> {
+    let given: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+    let stages = matches!(arguments.first(), Some(&"edit" | &"generate" | &"enroll"));
+    if std::env::var_os("SAFIX_TEST_DISK_STAGING").is_none()
+        || !stages
+        || arguments.contains(&safix_core::staging::ACKNOWLEDGEMENT)
+    {
+        return given;
+    }
+    let mut acknowledged = given;
+    acknowledged.insert(1, safix_core::staging::ACKNOWLEDGEMENT.to_owned());
+    acknowledged
 }
 
 /// Refuse an enrollment run that has not been pointed at the card stub.
