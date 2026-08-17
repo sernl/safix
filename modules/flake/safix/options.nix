@@ -1,11 +1,12 @@
-# The two records safix reads, and the whole of what a consumer declares.
+# The records safix reads, and the whole of what a consumer declares.
 #
-# Both are plain `attrsOf` options with no default derived from anything outside
-# this namespace. That is the property an adapter rests on: a module that sets
-# `flake.safix.users` from a `mapAttrs` over a consumer's own registry and a
+# Every one is a plain `attrsOf` option with no default derived from anything
+# outside this namespace. That is the property an adapter rests on: a module that
+# sets `flake.safix.users` from a `mapAttrs` over a consumer's own registry and a
 # module that sets it by hand are indistinguishable to the resolver, so bridging
 # an existing user vocabulary is a projection the consumer writes rather than an
-# integration point safix has to offer.
+# integration point safix has to offer. The same holds of a consumer's host
+# inventory projected into `flake.safix.machines`.
 #
 # Attrsets merge, so declarations may be scattered one per file anywhere in a
 # consumer's tree and the resolver still sees one record. safix reads no path, no
@@ -60,6 +61,69 @@ in
         It is deliberately not a consumer's user registry and never reads one. A
         consumer with its own users writes a projection from theirs into this one;
         the two are different objects that happen to share a name.
+      '';
+    };
+
+    machines = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.machine;
+      example = lib.literalExpression ''
+        {
+          deck = {
+            recipient = "age1...";
+            owner = "ana";
+            tags = [ "laptop" ];
+          };
+        }
+      '';
+      description = ''
+        The machines an audience may name: each one's recipient — the age form of
+        the host identity its system scope already decrypts with — the person who
+        owns it, and its tags.
+
+        Declaring a machine is inert until something names it. A tree with
+        machines declared and no audience reaching one generates the same policy,
+        the same rules and the same files as a tree without them, byte for byte:
+        a machine earns an anchor when a rule needs its key and not before.
+
+        A machine holds nothing of its own. There is no `carries`, no `private`
+        and no `sharedWith` here, because everything a machine holds arrives
+        through a grant aimed at it from
+        `flake.safix.users.<u>.sharedWith.<machine>`.
+      '';
+    };
+
+    groups = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.group;
+      example = lib.literalExpression ''{ oncall.members = [ "ana" "bo" ]; }'';
+      description = ''
+        The groups an audience may name, each a set of subjects — people,
+        machines, or other groups.
+
+        A group audience is encrypted to the expanded membership's keys, and the
+        file it lands in is named for the group rather than for its members, so
+        membership change is a re-wrap of one file rather than a migration to
+        another. A hundred-member guest list in a directory name is not a name.
+
+        Declaring a group is inert until an audience names it, on the same terms
+        as `machines`.
+      '';
+    };
+
+    silos = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.silo;
+      example = lib.literalExpression ''{ corp.groups = [ "contractors" "staff" ]; }'';
+      description = ''
+        Named sets of `flake.safix.groups` that no one file's audience may span.
+
+        Evaluation refuses any audience reaching subjects of two groups in one
+        set, naming the file, the subjects and the set. That is the only place a
+        silo can be strong: computed where audiences are, it is a file that cannot
+        exist rather than a policy hoping nobody misconfigured one.
+
+        Inert until a group it names appears in an audience.
       '';
     };
 

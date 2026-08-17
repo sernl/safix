@@ -125,7 +125,7 @@
       # on the null/non-null distinction the rule tests, never on a real key.
       fixtureRecipient = "age1fixture000000000000000000000000000000000000000000000000000";
 
-      violationsOf = users: resolve.violations users catalogue;
+      violationsOf = users: resolve.violations { inherit users catalogue; };
 
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
 
@@ -252,7 +252,12 @@
         pinned.path = _cfg: "/home/ana/pinned";
       };
 
-      sharedViolationsOf = users: resolve.violations users sharedCatalogue;
+      sharedViolationsOf =
+        users:
+        resolve.violations {
+          inherit users;
+          catalogue = sharedCatalogue;
+        };
 
       resolvesInShared =
         users: user:
@@ -832,7 +837,7 @@
           ];
 
           unknownRecipientMessages = [
-            "flake.safix.users.ana.sharedWith names 'nobody', which is not a declared user of flake.safix.users"
+            "flake.safix.users.ana.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
           ];
           unknownRecipientFires = true;
 
@@ -847,7 +852,7 @@
           keylessRecipientFires = true;
 
           dormantMessages = [
-            "flake.safix.users.cy.sharedWith names 'nobody', which is not a declared user of flake.safix.users"
+            "flake.safix.users.cy.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
           ];
           dormantFiresForOthers = true;
 
@@ -899,7 +904,7 @@
           ownAndSharedFires = true;
 
           sharedTwiceMessages = [
-            "flake.safix.users.bo receives 'shared-token' from more than one owner: flake.safix.users.ana.sharedWith.bo and flake.safix.users.dee.sharedWith.bo"
+            "flake.safix.users.bo receives 'shared-token' from more than one grant: flake.safix.users.ana.sharedWith.bo and flake.safix.users.dee.sharedWith.bo"
           ];
           sharedTwiceFires = true;
 

@@ -40,7 +40,8 @@ let
     differ, and its failure names that command. Its whole input is
     flake.safix.users — each person's `recipient`, their `recoveryRecipients`,
     and the secrets they own and share under `carries`, `private` and
-    `sharedWith` — together with flake.safix.catalogue.
+    `sharedWith` — together with flake.safix.catalogue, and with
+    flake.safix.machines and flake.safix.groups where an audience names one.
 
     ── one rule per audience ──
     A sops file has a single data key, wrapped once per recipient, so anyone who
@@ -55,6 +56,13 @@ let
     path states who can open it without opening it. The separator is one the name
     alphabet excludes, which is what keeps two audiences from reaching one
     directory and so one rule.
+
+    An audience member is a subject: a person, a machine whose recipient is the
+    age form of the host identity it already decrypts with, or a group. A group
+    appears as @<group> and the owner of a machine as @~<machine>, both marks the
+    name alphabet excludes. A marked member is a readership its own declaration
+    decides, so adding a member or changing an owner re-wraps this file's rule
+    rather than moving the secret to another directory.
 
     ── anchoring is load-bearing ──
     Anchoring survives every edit to the generator, in two independent ways:
@@ -95,11 +103,19 @@ let
   '';
 
   # Registry-wide anchor order: recovery identities first, sorted by anchor, then
-  # one `<user>-safix` per person that records a recipient, sorted by user. Rule
-  # bodies are emitted in this order too, so a rule's recipient list reads the
-  # same way the keys block does.
+  # one `<user>-safix` per person that records a recipient, sorted by user, then
+  # one `<machine>-safix` per machine a rule needs the key of. Rule bodies are
+  # emitted in this order too, so a rule's recipient list reads the same way the
+  # keys block does.
+  #
+  # A person who records a recipient earns an anchor whether or not any rule names
+  # them: their recipient is their custody record, and `safix adduser` writes one
+  # before they hold anything. A machine's is not a custody record but a key some
+  # rule needs, so it earns an anchor when a rule needs it and not before — which
+  # is what makes declaring a machine nobody has granted anything to leave this
+  # file byte-identical.
   anchorsOf =
-    users:
+    users: machines: keysInUse:
     let
       recovery = lib.concatMap (
         user:
@@ -118,8 +134,23 @@ let
         key = users.${user}.recipient;
         note = users.${user}.recipientNote;
       }) (sortNames (builtins.attrNames (lib.filterAttrs (_n: u: u.recipient != null) users)));
+
+      hosts =
+        map
+          (machine: {
+            anchor = "${machine}-safix";
+            key = machines.${machine}.recipient;
+            note = machines.${machine}.recipientNote;
+          })
+          (
+            sortNames (
+              builtins.attrNames (
+                lib.filterAttrs (_n: m: m.recipient != null && builtins.elem m.recipient keysInUse) machines
+              )
+            )
+          );
     in
-    lib.sort (a: b: a.anchor < b.anchor) deduped ++ primary;
+    lib.sort (a: b: a.anchor < b.anchor) deduped ++ primary ++ hosts;
 
   audienceNote =
     audience:
@@ -133,14 +164,16 @@ let
       + "than adding a recipient to one of their personal files.";
 
   plan =
-    users: catalogue:
+    registry:
     let
-      anchors = anchorsOf users;
+      audiences = resolve.audiencesOf registry;
+
+      anchors = anchorsOf registry.users (registry.machines or { }) (
+        lib.unique (lib.concatMap (a: a.recipients) (lib.attrValues audiences))
+      );
       anchorOfKey = lib.listToAttrs (map (a: lib.nameValuePair a.key a.anchor) anchors);
       order = lib.imap0 (i: a: lib.nameValuePair a.anchor i) anchors;
       rankOf = lib.listToAttrs order;
-
-      audiences = resolve.audiencesOf users catalogue;
     in
     {
       inherit anchors;
@@ -172,7 +205,7 @@ let
       ) p.rules
     );
 
-  render = users: catalogue: renderPlan (plan users catalogue);
+  render = registry: renderPlan (plan registry);
 
   # What a consumer's drift check says when the committed policy and the
   # generated one disagree. A named string rather than prose inlined in a

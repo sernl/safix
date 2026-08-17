@@ -1,8 +1,31 @@
-# The resolution algebra, as pure functions of the two records it reads —
-# `users` and `catalogue` — rather than of the flake config. ./default.nix binds
-# them to `flake.safix.users` and `flake.safix.catalogue`; the checks bind them
-# to synthetic fleets, which is the only way an error path in here can be shown
-# to fire.
+# The resolution algebra, as pure functions of the records it reads — `users`,
+# `catalogue`, `machines`, `groups` and `silos` — rather than of the flake
+# config. ./default.nix binds them to `flake.safix.*`; the checks bind them to
+# synthetic fleets, which is the only way an error path in here can be shown to
+# fire.
+#
+# Every entry point takes those records as one attrset with the three subject
+# records defaulted to empty, so a call that names none of them is exactly the
+# tree that declares none. That is what makes the inertness property structural
+# rather than a claim about a code path: there is one algebra, and a fleet with no
+# machines, groups or silos travels the same one.
+#
+# ── one audience algebra over subjects ──
+# A subject is what can hold a key and appear in an audience: a person, a
+# machine, or a group of subjects. A machine's recipient is the age form of the
+# host identity its system scope already decrypts with, so a machine subject
+# introduces no identity and no enrollment step; a group's recipients are its
+# expanded membership's.
+#
+# A grant names a subject by reference, and a reference is either a subject's own
+# name or `ownerOf.<machine>`, which resolves through that machine's `owner`. An
+# audience is the sorted list of *elements* those references render as: a subject
+# enumerated in place is its own name, and a reference resolved through a
+# declaration is marked — see `audienceMarkers` — so a reader can tell from the
+# path whether a file's readership is the list in front of them or a record that
+# can change under it. The file is named for the elements rather than for the
+# expansion, which is what makes a membership change or an ownership change a
+# re-wrap of one file rather than a migration to another.
 #
 # ── three sources, one name space ──
 # A user's secrets come from three places. `carries` selects from the catalogue,
@@ -72,6 +95,27 @@ let
 
   applyOverride = base: override: base // lib.filterAttrs (_: v: v != null) override;
 
+  # The records the resolver reads, as one value. The three subject records
+  # default to empty and the pattern is closed, so a misspelled record name is an
+  # error rather than a silent fall-back to the empty one.
+  registryOf =
+    {
+      users,
+      catalogue ? { },
+      machines ? { },
+      groups ? { },
+      silos ? { },
+    }:
+    {
+      inherit
+        users
+        catalogue
+        machines
+        groups
+        silos
+        ;
+    };
+
   holds = userRec: name: userRec.carries ? ${name} || userRec.private ? ${name};
 
   ownedNames =
@@ -125,6 +169,140 @@ let
       "safix placement: the audience separator '${sep}' is drawn from the alphabet wellFormedName admits, so a user name can contain it and two distinct audiences can be joined into one directory name — one recipient rule over two audiences' secrets. Choose a separator outside [a-z0-9_-] rather than refusing names that contain this one; the separator is forgeable across an element boundary, so no refusal restores injectivity.";
     sep;
 
+  # ── the subject name space ──
+  # One name space over all three kinds. Two kinds of declaration sharing a name
+  # is refused rather than resolved by precedence, because every audience element,
+  # every path and every anchor is derived from the name alone: a precedence rule
+  # would decide who reads a file, silently, at the point one of the two
+  # declarations was written.
+  isPerson = r: name: r.users ? ${name};
+  isMachine = r: name: r.machines ? ${name};
+  isGroup = r: name: r.groups ? ${name};
+  isSubject = r: name: isPerson r name || isMachine r name || isGroup r name;
+
+  # The reference a grant names a subject by: the subject's own name, or the owner
+  # of a machine. `.` is outside the alphabet `wellFormedName` admits, so
+  # `ownerOf.<machine>` can never be a declared subject's name and the two forms
+  # need no disambiguation beyond this prefix.
+  ownerRefPrefix = "ownerOf.";
+  isOwnerRef = ref: lib.hasPrefix ownerRefPrefix ref;
+  ownerRefMachine = ref: lib.removePrefix ownerRefPrefix ref;
+
+  # How a reference is written in the directory its audience's file sits in.
+  #
+  # A subject enumerated in place is its own name; a reference resolved through a
+  # declaration is marked. The marker is what a reader needs: an unmarked element
+  # names a readership the path states in full, and a marked one names a
+  # declaration that can change the readership without changing the path — which
+  # is the point, because that is what makes membership and ownership changes
+  # re-wraps of one file rather than migrations to another.
+  #
+  # Both markers are drawn from outside the alphabet `wellFormedName` admits and
+  # from outside the separator, so no name can carry one and the three element
+  # forms partition by their leading characters: the owner marker extends the
+  # group marker with a character a group name cannot start with, which is what
+  # keeps `@<group>` and `@~<machine>` distinct. The assertion is the whole of
+  # that argument, and it is the same argument `audienceSeparator` makes: an
+  # ambiguous element form is two audiences reaching one directory, so one
+  # recipient rule over both audiences' secrets.
+  audienceMarkers =
+    let
+      markers = {
+        group = "@";
+        owner = "@~";
+      };
+      outsideAlphabet = m: builtins.match "[a-z0-9_-]*" m == null;
+      kindTail = lib.removePrefix markers.group markers.owner;
+    in
+    assert lib.assertMsg
+      (
+        lib.all outsideAlphabet (lib.attrValues markers)
+        && outsideAlphabet kindTail
+        && !(lib.any (m: lib.hasInfix audienceSeparator m) (lib.attrValues markers))
+      )
+      "safix placement: an audience marker is drawn from the alphabet wellFormedName admits or carries the audience separator, so a subject name can forge one and two distinct audiences can be joined into one directory name — one recipient rule over two audiences' secrets. Choose markers outside [a-z0-9_-] whose kinds stay distinguishable by their leading characters.";
+    markers;
+
+  elementOf =
+    r: ref:
+    if isOwnerRef ref then
+      "${audienceMarkers.owner}${ownerRefMachine ref}"
+    else if isGroup r ref then
+      "${audienceMarkers.group}${ref}"
+    else
+      ref;
+
+  # The inverse, which is what turns a file's audience back into the references
+  # its recipients are computed from. The owner form is tested first because it
+  # extends the group form.
+  refOfElement =
+    element:
+    if lib.hasPrefix audienceMarkers.owner element then
+      "${ownerRefPrefix}${lib.removePrefix audienceMarkers.owner element}"
+    else if lib.hasPrefix audienceMarkers.group element then
+      lib.removePrefix audienceMarkers.group element
+    else
+      element;
+
+  isMarkedElement = element: lib.hasPrefix audienceMarkers.group element;
+
+  # Every leaf subject a reference reaches: the persons and machines whose keys a
+  # file's data key is wrapped for. A group expands to its members and theirs, an
+  # `ownerOf` reference to the one person the machine's record names, and anything
+  # else to itself.
+  #
+  # Bounded by the number of declared groups rather than recursive, so a cycle
+  # among group definitions leaves groups unexpanded here instead of failing to
+  # terminate. `violations` refuses that cycle by name, which is the only report
+  # of it anyone should ever read; this bound is what makes that true.
+  expandGroups =
+    r: names:
+    let
+      step =
+        current:
+        lib.unique (lib.concatMap (n: if isGroup r n then r.groups.${n}.members else [ n ]) current);
+    in
+    lib.foldl' (acc: _: step acc) names (lib.range 0 (builtins.length (builtins.attrNames r.groups)));
+
+  leavesOf =
+    r: ref:
+    let
+      machine = ownerRefMachine ref;
+      seed =
+        if isOwnerRef ref then
+          lib.optionals (r.machines ? ${machine} && r.machines.${machine}.owner != null) [
+            r.machines.${machine}.owner
+          ]
+        else
+          [ ref ];
+    in
+    sortNames (lib.filter (n: isPerson r n || isMachine r n) (expandGroups r seed));
+
+  # Every key one leaf subject can open a file with. A person's is their custody —
+  # their own recipient and their recovery identities; a machine's is the one host
+  # identity it already decrypts with, and it has no recovery axis because the
+  # grant that reached it always names its owner too, whose custody is the one
+  # that has a recovery story.
+  subjectRecipientsOf =
+    r: name:
+    if isMachine r name then
+      lib.optional (r.machines.${name}.recipient != null) r.machines.${name}.recipient
+    else if isPerson r name then
+      recipientsOf r.users.${name}
+    else
+      [ ];
+
+  # Every key an audience's file has to be wrapped for, expanded from the elements
+  # the directory is named after. Marked elements expand; unmarked ones are
+  # themselves.
+  audienceRecipients =
+    r: audience:
+    lib.unique (
+      lib.concatMap (
+        element: lib.concatMap (leaf: subjectRecipientsOf r leaf) (leavesOf r (refOfElement element))
+      ) audience
+    );
+
   # A catalogue entry's `shared` flag, asked of one person's name — which may not
   # be a catalogue entry at all. A `private` declaration is that person's own
   # value and nobody else's to carry, so it stays unshared even where a catalogue
@@ -132,40 +310,48 @@ let
   # colliding with a shared catalogue name would resolve into a file its holder
   # is not a member of.
   isShared =
-    users: catalogue: user: name:
-    catalogue ? ${name} && catalogue.${name}.shared && !(users.${user}.private ? ${name});
+    r: user: name:
+    r.catalogue ? ${name} && r.catalogue.${name}.shared && !(r.users.${user}.private ? ${name});
 
   # Who a shared entry's audience consists of. `carries` alone, because carrying
   # is the declaration of custody: one file serves every host, so a perHost or
   # perTag selection cannot contribute a member without making the audience a
   # function of which host is being evaluated.
   carriersOf =
-    users: name: sortNames (lib.filter (u: users.${u}.carries ? ${name}) (builtins.attrNames users));
+    r: name: sortNames (lib.filter (u: r.users.${u}.carries ? ${name}) (builtins.attrNames r.users));
+
+  # The references one owner's `sharedWith` aims a name at.
+  grantRefsOf =
+    r: owner: name:
+    lib.filter (ref: (r.users.${owner}.sharedWith.${ref} or { }) ? ${name}) (
+      builtins.attrNames r.users.${owner}.sharedWith
+    );
 
   # A shared entry has one audience for every carrier, so `owner` does not enter
   # it — which is the point: a catalogue entry has no owner, and deriving the
   # audience from the selection is the only statement of custody available to
-  # one. An unshared name keeps the owner-plus-grantees audience unchanged.
+  # one. An unshared name is its owner plus the elements every reference their
+  # `sharedWith` names renders as.
   audienceOf =
-    users: catalogue: owner: name:
-    if isShared users catalogue owner name then
-      carriersOf users name
+    r: owner: name:
+    if isShared r owner name then
+      carriersOf r name
     else
-      sortNames (
-        lib.unique (
-          [ owner ]
-          ++ lib.filter (r: (users.${owner}.sharedWith.${r} or { }) ? ${name}) (
-            builtins.attrNames users.${owner}.sharedWith
-          )
-        )
-      );
+      sortNames (lib.unique ([ owner ] ++ map (elementOf r) (grantRefsOf r owner name)));
 
-  # One file per distinct audience. The singleton case keeps the person's own
-  # directory; the plural case is named for its members in sorted order, so the
-  # path states who can open it.
+  # One file per distinct audience. A lone unmarked element keeps that subject's
+  # own directory; anything wider is named for its elements in sorted order, so
+  # the path states who can open it.
+  #
+  # A lone marked element takes the wider form, because a directory named
+  # `users/<x>` has to mean a subject's own custody: an audience that is one
+  # group is a readership its own declaration decides, which is the opposite
+  # claim. Nothing derives one today — an entry's owner is always in its audience
+  # — and the branch is here so that the invariant does not rest on that staying
+  # true.
   audienceFileOf =
     audience:
-    if builtins.length audience == 1 then
+    if builtins.length audience == 1 && !(isMarkedElement (builtins.head audience)) then
       "secrets/safix/users/${builtins.head audience}/secrets.yaml"
     else
       "secrets/safix/shared/${lib.concatStringsSep audienceSeparator audience}/secrets.yaml";
@@ -176,21 +362,21 @@ let
   # contradiction this cannot report — `builtins.listToAttrs` keeps the first
   # binding and drops the second silently — so it is ruled out upstream by
   # `audienceFileOf` being injective, not detected here.
-  audiencesOf =
-    users: catalogue:
+  audiencesIn =
+    r:
     let
-      owned = lib.concatMap (
-        owner: map (name: audienceOf users catalogue owner name) (ownedNames users.${owner})
-      ) (builtins.attrNames users);
+      owned = lib.concatMap (owner: map (name: audienceOf r owner name) (ownedNames r.users.${owner})) (
+        builtins.attrNames r.users
+      );
     in
-    guard users catalogue (
+    guard r (
       lib.listToAttrs (
         map (
           audience:
           lib.nameValuePair (audienceFileOf audience) {
             inherit audience;
             dir = builtins.dirOf (audienceFileOf audience);
-            recipients = lib.unique (lib.concatMap (u: recipientsOf users.${u}) audience);
+            recipients = audienceRecipients r audience;
           }
         ) (lib.unique owned)
       )
@@ -236,19 +422,17 @@ let
   # and a reviewer all actually operate on.
   publicFileOf =
     audience: name:
-    if builtins.length audience == 1 then
+    if builtins.length audience == 1 && !(isMarkedElement (builtins.head audience)) then
       "public/safix/users/${builtins.head audience}/${name}/value"
     else
       "public/safix/shared/${lib.concatStringsSep audienceSeparator audience}/${name}/value";
 
-  placementsOf =
-    users: catalogue:
+  placementsIn =
+    r:
     lib.mapAttrs (
       user: _:
       let
-        sources = sourcesOf {
-          inherit users catalogue user;
-        };
+        sources = sourcesIn r user;
         entryOf = src: applyOverride src.base src.override;
 
         # Which generator, if any, declares this name as a public output. Read
@@ -268,12 +452,12 @@ let
         name: src:
         let
           entry = entryOf src;
-          audience = audienceOf users catalogue src.owner name;
+          audience = audienceOf r src.owner name;
         in
         {
           inherit (src) origin owner;
           file = audienceFileOf audience;
-          shared = isShared users catalogue src.owner name;
+          shared = isShared r src.owner name;
           key = if entry.sopsKey != null then entry.sopsKey else name;
           public = if publiclyDeclared name then publicFileOf audience name else null;
           generator =
@@ -286,13 +470,13 @@ let
                 # this generator writes agrees. A generator whose outputs
                 # disagree never reaches here: `generatorViolations` refuses it,
                 # naming both sides.
-                share = lib.all (
-                  output: sources ? ${output} && isShared users catalogue sources.${output}.owner output
-                ) ([ name ] ++ builtins.attrNames entry.generator.files);
+                share = lib.all (output: sources ? ${output} && isShared r sources.${output}.owner output) (
+                  [ name ] ++ builtins.attrNames entry.generator.files
+                );
               };
         }
       ) sources
-    ) users;
+    ) r.users;
 
   # The two accessors a consuming module reads an output through, as functions
   # of a root rather than of the flake, so a check can point them at a fixture
@@ -301,10 +485,10 @@ let
   # `outputPathOf` answers for every output and is a path, never a value: for a
   # secret it is the document the provisioner decrypts, for a public output the
   # file holding its bytes.
-  outputPathOf =
-    users: catalogue: user: name:
+  outputPathIn =
+    r: user: name:
     let
-      placement = placementOrThrow users catalogue user name "has no path";
+      placement = placementOrThrow r user name "has no path";
     in
     if placement.public != null then placement.public else placement.file;
 
@@ -323,10 +507,10 @@ let
   # thunk; what it buys is that the likeliest authoring mistake in this surface —
   # reaching for a value on a secret because the sibling public output has one —
   # produces a sentence saying what to do instead.
-  publicValueOf =
-    users: catalogue: root: user: name:
+  publicValueIn =
+    r: root: user: name:
     let
-      placement = placementOrThrow users catalogue user name "has no value to read";
+      placement = placementOrThrow r user name "has no value to read";
       path = "${toString root}/${placement.public}";
     in
     if placement.public == null then
@@ -337,16 +521,16 @@ let
       throw "safix public: '${name}' of flake.safix.users.${user} has not been generated yet, so ${placement.public} does not exist. Run `safix generate ${user} ${name}`.";
 
   placementOrThrow =
-    users: catalogue: user: name: what:
-    (placementsOf users catalogue).${user}.${name}
+    r: user: name: what:
+    (placementsIn r).${user}.${name}
       or (throw "safix public: flake.safix.users.${user} holds no secret named '${name}', so it ${what}");
 
   # Every path the public store holds, over every user. What the recipient
   # policy is checked against: no generated creation rule may match any of them.
-  publicPathsOf =
-    users: catalogue:
+  publicPathsIn =
+    r:
     let
-      placements = placementsOf users catalogue;
+      placements = placementsIn r;
     in
     sortNames (
       lib.unique (
@@ -355,7 +539,7 @@ let
           lib.concatMap (
             name: lib.optional (placements.${user}.${name}.public != null) placements.${user}.${name}.public
           ) (builtins.attrNames placements.${user})
-        ) (builtins.attrNames users)
+        ) (builtins.attrNames r.users)
       )
     );
 
@@ -483,13 +667,13 @@ let
   # statement about one user's resolved set, and there is no resolved set to
   # state it against until custody resolves — `placementsOf` throws through
   # `guard` rather than returning a partial answer.
-  generatorViolations =
-    users: catalogue:
-    if violations users catalogue != [ ] then
+  generatorViolationsIn =
+    r:
+    if violationsIn r != [ ] then
       [ ]
     else
       let
-        placements = placementsOf users catalogue;
+        placements = placementsIn r;
 
         perUser =
           user:
@@ -497,11 +681,9 @@ let
             p = placements.${user};
             gens = generatorsIn p;
 
-            # The record before `placementsOf` replaces `share` with the derived
+            # The record before `placementsIn` replaces `share` with the derived
             # value, which is the only place the authored one is still visible.
-            raw = sourcesOf {
-              inherit users catalogue user;
-            };
+            raw = sourcesIn r user;
             authoredShareOf = n: (applyOverride raw.${n}.base raw.${n}.override).generator.share;
             producers = producersOf p;
             at = n: "flake.safix.users.${user}'s generator on '${n}'";
@@ -597,7 +779,7 @@ let
                 outputs = outputsOf n;
                 sharedness = map (o: {
                   name = o;
-                  shared = p ? ${o} && isShared users catalogue p.${o}.owner o;
+                  shared = p ? ${o} && isShared r p.${o}.owner o;
                 }) outputs;
                 yes = lib.filter (o: o.shared) sharedness;
                 no = lib.filter (o: !o.shared) sharedness;
@@ -704,12 +886,12 @@ let
           in
           if structural != [ ] then structural else cyclic;
       in
-      lib.concatMap perUser (builtins.attrNames users);
+      lib.concatMap perUser (builtins.attrNames r.users);
 
   guardGenerators =
-    users: catalogue: value:
+    r: value:
     let
-      found = generatorViolations users catalogue;
+      found = generatorViolationsIn r;
     in
     if found == [ ] then
       value
@@ -727,13 +909,13 @@ let
   #
   # Computed here rather than in the command so there is one implementation of
   # the order and one of the refusals that make an order exist at all.
-  generatorPlanOf =
-    users: catalogue:
-    guardGenerators users catalogue (
+  generatorPlanIn =
+    r:
+    guardGenerators r (
       lib.mapAttrs (
         user: _:
         let
-          mine = (placementsOf users catalogue).${user};
+          mine = (placementsIn r).${user};
         in
         {
           order = (topoSplit (generatorEdges mine)).order;
@@ -766,32 +948,108 @@ let
             )
           );
         }
-      ) users
+      ) r.users
     );
 
   grantsOf =
-    users: owner:
+    r: owner:
     lib.concatLists (
       lib.mapAttrsToList (
-        recipient: granted: map (name: { inherit owner recipient name; }) (builtins.attrNames granted)
-      ) users.${owner}.sharedWith
+        reference: granted: map (name: { inherit owner reference name; }) (builtins.attrNames granted)
+      ) r.users.${owner}.sharedWith
     );
 
-  allGrants = users: lib.concatMap (grantsOf users) (builtins.attrNames users);
+  allGrants = r: lib.concatMap (grantsOf r) (builtins.attrNames r.users);
+
+  # Whether a grant's reference names something that resolves: a declared subject,
+  # or the owner of a declared machine that records one.
+  referenceResolves =
+    r: ref:
+    if isOwnerRef ref then
+      r.machines ? ${ownerRefMachine ref} && r.machines.${ownerRefMachine ref}.owner != null
+    else
+      isSubject r ref;
+
+  # The declaration a refusal about one subject points at.
+  subjectPath =
+    r: name:
+    if isMachine r name then
+      "flake.safix.machines.${name}"
+    else if isGroup r name then
+      "flake.safix.groups.${name}"
+    else
+      "flake.safix.users.${name}";
+
+  # The declaration a refusal about one reference points at. A reference that is
+  # not its own only leaf is a group or an owner record, which is the whole reason
+  # this exists: an operator told that some subject cannot be encrypted to has to
+  # know which declaration put them in the audience.
+  referenceNoun =
+    r: ref:
+    if isOwnerRef ref then
+      "the owner flake.safix.machines.${ownerRefMachine ref} records"
+    else
+      subjectPath r ref;
+
+  grantPath =
+    g:
+    "flake.safix.users.${g.owner}.sharedWith.${
+      if isOwnerRef g.reference then "\"${g.reference}\"" else g.reference
+    }";
+
+  # Every grant flattened to one row per leaf subject it reaches.
+  #
+  # The owner is dropped from their own grant's reach. A group naming the person
+  # who granted to it is the ordinary case — sharing with the team one is on — and
+  # they already hold the name through the declaration the grant is about, so
+  # counting them again would report that case as a collision with itself.
+  reachesOf =
+    r:
+    lib.concatMap (
+      g: map (leaf: g // { inherit leaf; }) (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference))
+    ) (lib.filter (g: referenceResolves r g.reference) (allGrants r));
+
+  # Named where a grant reached its subject through a declaration rather than by
+  # naming them, and empty where it named them, so the sentence a direct grant
+  # produces is the one it has always produced.
+  reachClause =
+    r: g:
+    lib.optionalString (
+      g.reference != g.leaf
+    ) " with ${subjectPath r g.leaf}, reached through ${referenceNoun r g.reference},";
+
+  # Group name -> the groups it names as members. The whole of the graph a cycle
+  # can live in: a member that is not a group is a leaf and closes nothing.
+  groupEdges = r: lib.mapAttrs (_g: declared: lib.filter (isGroup r) declared.members) r.groups;
+
+  # Which silo set holds which of its groups over one leaf subject. A subject in
+  # two groups of one set carries the span by itself, which is why this returns
+  # every membership rather than the first.
+  siloMembershipsOf =
+    r: leaf:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        silo: declared:
+        map (group: { inherit silo group; }) (
+          lib.filter (group: isGroup r group && builtins.elem leaf (leavesOf r group)) declared.groups
+        )
+      ) r.silos
+    );
 
   # Every way a set of custody declarations can be wrong, as messages rather than
   # as a throw, so that the same list can be asserted against a literal and
   # thrown from. Ordered, and deterministic: attribute iteration is sorted.
-  violations =
-    users: catalogue:
+  violationsIn =
+    r:
     let
-      names = builtins.attrNames users;
-      grants = allGrants users;
+      names = builtins.attrNames r.users;
+      grants = allGrants r;
 
-      # Rules below index into the recipient's record, so a grant naming nobody
-      # is reported and then dropped rather than turned into a missing-attribute
-      # error with no message of ours on it.
-      known = lib.filter (g: users ? ${g.recipient}) grants;
+      # Rules below index into a resolved reference's own record, so a grant
+      # naming nobody is reported and then dropped rather than turned into a
+      # missing-attribute error with no message of ours on it.
+      resolvable = lib.filter (g: referenceResolves r g.reference) grants;
+      reaches = reachesOf r;
 
       # Checked first because every message and every generated path below
       # interpolates these names.
@@ -801,14 +1059,78 @@ let
           "flake.safix.users names '${user}', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
       ) names;
 
+      # A machine's name and a group's reach the same generated text a person's
+      # does: both become audience elements, and an audience element is a
+      # directory component and part of a rule's path_regex. A silo's name is not
+      # judged here because it reaches prose alone.
+      unsafeSubjectName =
+        lib.concatMap
+          (
+            record:
+            map (
+              name:
+              "flake.safix.${record.field} names '${name}', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
+            ) (lib.filter (n: !(wellFormedName n)) (builtins.attrNames record.declared))
+          )
+          [
+            {
+              field = "machines";
+              declared = r.machines;
+            }
+            {
+              field = "groups";
+              declared = r.groups;
+            }
+          ];
+
       unsafeAnchorName = lib.concatMap (
         user:
         lib.concatMap (
           anchor:
           lib.optional (!(wellFormedName anchor))
             "flake.safix.users.${user}.recoveryRecipients names '${anchor}', which is not [a-z0-9][a-z0-9_-]* and so cannot be a recipient policy anchor"
-        ) (builtins.attrNames users.${user}.recoveryRecipients)
+        ) (builtins.attrNames r.users.${user}.recoveryRecipients)
       ) names;
+
+      # One name space over the three kinds of subject. Two declarations of one
+      # name is refused rather than resolved by precedence, because a precedence
+      # rule would decide who reads a file — an audience element, a directory and
+      # an anchor are each derived from the name alone — silently, at the point one
+      # of the two declarations was written.
+      subjectDeclarations =
+        lib.concatMap
+          (
+            kind:
+            map (name: {
+              inherit name;
+              inherit (kind) field;
+            }) (builtins.attrNames kind.declared)
+          )
+          [
+            {
+              field = "users";
+              declared = r.users;
+            }
+            {
+              field = "machines";
+              declared = r.machines;
+            }
+            {
+              field = "groups";
+              declared = r.groups;
+            }
+          ];
+
+      subjectNameCollision = lib.concatLists (
+        lib.mapAttrsToList (
+          name: declared:
+          lib.optional (builtins.length declared > 1) (
+            "'${name}' is declared as more than one kind of subject, by "
+            + lib.concatMapStringsSep " and " (d: "flake.safix.${d.field}") declared
+            + "; people, machines and groups share one name space"
+          )
+        ) (lib.groupBy (d: d.name) subjectDeclarations)
+      );
 
       # Every authoring surface that can put a name into a resolved set, paired
       # with where it was written, so the refusal below names the declaration
@@ -819,7 +1141,7 @@ let
       secretNameSites = lib.concatMap (
         user:
         let
-          profile = users.${user};
+          profile = r.users.${user};
           site = where: declared: map (name: { inherit user where name; }) (builtins.attrNames declared);
           scopeSites =
             field:
@@ -832,7 +1154,7 @@ let
         site "carries" profile.carries
         ++ site "private" profile.private
         ++ lib.concatLists (
-          lib.mapAttrsToList (recipient: granted: site "sharedWith.${recipient}" granted) profile.sharedWith
+          lib.mapAttrsToList (reference: granted: site "sharedWith.${reference}" granted) profile.sharedWith
         )
         ++ scopeSites "perHost"
         ++ scopeSites "perTag"
@@ -856,14 +1178,14 @@ let
       # referencing it resolve to whichever definition YAML kept.
       anchorDefinitions = lib.concatMap (
         user:
-        lib.mapAttrsToList (anchor: r: {
+        lib.mapAttrsToList (anchor: recovery: {
           inherit anchor user;
-          inherit (r) key;
-        }) users.${user}.recoveryRecipients
-        ++ lib.optional (users.${user}.recipient != null) {
+          inherit (recovery) key;
+        }) r.users.${user}.recoveryRecipients
+        ++ lib.optional (r.users.${user}.recipient != null) {
           anchor = "${user}-safix";
           inherit user;
-          key = users.${user}.recipient;
+          key = r.users.${user}.recipient;
         }
       ) names;
 
@@ -891,12 +1213,12 @@ let
           (
             name:
             "flake.safix.users.${user} declares '${name}', but flake.safix.users.${user}.recipient is null, so ${
-              audienceFileOf (audienceOf users catalogue user name)
+              audienceFileOf (audienceOf r user name)
             } has no recipient to encrypt it to"
           )
           (
-            lib.optionals (users.${user}.recipient == null) (
-              lib.filter (n: !(isShared users catalogue user n)) (ownedNames users.${user})
+            lib.optionals (r.users.${user}.recipient == null) (
+              lib.filter (n: !(isShared r user n)) (ownedNames r.users.${user})
             )
           )
       ) names;
@@ -906,12 +1228,12 @@ let
       # key cannot be wrapped for.
       keylessCarrier = lib.concatMap (
         user:
-        lib.optionals (users.${user}.recipient == null) (
+        lib.optionals (r.users.${user}.recipient == null) (
           lib.concatMap (
             name:
-            lib.optional (isShared users catalogue user name)
+            lib.optional (isShared r user name)
               "flake.safix.users.${user}.carries names '${name}', which flake.safix.catalogue.${name} shares, but flake.safix.users.${user}.recipient is null, so no copy can be encrypted to them"
-          ) (sortNames (builtins.attrNames users.${user}.carries))
+          ) (sortNames (builtins.attrNames r.users.${user}.carries))
         )
       ) names;
 
@@ -920,9 +1242,16 @@ let
       # they can disagree, and one file has one audience.
       sharedAndGranted = lib.concatMap (
         g:
-        lib.optional (isShared users catalogue g.owner g.name)
-          "flake.safix.catalogue.${g.name} is shared, so its audience is every user whose carries names it, and flake.safix.users.${g.owner}.sharedWith.${g.recipient} shares a secret of that name as well; drop the grant and let flake.safix.users.${g.recipient}.carries say it"
-      ) known;
+        lib.optional (isShared r g.owner g.name) (
+          "flake.safix.catalogue.${g.name} is shared, so its audience is every user whose carries names it, and ${grantPath g} shares a secret of that name as well; "
+          + (
+            if isPerson r g.reference then
+              "drop the grant and let flake.safix.users.${g.reference}.carries say it"
+            else
+              "drop the grant: a shared entry's audience is the users whose carries name it, and nothing else can carry"
+          )
+        )
+      ) resolvable;
 
       # `shared` is a statement about an entry's carriers, and a private entry has
       # none — nobody else can select it. Refused rather than ignored, because an
@@ -931,83 +1260,212 @@ let
         user:
         lib.concatMap (
           name:
-          lib.optional users.${user}.private.${name}.shared
+          lib.optional r.users.${user}.private.${name}.shared
             "flake.safix.users.${user}.private.${name} sets shared = true, but a private entry has no carriers other than its holder; declare it in flake.safix.catalogue and let each carrier's carries select it"
-        ) (sortNames (builtins.attrNames users.${user}.private))
+        ) (sortNames (builtins.attrNames r.users.${user}.private))
       ) names;
 
-      unknownRecipient = lib.concatMap (
+      # One message per reference rather than per grant, because the defect is the
+      # reference: a name nobody declared, a machine nobody declared, or a machine
+      # whose record names no owner for the reference to resolve through.
+      references = lib.concatMap (
         owner:
-        lib.concatMap (
-          recipient:
-          lib.optional (!(users ? ${recipient}))
-            "flake.safix.users.${owner}.sharedWith names '${recipient}', which is not a declared user of flake.safix.users"
-        ) (builtins.attrNames users.${owner}.sharedWith)
+        map (reference: { inherit owner reference; }) (builtins.attrNames r.users.${owner}.sharedWith)
       ) names;
+
+      unknownReference = lib.concatMap (
+        ref:
+        let
+          machine = ownerRefMachine ref.reference;
+          at = "flake.safix.users.${ref.owner}.sharedWith";
+        in
+        lib.optional (!(referenceResolves r ref.reference)) (
+          if !(isOwnerRef ref.reference) then
+            "${at} names '${ref.reference}', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+          else if !(r.machines ? ${machine}) then
+            "${at} names the owner of '${machine}', which is not a declared machine of flake.safix.machines"
+          else
+            "${at} names the owner of flake.safix.machines.${machine}, which records none, so the grant resolves to nobody"
+        )
+      ) references;
+
+      # A machine's owner is a person here. Organizations owning machines is a
+      # later change, and a record naming one now would resolve a grant to
+      # something holding no recipient and no custody.
+      machineOwner = lib.concatMap (
+        machine:
+        let
+          owner = r.machines.${machine}.owner;
+        in
+        lib.optional (owner != null && !(isPerson r owner))
+          "flake.safix.machines.${machine}.owner names '${owner}', which is not a declared user of flake.safix.users"
+      ) (builtins.attrNames r.machines);
+
+      unknownGroupMember = lib.concatMap (
+        group:
+        map (
+          member:
+          "flake.safix.groups.${group}.members names '${member}', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+        ) (lib.filter (member: !(isSubject r member)) r.groups.${group}.members)
+      ) (builtins.attrNames r.groups);
+
+      # A group naming itself, directly or through others. Refused by name here so
+      # that the one report anybody reads names the participants: `expandGroups` is
+      # bounded rather than recursive, so a cycle would otherwise surface as a
+      # group audience quietly missing members.
+      groupCycle =
+        let
+          edges = groupEdges r;
+          split = topoSplit edges;
+        in
+        lib.optional (split.stuck != [ ]) (
+          "flake.safix.groups declares a cycle: "
+          + lib.concatMapStringsSep " -> " (n: "'${n}'") (firstCycle edges split.stuck)
+          + ". A membership that cannot be expanded is not a membership."
+        );
+
+      unknownSiloGroup = lib.concatMap (
+        silo:
+        map (
+          group:
+          "flake.safix.silos.${silo}.groups names '${group}', which is not a declared group of flake.safix.groups"
+        ) (lib.filter (group: !(isGroup r group)) r.silos.${silo}.groups)
+      ) (builtins.attrNames r.silos);
+
+      siloRows = lib.concatMap (silo: map (group: { inherit silo group; }) r.silos.${silo}.groups) (
+        builtins.attrNames r.silos
+      );
+
+      # Sets rather than pairs is what keeps the constraint linear, and this is
+      # what that rests on: a group in two sets makes each set's exclusions reach
+      # into the other's, so the two sets are one set that was written as two.
+      groupInTwoSilos = lib.concatLists (
+        lib.mapAttrsToList (
+          group: rows:
+          lib.optional (builtins.length rows > 1) (
+            "flake.safix.groups.${group} is named by more than one silo set, "
+            + lib.concatMapStringsSep " and " (row: "flake.safix.silos.${row.silo}") rows
+            + ". A group in two sets closes each set's exclusions over the other's, which is one set written as two."
+          )
+        ) (lib.groupBy (row: row.group) siloRows)
+      );
 
       carriedAndPrivate = lib.concatMap (
         user:
         map (
           name:
           "flake.safix.users.${user} declares '${name}' in both flake.safix.users.${user}.carries and flake.safix.users.${user}.private"
-        ) (builtins.attrNames (builtins.intersectAttrs users.${user}.carries users.${user}.private))
+        ) (builtins.attrNames (builtins.intersectAttrs r.users.${user}.carries r.users.${user}.private))
       ) names;
 
       notHeld = lib.concatMap (
         g:
-        lib.optional (!(holds users.${g.owner} g.name))
-          "flake.safix.users.${g.owner}.sharedWith.${g.recipient} names '${g.name}', which flake.safix.users.${g.owner} declares in neither carries nor private"
-      ) known;
+        lib.optional (!(holds r.users.${g.owner} g.name))
+          "${grantPath g} names '${g.name}', which flake.safix.users.${g.owner} declares in neither carries nor private"
+      ) resolvable;
+
+      # A reference that resolves and reaches nobody but the person who wrote it.
+      # An empty group and a group whose only member is its own grantor both widen
+      # nothing, and a widening that widens nothing is a declaration that reads as
+      # sharing and resolves as custody of one.
+      emptyReach = lib.concatMap (
+        g:
+        lib.optional (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference) == [ ])
+          "${grantPath g} shares '${g.name}' with ${referenceNoun r g.reference}, which reaches no subject beyond flake.safix.users.${g.owner}, so the grant widens nothing"
+      ) resolvable;
 
       noRecipientKey = lib.concatMap (
         g:
-        lib.optional (users.${g.recipient}.recipient == null)
-          "flake.safix.users.${g.owner}.sharedWith.${g.recipient} shares '${g.name}', but flake.safix.users.${g.recipient}.recipient is null, so no copy can be encrypted to them"
-      ) known;
+        lib.optional (subjectRecipientsOf r g.leaf == [ ])
+          "${grantPath g} shares '${g.name}'${reachClause r g}, but ${subjectPath r g.leaf}.recipient is null, so no copy can be encrypted to them"
+      ) reaches;
 
       ownAndShared = lib.concatMap (
         g:
         let
-          field = if users.${g.recipient}.private ? ${g.name} then "private" else "carries";
+          field = if r.users.${g.leaf}.private ? ${g.name} then "private" else "carries";
         in
-        lib.optional (holds users.${g.recipient} g.name)
-          "flake.safix.users.${g.recipient} declares '${g.name}' in flake.safix.users.${g.recipient}.${field}, and flake.safix.users.${g.owner}.sharedWith.${g.recipient} shares a secret of that name"
-      ) known;
+        lib.optional (isPerson r g.leaf && holds r.users.${g.leaf} g.name)
+          "flake.safix.users.${g.leaf} declares '${g.name}' in flake.safix.users.${g.leaf}.${field}, and ${grantPath g} shares a secret of that name${reachClause r g}"
+      ) reaches;
 
       sharedTwice = lib.concatLists (
         lib.mapAttrsToList (
-          recipient: received:
+          leaf: received:
           lib.concatLists (
             lib.mapAttrsToList (
               name: from:
               lib.optional (builtins.length from > 1) (
-                "flake.safix.users.${recipient} receives '${name}' from more than one owner: "
-                + lib.concatMapStringsSep " and " (g: "flake.safix.users.${g.owner}.sharedWith.${recipient}") from
+                "${subjectPath r leaf} receives '${name}' from more than one grant: "
+                + lib.concatMapStringsSep " and " grantPath from
               )
             ) (lib.groupBy (g: g.name) received)
           )
-        ) (lib.groupBy (g: g.recipient) known)
+        ) (lib.groupBy (g: g.leaf) reaches)
       );
+
+      # The silo constraint, judged where audiences are computed. A file whose
+      # audience reaches two groups one silo set holds apart is a file both silos
+      # can open: one data key, wrapped once per recipient, is the whole reason
+      # this cannot be a read-time policy.
+      crossSiloAudience = lib.concatMap (
+        owner:
+        lib.concatMap (
+          name:
+          let
+            audience = audienceOf r owner name;
+            leaves = lib.unique (lib.concatMap (e: leavesOf r (refOfElement e)) audience);
+            spans = lib.concatMap (leaf: map (m: m // { inherit leaf; }) (siloMembershipsOf r leaf)) leaves;
+            reachedBy =
+              rows: group:
+              sortNames (lib.unique (map (row: row.leaf) (lib.filter (row: row.group == group) rows)));
+          in
+          lib.concatLists (
+            lib.mapAttrsToList (
+              silo: rows:
+              let
+                groups = sortNames (lib.unique (map (row: row.group) rows));
+              in
+              lib.optional (builtins.length groups > 1) (
+                "flake.safix.users.${owner}'s '${name}' resolves an audience spanning silo set flake.safix.silos.${silo}: "
+                + lib.concatMapStringsSep " and " (
+                  group: "flake.safix.groups.${group} reaches ${lib.concatStringsSep ", " (reachedBy rows group)}"
+                ) groups
+                + ". ${audienceFileOf audience} is one file with one data key, so it would be readable from both."
+              )
+            ) (lib.groupBy (row: row.silo) spans)
+          )
+        ) (ownedNames r.users.${owner})
+      ) names;
     in
     unsafeUserName
+    ++ unsafeSubjectName
     ++ unsafeAnchorName
     ++ unsafeSecretName
+    ++ subjectNameCollision
     ++ anchorConflict
-    ++ unknownRecipient
+    ++ unknownReference
+    ++ machineOwner
+    ++ unknownGroupMember
+    ++ groupCycle
+    ++ unknownSiloGroup
+    ++ groupInTwoSilos
     ++ carriedAndPrivate
     ++ notHeld
+    ++ emptyReach
     ++ noRecipientKey
     ++ ownerWithoutRecipient
     ++ keylessCarrier
     ++ ownAndShared
     ++ sharedTwice
     ++ sharedAndGranted
-    ++ sharedPrivateEntry;
+    ++ sharedPrivateEntry
+    ++ crossSiloAudience;
 
   guard =
-    users: catalogue: value:
+    r: value:
     let
-      found = violations users catalogue;
+      found = violationsIn r;
     in
     if found == [ ] then
       value
@@ -1025,38 +1483,47 @@ let
   # The record an owner holds for one of their own names, which is also the
   # record a recipient of it receives.
   ownEntry =
-    {
-      users,
-      catalogue,
-      user,
-      name,
-    }:
+    r: user: name:
     let
-      profile = users.${user};
+      profile = r.users.${user};
     in
     if profile.private ? ${name} then
       profile.private.${name}
     else
-      applyOverride (catalogueEntry catalogue user "carries" name) profile.carries.${name};
+      applyOverride (catalogueEntry r.catalogue user "carries" name) profile.carries.${name};
+
+  # The grants reaching one subject, as the `shared` half of a resolved set. One
+  # function for a person and for a machine, because a grant does not know which
+  # kind it reached: what differs is only where the entries land, which is the
+  # consuming module's question and not this one.
+  inboundFor =
+    r: subject:
+    lib.listToAttrs (
+      map (
+        g:
+        lib.nameValuePair g.name {
+          origin = "shared";
+          inherit (g) owner;
+          base = ownEntry r g.owner g.name;
+          override = { };
+        }
+      ) (lib.filter (g: g.leaf == subject) (reachesOf r))
+    );
 
   # name -> { origin; owner; base; override; } for one user, over all three
   # sources. `base` is the unadjusted record and `override` the adjustment the
   # base layer of the scope algebra contributes, kept apart so that a later scope
   # layer replaces the override rather than compounding with it.
-  sourcesOf =
-    {
-      users,
-      catalogue,
-      user,
-    }:
-    guard users catalogue (
+  sourcesIn =
+    r: user:
+    guard r (
       let
-        profile = users.${user};
+        profile = r.users.${user};
 
         carried = lib.mapAttrs (name: override: {
           origin = "carries";
           owner = user;
-          base = catalogueEntry catalogue user "carries" name;
+          base = catalogueEntry r.catalogue user "carries" name;
           inherit override;
         }) profile.carries;
 
@@ -1066,25 +1533,16 @@ let
           base = entry;
           override = { };
         }) profile.private;
-
-        inbound = lib.listToAttrs (
-          map (
-            g:
-            lib.nameValuePair g.name {
-              origin = "shared";
-              inherit (g) owner;
-              base = ownEntry {
-                inherit users catalogue;
-                user = g.owner;
-                inherit (g) name;
-              };
-              override = { };
-            }
-          ) (lib.filter (g: g.recipient == user) (allGrants users))
-        );
       in
-      carried // privately // inbound
+      carried // privately // inboundFor r user
     );
+
+  # A machine holds exactly what has been granted to it, with the owner's record
+  # unchanged. There is no `carries`, no `private` and no scope algebra here: a
+  # machine declares nothing of its own, and the per-host and per-tag layers are
+  # adjustments to one *person's* resolved set on one host rather than statements
+  # about the host.
+  machineSourcesIn = r: machine: guard r (inboundFor r machine);
 
   # Named rather than inline in the `throw` below so that a check can read what a
   # caller sees, and so that this refusal and `safix`'s own `refuse_unknown_user`
@@ -1107,89 +1565,160 @@ let
       flake.safix.users.
     '';
 
-  # Deny-wins resolution of one user's effective secrets for one host, over the
-  # union of the three sources.
+  # The machine-scope counterpart, and separate prose rather than a parameterized
+  # sentence: a profile naming a machine nobody declared has made a different
+  # mistake from one naming a person nobody declared, and the option it names and
+  # the record it should have named are both different.
+  unknownMachineMessage =
+    machines: machine:
+    ''
+      safix: '${machine}' is not a declared machine of flake.safix.machines.
+
+      Declared machines:
+    ''
+    + lib.concatMapStrings (m: "  - ${m}\n") (sortNames (builtins.attrNames machines))
+    + ''
+
+      A profile selects a machine with safix.machine, which has no default: a
+      machine is a subject an audience names, and safix has no host registry to
+      derive one from. Name one of the above, or declare this one in
+      flake.safix.machines with the age form of the host identity it already
+      decrypts with.
+    '';
+
+  # Deny-wins resolution of one subject's effective secrets for one host, over the
+  # union of the sources that reach them.
   #
   # The membership guard is first because every path into this file goes through
   # here — the two consumption modules by way of `materializeFor`, and any direct
   # `safix.lib` call — and an unguarded selection reports `attribute '<u>'
   # missing` against a line of this file rather than the option that named a
-  # person nobody declared.
+  # subject nobody declared.
+  #
+  # `machine` and `user` are alternatives rather than a pair. A profile serves one
+  # subject, and which kind it serves is the consuming module's own refusal to
+  # make: naming both here would be a resolution of two subjects into one set.
   selectFor =
     {
       users,
-      catalogue,
+      catalogue ? { },
+      machines ? { },
+      groups ? { },
+      silos ? { },
       root,
-      user,
+      user ? null,
+      machine ? null,
       hostname,
       tags,
     }:
-    if !(users ? ${user}) then
+    let
+      r = registryOf {
+        inherit
+          users
+          catalogue
+          machines
+          groups
+          silos
+          ;
+      };
+
+      # Both branches read the placements of whoever owns each name, so a public
+      # output is dropped from a machine's selection for the same reason it is
+      # dropped from a person's: there is no ciphertext, no key and no creation
+      # rule for the provisioner to decrypt.
+      publicOwned =
+        sources: name:
+        let
+          owner = sources.${name}.owner;
+        in
+        (placementsIn r).${owner}.${name}.public != null;
+
+      forMachine =
+        let
+          sources = machineSourcesIn r machine;
+        in
+        lib.mapAttrs (
+          name: src:
+          let
+            entry = src.base;
+          in
+          if entry.sopsFile != null then
+            throw "safix placement: flake.safix.machines.${machine} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${src.owner}.sharedWith instead"
+          else
+            entry // { sopsFile = root + "/${audienceFileOf (audienceOf r src.owner name)}"; }
+        ) (lib.filterAttrs (name: _: !(publicOwned sources name)) sources);
+
+      forUser =
+        let
+          profile = r.users.${user};
+          sources = sourcesIn r user;
+
+          perTagSets = field: map (t: profile.perTag.${t}.${field} or { }) tags;
+
+          addSet = mergeSets (
+            [
+              (lib.mapAttrs (_n: s: s.override) sources)
+              (profile.perHost.${hostname}.add or { })
+            ]
+            ++ perTagSets "add"
+          );
+
+          omitSet = mergeSets ([ (profile.perHost.${hostname}.omit or { }) ] ++ perTagSets "omit");
+
+          forceSet = mergeSets ([ (profile.perHost.${hostname}.force or { }) ] ++ perTagSets "force");
+
+          selected = removeAttrs (
+            (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet
+          ) publicOutputs;
+
+          # A public output is dropped from the selection, and this is the one
+          # place it is dropped, so that `resolveSet`, `resolveNames` and
+          # `materializeFor` cannot disagree about what a person resolves.
+          #
+          # The reason is what selection is for. Every name it returns is handed to
+          # the secret provisioner with a `sopsFile` and a key inside it, and the
+          # provisioner decrypts at activation. A public output has no ciphertext,
+          # no key and no creation rule — that is what declaring it
+          # `files.<n>.secret = false` means — so an entry for one is an activation
+          # that fails to extract a key which will never exist.
+          #
+          # It is still the user's output and `flake.safix.lib.placements` still
+          # names it, which is where `safix generate`, `list` and `check` read it.
+          # A module reads its bytes with `flake.safix.lib.publicValue` at
+          # evaluation, or its path with `outputPath`.
+          publicOutputs = lib.filter (name: (placementsIn r).${user}.${name}.public != null) (
+            builtins.attrNames (placementsIn r).${user}
+          );
+        in
+        lib.mapAttrs (
+          name: override:
+          let
+            entry = applyOverride (
+              if sources ? ${name} then
+                sources.${name}.base
+              else
+                catalogueEntry r.catalogue user "perHost/perTag" name
+            ) override;
+
+            # A name reaching the scope from nowhere else is this user's own; a name
+            # from a grant carries its owner, whose sharedWith is what widens the
+            # audience, so both parties derive the same file.
+            owner = sources.${name}.owner or user;
+          in
+          if isShared r user name && !(profile.carries ? ${name}) then
+            throw "safix placement: flake.safix.users.${user} resolves '${name}' on '${hostname}' through a perHost or perTag selection, but flake.safix.catalogue.${name} is shared and derives its audience from carries; one file serves every host, so a host-scoped selection would leave them reading a file they are not encrypted to. Name it in flake.safix.users.${user}.carries instead, and use perHost/perTag omit where a host should not resolve it"
+          else if entry.sopsFile != null then
+            throw "safix placement: flake.safix.users.${user} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${owner}.sharedWith instead"
+          else
+            entry // { sopsFile = root + "/${audienceFileOf (audienceOf r owner name)}"; }
+        ) selected;
+    in
+    if machine != null then
+      if !(machines ? ${machine}) then throw (unknownMachineMessage machines machine) else forMachine
+    else if !(users ? ${user}) then
       throw (unknownUserMessage users user)
     else
-      let
-        profile = users.${user};
-        sources = sourcesOf { inherit users catalogue user; };
-
-        perTagSets = field: map (t: profile.perTag.${t}.${field} or { }) tags;
-
-        addSet = mergeSets (
-          [
-            (lib.mapAttrs (_n: s: s.override) sources)
-            (profile.perHost.${hostname}.add or { })
-          ]
-          ++ perTagSets "add"
-        );
-
-        omitSet = mergeSets ([ (profile.perHost.${hostname}.omit or { }) ] ++ perTagSets "omit");
-
-        forceSet = mergeSets ([ (profile.perHost.${hostname}.force or { }) ] ++ perTagSets "force");
-
-        selected = removeAttrs (
-          (removeAttrs addSet (builtins.attrNames omitSet)) // forceSet
-        ) publicOutputs;
-
-        # A public output is dropped from the selection, and this is the one
-        # place it is dropped, so that `resolveSet`, `resolveNames` and
-        # `materializeFor` cannot disagree about what a person resolves.
-        #
-        # The reason is what selection is for. Every name it returns is handed to
-        # the secret provisioner with a `sopsFile` and a key inside it, and the
-        # provisioner decrypts at activation. A public output has no ciphertext,
-        # no key and no creation rule — that is what declaring it
-        # `files.<n>.secret = false` means — so an entry for one is an activation
-        # that fails to extract a key which will never exist.
-        #
-        # It is still the user's output and `flake.safix.lib.placements` still
-        # names it, which is where `safix generate`, `list` and `check` read it.
-        # A module reads its bytes with `flake.safix.lib.publicValue` at
-        # evaluation, or its path with `outputPath`.
-        publicOutputs = lib.filter (name: (placementsOf users catalogue).${user}.${name}.public != null) (
-          builtins.attrNames (placementsOf users catalogue).${user}
-        );
-      in
-      lib.mapAttrs (
-        name: override:
-        let
-          entry = applyOverride (
-            if sources ? ${name} then
-              sources.${name}.base
-            else
-              catalogueEntry catalogue user "perHost/perTag" name
-          ) override;
-
-          # A name reaching the scope from nowhere else is this user's own; a name
-          # from a grant carries its owner, whose sharedWith is what widens the
-          # audience, so both parties derive the same file.
-          owner = sources.${name}.owner or user;
-        in
-        if isShared users catalogue user name && !(profile.carries ? ${name}) then
-          throw "safix placement: flake.safix.users.${user} resolves '${name}' on '${hostname}' through a perHost or perTag selection, but flake.safix.catalogue.${name} is shared and derives its audience from carries; one file serves every host, so a host-scoped selection would leave them reading a file they are not encrypted to. Name it in flake.safix.users.${user}.carries instead, and use perHost/perTag omit where a host should not resolve it"
-        else if entry.sopsFile != null then
-          throw "safix placement: flake.safix.users.${user} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${owner}.sharedWith instead"
-        else
-          entry // { sopsFile = root + "/${audienceFileOf (audienceOf users catalogue owner name)}"; }
-      ) selected;
+      forUser;
 
   # The scoped view materialized into the shape the secret provisioner's option
   # tree takes. Split into a second application because `path` is a function of
@@ -1203,6 +1732,15 @@ let
     args: cfg:
     let
       resolved = selectFor (builtins.removeAttrs args [ "scope" ]);
+
+      # Whichever subject the selection was made for, for the refusals below. They
+      # name a declaration rather than a scope, and a machine's is a different
+      # record from a person's.
+      subject =
+        if args.machine or null != null then
+          "flake.safix.machines.${args.machine}"
+        else
+          "flake.safix.users.${args.user}";
 
       # Two entries resolving onto one path is unrecoverable rather than untidy —
       # whichever declaration activates second unlinks the first's output — and
@@ -1231,7 +1769,7 @@ let
           value
         else
           throw (
-            "safix paths: flake.safix.users.${args.user} resolves two secrets onto one path on '${args.hostname}'\n"
+            "safix paths: ${subject} resolves two secrets onto one path on '${args.hostname}'\n"
             + lib.concatStrings (
               lib.mapAttrsToList (
                 path: claimants:
@@ -1263,7 +1801,7 @@ let
           value
         else
           throw (
-            "safix ownership: flake.safix.users.${args.user} materializes at user scope, where the provisioner has no ownership axis and runs as the user, but "
+            "safix ownership: ${subject} materializes at user scope, where the provisioner has no ownership axis and runs as the user, but "
             + lib.concatStringsSep " and " offending
             + ". Drop the field, or materialize this entry at system scope."
           );
@@ -1282,26 +1820,74 @@ let
         ) resolved
       )
     );
+
+  # ── the entry points ──
+  # One attrset holding the records, so a fleet that declares no subjects passes
+  # none and travels the same algebra. Every pattern is closed: a misspelled
+  # record name is refused rather than silently defaulted to the empty one.
+  entryPoint = f: args: f (registryOf args);
 in
 {
   inherit
     nameRegex
-    violations
-    generatorViolations
-    generatorPlanOf
-    audienceOf
     audienceFileOf
+    audienceMarkers
     audienceSeparator
-    audiencesOf
-    placementsOf
+    elementOf
+    refOfElement
     publicFileOf
-    publicPathsOf
-    publicValueOf
-    outputPathOf
     recipientsOf
-    sourcesOf
     selectFor
     materializeFor
     unknownUserMessage
+    unknownMachineMessage
     ;
+
+  violations = entryPoint violationsIn;
+  generatorViolations = entryPoint generatorViolationsIn;
+  generatorPlanOf = entryPoint generatorPlanIn;
+  audiencesOf = entryPoint audiencesIn;
+  placementsOf = entryPoint placementsIn;
+  publicPathsOf = entryPoint publicPathsIn;
+  leavesOf = entryPoint leavesOf;
+  subjectRecipientsOf = entryPoint subjectRecipientsOf;
+  audienceOf = entryPoint audienceOf;
+  outputPathOf = entryPoint outputPathIn;
+  publicValueOf = entryPoint publicValueIn;
+  sourcesOf =
+    {
+      users,
+      catalogue ? { },
+      machines ? { },
+      groups ? { },
+      silos ? { },
+      user,
+    }:
+    sourcesIn (registryOf {
+      inherit
+        users
+        catalogue
+        machines
+        groups
+        silos
+        ;
+    }) user;
+  machineSourcesOf =
+    {
+      users,
+      catalogue ? { },
+      machines ? { },
+      groups ? { },
+      silos ? { },
+      machine,
+    }:
+    machineSourcesIn (registryOf {
+      inherit
+        users
+        catalogue
+        machines
+        groups
+        silos
+        ;
+    }) machine;
 }

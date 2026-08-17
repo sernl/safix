@@ -1,10 +1,10 @@
 # The flake-parts module a consumer imports.
 #
-# It declares the two records in ./options.nix and binds the algebra in
-# ./resolve.nix and the renderer in ./policy.nix to them, exposing the result
-# under `flake.safix.lib`. Everything below is a projection of
-# `flake.safix.catalogue` and `flake.safix.users` and reads no option outside
-# this namespace, which is what makes an adapter written by a consumer
+# It declares the records in ./options.nix and binds the algebra in ./resolve.nix
+# and the renderer in ./policy.nix to them, exposing the result under
+# `flake.safix.lib`. Everything below is a projection of `flake.safix.catalogue`,
+# `flake.safix.users` and the subject records beside them, and reads no option
+# outside this namespace, which is what makes an adapter written by a consumer
 # sufficient on its own.
 {
   lib,
@@ -23,19 +23,26 @@ let
 
   sortNames = lib.sort (a: b: a < b);
 
-  audiences = resolve.audiencesOf cfg.users cfg.catalogue;
+  # The records the resolver reads, as one value. Named once so that a record
+  # added to the namespace reaches every projection below rather than whichever
+  # ones were remembered.
+  registry = {
+    inherit (cfg)
+      users
+      catalogue
+      machines
+      groups
+      silos
+      ;
+  };
+
+  audiences = resolve.audiencesOf registry;
 
   # Every entry's file is derived from its audience, and the result is a path
   # under the flake source rather than a repository-relative string, because that
   # is what the provisioner's `sopsFile` takes. It resolves the same from a
   # standalone user profile and from a system configuration.
-  bound =
-    args:
-    args
-    // {
-      inherit (cfg) users catalogue;
-      root = self;
-    };
+  bound = args: args // registry // { root = self; };
 
   resolveSet = args: resolve.selectFor (bound args);
 
@@ -162,14 +169,19 @@ in
     # is empty while the custody half is not: a generator rule is a statement
     # about one user's resolved set, and there is no resolved set to state it
     # against until custody resolves.
-    violations =
-      resolve.violations cfg.users cfg.catalogue ++ resolve.generatorViolations cfg.users cfg.catalogue;
+    violations = resolve.violations registry ++ resolve.generatorViolations registry;
 
     # file -> { audience; dir; recipients; }: who can open each encrypted file a
     # secret is placed in. The recipient policy and the resolved entries are both
     # derived from this, so a file, its rule and its stanzas cannot disagree by
     # construction — only by someone editing ciphertext or the policy out from
     # under it.
+    #
+    # `audience` holds subjects rather than only people: a group appears as
+    # `@<group>` and the owner of a machine as `@~<machine>`, which is what names
+    # the directory and so what keeps a membership change a re-wrap of one file.
+    # `recipients` is the expansion of that, which is what a data key is wrapped
+    # for.
     inherit audiences;
 
     # user -> name -> { file; key; origin; owner; shared; generator; }: the
@@ -179,32 +191,52 @@ in
     # setting a value names a secret and never a path. Both are the same audience
     # computation, so a value written through it lands in the file the policy
     # writes a rule for.
-    placements = resolve.placementsOf cfg.users cfg.catalogue;
+    #
+    # Keyed by person, because a name is placed by whoever declared it. A machine
+    # holds only what a person granted it, under that person's own record, so a
+    # machine's entries are already here under their owner's name and appear again
+    # under no second key.
+    placements = resolve.placementsOf registry;
 
-    # user -> [ recipient ]: every key a declared user can open a file with,
-    # their own and their recovery keys alike. `audiences` answers the same
-    # question per file and unions the members' keys into one list, which loses
-    # which key is whose; a check that has found a stanza on a file and wants to
-    # say who left it there needs the direction this way round.
-    recipients = lib.mapAttrs (_: resolve.recipientsOf) cfg.users;
+    # subject -> [ recipient ]: every key a declared subject can open a file with
+    # — a person's own and their recovery keys, a machine's host identity.
+    # `audiences` answers the same question per file and unions the members' keys
+    # into one list, which loses which key is whose; a check that has found a
+    # stanza on a file and wants to say who left it there needs the direction this
+    # way round.
+    #
+    # Groups are absent by construction. A group holds no key of its own — its
+    # recipients are its members' — so a row for one would attribute a member's
+    # key to two subjects and a report naming who can open a file would name both.
+    recipients =
+      lib.mapAttrs (_: resolve.recipientsOf) cfg.users
+      // lib.mapAttrs (_: m: lib.optional (m.recipient != null) m.recipient) cfg.machines;
+
+    # The subject records themselves, as the consumption modules read them: a
+    # machine's tags default a profile that names it, and nothing else here is
+    # read outside this namespace.
+    subjects = {
+      machines = lib.mapAttrs (_: m: { inherit (m) owner tags; }) cfg.machines;
+      groups = lib.mapAttrs (_: g: { inherit (g) members; }) cfg.groups;
+    };
 
     # user -> { order; outputs; inputs; }: the order `safix generate` runs that
     # user's generators in, what each one writes, and the name space its script
     # addresses its prompts and dependencies by.
-    generatorPlan = resolve.generatorPlanOf cfg.users cfg.catalogue;
+    generatorPlan = resolve.generatorPlanOf registry;
 
     # Every repository-relative path the plaintext store holds, sorted. What the
     # generated recipient policy is checked against: no rule may match any of
     # them, because a rule reaching the public store would encrypt a value the
     # whole point of which is being readable at evaluation.
-    publicPaths = resolve.publicPathsOf cfg.users cfg.catalogue;
+    publicPaths = resolve.publicPathsOf registry;
 
     # The two accessors a consuming module reads an output through, bound to
     # this flake's own source. `resolve.nix` holds both and states what each of
     # the three answers is for; binding them here is the only thing this file
     # adds, because `root` is what a check has to be able to vary.
-    publicValue = resolve.publicValueOf cfg.users cfg.catalogue self;
-    outputPath = resolve.outputPathOf cfg.users cfg.catalogue;
+    publicValue = resolve.publicValueOf registry self;
+    outputPath = resolve.outputPathOf registry;
 
     # The declared bridge, flattened into what `safix import` and `safix export`
     # read: the clan flake reference, and one record per mapping carrying the
@@ -270,8 +302,8 @@ in
     # structured plan the text renders. The sops CLI reads the committed file off
     # disk, so the text is an artifact that must be regenerated and committed,
     # never something a build alone can satisfy.
-    policyText = policy.render cfg.users cfg.catalogue;
-    policyPlan = policy.plan cfg.users cfg.catalogue;
+    policyText = policy.render registry;
+    policyPlan = policy.plan registry;
 
     # The check a consumer instantiates over its own committed policy file. Built
     # here so that its failure and the generated header name one command.
@@ -279,7 +311,7 @@ in
       pkgs: committed:
       policy.mkDriftCheck pkgs {
         inherit committed;
-        generated = policy.render cfg.users cfg.catalogue;
+        generated = policy.render registry;
       };
 
     # Every check safix has to offer, over the declarations this flake carries,
@@ -291,13 +323,6 @@ in
     # ../checks calls the same builders with fleets written beside them, so a
     # claim asserted there is asserted about the function a consumer runs rather
     # than about a second copy of it.
-    mkChecks =
-      pkgs: args:
-      checks.mkChecks pkgs (
-        {
-          inherit (cfg) users catalogue;
-        }
-        // args
-      );
+    mkChecks = pkgs: args: checks.mkChecks pkgs (registry // args);
   };
 }

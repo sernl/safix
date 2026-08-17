@@ -119,7 +119,7 @@
         safix = { inherit user name; };
       };
 
-      violations = fleet': record: bridge.violationsOf fleet' { } (bridgeOf record);
+      violations = fleet': record: bridge.violationsOf { users = fleet'; } (bridgeOf record);
 
       sound = {
         clanFlake = ".";
@@ -248,7 +248,7 @@
           # Without this the field above is vacuous: an empty bridge message
           # list proves the short-circuit only if the fleet it was computed over
           # is one custody actually refuses.
-          brokenCustodyIsBroken = resolve.violations brokenFleet { } != [ ];
+          brokenCustodyIsBroken = resolve.violations { users = brokenFleet; } != [ ];
 
           badDirection = badDirection;
         };

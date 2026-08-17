@@ -124,10 +124,10 @@
 
       # These fixtures declare every secret under `private`, so no catalogue
       # entry can be shared and the audiences are the grant-derived ones alone.
-      grantedAudiences = resolve.audiencesOf granted { };
-      revokedAudiences = resolve.audiencesOf revoked { };
+      grantedAudiences = resolve.audiencesOf { users = granted; };
+      revokedAudiences = resolve.audiencesOf { users = revoked; };
 
-      planOf = users: policy.plan users { };
+      planOf = users: policy.plan { inherit users; };
 
       rulesOf =
         users:
@@ -135,7 +135,7 @@
           inherit (r) pathRegex audience anchors;
         }) (planOf users).rules;
 
-      rendered = policy.render granted { };
+      rendered = policy.render { users = granted; };
     in
     {
       checks.safix-policy = mkStructuralCheck {

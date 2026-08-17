@@ -6,7 +6,8 @@
 # differ, and its failure names that command. Its whole input is
 # flake.safix.users — each person's `recipient`, their `recoveryRecipients`,
 # and the secrets they own and share under `carries`, `private` and
-# `sharedWith` — together with flake.safix.catalogue.
+# `sharedWith` — together with flake.safix.catalogue, and with
+# flake.safix.machines and flake.safix.groups where an audience names one.
 #
 # ── one rule per audience ──
 # A sops file has a single data key, wrapped once per recipient, so anyone who
@@ -21,6 +22,13 @@
 # path states who can open it without opening it. The separator is one the name
 # alphabet excludes, which is what keeps two audiences from reaching one
 # directory and so one rule.
+#
+# An audience member is a subject: a person, a machine whose recipient is the
+# age form of the host identity it already decrypts with, or a group. A group
+# appears as @<group> and the owner of a machine as @~<machine>, both marks the
+# name alphabet excludes. A marked member is a readership its own declaration
+# decides, so adding a member or changing an owner re-wraps this file's rule
+# rather than moving the secret to another directory.
 #
 # ── anchoring is load-bearing ──
 # Anchoring survives every edit to the generator, in two independent ways:

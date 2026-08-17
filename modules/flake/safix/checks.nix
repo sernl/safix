@@ -66,15 +66,14 @@ let
   # generator rule is a statement about a resolved set and custody is what
   # resolves it. This covers the users no configuration builds and so never
   # forces a resolution of.
-  custodyMessages =
-    users: catalogue: resolve.violations users catalogue ++ resolve.generatorViolations users catalogue;
+  custodyMessages = registry: resolve.violations registry ++ resolve.generatorViolations registry;
 
   mkCustodyCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-custody-refusals";
       subject = "safix custody: these declarations break rules the resolver refuses on.";
-      messages = custodyMessages users catalogue;
+      messages = custodyMessages registry;
     };
 
   # ── generator runtime tools ──
@@ -86,7 +85,7 @@ let
   # written, and `hasAttrByPath` forces the attribute's existence and never its
   # value.
   generatorsDeclaredIn =
-    users: catalogue:
+    registry:
     lib.concatLists (
       lib.mapAttrsToList (
         user: names:
@@ -99,11 +98,11 @@ let
             }
           ) names
         )
-      ) (resolve.placementsOf users catalogue)
+      ) (resolve.placementsOf registry)
     );
 
   generatorToolMessages =
-    pkgs: users: catalogue:
+    pkgs: registry:
     let
       resolves = spec: lib.hasAttrByPath (lib.splitString "." spec) pkgs;
     in
@@ -113,30 +112,28 @@ let
         spec:
         "flake.safix.users.${g.user}'s generator on '${g.name}' names runtimeInputs '${spec}', which is not an attribute of nixpkgs"
       ) (lib.filter (spec: !(resolves spec)) g.generator.runtimeInputs)
-    ) (generatorsDeclaredIn users catalogue);
+    ) (generatorsDeclaredIn registry);
 
   mkGeneratorToolCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-generator-tools";
       subject = "safix generators: a declared generator names a runtime tool nixpkgs does not have.";
-      messages = generatorToolMessages pkgs users catalogue;
+      messages = generatorToolMessages pkgs registry;
     };
 
   # ── the bridge ──
   # Only the half of each mapping that lives in the consumer's own flake. The
   # clan half is not checked here and cannot be: it lives in another flake, and
   # the only thing that can answer whether it resolves is clan itself.
-  bridgeMessages =
-    users: catalogue: bridgeRecord:
-    bridge.violationsOf users catalogue bridgeRecord;
+  bridgeMessages = registry: bridgeRecord: bridge.violationsOf registry bridgeRecord;
 
   mkBridgeCheck =
-    pkgs: users: catalogue: bridgeRecord:
+    pkgs: registry: bridgeRecord:
     mkMessageCheck pkgs {
       name = "safix-bridge-refusals";
       subject = "safix bridge: these mappings break rules evaluation refuses on.";
-      messages = bridgeMessages users catalogue bridgeRecord;
+      messages = bridgeMessages registry bridgeRecord;
     };
 
   # ── the keepassxc mirror ──
@@ -144,16 +141,14 @@ let
   # The database's half is not checked here and cannot be: the group and the
   # entry are content of an encrypted file, and answering whether they are there
   # needs a key.
-  keepassxcMessages =
-    users: catalogue: keepassxcRecord:
-    keepassxc.violationsOf users catalogue keepassxcRecord;
+  keepassxcMessages = registry: keepassxcRecord: keepassxc.violationsOf registry keepassxcRecord;
 
   mkKeepassxcCheck =
-    pkgs: users: catalogue: keepassxcRecord:
+    pkgs: registry: keepassxcRecord:
     mkMessageCheck pkgs {
       name = "safix-keepassxc-refusals";
       subject = "safix keepassxc: these mappings break rules evaluation refuses on.";
-      messages = keepassxcMessages users catalogue keepassxcRecord;
+      messages = keepassxcMessages registry keepassxcRecord;
     };
 
   # ── the shape of a generated rule ──
@@ -203,18 +198,18 @@ let
     lib.concatLists (lib.mapAttrsToList perAudience audiences);
 
   ruleShapeMessages =
-    users: catalogue:
+    registry:
     ruleShapeMessagesOf {
-      plan = policy.plan users catalogue;
-      audiences = resolve.audiencesOf users catalogue;
+      plan = policy.plan registry;
+      audiences = resolve.audiencesOf registry;
     };
 
   mkRuleShapeCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-rule-shape";
       subject = "safix policy: a generated rule does not cover exactly the directory it was written for.";
-      messages = ruleShapeMessages users catalogue;
+      messages = ruleShapeMessages registry;
     };
 
   # ── no catch-all ──
@@ -257,14 +252,14 @@ let
       ) (lib.filter (matches r.pathRegex) catchAllProbes)
     ) plan.rules;
 
-  catchAllMessages = users: catalogue: catchAllMessagesOf (policy.plan users catalogue);
+  catchAllMessages = registry: catchAllMessagesOf (policy.plan registry);
 
   mkNoCatchAllCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-no-catch-all";
       subject = "safix policy: a generated rule matches a path no declaration places anything in.";
-      messages = catchAllMessages users catalogue;
+      messages = catchAllMessages registry;
     };
 
   # ── the public store is out of the policy's reach ──
@@ -291,18 +286,18 @@ let
     ) plan.rules;
 
   publicRuleMessages =
-    users: catalogue:
+    registry:
     publicRuleMessagesOf {
-      plan = policy.plan users catalogue;
-      publicPaths = resolve.publicPathsOf users catalogue;
+      plan = policy.plan registry;
+      publicPaths = resolve.publicPathsOf registry;
     };
 
   mkPublicRuleCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-public-no-rule";
       subject = "safix policy: a generated rule matches a path the public store holds in the clear.";
-      messages = publicRuleMessages users catalogue;
+      messages = publicRuleMessages registry;
     };
 
   # ── the audience separator ──
@@ -346,19 +341,19 @@ let
     alphabet ++ lib.concatLists (lib.mapAttrsToList inert shared);
 
   separatorMessages =
-    users: catalogue:
+    registry:
     separatorMessagesOf {
-      plan = policy.plan users catalogue;
-      audiences = resolve.audiencesOf users catalogue;
+      plan = policy.plan registry;
+      audiences = resolve.audiencesOf registry;
       separator = resolve.audienceSeparator;
     };
 
   mkSeparatorCheck =
-    pkgs: users: catalogue:
+    pkgs: registry:
     mkMessageCheck pkgs {
       name = "safix-audience-separator";
       subject = "safix policy: the character joining a shared audience's members does not hold its directory apart.";
-      messages = separatorMessages users catalogue;
+      messages = separatorMessages registry;
     };
 
   # ── path collisions ──
@@ -397,6 +392,9 @@ let
     {
       users,
       catalogue ? { },
+      machines ? { },
+      groups ? { },
+      silos ? { },
       committedPolicy ? null,
       materializations ? { },
       bridge ? {
@@ -409,20 +407,31 @@ let
         mappings = { };
       },
     }:
+    let
+      registry = {
+        inherit
+          users
+          catalogue
+          machines
+          groups
+          silos
+          ;
+      };
+    in
     {
-      safix-bridge-refusals = mkBridgeCheck pkgs users catalogue bridge;
-      safix-keepassxc-refusals = mkKeepassxcCheck pkgs users catalogue keepassxc;
-      safix-custody-refusals = mkCustodyCheck pkgs users catalogue;
-      safix-generator-tools = mkGeneratorToolCheck pkgs users catalogue;
-      safix-rule-shape = mkRuleShapeCheck pkgs users catalogue;
-      safix-no-catch-all = mkNoCatchAllCheck pkgs users catalogue;
-      safix-public-no-rule = mkPublicRuleCheck pkgs users catalogue;
-      safix-audience-separator = mkSeparatorCheck pkgs users catalogue;
+      safix-bridge-refusals = mkBridgeCheck pkgs registry bridge;
+      safix-keepassxc-refusals = mkKeepassxcCheck pkgs registry keepassxc;
+      safix-custody-refusals = mkCustodyCheck pkgs registry;
+      safix-generator-tools = mkGeneratorToolCheck pkgs registry;
+      safix-rule-shape = mkRuleShapeCheck pkgs registry;
+      safix-no-catch-all = mkNoCatchAllCheck pkgs registry;
+      safix-public-no-rule = mkPublicRuleCheck pkgs registry;
+      safix-audience-separator = mkSeparatorCheck pkgs registry;
     }
     // lib.optionalAttrs (committedPolicy != null) {
       safix-policy-drift = policy.mkDriftCheck pkgs {
         committed = committedPolicy;
-        generated = policy.render users catalogue;
+        generated = policy.render registry;
       };
     }
     // lib.optionalAttrs (materializations != { }) {

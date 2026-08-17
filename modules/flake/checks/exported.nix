@@ -66,7 +66,20 @@ in
     let
       safix = config.flake.safix.lib;
       users = config.flake.safix.users;
-      catalogue = config.flake.safix.catalogue;
+
+      # The records as the binding a consumer gets holds them. The subject records
+      # are empty on this fleet, which is what these claims are about: the
+      # exported builders read the whole registry, and a fleet declaring no
+      # subjects is the same algebra with three empty records in it.
+      registry = {
+        inherit (config.flake.safix)
+          users
+          catalogue
+          machines
+          groups
+          silos
+          ;
+      };
 
       mkStructuralCheck = import ./mk-structural-check.nix pkgs;
 
@@ -107,8 +120,8 @@ in
         users.ana.private.api-token.path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/ana-alone";
       };
 
-      plan = policy.plan users catalogue;
-      audiences = resolve.audiencesOf users catalogue;
+      plan = policy.plan registry;
+      audiences = resolve.audiencesOf registry;
 
       rewriteRules = f: plan // { rules = map (r: r // { pathRegex = f r.pathRegex; }) plan.rules; };
 
@@ -155,7 +168,7 @@ in
           fixtureRoster = {
             people = lib.sort (a: b: a < b) (builtins.attrNames users);
             files = lib.sort (a: b: a < b) (builtins.attrNames audiences);
-            generators = map (g: "${g.user}/${g.name}") (safixChecks.generatorsDeclaredIn users catalogue);
+            generators = map (g: "${g.user}/${g.name}") (safixChecks.generatorsDeclaredIn registry);
           };
 
           # Every family is silent on the fleet as declared. This is the same
@@ -163,23 +176,21 @@ in
           # well-formed fleet fails here rather than in the check that would
           # then have to be blessed.
           quietOnFixture = {
-            custody = safixChecks.custodyMessages users catalogue == [ ];
-            generatorTools = safixChecks.generatorToolMessages pkgs users catalogue == [ ];
-            ruleShape = safixChecks.ruleShapeMessages users catalogue == [ ];
-            catchAll = safixChecks.catchAllMessages users catalogue == [ ];
-            separator = safixChecks.separatorMessages users catalogue == [ ];
+            custody = safixChecks.custodyMessages registry == [ ];
+            generatorTools = safixChecks.generatorToolMessages pkgs registry == [ ];
+            ruleShape = safixChecks.ruleShapeMessages registry == [ ];
+            catchAll = safixChecks.catchAllMessages registry == [ ];
+            separator = safixChecks.separatorMessages registry == [ ];
           };
 
           # 8.6 — a grant to someone holding no key. The message has to name the
           # person, because the remedy is theirs.
-          custodyDrill = namesOneOf [ "bo" ] (
-            safixChecks.custodyMessages keylessGrantee.users keylessGrantee.catalogue
-          );
+          custodyDrill = namesOneOf [ "bo" ] (safixChecks.custodyMessages keylessGrantee);
 
           # 8.5 — a misspelled runtime tool, which is otherwise discovered at a
           # rotation. The message has to name the spelling that was written.
           generatorToolDrill = namesOneOf [ "opensll" ] (
-            safixChecks.generatorToolMessages pkgs misspelledTool.users misspelledTool.catalogue
+            safixChecks.generatorToolMessages pkgs misspelledTool
           );
 
           # 8.2 — the three ways a rule stops covering exactly its own
@@ -229,15 +240,16 @@ in
           # 8.4 — two entries onto one path, which is unrecoverable rather than
           # untidy: whichever activates second unlinks the first's output.
           pathCollisionDrill = fires (
-            resolve.materializeFor {
-              users = collidingPaths.users;
-              catalogue = collidingPaths.catalogue;
-              root = ./.;
-              user = "ana";
-              hostname = "workstation";
-              tags = [ ];
-              scope = "user";
-            } fixtureCfg
+            resolve.materializeFor (
+              collidingPaths
+              // {
+                root = ./.;
+                user = "ana";
+                hostname = "workstation";
+                tags = [ ];
+                scope = "user";
+              }
+            ) fixtureCfg
           );
         };
 

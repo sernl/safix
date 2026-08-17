@@ -126,7 +126,7 @@
         kdbx = { inherit path; };
       };
 
-      violations = fleet': record: keepassxc.violationsOf fleet' { } (recordOf record);
+      violations = fleet': record: keepassxc.violationsOf { users = fleet'; } (recordOf record);
 
       sound = {
         database = "/nonexistent/master.kdbx";
@@ -251,7 +251,7 @@
           # Without this the field above is vacuous: an empty message list proves
           # the short-circuit only if the fleet it was computed over is one
           # custody actually refuses.
-          brokenCustodyIsBroken = resolve.violations brokenFleet { } != [ ];
+          brokenCustodyIsBroken = resolve.violations { users = brokenFleet; } != [ ];
 
           badMode = badMode;
         };

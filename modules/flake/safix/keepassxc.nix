@@ -149,15 +149,16 @@ let
   entryPathOf = group: m: "${group}/${m.kdbx.path}";
 
   violationsOf =
-    users: catalogue: keepassxc:
+    registry: keepassxc:
     let
+      inherit (registry) users;
       declared = mappingsOf keepassxc;
 
       # Custody has to resolve before a mapping's safix side can be looked up in
       # it, and a broken custody declaration already has its own refusal.
       # Staying silent here keeps one fault from producing two unrelated
       # sentences — ./bridge.nix short-circuits on the same list.
-      placements = resolve.placementsOf users catalogue;
+      placements = resolve.placementsOf registry;
 
       resolves = m: (placements.${m.safix.user} or { }) ? ${m.safix.name};
 
@@ -209,7 +210,7 @@ let
         lib.optional (lib.hasSuffix stateSuffix m.kdbx.path) "flake.safix.keepassxc.mappings.${m.id} names the entry ${entryPathOf keepassxc.group m}, and '${stateSuffix}' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
       ) declared;
     in
-    if resolve.violations users catalogue != [ ] then
+    if resolve.violations registry != [ ] then
       [ ]
     else
       unresolvableSafixSide ++ twoProducers ++ twoMappingsOneEntry ++ reservedName;

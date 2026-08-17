@@ -124,15 +124,16 @@ let
     "${m.clan.machine}:${m.clan.generator}/${m.clan.file} <-> flake.safix.users.${m.safix.user}.${m.safix.name}";
 
   violationsOf =
-    users: catalogue: bridge:
+    registry: bridge:
     let
+      users = registry.users;
       declared = mappingsOf bridge;
 
       # Custody has to resolve before a mapping's safix side can be looked up in
       # it, and a broken custody declaration already has its own refusal. Saying
       # nothing here while that one is outstanding keeps one fault from
       # producing two unrelated sentences.
-      placements = resolve.placementsOf users catalogue;
+      placements = resolve.placementsOf registry;
 
       resolves = m: (placements.${m.safix.user} or { }) ? ${m.safix.name};
 
@@ -207,7 +208,7 @@ let
         lib.optional (declared != [ ] && bridge.clanFlake == null)
           "flake.safix.bridge declares ${toString (builtins.length declared)} mapping(s) and no clanFlake, so there is no clan for them to reach";
     in
-    if resolve.violations users catalogue != [ ] then
+    if resolve.violations registry != [ ] then
       [ ]
     else
       unresolvableSafixSide ++ twoProducers ++ twoMappingsOneTarget ++ bothDirections ++ noClanFlake;

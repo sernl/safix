@@ -2,14 +2,20 @@
 # the resolver, the policy renderer and the checks can all type a value without
 # taking a dependency on the option declarations.
 #
-# Five types, and the relationship between them is the whole shape of the
-# registry. `entry` is what a secret consists of: the record
-# `flake.safix.catalogue` holds one of per catalogue name, and the record a
-# user's `private` holds one of per name they declare alone. `override` is a
-# partial entry: every field nullOr with a null default, applied by taking only
-# the non-null ones. `scope` is the add/omit/force triple over overrides.
-# `grant` is one person's statement that a name they hold reaches another.
-# `profile` is the whole of what one person's custody is.
+# `entry` is what a secret consists of: the record `flake.safix.catalogue` holds
+# one of per catalogue name, and the record a user's `private` holds one of per
+# name they declare alone. `override` is a partial entry: every field nullOr with
+# a null default, applied by taking only the non-null ones. `scope` is the
+# add/omit/force triple over overrides. `grant` is one subject's statement that a
+# name they hold reaches another. `profile` is the whole of what one person's
+# custody is.
+#
+# `machine`, `group` and `silo` are the rest of the subject vocabulary. A subject
+# is what can hold a key and appear in an audience: a person, a machine, or a
+# group of subjects. They are three records rather than three grant surfaces,
+# because one audience algebra over subjects is what keeps a second audience
+# computation, a second policy renderer and a second revocation report from
+# existing at all.
 #
 # `entry` is one type rather than a function of registry-wide defaults, so
 # `flake.safix.catalogue.<n>` and `flake.safix.users.<u>.private.<n>` are the
@@ -525,6 +531,151 @@ let
     };
   };
 
+  # A machine, as a subject. It carries no `carries`, no `private` and no
+  # `sharedWith`: everything a machine holds arrives through a grant aimed at it,
+  # so `flake.safix.users` stays the only place a secret is declared and a
+  # machine is something an audience can name rather than a second authoring
+  # surface for custody.
+  machine = lib.types.submodule {
+    options = {
+      recipient = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "age1examplemachine00000000000000000000000000000000000000000000";
+        description = ''
+          The age public key this machine's system scope already decrypts with:
+          `ssh-to-age` of the host's ed25519 key, which is the derivation clan
+          uses for its own machine recipients and the key sops-nix's NixOS module
+          reaches by defaulting `sops.age.sshKeyPaths` to
+          `config.services.openssh.hostKeys`. Declaring a machine therefore mints
+          no second identity and adds no enrollment step; it names a key the host
+          already holds.
+
+          A recipient, never an identity. Nothing here can decrypt anything, and
+          no private half is named, escrowed or deployed by this field.
+
+          The hardware-recipient refusal `safix adduser` applies to a person does
+          not transfer to a machine, and the reason is the sentence that refusal
+          rests on: a card needs a PIN and a touch once per file, while an
+          activation decrypts non-interactively, so a person whose only recipient
+          is a card cannot activate at all. A host identity decrypts
+          non-interactively by nature — that is what it is — so the sentence is
+          not true of one and the refusal has nothing to say about it.
+
+          Null is inert rather than an error: a machine that records no recipient
+          and that no audience names changes nothing. A grant naming one is
+          refused, because there is no key to wrap a data key for.
+        '';
+      };
+
+      recipientNote = lib.mkOption {
+        type = lib.types.nullOr lib.types.lines;
+        default = null;
+        description = ''
+          Prose emitted above this machine's key in the generated policy's keys
+          block, where the key earns an anchor at all. What converts to it and
+          which host holds the private half belongs here rather than in the
+          generated file, which no one may edit by hand.
+        '';
+      };
+
+      owner = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "ana";
+        description = ''
+          The `flake.safix.users` entry this machine belongs to, or null.
+
+          A record, and in this model nothing more. It confers no powers: an
+          owner does not thereby read the machine's entries or manage its users,
+          because a record that silently granted either would be the escrowed
+          custody safix already prints a warning about, arrived at by accident
+          rather than declared.
+
+          What it does is give a grant somewhere to resolve through. An owner
+          named here is what makes `sharedWith."ownerOf.<machine>"` mean
+          something, and a change of owner then re-wraps the grant toward the new
+          one rather than leaving it pointed at whoever held the host when it was
+          written.
+        '';
+      };
+
+      tags = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "laptop" ];
+        description = ''
+          The tags this machine carries, against which
+          `flake.safix.users.<u>.perTag` adds, omits and forces entries.
+
+          The one tag vocabulary safix holds. A profile still hands its own over
+          through `safix.tags` and nothing here overrides that; a profile or
+          system naming `safix.machine` takes these instead, which is what makes
+          a hundred hosts declarable as tags on machines rather than as a hundred
+          `perHost` blocks.
+        '';
+      };
+    };
+  };
+
+  # A group, as a subject whose recipients are its members'. Membership lives in
+  # one place and every audience naming the group follows it, which is the whole
+  # difference between a group audience and an enumerated one.
+  group = lib.types.submodule {
+    options.members = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [
+        "ana"
+        "deck"
+        "oncall"
+      ];
+      description = ''
+        The subjects this group consists of: people, machines, or other groups.
+
+        An audience naming this group is encrypted to the expanded membership's
+        keys, so adding a member is a re-wrap of every file the group's audience
+        names and removing one is the revocation it is — reported as such, with
+        rotation named as the remedy, because a member who has held a file's data
+        key has read what it holds and no re-wrap unreads it.
+
+        A group naming itself, directly or through other groups, is refused at
+        evaluation with the participants named: a membership that cannot be
+        expanded is not a membership.
+      '';
+    };
+  };
+
+  # A silo set: named groups that no one file's audience may span.
+  silo = lib.types.submodule {
+    options.groups = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [
+        "contractors"
+        "staff"
+      ];
+      description = ''
+        The `flake.safix.groups` this set holds mutually exclusive.
+
+        Evaluation refuses any file whose audience would reach subjects of two of
+        them, naming the file, the subjects and this declaration. A silo enforced
+        where audiences are computed is a file that cannot exist; one enforced at
+        read time is a policy hoping nobody misconfigured a file.
+
+        Sets rather than pairs, so a declaration over n groups is one line rather
+        than n² of them, and a group named in two sets is itself refused — which
+        is what keeps the constraint linear instead of transitively closing over
+        every set a group appears in.
+
+        Deliberately not transitive over ownership. A person may own machines in
+        two silos, because the operator administering both sides is the normal
+        case; what is refused is one file readable from both, never a person's
+        existence in both worlds.
+      '';
+    };
+  };
+
   profile = lib.types.submodule {
     options = {
       recipient = lib.mkOption {
@@ -608,12 +759,27 @@ let
       sharedWith = lib.mkOption {
         type = lib.types.attrsOf (lib.types.attrsOf grant);
         default = { };
-        example = lib.literalExpression "{ bo.wifi-psk = { }; }";
+        example = lib.literalExpression ''
+          {
+            bo.wifi-psk = { };
+            oncall.deploy-key = { };
+            "ownerOf.deck".wifi-psk = { };
+          }
+        '';
         description = ''
-          Outbound sharing, declared by the owner: <other-user>.<name> makes this
-          user's <name> resolve into that user's secret set as well, at that
-          user's own path and with this user's declared mode unless the recipient
-          adjusts it through their own perHost/perTag.
+          Outbound sharing, declared by the owner: <subject>.<name> makes this
+          user's <name> resolve into that subject's secret set as well, at that
+          subject's own path and with this user's declared mode unless a
+          recipient adjusts it through their own perHost/perTag.
+
+          A subject is a person, a machine, a group of subjects, or the owner of a
+          machine written `ownerOf.<machine>` — one grant surface over all four,
+          because a second one would be a second audience computation to keep in
+          step with this one. A group grant reaches every expanded member's set
+          and follows the membership; an `ownerOf` grant reaches whoever the
+          machine's `owner` names and follows that record. `.` is outside the name
+          alphabet, so `ownerOf.<machine>` can never collide with a declared
+          subject's name.
 
           A grant widens the secret's audience, and the audience picks the file.
           An encrypted file has one data key wrapped once per recipient, so
@@ -659,5 +825,8 @@ in
     scope
     grant
     profile
+    machine
+    group
+    silo
     ;
 }

@@ -116,13 +116,19 @@
 
       plain = { };
 
-      violationsOf = private: resolve.generatorViolations (fleetOf private) { };
+      violationsOf = private: resolve.generatorViolations { users = fleetOf private; };
+
+      # The one fleet the public-output claims are all made over, named once
+      # because they are made about the same declarations from several angles.
+      publicFleet = {
+        users = fleetOf fixtures.publicOutput;
+      };
 
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
 
       # `generatorPlanOf` is the surface `guardGenerators` wraps, so this is the
       # throw an operator running `safix generate` would meet.
-      planFires = private: fires (resolve.generatorPlanOf (fleetOf private) { });
+      planFires = private: fires (resolve.generatorPlanOf { users = fleetOf private; });
 
       # The runtime-tool claim, restated over a fleet written here rather than
       # over whatever a consumer declares. The declaration is well-formed in
@@ -142,7 +148,7 @@
                 }
               ) names
             )
-          ) (resolve.placementsOf (fleetOf private) { })
+          ) (resolve.placementsOf { users = fleetOf private; })
         );
 
       unresolvedIn =
@@ -309,6 +315,12 @@
             };
           };
         };
+
+      # The two records the resolver reads, out of a fixture that also carries the
+      # `private` block its two users share.
+      disagreeingFleet = {
+        inherit (disagreeing) users catalogue;
+      };
     in
     {
       checks.safix-generators = mkStructuralCheck {
@@ -323,7 +335,7 @@
           validPlans = !(planFires fixtures.valid);
           # The order the well-formed fixture resolves to, so the claim above is
           # that a plan comes back and not merely that nothing threw.
-          validOrder = (resolve.generatorPlanOf (fleetOf fixtures.valid) { }).ana.order;
+          validOrder = (resolve.generatorPlanOf { users = fleetOf fixtures.valid; }).ana.order;
 
           crossUserMessages = violationsOf fixtures.crossUser;
           crossUserFires = planFires fixtures.crossUser;
@@ -358,8 +370,8 @@
           noOutputReferenceMessages = violationsOf fixtures.noOutputReference;
           noOutputReferenceFires = planFires fixtures.noOutputReference;
 
-          shareDisagreementMessages = resolve.generatorViolations disagreeing.users disagreeing.catalogue;
-          shareDisagreementFires = fires (resolve.generatorPlanOf disagreeing.users disagreeing.catalogue);
+          shareDisagreementMessages = resolve.generatorViolations disagreeingFleet;
+          shareDisagreementFires = fires (resolve.generatorPlanOf disagreeingFleet);
 
           # A public output resolves to a path in the plaintext store, an
           # encrypted one to null, and the two prefixes do not overlap.
@@ -368,18 +380,14 @@
           # file to read and the "not generated yet" answer has a name it does
           # not hold. Reading it at evaluation is the whole point of declaring an
           # output public, and this is that read.
-          publicValueReadsTheFile =
-            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } generatedRoot "ana"
-              "keys-pub";
+          publicValueReadsTheFile = resolve.publicValueOf publicFleet generatedRoot "ana" "keys-pub";
           publicValueOnAnUngeneratedOutput = fires (
-            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } emptyRoot "ana" "keys-pub"
+            resolve.publicValueOf publicFleet emptyRoot "ana" "keys-pub"
           );
-          publicValueOnASecretOutput = fires (
-            resolve.publicValueOf (fleetOf fixtures.publicOutput) { } generatedRoot "ana" "keys"
-          );
+          publicValueOnASecretOutput = fires (resolve.publicValueOf publicFleet generatedRoot "ana" "keys");
           # `path` answers for both, and answers with a path rather than a value.
-          pathOfThePublicHalf = resolve.outputPathOf (fleetOf fixtures.publicOutput) { } "ana" "keys-pub";
-          pathOfTheSecretHalf = resolve.outputPathOf (fleetOf fixtures.publicOutput) { } "ana" "keys";
+          pathOfThePublicHalf = resolve.outputPathOf publicFleet "ana" "keys-pub";
+          pathOfTheSecretHalf = resolve.outputPathOf publicFleet "ana" "keys";
 
           # ── severity: a rule that would reach the public store ──
           # Both checks have to fail, and which one fails is recorded rather than
@@ -389,16 +397,15 @@
           reachingRuleFailsPublicCheck =
             checks.publicRuleMessagesOf {
               plan = reachingPlan;
-              publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
+              publicPaths = resolve.publicPathsOf publicFleet;
             } != [ ];
           reachingRuleFailsCatchAll = checks.catchAllMessagesOf reachingPlan != [ ];
 
           publicMessages = violationsOf fixtures.publicOutput;
-          publicPaths = resolve.publicPathsOf (fleetOf fixtures.publicOutput) { };
-          publicOnTheEncryptedHalf =
-            (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.public;
-          publicShare = (resolve.placementsOf (fleetOf fixtures.publicOutput) { }).ana.keys.generator.share;
-          publicRuleReaches = checks.publicRuleMessages (fleetOf fixtures.publicOutput) { };
+          publicPaths = resolve.publicPathsOf publicFleet;
+          publicOnTheEncryptedHalf = (resolve.placementsOf publicFleet).ana.keys.public;
+          publicShare = (resolve.placementsOf publicFleet).ana.keys.generator.share;
+          publicRuleReaches = checks.publicRuleMessages publicFleet;
 
           unsafePromptNameMessages = violationsOf fixtures.unsafePromptName;
           unsafePromptNameFires = planFires fixtures.unsafePromptName;
@@ -412,7 +419,7 @@
           networkGrantMessages = violationsOf fixtures.networkGrant;
           networkGrants = lib.mapAttrs (_: placement: placement.generator.network) (
             lib.filterAttrs (_: placement: placement.generator != null) (
-              (resolve.placementsOf (fleetOf fixtures.networkGrant) { }).ana
+              (resolve.placementsOf { users = fleetOf fixtures.networkGrant; }).ana
             )
           );
 
