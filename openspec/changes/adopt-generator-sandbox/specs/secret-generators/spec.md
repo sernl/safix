@@ -95,7 +95,7 @@ A generated value SHALL NOT reach an argument vector or an environment variable 
 - **THEN** it states that the generator contract is a filesystem contract and that the earlier absolute no longer holds
 - **AND** it names what stands in its place
 
-#### Scenario: What the runtime does not control is the declared escape
+#### Scenario: What the runtime does not control
 
 - **WHEN** a generator whose declaration grants the network moves a value over the connection the declaration opens
 - **THEN** that movement is outside what the runtime shreds or observes
