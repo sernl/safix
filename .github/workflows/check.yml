@@ -53,6 +53,7 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = false
             keep-going = true
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
       # This is as far as one platform can go towards another's check surface, and
       # the limit is the tree's own: `safix-generators` and the checks beside it
@@ -107,12 +108,21 @@ jobs:
       # so rather than dying of a full disk. Reclaiming the image's own tooling
       # was tried and taken back out: it left `/` at one gigabyte free, which is a
       # new way to fail in exchange for headroom nothing was using.
+      # `access-tokens` is what makes a run repeatable rather than a coin toss.
+      # Six of this flake's inputs are `github:` references, and nix fetches those
+      # through `api.github.com`, which rate-limits an unauthenticated caller by
+      # source address — sixty requests an hour shared with every other runner
+      # behind the same egress. Runs died in `nix-eval-jobs` on HTTP 429 before
+      # evaluating a single check, and the darwin runners died more often than the
+      # linux ones. The job's own token raises that ceiling and is scoped to
+      # reading this repository.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = false
             keep-going = true
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
       # Ubuntu 24.04 ships `kernel.apparmor_restrict_unprivileged_userns` at 1,
       # which denies a user namespace to a process that is unconfined and has no
