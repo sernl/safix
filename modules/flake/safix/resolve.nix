@@ -1861,8 +1861,6 @@ in
   audiencesOf = entryPoint audiencesIn;
   placementsOf = entryPoint placementsIn;
   publicPathsOf = entryPoint publicPathsIn;
-  leavesOf = entryPoint leavesOf;
-  subjectRecipientsOf = entryPoint subjectRecipientsOf;
   audienceOf = entryPoint audienceOf;
   outputPathOf = entryPoint outputPathIn;
   publicValueOf = entryPoint publicValueIn;
@@ -1884,22 +1882,4 @@ in
         silos
         ;
     }) user;
-  machineSourcesOf =
-    {
-      users,
-      catalogue ? { },
-      machines ? { },
-      groups ? { },
-      silos ? { },
-      machine,
-    }:
-    machineSourcesIn (registryOf {
-      inherit
-        users
-        catalogue
-        machines
-        groups
-        silos
-        ;
-    }) machine;
 }
