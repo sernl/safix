@@ -80,6 +80,7 @@
         ./modules/flake/checks/materialization.nix
         ./modules/flake/checks/namespace.nix
         ./modules/flake/checks/policy.nix
+        ./modules/flake/checks/portability.nix
         ./modules/flake/checks/real-clan.nix
         ./modules/flake/checks/single-runtime.nix
         ./modules/flake/checks/subjects.nix
