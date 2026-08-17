@@ -563,6 +563,10 @@ And a mapping whose clan-side generator clan already considers outdated is refus
 There is no option that exports anyway: safix has nowhere to record that a var is externally supplied, so the flag would turn a refusal into a silent loss.
 The refusal names both remedies — bring clan's side back into agreement, or declare the mapping `clan-to-safix`, which is the right shape when clan's generator is the producer.
 
+That second refusal reaches further than it may look, and the reach is correct.
+clan records a validation for a generator only when the generator declares `validation`, and it calls one whose declared validation has nothing recorded beside it outdated — so a generator that declares a validation and has never run is refused at its *first* export, because it has not run and will, and the run would replace whatever was exported.
+The generator to export into is therefore one that declares no `validation`: a var clan holds a place for and nothing else.
+
 **`safix audit` is the report over the same declarations.**
 It compares both sides of every declared mapping, or the one named in either direction, and changes nothing on either side of the boundary.
 A mapping agrees when both sides hold the same bytes, and also when neither side holds a value yet, which is a bridge nobody has bootstrapped rather than a disagreement.
@@ -656,6 +660,7 @@ The nix half was never in scope and did not move; what was replaced is a shell r
 The port ran behind a differential harness comparing every subcommand against the shell runtime; the five places the two differ are recorded as decisions in the changelog's "Known differences".
 With the port complete the harness was deleted with the runtime it compared against — 6205 lines — and its claims rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
 `safix-syscall-proof` (linux-only) observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe; `safix-channel-drills` damages the runtime once per channel and fails unless each damage is caught by the channel that exists to catch it.
+`safix-bridge-real-clan` (linux-only) drives the real clan command over a clan it builds inside the check — one machine, three `age`-backed generators, an identity minted per run — because every other bridge check drives a stub, and a stub goes on answering safix's arguments after clan has changed what they mean.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/` for the port and `openspec/changes/rust-only-runtime/` for the retirement.
 
 ## License

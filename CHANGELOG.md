@@ -39,11 +39,26 @@ A change to it is a breaking change whether or not any rust changed.
 - `safix-generate-cycle` and `safix-identity-recipiency`, two more checks over one test each.
   The first holds the cycle refusal to when it arrives; the second holds the sentence the consumption module's identity preflight makes about what it did not check — that an identity present and readable and not a recipient of these files does not open them — against fixture ciphertext, which is the one claim on that path an evaluation cannot hold.
   Both drills were observed red, each on the assertion written for it.
+- `safix-bridge-real-clan`, the one check that drives the real clan command rather than the stub, over a throwaway clan built inside the check: one machine, three `age`-backed generators, an identity minted per run and a recipient derived from it.
+  Every other bridge check drives a stub, which can be asked what it was handed but would go on answering safix's argument vectors after clan changed its command line; this one establishes that those arguments mean to clan what safix thinks they mean.
+  It asserts eleven claims through `crates/safix/tests/real_clan.rs`: the raw bytes off a real `clan vars get`, a real `clan vars set` fed on standard input and committing in clan's own repository, a second run of either verb leaving both histories where they were, the two absent-var states told apart by clan's own words, the drift refusal against a real `clan vars check`, `audit` finding a real divergence and finding none once a transfer resolves it, and clan's repository unchanged across every read safix makes.
+  Absent rather than trivially green off linux, and its two drills were observed red: withholding the throwaway clan makes all eleven tests report an absence and libtest call them passed, which the result-line guard catches, and putting the stub in the real command's place fails ten of the eleven.
+- `clan-core` as a flake input, read by that check and by nothing else.
+  clan-cli is not packaged in nixpkgs, so there is no attribute to reach for, and the input also supplies `packages.clan-core-flake` — a clan-core whose lock names store paths rather than URLs — which is what lets the throwaway clan lock in a sandbox with no network.
+  Pinned to a revision rather than a branch, because the subject of the check is a specific clan's behaviour and an input that moved on every `nix flake update` would redden it for reasons unrelated to safix.
 
 ### Changed
 
 - `README.md` opens by stating who the project is for: its operator's own fleet and use case.
   The status section's subcommand count now includes the bridge pair and `audit`, the stale no-remote sentence is gone, and the port history is condensed to what the changelog and the openspec records do not already hold.
+
+### Fixed
+
+- The design record's account of what invalidates a clan generator's recorded validation, corrected against the real clan.
+  `validationHash` is null unless the generator declares `validation`, and a null-in-nix, null-on-disk pair counts as valid, so a change to a generator's `script` alone does not make clan call it stale — only a change to its declared `validation` does.
+  A generator that declares `validation` and has never run *is* reported stale, so `safix export` refuses the first export into one, which is correct and was not a state any stub fixture would have produced.
+  No runtime behaviour changed; what changed is that the claim is now asserted by a check rather than recorded from a reading.
+  `openspec/changes/clan-bridge/design.md` holds both findings under "Landing the real clan as a check".
 
 ## [0.2.0] — 2026-08-16
 

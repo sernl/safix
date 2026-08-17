@@ -176,7 +176,8 @@ That work is a dotfiles follow-up change, `retire-agents-mirror`, named here and
 The integration suite drives a stub clan CLI whose behaviour is asserted, not assumed: it answers `vars get` with known bytes, records what `vars set` received on standard input, and can be made to fail in each way the real one does.
 The stub is a fixture, and the same reasoning that forbids stubbing sops does not apply — sops is the thing safix's claims are *about*, whereas clan is a boundary safix delegates across, and what is being tested is the delegation.
 
-One further check drives the real clan CLI over a throwaway clan if it is present in the check closure, and is absent rather than trivially green when it is not — the same shape the linux-only syscall check uses.
+One further check drives the real clan CLI over a throwaway clan built inside the check, and is absent rather than trivially green where it cannot be made — the same shape the linux-only syscall check uses.
+That check is `safix-bridge-real-clan`, and what it took to make it possible is recorded below under "Landing the real clan as a check".
 
 ## What the real clan confirmed
 
@@ -191,7 +192,27 @@ Every contract above was read out of clan-cli's source. Before the transfer verb
 
 The suite drives a stub rather than this, and `crates/safix/tests/support/clan-stub.rs` states why: what is under test is the delegation, and a stub can be asked what it was handed. The stub's behaviour is written against the findings above rather than against a reading of the source, which is the point of having made them.
 
-Landing this as a check is task 5.2 and is not done: the miniature clan needs a locked flake, a generated identity and a declared recipient, none of which a build sandbox has.
+## Landing the real clan as a check
+
+Task 5.2 held that the miniature clan needed a locked flake, a generated identity and a declared recipient, none of which a build sandbox has.
+The first of those three was the real obstacle and it is answered by clan itself, so `safix-bridge-real-clan` exists and drives the real command over a clan it builds per run.
+
+clan runs its own `age`-backed vars tests inside an ordinary nix build sandbox — `pkgs/clan-cli/clan_cli/tests/test_vars_age.py`, every test marked `with_core` and none marked `impure`, run by the `clan-pytest-with-core` derivation with no relaxed sandbox and no recursive nix.
+Three pieces make that work and all three are clan's, used here rather than reinvented:
+
+- `packages.clan-core-flake` is a copy of clan-core whose `flake.lock` names store paths instead of URLs, built by `lib/flakes.nix`'s `mkOfflineFlakeLock`. A throwaway flake taking that as its `clan-core` locks with no network at all, which is the locked flake the task was missing.
+- A private chroot store under the build directory, seeded by copying a `closureInfo` into it and loading that closure's registration, gives the nested nix somewhere it may write. `pkgs/testing/flake-module.nix`'s `setupNixInNix` is the recipe.
+- `CLAN_TEST_STORE` and `IN_NIX_SANDBOX` are read by shipped clan-cli code rather than by test-only monkeypatching: the first becomes `--store` on every nix invocation clan makes (`clan_lib/nix/__init__.py`), and the second makes clan take its runtime tools off `PATH` instead of resolving them with `nix build`, which is the one thing that genuinely cannot work against a read-only store (`clan_lib/nix/shell.py`).
+
+The identity and the recipient were never obstacles: `age-keygen` mints one in the builder, `clan.nix` names the derived recipient under `vars.settings.recipients.hosts.<machine>`, and `AGE_KEYFILE` points clan at the private half.
+
+Two things the real clan established that the reading had not, and both changed what the check asserts:
+
+**`validationHash` is null unless the generator declares `validation`.** `modules/clan/export-modules/generic-generator.nix` defaults it to null, and `hash_is_valid` calls a null-in-nix, null-on-disk pair valid for backwards compatibility. So D5's sentence "a change to the clan-side generator's *definition* invalidates the hash" is true of a change to its declared `validation` and not of a change to its `script`: a script edit alone leaves `clan vars check` answering "All vars are present and valid.", observed.
+
+**A generator that declares `validation` and has never run is reported stale.** A declared validation with nothing recorded beside it does not match, so clan says "outdated invalidation hash" and `safix export` refuses the *first* export into such a generator. That is the right answer — the generator has not run and will, and the run would replace whatever the export wrote — but it is not a state any fixture of the stub would have produced, because the stub's staleness is a switch a test throws. The ordinary export target is therefore a generator that declares no `validation`, and the check's throwaway clan carries one of each so that both facts are asserted rather than assumed.
+
+One thing above is narrower than it reads. The `.recipients` sidecar beside the `.age` file is written for a shared secret and for the machine key, and not for a per-machine var: at this revision `clan vars set` on a per-machine var commits `<file>.age` alone, and `test_age_no_sidecar_for_per_machine_secret` is clan's own assertion of that. Nothing in the runtime or the checks depends on either shape, which is the point of decision one, but the sentence above records the layout as the miniature clan showed it rather than as this revision writes it.
 
 ## The three decisions
 
