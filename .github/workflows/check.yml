@@ -49,12 +49,24 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = false
+            keep-going = true
 
-      # `--all-systems` is the reason this job exists: aarch64-linux is a system
-      # safix declares and nothing here builds, so without this its evaluation is
-      # only ever exercised on somebody's machine.
-      - name: every output instantiates, on every system safix declares
-        run: nix flake check --all-systems --no-build --show-trace
+      # This is as far as one platform can go towards another's check surface, and
+      # the limit is the tree's own: `safix-generators` and the checks beside it
+      # read a fixture out of a derivation, so instantiating them means building
+      # something for the target platform, and `nix flake check --all-systems`
+      # stops on the platform mismatch rather than reporting anything. What this
+      # does reach is every perSystem module evaluated for all three systems —
+      # the option types, the resolution algebra and the fixture fleet — which is
+      # where a change that only aarch64-linux notices goes wrong.
+      - name: every output evaluates, on every system safix declares
+        run: nix flake show --all-systems --json > /dev/null
+
+      # And the flake's own output contract, plus the instantiation of every check
+      # for the one system this runner is.
+      - name: the flake's outputs are the shapes a flake's outputs have
+        if: ${{ !cancelled() }}
+        run: nix flake check --no-build --show-trace
 
       # Both formatters are checks of the flake and are built again by the build
       # job. They are also the two failures a contributor is most likely to
@@ -82,33 +94,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # What the surface asks of a store is more than a runner's root filesystem
-      # has spare: this flake's nixpkgs closure, the second one clan-core pins for
-      # the nested clan that `safix-bridge-real-clan` builds inside itself, a rust
-      # toolchain and a Qt application. This moves the store onto the space the
-      # image was using for tooling nothing here runs. The last step of this job
-      # reports what it actually cost, so the ceiling is a measurement rather than
-      # a guess.
-      - name: give the nix store the runner's disk
-        if: runner.os == 'Linux'
-        uses: wimpysworld/nothing-but-nix@687c797a730352432950c707ab493fcc951818d7 # v10
-        with:
-          hatchet-protocol: cleave
-          nix-permission-edict: true
-
+      # No step frees disk for the store, because the surface does not need one.
+      # The whole of it — this flake's nixpkgs closure, the second one clan-core
+      # pins for the nested clan that `safix-bridge-real-clan` builds inside
+      # itself, a rust toolchain and a Qt application — comes to 8.5 GiB, against
+      # 87 GiB free on a linux runner and 97 GiB on a darwin one. The last step
+      # reports both numbers on every run, so the day a runner image or the
+      # surface changes that arithmetic, the run says so rather than dying of a
+      # full disk. Reclaiming the image's own tooling was tried and taken back
+      # out: it left `/` at one gigabyte free, which is a new failure mode in
+      # exchange for headroom nothing was using.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = false
             keep-going = true
-            ${{ runner.os == 'Linux' && 'build-dir = /nix/build' || '' }}
-
-      # `build-dir` is on `/nix` because the step above took the space `/tmp`
-      # was on: https://github.com/wimpysworld/nothing-but-nix/issues/18
-      - name: somewhere to build
-        if: runner.os == 'Linux'
-        run: sudo mkdir -p /nix/build
 
       # Ubuntu 24.04 ships `kernel.apparmor_restrict_unprivileged_userns` at 1,
       # which denies a user namespace to a process that is unconfined and has no
@@ -177,5 +178,5 @@ jobs:
       - name: what the surface cost in disk
         if: always()
         run: |
-          df -h
+          df -h /
           sudo du -sh /nix/store || true
