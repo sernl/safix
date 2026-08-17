@@ -139,7 +139,10 @@ pub fn run(
 
     log(
         progress,
-        &format!("safix: {} {subject} in {relative}", act.as_str()),
+        &match act {
+            Act::Add => format!("safix: adding {subject} to {relative}"),
+            Act::Remove => format!("safix: removing {subject} from {relative}"),
+        },
     );
     std::fs::write(&absolute, &edited).map_err(|cause| Error::FileUnwritable {
         path: absolute.display().to_string(),
