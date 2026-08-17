@@ -41,6 +41,12 @@ use crate::{git, scratch};
 /// entries is one act with one outcome: the caller that prompts is also the
 /// caller that knows whether a terminal was involved, and splitting it would put
 /// half of that knowledge here.
+///
+/// Four implementations, and only two of them are in this crate. The command owns
+/// the prompt that reads a typed value twice and the stream that reads a piped one
+/// once, because both are about a terminal; [`crate::edit`] owns the buffer and
+/// [`crate::bridge`] the value clan already handed over. Everything after the read
+/// is this module's, identically for all four.
 pub trait ValueSource {
     /// The value for this user's secret of this name.
     ///

@@ -130,6 +130,12 @@ pub fn record_path(name: &str, placement: &Placement) -> String {
 
 /// The last component of the directory a file sits in, which for a shared
 /// entry's document is the audience's own name.
+///
+/// Total, and the degenerate answer is the empty string: a file at the repository
+/// root sits in no directory and so names no audience. `resolve.nix` places a
+/// shared entry at `secrets/safix/shared/<audience>/`, so nothing it emits reaches
+/// that branch, and an embedder that handed one over would get a record path with
+/// an empty segment rather than a refusal.
 fn audience_directory(file: &str) -> &str {
     let directory = match file.rfind('/') {
         None => "",

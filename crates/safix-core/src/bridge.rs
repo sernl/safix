@@ -154,10 +154,11 @@ pub struct Tally {
 
 /// A value already in hand, for the write path that expects to read one.
 ///
-/// `set` takes a [`ValueSource`] because the hand-set path reads the value twice
-/// from a terminal and compares the two. A bridged value was read once, from
-/// clan, and there is nothing to compare it against — so this hands it over and
-/// the rest of the write path is unchanged.
+/// `set` takes a [`ValueSource`] because how a value arrives differs while what
+/// happens to it does not: typed twice at a terminal and compared, piped once by a
+/// script, edited in a buffer. A bridged value was read once, from clan, and there
+/// is nothing to compare it against — so this hands it over and the rest of the
+/// write path is unchanged.
 struct Held(Option<Secret>);
 
 impl ValueSource for Held {
