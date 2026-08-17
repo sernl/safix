@@ -62,7 +62,7 @@ pub enum Disagreement {
     /// safix's side of the mapping did not decrypt for whoever is running.
     ///
     /// Carried as data rather than as the refusal that produced it.
-    /// [`bridge::held_by_safix`] raises [`Error::SourceUnreadable`], whose
+    /// `bridge::held_by_safix` raises [`Error::SourceUnreadable`], whose
     /// sentence is the export path's: it says the mapping exports the entry and
     /// that the mapping was refused rather than transferred. Neither is true
     /// here — the safix side of a `clan-to-safix` mapping is the destination,

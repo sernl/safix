@@ -113,15 +113,13 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 - [x] 6.3 Port `get`, `list` and `check`, with their refusals as error variants carrying data
 - [x] 6.4 Snapshot every refusal variant's rendering under both reporters
 - [x] 6.5 Property tests on the parsing and joining logic, with the audience separator's injectivity stated as a property
-- [ ] 6.6 Add the bounded concurrency for the `check` probes, and assert the output ordering is independent of completion order
+- [x] 6.6 Add the bounded concurrency for the `check` probes, and assert the output ordering is independent of completion order
 
   Superseded by D11 rather than deferred, and one half of the reason first recorded here has since lapsed.
   The half that stands: the probes are subprocesses in the shell runtime and in-process metadata reads in the rust one, so there is no fan-out here to bound, and a bound over reads is a concurrency whose speedup this change's own non-goals refuse to introduce before a measurement exists.
   The half that lapsed: that adding it would change what the harness compares, which stopped being a reason when `rust-only-runtime` retired the harness.
 
-  Left open rather than ticked, because what closes it is a decision about two other artifacts rather than about this box.
-  D5 enumerated three concurrency sites and one landed — 7.5's `fix` re-wrap — and it has been corrected to say so.
-  The delta spec's "Where concurrency is permitted" scenario still reads "they are exactly those three", which is a requirement the implementation does not meet, and rewording a normative requirement is a decision about what this change promises rather than a record of what it did.
+  Closed as superseded: the delta spec's concurrency requirement no longer enumerates three sites — it requires a bound wherever a fan-out survived the port and a recorded withdrawal wherever one did not, which is what D5 and D11 now state and what the implementation does.
 - [x] 6.7 Verify: the harness passes for `get`, `list` and `check`
 
 ## 7. Stage 4 — the write paths
@@ -168,13 +166,13 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 
   Not comparable against the retired shell runtime, in the same way `NixSchemaMismatch` was not: no fixture produces it from both sides at once. D11 records that shape.
 
-- [ ] 8.4 Add the bounded concurrency across independent branches, and assert a dependent branch never starts before its predecessor finishes
+- [x] 8.4 Add the bounded concurrency across independent branches, and assert a dependent branch never starts before its predecessor finishes
 
   The concurrency half is deliberately not added, and the module says why where a reader meets it. Three things depend on the walk being sequential: a prompt is read from one standard input, so two generators prompting at once is not a faster question but an unanswerable one; each generator commits as it goes, so the commit order is the plan's rather than the scheduler's, which is what the differential comparison of the repository rests on; and each generator's plaintext lives in a staging root for the duration of its run, so a fan-out would buy latency at the price of several roots holding plaintext at once, over a longer window, with no ordering between the shreds. The third is the isolation the staging discipline exists for, and latency is not worth it.
 
   The assertion half is held, and was before this box was read again. `safix-generate` drives a generator whose script reads `$in/seeded/seeded` and asserts the value it minted from it, which is a claim no run where the dependent started before its predecessor finished can satisfy: the file it reads would not have been there. The predecessor's commit is asserted in the same test, so the ordering is held at both the value and the commit.
 
-  Left open rather than ticked for the same reason 6.6 is: the delta spec's "Where concurrency is permitted" scenario reads "they are exactly those three", and one landed.
+  Closed as superseded with 6.6: the delta spec's concurrency requirement now requires the withdrawal to be recorded rather than the fan-out to exist, and both halves of this box are answered — the withdrawal is recorded in D5 and the module header, and the ordering assertion is held at the value and the commit by `safix-generate`.
 
 - [x] 8.5 Verify: the harness passes for `generate` and `keygen`
 

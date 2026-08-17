@@ -92,7 +92,7 @@ pub enum Reading {
     /// clan had a value, and this is it.
     Present(Secret),
     /// clan knows the var and it holds nothing yet. An outcome rather than a
-    /// failure — see [`NOT_GENERATED`].
+    /// failure — see `NOT_GENERATED`.
     AbsentAtSource,
 }
 

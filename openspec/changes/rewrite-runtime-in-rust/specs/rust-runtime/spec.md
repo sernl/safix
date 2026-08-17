@@ -128,13 +128,13 @@ Every refusal SHALL be a variant of the library's error type carrying the data i
 
 ### Requirement: Concurrency is bounded and confined to the fan-outs the shell already has
 
-Asynchronous execution SHALL appear only in re-wrapping during a fix, probing during a check, and independent branches of the generator graph, each bounded by a limit on concurrent work; every other path SHALL be sequential.
+Asynchronous execution SHALL appear only where work the shell runtime already fanned out still fans out in this runtime, bounded by a limit on concurrent work; every other path SHALL be sequential.
 
 #### Scenario: Where concurrency is permitted
 
 - **WHEN** the runtime's concurrent regions are enumerated
-- **THEN** they are exactly those three
-- **AND** each is bounded rather than spawning one task per item
+- **THEN** each is bounded rather than spawning one task per item
+- **AND** a fan-out that did not survive the port is withdrawn in the design, with the reason stated where a reader meets the sequential path
 
 #### Scenario: Why writing stays sequential
 
