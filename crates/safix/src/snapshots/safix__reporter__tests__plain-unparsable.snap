@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: generated /srv/fleet/safix/users/dee.nix does not parse; nothing was staged
+safix: generated /srv/fleet/safix/users/dave.nix does not parse; nothing was staged

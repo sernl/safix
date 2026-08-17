@@ -306,10 +306,10 @@ mod tests {
 
     #[test]
     fn the_candidate_sits_beside_the_target_and_keeps_the_yaml_suffix() {
-        let candidate = candidate_path(Path::new("/srv/fleet/secrets/ana/secrets.yaml"));
+        let candidate = candidate_path(Path::new("/srv/fleet/secrets/alice/secrets.yaml"));
         assert_eq!(
             candidate.parent(),
-            Path::new("/srv/fleet/secrets/ana/secrets.yaml").parent()
+            Path::new("/srv/fleet/secrets/alice/secrets.yaml").parent()
         );
         assert_eq!(
             candidate.extension().and_then(std::ffi::OsStr::to_str),
@@ -318,7 +318,7 @@ mod tests {
         assert!(
             candidate
                 .to_string_lossy()
-                .starts_with("/srv/fleet/secrets/ana/secrets.yaml.safix-tmp.")
+                .starts_with("/srv/fleet/secrets/alice/secrets.yaml.safix-tmp.")
         );
     }
 }

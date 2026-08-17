@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::bad_user_name
 
-  × Ana Smith is not a well-formed user name.
+  × Alice Smith is not a well-formed user name.
   │ 
   │ A user name is interpolated into the path of the file their secrets are
   │ placed in and into the path_regex of a .sops.yaml creation rule, so the

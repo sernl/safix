@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: age-keygen wrote no public key; check /home/ana/.config/sops/age/keys.txt before re-running
+safix: age-keygen wrote no public key; check /home/alice/.config/sops/age/keys.txt before re-running

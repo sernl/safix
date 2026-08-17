@@ -554,8 +554,8 @@ mod tests {
     #[test]
     fn parent_matches_dirname_on_the_shapes_placements_produce() {
         assert_eq!(
-            parent_of("secrets/safix/users/ana/secrets.yaml"),
-            "secrets/safix/users/ana"
+            parent_of("secrets/safix/users/alice/secrets.yaml"),
+            "secrets/safix/users/alice"
         );
         assert_eq!(parent_of("secrets.yaml"), ".");
         assert_eq!(parent_of("/secrets.yaml"), "/");

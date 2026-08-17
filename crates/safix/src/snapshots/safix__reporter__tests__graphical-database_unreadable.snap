@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::database_unreadable
 
-  × /home/ana/.keys/master.kdbx did not open, so no mapping was judged and
+  × /home/alice/.keys/master.kdbx did not open, so no mapping was judged and
   │ nothing was written.
   │ 
   │ A wrong password and an unreadable file present the same way here, and the

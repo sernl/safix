@@ -582,7 +582,7 @@ let
       owner = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        example = "ana";
+        example = "alice";
         description = ''
           The `flake.safix.users` entry this machine belongs to, or null.
 
@@ -655,7 +655,7 @@ let
       owner = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        example = "ana";
+        example = "alice";
         description = ''
           The `flake.safix.users` entry this service belongs to, or null.
 
@@ -701,7 +701,7 @@ let
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [
-        "ana"
+        "alice"
         "deck"
         "oncall"
       ];
@@ -837,7 +837,7 @@ let
         default = { };
         example = lib.literalExpression ''
           {
-            bo.wifi-psk = { };
+            bob.wifi-psk = { };
             oncall.deploy-key = { };
             "ownerOf.deck".wifi-psk = { };
           }

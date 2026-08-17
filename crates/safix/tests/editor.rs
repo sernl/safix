@@ -19,7 +19,7 @@ mod harness;
 
 use std::path::Path;
 
-use harness::{ANA_FILE, Fixture};
+use harness::{ALICE_FILE, Fixture};
 
 /// A shell script standing in for the operator's editor.
 ///
@@ -49,7 +49,7 @@ fn no_buffer_left(fixture: &Fixture, before: &[std::path::PathBuf], what: &str) 
 fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
     let fixture = Fixture::new();
     fixture
-        .set("ana", "api-token", "the-original")
+        .set("alice", "api-token", "the-original")
         .expect_success("the value being edited");
     let settled = fixture.head();
 
@@ -59,13 +59,13 @@ fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
     let roots = fixture.staging_roots();
     let refused = fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[("EDITOR", &editor(&fixture, "refuse", "exit 3"))],
         )
         .expect_refusal("an editor that exited non-zero");
     refused.says("the editor exited 3");
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "the-original");
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "the-original");
     assert_eq!(fixture.head(), settled, "a failed editor committed");
     no_buffer_left(&fixture, &roots, "a failed editor");
 
@@ -76,13 +76,13 @@ fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
     let roots = fixture.staging_roots();
     fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[("EDITOR", &editor(&fixture, "leave", "true"))],
         )
         .expect_success("an editor that changed nothing")
         .says("unchanged");
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "the-original");
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "the-original");
     assert_eq!(fixture.head(), settled, "an unchanged buffer committed");
     no_buffer_left(&fixture, &roots, "an unchanged edit");
 
@@ -92,13 +92,13 @@ fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
     let roots = fixture.staging_roots();
     let emptied = fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[("EDITOR", &editor(&fixture, "empty", ": > \"$1\""))],
         )
         .expect_refusal("an editor that emptied the buffer");
     emptied.says("empty");
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "the-original");
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "the-original");
     assert_eq!(fixture.head(), settled, "an emptied buffer committed");
     no_buffer_left(&fixture, &roots, "an emptied edit");
 
@@ -107,7 +107,7 @@ fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
     let roots = fixture.staging_roots();
     fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[(
                 "EDITOR",
@@ -115,7 +115,7 @@ fn the_four_outcomes_of_an_edit_write_what_each_is_supposed_to() {
             )],
         )
         .expect_success("an editor that changed the value");
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "the-edited-value");
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "the-edited-value");
     assert_ne!(
         fixture.head(),
         settled,
@@ -146,7 +146,7 @@ fn the_editor_is_the_one_the_operator_named_or_the_run_refuses() {
     let roots = fixture.staging_roots();
     let refused = fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[("EDITOR", ""), ("VISUAL", "")],
         )
@@ -171,7 +171,7 @@ fn the_editor_is_the_one_the_operator_named_or_the_run_refuses() {
     };
     fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[
                 ("EDITOR", &record("fallback")),
@@ -189,7 +189,11 @@ fn the_editor_is_the_one_the_operator_named_or_the_run_refuses() {
     // authoring verb as well as an amending one.
     let authored = editor(&fixture, "author", "printf 'authored-here' > \"$1\"");
     fixture
-        .run_env(&["edit", "ana", "wifi-psk"], None, &[("EDITOR", &authored)])
+        .run_env(
+            &["edit", "alice", "wifi-psk"],
+            None,
+            &[("EDITOR", &authored)],
+        )
         .expect_success("authoring an entry that held nothing");
     assert_eq!(
         fixture.value(harness::SHARED_FILE, "wifi-psk"),
@@ -207,7 +211,7 @@ fn the_editor_is_the_one_the_operator_named_or_the_run_refuses() {
 fn the_editor_receives_the_path_and_never_the_value() {
     let fixture = Fixture::new();
     fixture
-        .set("ana", "api-token", "CANARY-edited-value")
+        .set("alice", "api-token", "CANARY-edited-value")
         .expect_success("the value being edited");
 
     let spool = fixture.scratch("argv");
@@ -222,7 +226,7 @@ fn the_editor_receives_the_path_and_never_the_value() {
 
     fixture
         .run_env(
-            &["edit", "ana", "api-token"],
+            &["edit", "alice", "api-token"],
             None,
             &[("EDITOR", &observer)],
         )

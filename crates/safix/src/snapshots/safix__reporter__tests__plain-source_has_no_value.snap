@@ -2,16 +2,16 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the mapping 'ntfy-token' exports ntfy-token for ana, which holds no value yet.
+safix: the mapping 'ntfy-token' exports ntfy-token for alice, which holds no value yet.
 
-secrets/safix/users/ana/secrets.yaml does not carry the key. Evaluation could not have caught this: an
+secrets/safix/users/alice/secrets.yaml does not carry the key. Evaluation could not have caught this: an
 entry declares where a value lives, not that one is there, and the two
 are the same declaration until something reads the file.
 
 Put a value there first:
 
-    safix set ana ntfy-token
+    safix set alice ntfy-token
 
 or, if a generator should mint it, declare one and run:
 
-    safix generate ana ntfy-token
+    safix generate alice ntfy-token

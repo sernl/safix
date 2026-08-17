@@ -40,8 +40,8 @@
 #   2. Every `path_regex` is anchored with `^`. sops matches `path_regex`
 #      unanchored against the path relative to this file's directory, so an
 #      unanchored rule also matches the same suffix under any prefix:
-#      `nested/secrets/safix/users/ana/x.yaml` would match a rule written for
-#      `secrets/safix/users/ana/`. `[^/]*` rather than `.*` keeps each rule to
+#      `nested/secrets/safix/users/alice/x.yaml` would match a rule written for
+#      `secrets/safix/users/alice/`. `[^/]*` rather than `.*` keeps each rule to
 #      one directory level, so a file dropped in a subdirectory fails closed
 #      instead of silently inheriting a person's recipients. It is `[^/]*`
 #      rather than one literal filename so that a file placed beside a person's
@@ -68,51 +68,51 @@
 # or `sops <file>`.
 
 keys:
-  # ana's escrow — a second identity she holds
-  - &ana-escrow age1fixturevault0000000000000000000000000000000000000000000000
-  # ana — fixture identity, decrypts nothing
-  - &ana-safix age1fixtureaaa00000000000000000000000000000000000000000000000
-  # bo — fixture identity, decrypts nothing
-  - &bo-safix age1fixturebbb00000000000000000000000000000000000000000000000
-  # cy — fixture identity, decrypts nothing
-  - &cy-safix age1fixtureccc00000000000000000000000000000000000000000000000
+  # alice's escrow — a second identity she holds
+  - &alice-escrow age1fixturevault0000000000000000000000000000000000000000000000
+  # alice — fixture identity, decrypts nothing
+  - &alice-safix age1fixtureaaa00000000000000000000000000000000000000000000000
+  # bob — fixture identity, decrypts nothing
+  - &bob-safix age1fixturebbb00000000000000000000000000000000000000000000000
+  # carol — fixture identity, decrypts nothing
+  - &carol-safix age1fixtureccc00000000000000000000000000000000000000000000000
   # fixture-host — the age form of a host identity that does not exist
   - &fixture-host-safix age1fixturehost00000000000000000000000000000000000000000000000
 
 creation_rules:
-  # Audience: %fixture-web, ana.
+  # Audience: %fixture-web, alice.
   # One data key, wrapped once per recipient, so every member of this audience
   # opens every value in this directory. That is why sharing lands here rather
   # than adding a recipient to one of their personal files.
-  - path_regex: ^secrets/safix/shared/%fixture-web,ana/[^/]*\.yaml$
+  - path_regex: ^secrets/safix/shared/%fixture-web,alice/[^/]*\.yaml$
     key_groups:
       - age:
-          - *ana-escrow
-          - *ana-safix
+          - *alice-escrow
+          - *alice-safix
           - *fixture-host-safix
 
-  # Audience: ana, bo.
+  # Audience: alice, bob.
   # One data key, wrapped once per recipient, so every member of this audience
   # opens every value in this directory. That is why sharing lands here rather
   # than adding a recipient to one of their personal files.
-  - path_regex: ^secrets/safix/shared/ana,bo/[^/]*\.yaml$
+  - path_regex: ^secrets/safix/shared/alice,bob/[^/]*\.yaml$
     key_groups:
       - age:
-          - *ana-escrow
-          - *ana-safix
-          - *bo-safix
+          - *alice-escrow
+          - *alice-safix
+          - *bob-safix
 
-  # Audience: ana alone — their own custody. The recipients
+  # Audience: alice alone — their own custody. The recipients
   # below are the identities that one person holds.
-  - path_regex: ^secrets/safix/users/ana/[^/]*\.yaml$
+  - path_regex: ^secrets/safix/users/alice/[^/]*\.yaml$
     key_groups:
       - age:
-          - *ana-escrow
-          - *ana-safix
+          - *alice-escrow
+          - *alice-safix
 
-  # Audience: bo alone — their own custody. The recipients
+  # Audience: bob alone — their own custody. The recipients
   # below are the identities that one person holds.
-  - path_regex: ^secrets/safix/users/bo/[^/]*\.yaml$
+  - path_regex: ^secrets/safix/users/bob/[^/]*\.yaml$
     key_groups:
       - age:
-          - *bo-safix
+          - *bob-safix

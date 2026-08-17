@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::scaffold_exists
 
-  × safix/users/dee.nix already exists but declares no user; resolve that by
+  × safix/users/dave.nix already exists but declares no user; resolve that by
   │ hand before scaffolding over it

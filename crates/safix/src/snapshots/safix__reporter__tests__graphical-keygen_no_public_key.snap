@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::keygen_no_public_key
 
-  × age-keygen wrote no public key; check /home/ana/.config/sops/age/keys.txt
-  │ before re-running
+  × age-keygen wrote no public key; check /home/alice/.config/sops/age/
+  │ keys.txt before re-running

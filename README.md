@@ -24,9 +24,9 @@ Add the input, import the module, declare a person.
       systems = [ "x86_64-linux" ];
       imports = [ safix.flakeModules.default ];
 
-      flake.safix.users.ana = {
+      flake.safix.users.alice = {
         recipient = "age1...";
-        private.ana-token = { };
+        private.alice-token = { };
       };
     };
 }
@@ -34,24 +34,24 @@ Add the input, import the module, declare a person.
 
 That is the flake half.
 `flake.safix.lib` now holds the audiences, the placements, the generated policy text and the check builders, and `packages.safix` is the command.
-Put `safix` in your devshell and run `safix fix` once to write `.sops.yaml`, then `safix set ana-token`.
+Put `safix` in your devshell and run `safix fix` once to write `.sops.yaml`, then `safix set alice-token`.
 
-The profile half is an import and four lines, in whichever module system ana's secrets are to arrive in.
+The profile half is an import and four lines, in whichever module system alice's secrets are to arrive in.
 
 ```nix
-# ana's home-manager profile
+# alice's home-manager profile
 { inputs, ... }:
 {
   imports = [ inputs.safix.homeModules.default ];
 
   safix.flake = inputs.self;
-  safix.user = "ana";
+  safix.user = "alice";
   safix.hostname = "workstation";
-  safix.identity.sshKeyPaths = [ "/home/ana/.ssh/id_ed25519" ];
+  safix.identity.sshKeyPaths = [ "/home/alice/.ssh/id_ed25519" ];
 }
 ```
 
-Every secret ana resolves on that host is now established there.
+Every secret alice resolves on that host is now established there.
 
 `nixosModules.default` is the first three of those lines for a system configuration.
 The fourth is the user scope's alone: sops-nix's NixOS module defaults its age identity to the ed25519 keys of `config.services.openssh.hostKeys`, and its home-manager module has no per-person equivalent to fall back on, so a profile that resolves secrets and names no identity refuses at evaluation rather than establishing them.
@@ -75,7 +75,7 @@ Every refusal safix makes comes from keeping those two apart.
 ## private: mine alone
 
 ```nix
-flake.safix.users.ana.private = {
+flake.safix.users.alice.private = {
   filen-key = { };
   ssh-personal.mode = "0600";
 };
@@ -86,7 +86,7 @@ $ safix set filen-key    # prompts hidden, encrypts, commits
 $ safix get filen-key    # prints the value, for piping
 ```
 
-Think of it as ana's drawer.
+Think of it as alice's drawer.
 Declaring an entry here is the whole story: there is no catalogue entry and no separate selection step, because a private declaration is its own selection.
 Only the holder can read it.
 
@@ -96,30 +96,30 @@ Only the holder can read it.
 # the shelf, declared once
 flake.safix.catalogue.cognee-api-key = { };
 
-# ana taking one
-flake.safix.users.ana.carries.cognee-api-key = { };
+# alice taking one
+flake.safix.users.alice.carries.cognee-api-key = { };
 ```
 
 Think of it as a shelf of standard items.
 The shelf says this thing exists; carrying says I have one.
-By default each carrier gets their own copy with their own value: if bo also carries `cognee-api-key`, his value and ana's are unrelated.
+By default each carrier gets their own copy with their own value: if bob also carries `cognee-api-key`, his value and alice's are unrelated.
 Same label, different contents.
 
 ## sharedWith: I hand you a copy of my thing
 
 ```nix
-flake.safix.users.ana.sharedWith.bo = {
+flake.safix.users.alice.sharedWith.bob = {
   linear-credentials = { };
 };
 ```
 
 ```console
 $ safix fix
-$ sops secrets/safix/shared/ana,bo/secrets.yaml
+$ sops secrets/safix/shared/alice,bob/secrets.yaml
 ```
 
 Think of it as a shared drawer between exactly those two.
-The directory name is the guest list: `ana,bo` means those two can open it and nobody else can.
+The directory name is the guest list: `alice,bob` means those two can open it and nobody else can.
 `fix` regenerates the rule for the new audience file; moving the value in is a keyholder's act, which is why the second command is `sops` in your hands rather than something automatic.
 On the recipient's next rebuild the secret appears in their resolved set at their own path, and they declare nothing.
 
@@ -134,8 +134,8 @@ Revocation is not retroactive, and that sentence is written on the `recipient` o
 flake.safix.catalogue.team-api-token.shared = true;
 
 # both of them carry it
-flake.safix.users.ana.carries.team-api-token = { };
-flake.safix.users.bo.carries.team-api-token = { };
+flake.safix.users.alice.carries.team-api-token = { };
+flake.safix.users.bob.carries.team-api-token = { };
 ```
 
 Think of it as the office wifi password.
@@ -155,13 +155,13 @@ The signal is derived from the file's own recipient stanzas — a stanza belongi
 ## perHost and perTag: where it shows up, not who owns it
 
 ```nix
-flake.safix.users.ana.perHost.builder = {
+flake.safix.users.alice.perHost.builder = {
   omit.filen-key = { };
 };
 ```
 
 Think of it as which rooms my keys follow me into.
-The secret is still ana's everywhere; it simply does not land on that host.
+The secret is still alice's everywhere; it simply does not land on that host.
 This is why a carrier of a shared entry who omits it on one host stays in the audience: omitting is about placement, and custody is about carrying.
 Reaching an entry only through a `perHost` or `perTag` `add` is refused, because a host-scoped selection puts nobody in any audience and would leave that person resolving a file they are not encrypted to.
 
@@ -176,16 +176,16 @@ Nothing in this section changes anything until you declare it, and declaring a m
 ```nix
 flake.safix.machines.deck = {
   recipient = "age1..."; # ssh-to-age of the host's ed25519 key
-  owner = "ana";
+  owner = "alice";
   tags = [ "laptop" ];
 };
 
-flake.safix.users.ana.sharedWith.deck.fleet-token = { };
+flake.safix.users.alice.sharedWith.deck.fleet-token = { };
 ```
 
 ```console
 $ safix fix
-$ sops secrets/safix/shared/ana,deck/secrets.yaml
+$ sops secrets/safix/shared/alice,deck/secrets.yaml
 ```
 
 Think of it as sharing with the host rather than with its owner: the machine's own service reads the value, and no person has to be logged in.
@@ -207,16 +207,16 @@ A service grant narrows what is declared and what is placed, and not what decryp
 ```nix
 flake.safix.services.nginx = {
   machines = [ "deck" ];
-  owner = "ana";
+  owner = "alice";
   user = "nginx";
   group = "nginx";
 };
 
-flake.safix.users.ana.sharedWith.nginx.web-token = { };
+flake.safix.users.alice.sharedWith.nginx.web-token = { };
 ```
 
 ```console
-$ sops secrets/safix/shared/%nginx,ana/secrets.yaml
+$ sops secrets/safix/shared/%nginx,alice/secrets.yaml
 ```
 
 The entry arrives on each machine the service runs on, keyed `nginx/web-token`, so the provisioner's own default path nests it under the service and two services granted one name never collide.
@@ -228,13 +228,13 @@ safix records where a service runs because audiences need it and derives it from
 ### A group is a subject whose recipients are its members'
 
 ```nix
-flake.safix.groups.oncall.members = [ "ana" "bo" "deck" ];
+flake.safix.groups.oncall.members = [ "alice" "bob" "deck" ];
 
-flake.safix.users.ana.sharedWith.oncall.pager-token = { };
+flake.safix.users.alice.sharedWith.oncall.pager-token = { };
 ```
 
 ```console
-$ sops secrets/safix/shared/@oncall,ana/secrets.yaml
+$ sops secrets/safix/shared/@oncall,alice/secrets.yaml
 ```
 
 Think of it as a drawer with a name on it instead of a guest list.
@@ -242,7 +242,7 @@ Members may be people, machines, services, or other groups, and a cycle among th
 
 The `@` is what makes membership changes cheap.
 A guest-list directory moves when its list changes, which is a migration; a group-named directory does not, so adding a member is one `safix fix` that re-wraps one file, and removing one is a narrowing of the same file.
-Ad-hoc `sharedWith.bo` keeps the guest-list form — the two answer different questions and both stay derived.
+Ad-hoc `sharedWith.bob` keeps the guest-list form — the two answer different questions and both stay derived.
 
 A member who leaves is reported by `safix check` as the revocation it is, with rotation as the remedy and `fix` as only the alignment afterwards.
 They have read what the file holds; no re-wrap unreads it.
@@ -263,7 +263,7 @@ One person may own machines in two silos — the operator administering both sid
 ### Ownership is a record a grant resolves through
 
 ```nix
-flake.safix.users.ana.sharedWith."ownerOf.deck".wifi-psk = { };
+flake.safix.users.alice.sharedWith."ownerOf.deck".wifi-psk = { };
 ```
 
 Think of it as sharing with whoever holds the host, without having to know who that is.
@@ -276,7 +276,7 @@ An owner does not thereby read the machine's entries or manage its users, becaus
 ## Generators: the value writes itself
 
 ```nix
-flake.safix.users.ana.private.grafana-token = {
+flake.safix.users.alice.private.grafana-token = {
   generator.script = ''openssl rand -hex 32 > "$out/grafana-token"'';
   generator.runtimeInputs = [ "openssl" ];
 };
@@ -305,7 +305,7 @@ Dependencies chain generators.
 Think of a recipe that uses another recipe's output.
 
 ```nix
-flake.safix.users.ana.private = {
+flake.safix.users.alice.private = {
   db-password.generator.script = ''openssl rand -base64 24 > "$out/db-password"'';
   db-password-hash.generator = {
     dependencies = [ "db-password" ];
@@ -322,7 +322,7 @@ Cycles, self-references, and depending on another person's secret are all refuse
 A prompted generator asks instead of computing.
 
 ```nix
-flake.safix.users.ana.private.upstream-api-key.generator = {
+flake.safix.users.alice.private.upstream-api-key.generator = {
   prompts.token = {
     type = "hidden";
     description = "the API key issued by the provider's console";
@@ -334,7 +334,7 @@ flake.safix.users.ana.private.upstream-api-key.generator = {
 A multi-output generator mints related values together, each with its own mode, and each half may be encrypted or public.
 
 ```nix
-flake.safix.users.ana.private = {
+flake.safix.users.alice.private = {
   wg-private = {
     mode = "0400";
     generator = {
@@ -361,7 +361,7 @@ A `validation` script receives the candidate value on stdin, with `$out_name` na
 `files.<name>.secret = false` writes the value to the repository in the clear, gives it no creation rule, and makes it readable while nix evaluates:
 
 ```nix
-peers = [ { publicKey = config.flake.safix.lib.publicValue "ana" "wg-public"; } ];
+peers = [ { publicKey = config.flake.safix.lib.publicValue "alice" "wg-public"; } ];
 ```
 
 That is what a public key, a fingerprint or a derived identifier is for: a module reads it directly rather than through a deployment-time indirection.
@@ -398,7 +398,7 @@ And a validation fragment has no writable path at all, since the staging root ha
 One capability can be granted, on the generator itself:
 
 ```nix
-flake.safix.users.ana.private.acme-account-key.generator = {
+flake.safix.users.alice.private.acme-account-key.generator = {
   network = true;
   runtimeInputs = [ "lego" ];
   script = ''…'';
@@ -457,7 +457,7 @@ A record in a format the running safix does not write is not a finding either, w
 ## Editing a value: `safix edit`
 
 ```console
-$ safix edit ana grafana-token
+$ safix edit alice grafana-token
 ```
 
 Opens `$VISUAL`, or `$EDITOR` when that is unset, on the entry's decrypted value.
@@ -479,7 +479,7 @@ A credential you invoke interactively can stay encrypted and be decrypted on dem
 
 ```nix
 # in your own module, not safix's
-settings.credsCommand = ''sops -d --extract '["dns-creds"]' secrets/safix/users/ana/ops-tooling.yaml'';
+settings.credsCommand = ''sops -d --extract '["dns-creds"]' secrets/safix/users/alice/ops-tooling.yaml'';
 ```
 
 Think of it as reading a note without photocopying it.
@@ -538,8 +538,8 @@ The operator's part is a scaffold and nothing more.
 
 ```console
 # on the operator's machine
-$ safix adduser tama age1abc...
-# writes safix/users/tama.nix, regenerates .sops.yaml, commits exactly those two
+$ safix adduser carol age1abc...
+# writes safix/users/carol.nix, regenerates .sops.yaml, commits exactly those two
 ```
 
 `adduser` mints nothing: no age key, no password material, no secret value.
@@ -574,7 +574,7 @@ It is now one verb.
 $ safix enroll
 # 12345678 is factory-fresh. Generating a PIN and a distinct PUK...
 # 👆 Please touch the YubiKey
-# 12345678 is enrolled for ana.
+# 12345678 is enrolled for alice.
 ```
 
 A touch is the only thing you do.
@@ -745,7 +745,7 @@ The relationship is declared rather than passed as arguments, because a bridge i
   flake.safix.bridge.mappings.ntfy-token = {
     direction = "clan-to-safix";
     clan = { machine = "meridian"; generator = "ntfy"; file = "token"; };
-    safix = { user = "ana"; name = "ntfy-token"; };
+    safix = { user = "alice"; name = "ntfy-token"; };
   };
 }
 ```
@@ -800,13 +800,13 @@ Some secrets are read by tools and some are also read by a person — typed into
 ```nix
 {
   flake.safix.keepassxc = {
-    database = "/home/ana/.keys/master.kdbx";
+    database = "/home/alice/.keys/master.kdbx";
     group = "safix";
 
     mappings.grafana = {
       mode = "safix-to-keepassxc";
-      safix = { user = "ana"; name = "grafana-password"; };
-      kdbx = { path = "ana/grafana"; username = "ana@example.invalid"; };
+      safix = { user = "alice"; name = "grafana-password"; };
+      kdbx = { path = "alice/grafana"; username = "alice@example.com"; };
     };
   };
 }
@@ -858,7 +858,7 @@ The session's secret service is not a second way in, and the reason is worth sta
       checks = config.flake.safix.lib.mkChecks pkgs {
         committedPolicy = ./.sops.yaml;
         materializations = {
-          ana-workstation = /* the attrset your profile materializes */;
+          alice-workstation = /* the attrset your profile materializes */;
         };
       };
     };

@@ -2,10 +2,10 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: secrets/safix/users/ana/secrets.yaml lost a recipient it had before this run, so nothing was committed.
+safix: secrets/safix/users/alice/secrets.yaml lost a recipient it had before this run, so nothing was committed.
 
 No longer able to open it:
-  - age1bo
+  - age1bob
 
 Enrollment is additive and only additive: it appends an identity, appends a
 recipient and re-wraps every governed file to the policy those imply. A

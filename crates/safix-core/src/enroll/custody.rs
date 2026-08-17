@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn neither_transports_argument_vector_can_carry_a_credential() {
-        let service = secret_tool_arguments("ana", "12345678").join(" ");
+        let service = secret_tool_arguments("alice", "12345678").join(" ");
         let store = keepassxc_arguments(Path::new("/keys/master.kdbx"), "12345678").join(" ");
         for shown in [&service, &store] {
             assert!(shown.contains("12345678"), "the serial is public: {shown}");
@@ -394,7 +394,9 @@ mod tests {
                 "a password reached argv: {shown}"
             );
         }
-        assert!(service.starts_with("store --label=safix: PIV access for ana's YubiKey 12345678"));
+        assert!(
+            service.starts_with("store --label=safix: PIV access for alice's YubiKey 12345678")
+        );
         assert!(store.contains("add --password-prompt /keys/master.kdbx"));
     }
 

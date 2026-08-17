@@ -71,7 +71,7 @@ in
         {
           deck = {
             recipient = "age1...";
-            owner = "ana";
+            owner = "alice";
             tags = [ "laptop" ];
           };
         }
@@ -100,7 +100,7 @@ in
         {
           nginx = {
             machines = [ "deck" ];
-            owner = "ana";
+            owner = "alice";
             user = "nginx";
             group = "nginx";
           };
@@ -136,7 +136,7 @@ in
     groups = lib.mkOption {
       default = { };
       type = lib.types.attrsOf types.group;
-      example = lib.literalExpression ''{ oncall.members = [ "ana" "bo" ]; }'';
+      example = lib.literalExpression ''{ oncall.members = [ "alice" "bob" ]; }'';
       description = ''
         The groups an audience may name, each a set of subjects — people,
         machines, services, or other groups.
@@ -195,7 +195,7 @@ in
                 file = "token";
               };
               safix = {
-                user = "ana";
+                user = "alice";
                 name = "ntfy-token";
               };
             };
@@ -224,7 +224,7 @@ in
       database = lib.mkOption {
         default = null;
         type = lib.types.nullOr lib.types.str;
-        example = "/home/ana/.keys/master.kdbx";
+        example = "/home/alice/.keys/master.kdbx";
         description = ''
           The password database `safix sync` converges against, as an absolute
           path on the machine the verb runs on.
@@ -268,12 +268,12 @@ in
             grafana = {
               mode = "safix-to-keepassxc";
               safix = {
-                user = "ana";
+                user = "alice";
                 name = "grafana-password";
               };
               kdbx = {
-                path = "ana/grafana";
-                username = "ana@example.invalid";
+                path = "alice/grafana";
+                username = "alice@example.com";
               };
             };
           }

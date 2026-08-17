@@ -1183,19 +1183,19 @@ mod tests {
     #[test]
     fn a_refusal_naming_a_list_ends_without_a_newline() {
         let refusal = Error::UnknownUser {
-            user: "dee".into(),
-            declared: vec!["ana".into(), "bo".into(), "cy".into()],
+            user: "dave".into(),
+            declared: vec!["alice".into(), "bob".into(), "carol".into()],
         };
         assert_eq!(
             refusal.to_string(),
-            "'dee' is not a declared user of flake.safix.users.\n\nDeclared users:\n  - ana\n  - bo\n  - cy"
+            "'dave' is not a declared user of flake.safix.users.\n\nDeclared users:\n  - alice\n  - bob\n  - carol"
         );
     }
 
     #[test]
     fn a_refusal_naming_an_empty_list_ends_at_its_heading() {
         let refusal = Error::UnknownUser {
-            user: "dee".into(),
+            user: "dave".into(),
             declared: Vec::new(),
         };
         assert!(refusal.to_string().ends_with("Declared users:"));
@@ -1204,14 +1204,14 @@ mod tests {
     #[test]
     fn the_unknown_name_refusal_keeps_the_shell_s_literal_owner_placeholder() {
         let refusal = Error::UnknownName {
-            user: "cy".into(),
+            user: "carol".into(),
             name: "api-token".into(),
             held: Vec::new(),
         };
         let rendered = refusal.to_string();
         assert!(rendered.contains(
-            "  3. flake.safix.users.<owner>.sharedWith.cy.api-token — granted from outside\n"
+            "  3. flake.safix.users.<owner>.sharedWith.carol.api-token — granted from outside\n"
         ));
-        assert!(rendered.ends_with("Names flake.safix.users.cy holds:"));
+        assert!(rendered.ends_with("Names flake.safix.users.carol holds:"));
     }
 }

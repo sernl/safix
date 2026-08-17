@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: .sops.yaml has no creation rule for secrets/safix/shared/ana,bo/secrets.yaml
+safix: .sops.yaml has no creation rule for secrets/safix/shared/alice,bob/secrets.yaml
 
 The recipient policy is generated from the declarations, and a file with
 no rule must fail closed rather than acquire a default recipient set:

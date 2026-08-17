@@ -6,7 +6,7 @@ safix::store_entry_absent
 
   × the mapping 'router' is keepassxc-to-safix, so the database is where its
   │ value comes
-  │ from, and the database holds no entry at 'safix/bo/router'. Nothing was
+  │ from, and the database holds no entry at 'safix/bob/router'. Nothing was
   │ written.
   │ 
   │ safix does not author that entry, and this is the one place the asymmetry

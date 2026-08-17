@@ -13,25 +13,25 @@
 # Two people, one of whom shares one secret with the other, and three throwaway
 # recipient strings that decrypt nothing and have no private half anywhere.
 # Encrypting needs the public key alone, so nothing here is a key: they are
-# literals chosen to be distinguishable in a diff. ana escrows to a second
-# identity she holds and bo does not, so the same fixture carries both custody
+# literals chosen to be distinguishable in a diff. alice escrows to a second
+# identity she holds and bob does not, so the same fixture carries both custody
 # postures and the rules below show each.
 #
 # Severity: proven by perturbation, one drill per claim, each recorded with the
 # projection it moves.
-# Dropping `bo` from the granted fixture's `sharedWith` fails `grantedRules`,
+# Dropping `bob` from the granted fixture's `sharedWith` fails `grantedRules`,
 # whose shared rule disappears, and `sharedOrphaned.granted`, which flips: the
 # shared file stops having an audience and so stops having any rule, which is
 # what makes a file left behind on disk fail closed. `grantedAnchors` does not
 # move, and should not — anchors are the registry's key list rather than a
-# per-rule one, and bo still holds a key.
+# per-rule one, and bob still holds a key.
 # Setting the audience separator to `+` passes the injectivity assertion in
 # resolve.nix — `+` is outside the name alphabet, so the join stays injective —
 # and fails `sharedRuleMatches` on `ownFile` and `elidedSeparator`. The rule for
-# `ana+bo` matches `anabo` and never `ana+bo`, so every file in that directory
-# would fail closed under a rule that reads as if it covered them. That drill is
-# why the separator has to be inert in a regex as well as absent from names, and
-# it is the one an injectivity claim alone would miss.
+# `alice+bob` matches `alicebob` and never `alice+bob`, so every file in that
+# directory would fail closed under a rule that reads as if it covered them.
+# That drill is why the separator has to be inert in a regex as well as absent
+# from names, and it is the one an injectivity claim alone would miss.
 # Removing the `^` from the emitted pattern, or replacing `[^/]*` with `.*`,
 # fails `rulesWellFormed` and — for the second — `sharedRuleMatches.nestedFile`,
 # which is the file that must not be covered.
@@ -84,43 +84,43 @@
       fleetOf = lib.mapAttrs (_name: mkUser);
 
       granted = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureA;
           recoveryRecipients.vault = fixtureVault;
           custody = {
-            private.ana-alone = { };
+            private.alice-alone = { };
             private.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo = {
+        bob = {
           recipient = fixtureB;
-          custody.private.bo-alone = { };
+          custody.private.bob-alone = { };
         };
       };
 
       revoked = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureA;
           recoveryRecipients.vault = fixtureVault;
           custody = {
-            private.ana-alone = { };
+            private.alice-alone = { };
             private.shared-token = { };
           };
         };
-        bo = {
+        bob = {
           recipient = fixtureB;
-          custody.private.bo-alone = { };
+          custody.private.bob-alone = { };
         };
       };
 
       # A third person who records a recipient and holds nothing. They earn an
       # anchor and no rule, since no audience includes them.
       withBystander = granted // {
-        cy = mkUser { recipient = "age1fixtureccc00000000000000000000000000000000000000000000000"; };
+        carol = mkUser { recipient = "age1fixtureccc00000000000000000000000000000000000000000000000"; };
       };
 
-      sharedFile = "secrets/safix/shared/ana,bo/secrets.yaml";
+      sharedFile = "secrets/safix/shared/alice,bob/secrets.yaml";
 
       # These fixtures declare every secret under `private`, so no catalogue
       # entry can be shared and the audiences are the grant-derived ones alone.
@@ -173,9 +173,9 @@
           # The audience separator is interpolated into a generated path_regex,
           # so it has to be inert there as well as outside the name alphabet. A
           # regex metacharacter would leave the rule matching something other
-          # than the directory it names — `ana+bo` matches `anabo` and never
-          # `ana+bo` — and every file in that directory would fail closed under a
-          # rule that reads as if it covered them.
+          # than the directory it names — `alice+bob` matches `alicebob` and
+          # never `alice+bob` — and every file in that directory would fail
+          # closed under a rule that reads as if it covered them.
           sharedRuleMatches =
             let
               rule = lib.head (lib.filter (r: builtins.length r.audience > 1) (planOf granted).rules);
@@ -183,9 +183,9 @@
             in
             {
               ownFile = matches sharedFile;
-              elidedSeparator = matches (lib.replaceStrings [ "ana,bo" ] [ "anabo" ] sharedFile);
-              siblingDirectory = matches "secrets/safix/users/ana/secrets.yaml";
-              nestedFile = matches "secrets/safix/shared/ana,bo/deeper/secrets.yaml";
+              elidedSeparator = matches (lib.replaceStrings [ "alice,bob" ] [ "alicebob" ] sharedFile);
+              siblingDirectory = matches "secrets/safix/users/alice/secrets.yaml";
+              nestedFile = matches "secrets/safix/shared/alice,bob/deeper/secrets.yaml";
               prefixedPath = matches "nested/${sharedFile}";
             };
 
@@ -209,71 +209,71 @@
         };
         expected = {
           fixtureRoster = [
-            "ana"
-            "bo"
+            "alice"
+            "bob"
           ];
 
           grantedAnchors = [
             "vault"
-            "ana-safix"
-            "bo-safix"
+            "alice-safix"
+            "bob-safix"
           ];
           grantedRules = [
             {
-              pathRegex = "^secrets/safix/shared/ana,bo/[^/]*\\.yaml$";
+              pathRegex = "^secrets/safix/shared/alice,bob/[^/]*\\.yaml$";
               audience = [
-                "ana"
-                "bo"
+                "alice"
+                "bob"
               ];
               anchors = [
                 "vault"
-                "ana-safix"
-                "bo-safix"
+                "alice-safix"
+                "bob-safix"
               ];
             }
             {
-              pathRegex = "^secrets/safix/users/ana/[^/]*\\.yaml$";
-              audience = [ "ana" ];
+              pathRegex = "^secrets/safix/users/alice/[^/]*\\.yaml$";
+              audience = [ "alice" ];
               anchors = [
                 "vault"
-                "ana-safix"
+                "alice-safix"
               ];
             }
             {
-              pathRegex = "^secrets/safix/users/bo/[^/]*\\.yaml$";
-              audience = [ "bo" ];
-              anchors = [ "bo-safix" ];
+              pathRegex = "^secrets/safix/users/bob/[^/]*\\.yaml$";
+              audience = [ "bob" ];
+              anchors = [ "bob-safix" ];
             }
           ];
           revokedRules = [
             {
-              pathRegex = "^secrets/safix/users/ana/[^/]*\\.yaml$";
-              audience = [ "ana" ];
+              pathRegex = "^secrets/safix/users/alice/[^/]*\\.yaml$";
+              audience = [ "alice" ];
               anchors = [
                 "vault"
-                "ana-safix"
+                "alice-safix"
               ];
             }
             {
-              pathRegex = "^secrets/safix/users/bo/[^/]*\\.yaml$";
-              audience = [ "bo" ];
-              anchors = [ "bo-safix" ];
+              pathRegex = "^secrets/safix/users/bob/[^/]*\\.yaml$";
+              audience = [ "bob" ];
+              anchors = [ "bob-safix" ];
             }
           ];
 
           bystanderAnchors = [
             "vault"
-            "ana-safix"
-            "bo-safix"
-            "cy-safix"
+            "alice-safix"
+            "bob-safix"
+            "carol-safix"
           ];
           bystanderRuleAudiences = [
             [
-              "ana"
-              "bo"
+              "alice"
+              "bob"
             ]
-            [ "ana" ]
-            [ "bo" ]
+            [ "alice" ]
+            [ "bob" ]
           ];
 
           sharedOrphaned = {

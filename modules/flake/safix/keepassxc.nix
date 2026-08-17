@@ -58,7 +58,7 @@ let
     options = {
       path = lib.mkOption {
         type = lib.types.str;
-        example = "ana/grafana";
+        example = "alice/grafana";
         description = ''
           Where the entry sits under the declared group, as keepassxc's own
           command line spells an entry path.
@@ -74,7 +74,7 @@ let
       username = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        example = "ana@example.invalid";
+        example = "alice@example.com";
         description = ''
           The username to set on the entry, or null to leave the field alone.
 

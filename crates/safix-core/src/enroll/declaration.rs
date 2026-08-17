@@ -218,7 +218,7 @@ mod tests {
     /// The scaffold `adduser` writes, cut to the lines these edits touch.
     const SCAFFOLD: &str = "\
 {
-  flake.safix.users.ana = {
+  flake.safix.users.alice = {
     # handed over by them.
     recipient = \"age1software\";
 
@@ -288,7 +288,7 @@ mod tests {
     fn a_hand_written_attrset_gains_an_anchor_and_keeps_its_own() {
         let record = "\
 {
-  flake.safix.users.ana = {
+  flake.safix.users.alice = {
     recipient = \"age1software\";
     recoveryRecipients = {
       master = {
@@ -313,7 +313,7 @@ mod tests {
         // it would bury that error under a second one.
         let record = "\
 {
-  flake.safix.users.ana = {
+  flake.safix.users.alice = {
     recipient = \"age1software\";
     recoveryRecipients = [ \"age1existing\" ];
   };
@@ -343,7 +343,7 @@ mod tests {
     fn a_private_set_already_holding_entries_gains_one() {
         let record = "\
 {
-  flake.safix.users.ana = {
+  flake.safix.users.alice = {
     recipient = \"age1software\";
     private = {
       mail-password = { };

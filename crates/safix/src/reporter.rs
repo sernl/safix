@@ -214,10 +214,10 @@ mod tests {
     /// without a value to render; `insta` then refuses to pass without a
     /// snapshot of that value. Nothing in that chain is a habit.
     ///
-    /// The values are fixtures throughout: the fleet is `ana`, `bo` and `cy`,
-    /// the one every check in this repository drives, and every age string is
-    /// synthetic — 58 characters of one bech32 letter, minted by nobody and
-    /// opening nothing.
+    /// The values are fixtures throughout: the fleet is `alice`, `bob` and
+    /// `carol`, the one every check in this repository drives, and every age
+    /// string is synthetic — 58 characters of one bech32 letter, minted by
+    /// nobody and opening nothing.
     ///
     /// The arms are in the order [`Error`] declares its variants, which is the
     /// order [`Code::ALL`] iterates and the order the refusals were ported in:
@@ -244,32 +244,32 @@ mod tests {
                 cause: "unknown field `mode`".into(),
             },
             Code::UnknownUser => Error::UnknownUser {
-                user: "dee".into(),
-                declared: vec!["ana".into(), "bo".into(), "cy".into()],
+                user: "dave".into(),
+                declared: vec!["alice".into(), "bob".into(), "carol".into()],
             },
             Code::UnknownName => Error::UnknownName {
-                user: "ana".into(),
+                user: "alice".into(),
                 name: "no-such-secret".into(),
-                held: vec!["ana-alone".into(), "team-vault".into()],
+                held: vec!["alice-alone".into(), "team-vault".into()],
             },
             Code::NoFileForName => Error::NoFileForName {
-                name: "ana-alone".into(),
+                name: "alice-alone".into(),
             },
             Code::NotAYamlPath => Error::NotAYamlPath {
                 name: "bad-path".into(),
-                file: "secrets/safix/users/bo/notes.txt".into(),
+                file: "secrets/safix/users/bob/notes.txt".into(),
             },
             Code::NoDefaultUser => Error::NoDefaultUser {
                 login: "builder".into(),
                 holders: 2,
             },
             Code::NoValueYet => Error::NoValueYet {
-                file: "secrets/safix/users/bo/secrets.yaml".into(),
-                name: "bo-service".into(),
-                user: "bo".into(),
+                file: "secrets/safix/users/bob/secrets.yaml".into(),
+                name: "bob-service".into(),
+                user: "bob".into(),
             },
             Code::RecipientsUnreadable => Error::RecipientsUnreadable {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
                 cause: Box::new(Error::SopsStanzaUnreadable),
             },
             Code::SopsDocumentUnreadable => Error::SopsDocumentUnreadable {
@@ -292,15 +292,15 @@ mod tests {
             Code::ClanPipeMissing => Error::ClanPipeMissing,
             Code::ClanVarUnknown => Error::ClanVarUnknown {
                 mapping: "ntfy-token".into(),
-                machine: "ana-workstation".into(),
+                machine: "alice-workstation".into(),
                 generator: "ntfy".into(),
                 file: "token".into(),
             },
             Code::ClanCommandFailed => Error::ClanCommandFailed {
                 mapping: "ntfy-token".into(),
-                machine: "ana-workstation".into(),
+                machine: "alice-workstation".into(),
                 var_id: "ntfy/token".into(),
-                output: "Error: Machine ana-workstation does not exist".into(),
+                output: "Error: Machine alice-workstation does not exist".into(),
             },
             Code::UnknownMapping => Error::UnknownMapping {
                 mapping: "ntfy-tokne".into(),
@@ -314,25 +314,25 @@ mod tests {
             },
             Code::SourceHasNoValue => Error::SourceHasNoValue {
                 mapping: "ntfy-token".into(),
-                user: "ana".into(),
+                user: "alice".into(),
                 name: "ntfy-token".into(),
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
                 generated: false,
             },
             Code::SourceUnreadable => Error::SourceUnreadable {
                 mapping: "ntfy-token".into(),
-                user: "ana".into(),
+                user: "alice".into(),
                 name: "ntfy-token".into(),
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
             },
             Code::GeneratorDefinitionDrifted => Error::GeneratorDefinitionDrifted {
                 mapping: "ntfy-token".into(),
-                machine: "ana-workstation".into(),
+                machine: "alice-workstation".into(),
                 generator: "ntfy".into(),
             },
             Code::NoClanFlake => Error::NoClanFlake,
             Code::FileUnreadable => Error::FileUnreadable {
-                path: "secrets/safix/users/ana/secrets.yaml.safix-tmp.4213.yaml".into(),
+                path: "secrets/safix/users/alice/secrets.yaml.safix-tmp.4213.yaml".into(),
                 cause: io::Error::from(io::ErrorKind::PermissionDenied),
             },
             Code::GitUnavailable => Error::GitUnavailable {
@@ -340,8 +340,8 @@ mod tests {
                 cause: io::Error::from(io::ErrorKind::NotFound),
             },
             Code::GitCommandFailed => Error::GitCommandFailed {
-                arguments: "commit -q -m chore(safix): set ana-alone for ana \
-                    -- secrets/safix/users/ana/secrets.yaml"
+                arguments: "commit -q -m chore(safix): set alice-alone for alice \
+                    -- secrets/safix/users/alice/secrets.yaml"
                     .into(),
             },
             Code::GitOutputNotText => Error::GitOutputNotText {
@@ -352,54 +352,54 @@ mod tests {
                 marker: "/srv/fleet/.git/rebase-merge".into(),
             },
             Code::ConflictEntries => Error::ConflictEntries {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
             },
             Code::UncommittedChanges => Error::UncommittedChanges {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
-                status: " M secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
+                status: " M secrets/safix/users/alice/secrets.yaml".into(),
             },
             Code::NoValueRead => Error::NoValueRead,
             Code::NoConfirmationRead => Error::NoConfirmationRead,
             Code::EmptyValue => Error::EmptyValue,
             Code::EntriesDiffer => Error::EntriesDiffer,
             Code::FileUnwritable => Error::FileUnwritable {
-                path: "secrets/safix/users/ana/secrets.yaml".into(),
+                path: "secrets/safix/users/alice/secrets.yaml".into(),
                 cause: io::Error::from(io::ErrorKind::PermissionDenied),
             },
             Code::NoAudienceForFile => Error::NoAudienceForFile {
                 file: "secrets/elsewhere/notes.yaml".into(),
             },
             Code::CandidateRecipientsUnreadable => Error::CandidateRecipientsUnreadable {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
                 cause: Box::new(Error::SopsStanzaUnreadable),
             },
             Code::RecipientDrift => Error::RecipientDrift {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
-                extra: vec!["age1cy".into()],
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
+                extra: vec!["age1carol".into()],
                 missing: vec!["age1escrow".into()],
             },
             Code::NoCreationRule => Error::NoCreationRule {
-                file: "secrets/safix/shared/ana,bo/secrets.yaml".into(),
+                file: "secrets/safix/shared/alice,bob/secrets.yaml".into(),
             },
             Code::RewrapUnschedulable => Error::RewrapUnschedulable {
                 cause: "task panicked".into(),
             },
             Code::SopsCreateFailed => Error::SopsCreateFailed {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
                 output: "Failed to get the data key: no key could be obtained".into(),
             },
             Code::GeneratorCycle => Error::GeneratorCycle {
-                user: "ana".into(),
+                user: "alice".into(),
                 cycle: vec!["base".into(), "derived".into(), "base".into()],
             },
             Code::NoGenerator => Error::NoGenerator {
-                user: "ana".into(),
+                user: "alice".into(),
                 name: "api-token".into(),
             },
             Code::DependencyHasNoValue => Error::DependencyHasNoValue {
                 name: "base-pub".into(),
                 producer: "base".into(),
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
             },
             Code::SandboxUnavailable => Error::SandboxUnavailable {
                 backend: safix_core::sandbox::Backend::Bubblewrap.program(),
@@ -443,16 +443,16 @@ mod tests {
             Code::NoEditor => Error::NoEditor,
             Code::PublicNotEditable => Error::PublicNotEditable {
                 name: "wg-public".into(),
-                path: "public/safix/users/ana/wg-public/value".into(),
+                path: "public/safix/users/alice/wg-public/value".into(),
             },
             Code::EditorFailed => Error::EditorFailed { status: 1 },
-            Code::KeygenForSomeoneElse => Error::KeygenForSomeoneElse { user: "bo".into() },
+            Code::KeygenForSomeoneElse => Error::KeygenForSomeoneElse { user: "bob".into() },
             Code::KeygenFailed => Error::KeygenFailed,
             Code::KeygenNoPublicKey => Error::KeygenNoPublicKey {
-                file: "/home/ana/.config/sops/age/keys.txt".into(),
+                file: "/home/alice/.config/sops/age/keys.txt".into(),
             },
             Code::BadUserName => Error::BadUserName {
-                name: "Ana Smith".into(),
+                name: "Alice Smith".into(),
                 pattern: "[a-z0-9][a-z0-9_-]*".into(),
             },
             Code::HardwareRecipient => Error::HardwareRecipient {
@@ -461,13 +461,15 @@ mod tests {
             Code::BadRecipient => Error::BadRecipient {
                 recipient: "age1-not-a-key".into(),
             },
-            Code::AlreadyDeclared => Error::AlreadyDeclared { user: "ana".into() },
+            Code::AlreadyDeclared => Error::AlreadyDeclared {
+                user: "alice".into(),
+            },
             Code::ScaffoldExists => Error::ScaffoldExists {
-                file: "safix/users/dee.nix".into(),
+                file: "safix/users/dave.nix".into(),
             },
             Code::HostWithoutHook => Error::HostWithoutHook,
             Code::Unparsable => Error::Unparsable {
-                path: "/srv/fleet/safix/users/dee.nix".into(),
+                path: "/srv/fleet/safix/users/dave.nix".into(),
             },
             Code::ScaffoldDeclined => Error::ScaffoldDeclined,
             Code::PolicyEvalAfterScaffold => Error::PolicyEvalAfterScaffold {
@@ -509,14 +511,16 @@ mod tests {
             Code::PluginStalled => Error::PluginStalled { seconds: 90 },
             Code::PluginNoIdentity => Error::PluginNoIdentity,
             Code::NoDeclarationFile => Error::NoDeclarationFile {
-                user: "cy".into(),
-                file: "safix/users/cy.nix".into(),
+                user: "carol".into(),
+                file: "safix/users/carol.nix".into(),
             },
             Code::RecipientsLost => Error::RecipientsLost {
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
-                lost: vec!["age1bo".into()],
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
+                lost: vec!["age1bob".into()],
             },
-            Code::NoFileToProveWith => Error::NoFileToProveWith { user: "cy".into() },
+            Code::NoFileToProveWith => Error::NoFileToProveWith {
+                user: "carol".into(),
+            },
             Code::StoreUnavailable => Error::StoreUnavailable {
                 program: "secret-tool".into(),
                 cause: io::Error::from(io::ErrorKind::NotFound),
@@ -532,38 +536,38 @@ mod tests {
                 declared: vec!["grafana".into(), "router".into()],
             },
             Code::StoreLocked => Error::StoreLocked {
-                database: "/home/ana/.keys/master.kdbx".into(),
+                database: "/home/alice/.keys/master.kdbx".into(),
             },
             Code::DatabaseUnreadable => Error::DatabaseUnreadable {
-                database: "/home/ana/.keys/master.kdbx".into(),
+                database: "/home/alice/.keys/master.kdbx".into(),
                 output: "Invalid credentials were provided, please try again.".into(),
             },
             Code::StorePipeMissing => Error::StorePipeMissing,
             Code::StoreCommandFailed => Error::StoreCommandFailed {
-                entry: "safix/ana/grafana".into(),
-                arguments: "add --quiet --password-prompt /home/ana/.keys/master.kdbx \
-                    safix/ana/grafana"
+                entry: "safix/alice/grafana".into(),
+                arguments: "add --quiet --password-prompt /home/alice/.keys/master.kdbx \
+                    safix/alice/grafana"
                     .into(),
-                output: "Could not create entry with path safix/ana/grafana.".into(),
+                output: "Could not create entry with path safix/alice/grafana.".into(),
             },
             Code::ValueSpansLines => Error::ValueSpansLines {
-                entry: "safix/ana/grafana".into(),
+                entry: "safix/alice/grafana".into(),
             },
             Code::SyncSourceEmpty => Error::SyncSourceEmpty {
                 mapping: "grafana".into(),
-                user: "ana".into(),
+                user: "alice".into(),
                 name: "grafana-password".into(),
-                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
                 generated: false,
             },
             Code::StoreEntryAbsent => Error::StoreEntryAbsent {
                 mapping: "router".into(),
-                entry: "safix/bo/router".into(),
+                entry: "safix/bob/router".into(),
                 mode: "keepassxc-to-safix",
             },
             Code::ClanUserRegistrationFailed => Error::ClanUserRegistrationFailed {
-                user: "ana".into(),
-                output: "Error: user ana already exists".into(),
+                user: "alice".into(),
+                output: "Error: user alice already exists".into(),
             },
             Code::EnrollHookFailed => Error::EnrollHookFailed { status: 2 },
         }
@@ -580,18 +584,18 @@ mod tests {
             (
                 "recipient_drift_one_sided",
                 Refusal::Runtime(Error::RecipientDrift {
-                    file: "secrets/safix/users/bo/secrets.yaml".into(),
+                    file: "secrets/safix/users/bob/secrets.yaml".into(),
                     extra: Vec::new(),
-                    missing: vec!["age1bo".into()],
+                    missing: vec!["age1bob".into()],
                 }),
             ),
             (
                 "source_has_no_value_generated",
                 Refusal::Runtime(Error::SourceHasNoValue {
                     mapping: "wg-key".into(),
-                    user: "ana".into(),
+                    user: "alice".into(),
                     name: "wg-private".into(),
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    file: "secrets/safix/users/alice/secrets.yaml".into(),
                     generated: true,
                 }),
             ),
@@ -599,9 +603,9 @@ mod tests {
                 "sync_source_empty_generated",
                 Refusal::Runtime(Error::SyncSourceEmpty {
                     mapping: "wg-key".into(),
-                    user: "ana".into(),
+                    user: "alice".into(),
                     name: "wg-private".into(),
-                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    file: "secrets/safix/users/alice/secrets.yaml".into(),
                     generated: true,
                 }),
             ),

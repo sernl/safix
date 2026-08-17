@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::keygen_for_someone_else
 
-  × 'bo' is not you, and this writes a private key into your own
+  × 'bob' is not you, and this writes a private key into your own
   │ identity file.
   │ 
   │ An age identity is custody: everything encrypted to its public half is
@@ -15,4 +15,4 @@ safix::keygen_for_someone_else
   │ 
   │ If you have decided otherwise anyway, say so:
   │ 
-  │     safix keygen --for-someone-else bo
+  │     safix keygen --for-someone-else bob

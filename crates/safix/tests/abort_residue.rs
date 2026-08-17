@@ -28,11 +28,11 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture, SHARED_FILE, real_sops, shim};
+use harness::{ALICE_FILE, Fixture, SHARED_FILE, real_sops, shim};
 
 /// The directory the shared file would need, which no run before this one has
 /// made.
-const SHARED_DIR: &str = "secrets/safix/shared/ana,bo";
+const SHARED_DIR: &str = "secrets/safix/shared/alice,bob";
 
 /// `SIGINT` while the value is being waited for.
 ///
@@ -45,7 +45,7 @@ fn a_signal_at_the_value_prompt_leaves_the_repository_as_it_found_it() {
     let fixture = Fixture::new();
     let before = fixture.head();
 
-    let run = fixture.interrupt_after("2", "INT", &["set", "ana", "wifi-psk"], "", &[]);
+    let run = fixture.interrupt_after("2", "INT", &["set", "alice", "wifi-psk"], "", &[]);
 
     assert_eq!(run.code, Some(130), "an interrupted run exits 130");
     assert_pristine(&fixture, &before, "CANARY-never-typed");
@@ -68,7 +68,7 @@ fn a_signal_at_the_confirmation_leaves_no_trace_of_the_value_already_typed() {
     let run = fixture.interrupt_after(
         "2",
         "INT",
-        &["set", "ana", "wifi-psk"],
+        &["set", "alice", "wifi-psk"],
         "CANARY-typed-once\n",
         &[],
     );
@@ -85,7 +85,7 @@ fn a_termination_is_answered_the_same_way_and_exits_143() {
     let fixture = Fixture::new();
     let before = fixture.head();
 
-    let run = fixture.interrupt_after("2", "TERM", &["set", "ana", "wifi-psk"], "", &[]);
+    let run = fixture.interrupt_after("2", "TERM", &["set", "alice", "wifi-psk"], "", &[]);
 
     assert_eq!(run.code, Some(143), "a terminated run exits 143");
     assert_pristine(&fixture, &before, "CANARY-never-typed");
@@ -116,15 +116,15 @@ fn a_termination_is_answered_the_same_way_and_exits_143() {
 fn a_signal_during_encryption_stops_before_the_rename() {
     let fixture = Fixture::new();
     fixture
-        .set("ana", "api-token", "CANARY-first-value")
+        .set("alice", "api-token", "CANARY-first-value")
         .expect_success("the value the interrupted run must not replace");
 
     let before = fixture.head();
-    let untouched = fixture.read(ANA_FILE);
+    let untouched = fixture.read(ALICE_FILE);
 
     let sops = real_sops();
     let run = fixture.run_env(
-        &["set", "ana", "api-token"],
+        &["set", "alice", "api-token"],
         Some("CANARY-second-value\nCANARY-second-value\n"),
         &[
             ("SAFIX_SOPS", shim()),
@@ -139,12 +139,12 @@ fn a_signal_during_encryption_stops_before_the_rename() {
 
     assert_eq!(run.code, Some(130), "an interrupted run exits 130");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         untouched,
         "the interrupted run changed the file it was writing into"
     );
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-first-value",
         "the interrupted run replaced the value that was there"
     );
@@ -211,7 +211,7 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
 
         fixture.seed_generator(
             "slow",
-            ANA_FILE,
+            ALICE_FILE,
             &[],
             &serde_json::json!({
                 "dependencies": [], "description": null,
@@ -223,7 +223,7 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
             }),
         );
 
-        let run = fixture.interrupt_after("2", signal, &["generate", "ana", "slow"], "", &[]);
+        let run = fixture.interrupt_after("2", signal, &["generate", "alice", "slow"], "", &[]);
 
         assert_eq!(
             run.code,
@@ -285,7 +285,7 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
 
     fixture.seed_generator(
         "slow",
-        ANA_FILE,
+        ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": null,
@@ -312,7 +312,7 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
     let run = fixture.interrupt_command_after(
         std::time::Duration::from_millis(700),
         rustix::process::Signal::INT,
-        &["generate", "ana", "slow"],
+        &["generate", "alice", "slow"],
         &[],
     );
 
@@ -355,7 +355,7 @@ fn a_generator_interrupted_during_encryption_leaves_no_definition_record() {
 
     fixture.seed_generator(
         "recorded",
-        ANA_FILE,
+        ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": null,
@@ -369,7 +369,7 @@ fn a_generator_interrupted_during_encryption_leaves_no_definition_record() {
 
     let sops = real_sops();
     let run = fixture.run_env(
-        &["generate", "ana", "recorded"],
+        &["generate", "alice", "recorded"],
         None,
         &[
             ("SAFIX_SOPS", shim()),
@@ -381,7 +381,7 @@ fn a_generator_interrupted_during_encryption_leaves_no_definition_record() {
 
     assert_eq!(run.code, Some(130), "an interrupted mint exits 130");
     assert!(
-        !fixture.exists("state/safix/definitions/ana/recorded"),
+        !fixture.exists("state/safix/definitions/alice/recorded"),
         "the interrupted mint recorded a definition for a value it did not commit"
     );
     assert_pristine(&fixture, &before, "CANARY-minted-not-committed");
@@ -408,7 +408,7 @@ fn a_signal_during_a_validation_is_not_reported_as_a_rejection() {
 
     fixture.seed_generator(
         "judged",
-        ANA_FILE,
+        ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": null,
@@ -423,7 +423,7 @@ fn a_signal_during_a_validation_is_not_reported_as_a_rejection() {
     let run = fixture.interrupt_command_after(
         std::time::Duration::from_millis(700),
         rustix::process::Signal::TERM,
-        &["generate", "ana", "judged"],
+        &["generate", "alice", "judged"],
         &[],
     );
 

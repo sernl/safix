@@ -40,10 +40,10 @@ fn adduser_commits_the_scaffold_and_the_policy_that_saw_it() {
     fixture.git(&["add", "--", "bystander.txt"]);
 
     let run = fixture
-        .run(&["adduser", "cy", &recipient, "--yes"])
+        .run(&["adduser", "carol", &recipient, "--yes"])
         .expect_success("scaffolding a new person");
 
-    let scaffold = fixture.read("safix/users/cy.nix");
+    let scaffold = fixture.read("safix/users/carol.nix");
     assert!(
         scaffold.contains(&format!("recipient = \"{recipient}\";")),
         "the recipient handed in is not the one recorded"
@@ -51,7 +51,7 @@ fn adduser_commits_the_scaffold_and_the_policy_that_saw_it() {
     assert!(
         Command::new("nix-instantiate")
             .arg("--parse")
-            .arg(fixture.repo.join("safix/users/cy.nix"))
+            .arg(fixture.repo.join("safix/users/carol.nix"))
             .output()
             .expect("could not run nix-instantiate")
             .status
@@ -61,29 +61,30 @@ fn adduser_commits_the_scaffold_and_the_policy_that_saw_it() {
     assert!(scaffold.contains("carries = { };"), "the scaffold carries");
     assert!(scaffold.contains("private = { };"), "the scaffold declares");
 
-    // The policy was regenerated from declarations that already contained cy,
-    // which is only true if the scaffold was staged before the evaluation: an
-    // evaluation reads the files git tracks, so regenerating first writes the
-    // policy of the declarations as they stood a moment earlier.
+    // The policy was regenerated from declarations that already contained
+    // carol, which is only true if the scaffold was staged before the
+    // evaluation: an evaluation reads the files git tracks, so regenerating
+    // first writes the policy of the declarations as they stood a moment
+    // earlier.
     let policy = fixture.read(".sops.yaml");
     assert!(
-        policy.contains(&format!("- &cy {recipient}")),
+        policy.contains(&format!("- &carol {recipient}")),
         "the regenerated .sops.yaml does not carry the person just declared"
     );
     assert!(
-        policy.contains("- &ana "),
+        policy.contains("- &alice "),
         "the regenerated .sops.yaml dropped someone already declared"
     );
     // A person who holds nothing gets an anchor and no rule: a rule comes from a
     // declaration with a secret in it and from nothing else.
     assert!(
-        !policy.contains("secrets/safix/users/cy/"),
+        !policy.contains("secrets/safix/users/carol/"),
         "a person who holds nothing produced a creation rule"
     );
 
     assert_eq!(
         fixture.paths_in("HEAD"),
-        vec![".sops.yaml".to_owned(), "safix/users/cy.nix".to_owned()],
+        vec![".sops.yaml".to_owned(), "safix/users/carol.nix".to_owned()],
         "the commit is not exactly the scaffold and the regenerated policy"
     );
     assert_eq!(
@@ -101,15 +102,15 @@ fn adduser_commits_the_scaffold_and_the_policy_that_saw_it() {
 
     // The output says what it did and what it did not, and names the sequence
     // that gives them their first secret.
-    run.says("safix/users/cy.nix");
+    run.says("safix/users/carol.nix");
     run.says("no key was minted");
     run.says("onboardingHook is unset");
     run.says("safix fix");
-    run.says("safix set cy");
+    run.says("safix set carol");
 
     let head = fixture.head();
     fixture
-        .run(&["adduser", "cy", &recipient, "--yes"])
+        .run(&["adduser", "carol", &recipient, "--yes"])
         .expect_refusal("scaffolding the same person twice");
     assert_eq!(fixture.head(), head, "the refusal to redeclare committed");
 }
@@ -127,7 +128,7 @@ fn adduser_refusals_leave_the_tree_as_they_found_it() {
     // not a declared user yet, so no resolver check can reach it, and the commit
     // that would make it reachable is the one being refused.
     let mut codes = Vec::new();
-    for name in ["Cy", "cy/../root"] {
+    for name in ["Carol", "carol/../root"] {
         fixture
             .run(&["adduser", name, &recipient, "--yes"])
             .expect_refusal("a name outside the alphabet");
@@ -141,17 +142,17 @@ fn adduser_refusals_leave_the_tree_as_they_found_it() {
     // A name starting outside the alphabet is refused as an option rather than
     // as a name, which is a different refusal and stays one.
     fixture
-        .run(&["adduser", "-cy", &recipient, "--yes"])
+        .run(&["adduser", "-carol", &recipient, "--yes"])
         .expect_refusal("a name starting outside the alphabet");
 
     // A recipient that is not one.
     for bad in ["not-an-age-key".to_owned(), format!("{recipient}extra")] {
         fixture
-            .run(&["adduser", "cy", &bad, "--yes"])
+            .run(&["adduser", "carol", &bad, "--yes"])
             .expect_refusal("a malformed recipient");
         codes.push(
             fixture
-                .run_graphical(&["adduser", "cy", &bad, "--yes"])
+                .run_graphical(&["adduser", "carol", &bad, "--yes"])
                 .refusal_code(),
         );
         assert_untouched(&fixture, &head, "a malformed recipient");
@@ -164,23 +165,23 @@ fn adduser_refusals_leave_the_tree_as_they_found_it() {
     // plausible-looking suffix is needed and none is used.
     let card = "age1yubikey1fixture000000000000000000000000000000000000000000000000000";
     let refused = fixture
-        .run(&["adduser", "cy", card, "--yes"])
+        .run(&["adduser", "carol", card, "--yes"])
         .expect_refusal("a recipient requiring a physical interaction");
     refused.says("recoveryRecipients");
     codes.push(
         fixture
-            .run_graphical(&["adduser", "cy", card, "--yes"])
+            .run_graphical(&["adduser", "carol", card, "--yes"])
             .refusal_code(),
     );
     assert_untouched(&fixture, &head, "a hardware recipient");
 
     // An existing person.
     fixture
-        .run(&["adduser", "ana", &recipient, "--yes"])
+        .run(&["adduser", "alice", &recipient, "--yes"])
         .expect_refusal("redeclaring an existing person");
     codes.push(
         fixture
-            .run_graphical(&["adduser", "ana", &recipient, "--yes"])
+            .run_graphical(&["adduser", "alice", &recipient, "--yes"])
             .refusal_code(),
     );
     assert_untouched(&fixture, &head, "redeclaring an existing person");
@@ -208,7 +209,7 @@ fn host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit(
     let head = fixture.head();
 
     let refused = fixture
-        .run(&["adduser", "cy", &recipient, "--host", "somebox", "--yes"])
+        .run(&["adduser", "carol", &recipient, "--host", "somebox", "--yes"])
         .expect_refusal("--host with no hook configured");
     refused.says("onboardingHook is unset");
     refused.says("onboarding without it succeeds");
@@ -225,14 +226,14 @@ fn host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit(
 
     fixture
         .run(&[
-            "adduser", "cy", &recipient, "--host", "somebox", "--host", "otherbox", "--yes",
+            "adduser", "carol", &recipient, "--host", "somebox", "--host", "otherbox", "--yes",
         ])
         .expect_success("onboarding with a hook");
 
     let log = fixture.read("hook-log.txt");
     assert_eq!(
         log,
-        format!("name=cy\nrecipient={recipient}\nhost=somebox\nhost=otherbox\n"),
+        format!("name=carol\nrecipient={recipient}\nhost=somebox\nhost=otherbox\n"),
         "the hook was not given the name, the recipient and every host"
     );
 
@@ -241,7 +242,7 @@ fn host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit(
     // so it cannot claim its work in a message naming only what safix did.
     assert_eq!(
         fixture.paths_in("HEAD"),
-        vec![".sops.yaml".to_owned(), "safix/users/cy.nix".to_owned()],
+        vec![".sops.yaml".to_owned(), "safix/users/carol.nix".to_owned()],
         "safix's commit carried the hook's work"
     );
     assert!(
@@ -255,7 +256,7 @@ fn host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit(
 fn assert_untouched(fixture: &Fixture, head: &str, what: &str) {
     assert_eq!(fixture.head(), head, "{what} committed something");
     assert!(
-        !fixture.exists("safix/users/cy.nix"),
+        !fixture.exists("safix/users/carol.nix"),
         "{what} left a scaffold behind"
     );
     assert_eq!(fixture.status(), "", "{what} left the tree dirty");

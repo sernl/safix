@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::sops_create_failed
 
-  × sops could not create secrets/safix/users/ana/secrets.yaml:
+  × sops could not create secrets/safix/users/alice/secrets.yaml:
   │ Failed to get the data key: no key could be obtained

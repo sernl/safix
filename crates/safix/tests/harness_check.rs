@@ -11,7 +11,7 @@ mod harness;
 
 use std::process::Command;
 
-use harness::{ANA_FILE, Fixture};
+use harness::{ALICE_FILE, Fixture};
 
 /// The fixture mints a key, writes a value through the real sops, and reads it
 /// back.
@@ -19,23 +19,29 @@ use harness::{ANA_FILE, Fixture};
 fn the_fixture_stands_up_a_repository_with_real_backends() {
     let fixture = Fixture::new();
 
-    assert!(fixture.ana.starts_with("age1"), "ana's recipient is minted");
-    assert!(fixture.bo.starts_with("age1"), "bo's recipient is minted");
-    assert_ne!(fixture.ana, fixture.bo, "the two are distinct identities");
+    assert!(
+        fixture.alice.starts_with("age1"),
+        "alice's recipient is minted"
+    );
+    assert!(fixture.bob.starts_with("age1"), "bob's recipient is minted");
+    assert_ne!(
+        fixture.alice, fixture.bob,
+        "the two are distinct identities"
+    );
 
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "fixture-value-for-api-token",
         "the fixture value round-trips through sops"
     );
     assert!(
-        fixture.read(ANA_FILE).contains("ENC[AES256_GCM"),
+        fixture.read(ALICE_FILE).contains("ENC[AES256_GCM"),
         "the file holds sops ciphertext"
     );
     assert_eq!(
         fixture.subject("HEAD"),
-        format!("fixture: {ANA_FILE}"),
+        format!("fixture: {ALICE_FILE}"),
         "the fixture committed the file it wrote"
     );
     assert_eq!(fixture.status(), "", "the fixture leaves a clean tree");
@@ -45,9 +51,9 @@ fn the_fixture_stands_up_a_repository_with_real_backends() {
 #[test]
 fn the_evaluator_stub_answers_what_the_runtime_reads() {
     let fixture = Fixture::new();
-    let listing = fixture.run(&["list", "ana"]).expect_success("list");
+    let listing = fixture.run(&["list", "alice"]).expect_success("list");
     listing.says("api-token");
-    listing.says(ANA_FILE);
+    listing.says(ALICE_FILE);
 }
 
 /// A rename of an attribute fails in the suite rather than at an operator's
@@ -58,7 +64,7 @@ fn the_evaluator_stub_answers_what_the_runtime_reads() {
 #[test]
 fn the_evaluator_stub_refuses_an_attribute_the_runtime_does_not_name() {
     let fixture = Fixture::new();
-    let command = fixture.command(&["list", "ana"]);
+    let command = fixture.command(&["list", "alice"]);
     let stub = command.get_program().to_owned();
     drop(command);
 

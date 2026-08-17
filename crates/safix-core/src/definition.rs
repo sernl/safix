@@ -453,30 +453,30 @@ mod tests {
         assert_eq!(
             record_path(
                 "api-token",
-                &placement("secrets/safix/users/ana/secrets.yaml", "ana", false)
+                &placement("secrets/safix/users/alice/secrets.yaml", "alice", false)
             ),
-            "state/safix/definitions/ana/api-token"
+            "state/safix/definitions/alice/api-token"
         );
 
-        // The granted case: bo owns it, ana holds it, and both resolve one
+        // The granted case: bob owns it, alice holds it, and both resolve one
         // record.
         assert_eq!(
             record_path(
                 "wifi-psk",
-                &placement("secrets/safix/shared/ana,bo/secrets.yaml", "bo", false)
+                &placement("secrets/safix/shared/alice,bob/secrets.yaml", "bob", false)
             ),
-            "state/safix/definitions/bo/wifi-psk"
+            "state/safix/definitions/bob/wifi-psk"
         );
 
         // The shared case: each carrier is its own placement's owner, so the
         // audience directory is what makes the two agree.
-        for owner in ["ana", "bo"] {
+        for owner in ["alice", "bob"] {
             assert_eq!(
                 record_path(
                     "fleet-token",
-                    &placement("secrets/safix/shared/ana,bo/secrets.yaml", owner, true)
+                    &placement("secrets/safix/shared/alice,bob/secrets.yaml", owner, true)
                 ),
-                "state/safix/definitions/shared/ana,bo/fleet-token"
+                "state/safix/definitions/shared/alice,bob/fleet-token"
             );
         }
     }
@@ -486,8 +486,8 @@ mod tests {
     #[test]
     fn no_record_path_reaches_the_secret_or_the_public_tree() {
         for placement in [
-            placement("secrets/safix/users/ana/secrets.yaml", "ana", false),
-            placement("secrets/safix/shared/ana,bo/secrets.yaml", "bo", true),
+            placement("secrets/safix/users/alice/secrets.yaml", "alice", false),
+            placement("secrets/safix/shared/alice,bob/secrets.yaml", "bob", true),
         ] {
             let path = record_path("api-token", &placement);
             assert!(path.starts_with(PREFIX), "{path} is outside {PREFIX}");

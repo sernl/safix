@@ -26,7 +26,7 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture, Run};
+use harness::{ALICE_FILE, Fixture, Run};
 
 /// The var the fixture mappings name on clan's side.
 const VAR: &str = "ntfy/token";
@@ -56,7 +56,7 @@ fn with_mapping(direction: &str) -> Fixture {
         "ntfy-token",
         direction,
         (MACHINE, "ntfy", "token"),
-        ("ana", "api-token"),
+        ("alice", "api-token"),
     );
     fixture
 }
@@ -80,14 +80,14 @@ fn import_moves_a_clan_value_into_the_declared_entry_and_commits_it() {
     run.silent_about("CANARY-from-clan");
 
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-from-clan",
         "the imported value is not what clan was holding"
     );
     assert_ne!(fixture.head(), before, "the import committed nothing");
     let subject = fixture.subject("HEAD");
     assert_eq!(
-        subject, "chore(safix): import ntfy-token for ana",
+        subject, "chore(safix): import ntfy-token for alice",
         "the commit does not name the mapping and the direction"
     );
     assert!(
@@ -109,7 +109,7 @@ fn a_second_import_writes_nothing_and_commits_nothing() {
 
     bridge(&fixture, &["import"], &[]).expect_success("the first import");
     let settled = fixture.head();
-    let document = fixture.read(ANA_FILE);
+    let document = fixture.read(ALICE_FILE);
 
     let again = bridge(&fixture, &["import"], &[]).expect_success("the second import");
     again.says("unchanged");
@@ -119,7 +119,7 @@ fn a_second_import_writes_nothing_and_commits_nothing() {
     again.says("0 updated, 1 unchanged");
     assert_eq!(fixture.head(), settled, "the second import committed");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         document,
         "the second import rewrote the file, which re-encrypts it for no reason"
     );
@@ -149,22 +149,22 @@ fn an_import_into_a_drifted_file_is_refused_before_anything_lands() {
     fixture.clan_seed(MACHINE, VAR, "CANARY-into-drift");
 
     fixture.encrypt_to(
-        ANA_FILE,
-        &[&fixture.ana, &stranger],
+        ALICE_FILE,
+        &[&fixture.alice, &stranger],
         "api-token: \"fixture-value-for-api-token\"\n",
     );
-    fixture.git(&["add", "--", ANA_FILE]);
+    fixture.git(&["add", "--", ALICE_FILE]);
     fixture.git(&["commit", "-q", "-m", "fixture: recipients drifted"]);
 
     let before = fixture.head();
-    let document = fixture.read(ANA_FILE);
+    let document = fixture.read(ALICE_FILE);
 
     let run = bridge(&fixture, &["import"], &[]).expect_refusal("importing into a drifted file");
     run.says(&stranger);
     run.silent_about("CANARY-into-drift");
     assert_eq!(fixture.head(), before, "the refused import committed");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         document,
         "the refused import wrote the file"
     );
@@ -177,7 +177,7 @@ fn an_import_into_a_drifted_file_is_refused_before_anything_lands() {
 fn export_moves_a_safix_value_into_clan_through_clans_own_command() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-from-safix")
+        .set("alice", "api-token", "CANARY-from-safix")
         .expect_success("seeding the source");
     let before = fixture.head();
 
@@ -215,7 +215,7 @@ fn export_moves_a_safix_value_into_clan_through_clans_own_command() {
 fn a_second_export_does_not_ask_clan_to_write_again() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-from-safix")
+        .set("alice", "api-token", "CANARY-from-safix")
         .expect_success("seeding the source");
 
     bridge(&fixture, &["export"], &[]).expect_success("the first export");
@@ -245,8 +245,8 @@ fn an_export_whose_source_holds_no_value_is_refused() {
 
     let run = bridge(&fixture, &["export"], &[]).expect_refusal("exporting an entry with no value");
     run.says("holds no value yet");
-    run.says("safix set ana api-token");
-    run.says("safix generate ana api-token");
+    run.says("safix set alice api-token");
+    run.says("safix generate alice api-token");
     assert_eq!(
         fixture.clan_writes(),
         0,
@@ -264,7 +264,7 @@ fn an_export_whose_source_holds_no_value_is_refused() {
 fn an_export_into_a_stale_generator_is_refused_and_names_both_remedies() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-would-be-lost")
+        .set("alice", "api-token", "CANARY-would-be-lost")
         .expect_success("seeding the source");
 
     let run = bridge(&fixture, &["export"], &[("SAFIX_CLAN_STUB_STALE", "ntfy")])
@@ -306,7 +306,7 @@ fn the_clan_read_happened_on_a_pipe_and_not_a_terminal() {
         "a clan read inherited a terminal, so what came back was a rendering: {seen:?}"
     );
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-raw-bytes",
         "the raw bytes are not what landed"
     );
@@ -324,7 +324,7 @@ fn no_value_reaches_clans_argument_vector_in_either_direction() {
     bridge(&down, &["import"], &[]).expect_success("the import");
 
     let up = with_mapping("safix-to-clan");
-    up.set("ana", "api-token", "CANARY-argv-up")
+    up.set("alice", "api-token", "CANARY-argv-up")
         .expect_success("seeding the source");
     bridge(&up, &["export"], &[]).expect_success("the export");
 
@@ -438,7 +438,7 @@ fn a_mapping_named_to_the_wrong_verb_is_told_which_verb_acts_on_it() {
 fn each_verb_acts_on_its_own_direction_alone() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-not-imported")
+        .set("alice", "api-token", "CANARY-not-imported")
         .expect_success("seeding the source");
 
     let run = bridge(&fixture, &["import"], &[]).expect_success("importing with no import mapping");

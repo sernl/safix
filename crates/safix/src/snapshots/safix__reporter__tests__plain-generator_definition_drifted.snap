@@ -2,14 +2,14 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: clan considers the generator 'ntfy' on ana-workstation outdated, so exporting
+safix: clan considers the generator 'ntfy' on alice-workstation outdated, so exporting
 the mapping 'ntfy-token' would write a value clan's next generation replaces.
 
 clan records a validation for each generator and regenerates when the
 recorded one no longer matches the definition. That has already happened
 here, so the next routine
 
-    clan vars generate ana-workstation
+    clan vars generate alice-workstation
 
 would discard whatever this export wrote, without saying so.
 

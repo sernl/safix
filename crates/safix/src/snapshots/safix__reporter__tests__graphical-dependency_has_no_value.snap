@@ -5,4 +5,4 @@ expression: render_graphical(&refusal)
 safix::dependency_has_no_value
 
   × the dependency 'base-pub' has no value yet, so $in/base/base-pub cannot be
-  │ written: secrets/safix/users/ana/secrets.yaml does not exist
+  │ written: secrets/safix/users/alice/secrets.yaml does not exist

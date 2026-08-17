@@ -56,7 +56,7 @@
       # between them is a difference safix made. Its shape is the one a real
       # home-manager configuration has, so the fixture's `path` function is the
       # expression a consumer would actually write.
-      fixtureCfg.home.homeDirectory = "/home/ana";
+      fixtureCfg.home.homeDirectory = "/home/alice";
 
       materializedFor =
         user: hostname: scope:
@@ -65,10 +65,10 @@
           tags = [ ];
         } fixtureCfg;
 
-      anaUser = materializedFor "ana" "workstation" "user";
-      anaSystem = materializedFor "ana" "workstation" "system";
-      boSystem = materializedFor "bo" "server" "system";
-      boUser = materializedFor "bo" "server" "user";
+      aliceUser = materializedFor "alice" "workstation" "user";
+      aliceSystem = materializedFor "alice" "workstation" "system";
+      bobSystem = materializedFor "bob" "server" "system";
+      bobUser = materializedFor "bob" "server" "user";
 
       # The provisioner's own module, evaluated over what safix produced.
       provisioner =
@@ -83,9 +83,9 @@
           ];
         };
 
-      userProvisioner = provisioner inputs.sops-nix.homeManagerModules.sops anaUser;
-      systemProvisioner = provisioner inputs.sops-nix.nixosModules.sops anaSystem;
-      ownedProvisioner = provisioner inputs.sops-nix.nixosModules.sops boSystem;
+      userProvisioner = provisioner inputs.sops-nix.homeManagerModules.sops aliceUser;
+      systemProvisioner = provisioner inputs.sops-nix.nixosModules.sops aliceSystem;
+      ownedProvisioner = provisioner inputs.sops-nix.nixosModules.sops bobSystem;
 
       axisOf = evaluated: builtins.attrNames (evaluated.options.sops.secrets.type.getSubOptions [ ]);
 
@@ -106,24 +106,24 @@
           # Both scopes resolve the same names, because selection is custody and
           # custody has no scope.
           names = {
-            user = sortNames (builtins.attrNames anaUser);
-            system = sortNames (builtins.attrNames anaSystem);
+            user = sortNames (builtins.attrNames aliceUser);
+            system = sortNames (builtins.attrNames aliceSystem);
           };
 
           # No field of a materialized entry names a scope, and for a
           # declaration that sets no ownership the two scopes produce the same
           # record outright.
-          fields = sortNames (builtins.attrNames anaUser.ana-alone);
-          sameInBothScopes = anaUser == anaSystem;
+          fields = sortNames (builtins.attrNames aliceUser.alice-alone);
+          sameInBothScopes = aliceUser == aliceSystem;
 
           # The entry as each provisioner sees it, read back through its own
           # option type rather than off the attrset safix handed it.
-          userReadback = readback userProvisioner "ana-alone" [
+          userReadback = readback userProvisioner "alice-alone" [
             "mode"
             "path"
             "key"
           ];
-          systemReadback = readback systemProvisioner "ana-alone" [
+          systemReadback = readback systemProvisioner "alice-alone" [
             "mode"
             "path"
             "key"
@@ -133,9 +133,9 @@
           # recipient policy writes a rule for. Asserted as a suffix because the
           # prefix is whatever store path this flake's source is at.
           fileFromAudience = {
-            own = placedIn anaUser.ana-alone "secrets/safix/users/ana/secrets.yaml";
-            shared = placedIn anaUser.ops-handover "secrets/safix/shared/ana,bo/secrets.yaml";
-            carried = placedIn anaUser.ops-tooling "secrets/safix/users/ana/secrets.yaml";
+            own = placedIn aliceUser.alice-alone "secrets/safix/users/alice/secrets.yaml";
+            shared = placedIn aliceUser.ops-handover "secrets/safix/shared/alice,bob/secrets.yaml";
+            carried = placedIn aliceUser.ops-tooling "secrets/safix/users/alice/secrets.yaml";
           };
 
           # The asymmetry the user-scope refusal rests on, read off the two
@@ -147,13 +147,13 @@
 
           # An entry that sets ownership reaches the system scope carrying it,
           # and the user scope refuses rather than dropping it.
-          ownedReadback = readback ownedProvisioner "bo-service" [
+          ownedReadback = readback ownedProvisioner "bob-service" [
             "mode"
             "path"
             "owner"
             "group"
           ];
-          userScopeRefusesOwnership = fires boUser;
+          userScopeRefusesOwnership = fires bobUser;
         };
 
         expected = {
@@ -164,7 +164,7 @@
           # never exist.
           names = {
             user = [
-              "ana-alone"
+              "alice-alone"
               "api-token"
               "ops-handover"
               "ops-tooling"
@@ -173,7 +173,7 @@
               "wg-private"
             ];
             system = [
-              "ana-alone"
+              "alice-alone"
               "api-token"
               "ops-handover"
               "ops-tooling"
@@ -193,13 +193,13 @@
 
           userReadback = {
             mode = "0440";
-            path = "/home/ana/.config/safix-fixture/ana-alone";
-            key = "ana_alone";
+            path = "/home/alice/.config/safix-fixture/alice-alone";
+            key = "alice_alone";
           };
           systemReadback = {
             mode = "0440";
-            path = "/home/ana/.config/safix-fixture/ana-alone";
-            key = "ana_alone";
+            path = "/home/alice/.config/safix-fixture/alice-alone";
+            key = "alice_alone";
           };
 
           fileFromAudience = {
@@ -218,8 +218,8 @@
 
           ownedReadback = {
             mode = "0400";
-            path = "/var/lib/safix-fixture/bo-service";
-            owner = "bo";
+            path = "/var/lib/safix-fixture/bob-service";
+            owner = "bob";
             group = "staff";
           };
           userScopeRefusesOwnership = true;

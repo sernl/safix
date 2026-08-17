@@ -5,10 +5,10 @@ expression: render_graphical(&refusal)
 safix::public_not_editable
 
   × 'wg-public' is a public output, so its value is already plaintext at
-  │ public/safix/users/ana/wg-public/value; there is nothing to decrypt and
+  │ public/safix/users/alice/wg-public/value; there is nothing to decrypt and
   │ nothing to encrypt.
   │ 
   │ A public output is minted by the generator that declares it. Re-run `safix
-  │ generate` to replace it, or edit public/safix/users/ana/wg-public/value
+  │ generate` to replace it, or edit public/safix/users/alice/wg-public/value
   │ directly — it is an ordinary file in the repository, which is what
   │ declaring it `secret = false` means.

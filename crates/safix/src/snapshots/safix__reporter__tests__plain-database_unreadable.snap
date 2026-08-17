@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: /home/ana/.keys/master.kdbx did not open, so no mapping was judged and nothing was written.
+safix: /home/alice/.keys/master.kdbx did not open, so no mapping was judged and nothing was written.
 
 A wrong password and an unreadable file present the same way here, and the
 store's own message below is what tells them apart.

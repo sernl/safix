@@ -29,7 +29,7 @@ mod harness;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use harness::{ANA_FILE, Fixture, SHARED_FILE};
+use harness::{ALICE_FILE, Fixture, SHARED_FILE};
 
 /// A file the declarations place a secret in, that nobody has run sops on yet,
 /// is created through sops so the creation rules choose its recipients.
@@ -38,7 +38,7 @@ fn set_new_creates_the_file_through_the_creation_rules() {
     let fixture = Fixture::new();
 
     fixture
-        .set("ana", "wifi-psk", "CANARY-shared-value")
+        .set("alice", "wifi-psk", "CANARY-shared-value")
         .expect_success("set on a new file");
 
     assert!(fixture.exists(SHARED_FILE), "the audience file was created");
@@ -47,8 +47,8 @@ fn set_new_creates_the_file_through_the_creation_rules() {
     // encrypted to the writer alone would satisfy "it is encrypted" and hand the
     // other party a file they cannot open.
     let document = fixture.read(SHARED_FILE);
-    assert!(document.contains(&fixture.ana), "encrypted to ana");
-    assert!(document.contains(&fixture.bo), "encrypted to bo");
+    assert!(document.contains(&fixture.alice), "encrypted to alice");
+    assert!(document.contains(&fixture.bob), "encrypted to bob");
     assert!(document.contains("ENC[AES256_GCM"), "holds sops ciphertext");
 
     assert_eq!(
@@ -59,7 +59,7 @@ fn set_new_creates_the_file_through_the_creation_rules() {
 
     assert_eq!(
         fixture.subject("HEAD"),
-        "chore(safix): set wifi-psk for ana",
+        "chore(safix): set wifi-psk for alice",
         "the commit names the secret"
     );
     assert_eq!(
@@ -73,13 +73,13 @@ fn set_new_creates_the_file_through_the_creation_rules() {
     );
     assert_eq!(fixture.status(), "", "the tree is clean after the write");
 
-    // One rule per audience, from the other side: a file created for ana alone
-    // must not name bo. A single rule covering both would hand a grant's
+    // One rule per audience, from the other side: a file created for alice
+    // alone must not name bob. A single rule covering both would hand a grant's
     // recipient everything its owner holds and pass every assertion above.
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
     assert!(
-        !fixture.read(ANA_FILE).contains(&fixture.bo),
-        "ana's own file names bo as a recipient"
+        !fixture.read(ALICE_FILE).contains(&fixture.bob),
+        "alice's own file names bob as a recipient"
     );
 }
 
@@ -89,7 +89,7 @@ fn set_new_creates_the_file_through_the_creation_rules() {
 fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     let fixture = Fixture::new();
     fixture.make_sops_file(
-        ANA_FILE,
+        ALICE_FILE,
         &[
             "api-token",
             "mail-password",
@@ -99,15 +99,15 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     );
 
     let bystanders = ["mail-password", "bystander-one", "bystander-two"];
-    let before = fixture.ciphertext_lines(ANA_FILE);
+    let before = fixture.ciphertext_lines(ALICE_FILE);
     let head_before = fixture.head();
 
     fixture
-        .set("ana", "api-token", "CANARY-api-v1")
+        .set("alice", "api-token", "CANARY-api-v1")
         .expect_success("set on an existing file");
 
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "CANARY-api-v1");
-    let after = fixture.ciphertext_lines(ANA_FILE);
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "CANARY-api-v1");
+    let after = fixture.ciphertext_lines(ALICE_FILE);
     for key in bystanders {
         assert_eq!(
             after.get(key),
@@ -122,14 +122,14 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     // unchanged value's IV, so a re-run inside the same second is byte-identical
     // whether or not `--idempotent` was passed. Without the wait the assertion
     // would hold over a command that had dropped the flag.
-    let snapshot = fixture.read(ANA_FILE);
+    let snapshot = fixture.read(ALICE_FILE);
     let head_after = fixture.head();
     std::thread::sleep(Duration::from_millis(1_100));
     let rerun = fixture
-        .set("ana", "api-token", "CANARY-api-v1")
+        .set("alice", "api-token", "CANARY-api-v1")
         .expect_success("the idempotent re-run");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         snapshot,
         "re-setting the same value rewrote the file"
     );
@@ -137,12 +137,12 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     rerun.says("unchanged");
 
     // A different value moves the target key and nothing else.
-    let before = fixture.ciphertext_lines(ANA_FILE);
+    let before = fixture.ciphertext_lines(ALICE_FILE);
     fixture
-        .set("ana", "api-token", "CANARY-api-v2")
+        .set("alice", "api-token", "CANARY-api-v2")
         .expect_success("the rotation");
-    assert_eq!(fixture.value(ANA_FILE, "api-token"), "CANARY-api-v2");
-    let after = fixture.ciphertext_lines(ANA_FILE);
+    assert_eq!(fixture.value(ALICE_FILE, "api-token"), "CANARY-api-v2");
+    let after = fixture.ciphertext_lines(ALICE_FILE);
     for key in bystanders {
         assert_eq!(
             after.get(key),
@@ -155,12 +155,12 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     // follows the key. Writing under the name would leave a profile reading an
     // absent key while this reported success.
     fixture
-        .set("ana", "aliased-secret", "CANARY-aliased")
+        .set("alice", "aliased-secret", "CANARY-aliased")
         .expect_success("the aliased set");
-    assert_eq!(fixture.value(ANA_FILE, "custom-key"), "CANARY-aliased");
+    assert_eq!(fixture.value(ALICE_FILE, "custom-key"), "CANARY-aliased");
     assert!(
         !fixture
-            .ciphertext_lines(ANA_FILE)
+            .ciphertext_lines(ALICE_FILE)
             .contains_key("aliased-secret"),
         "an entry with a sopsKey also wrote a key named after the secret"
     );
@@ -168,15 +168,15 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
     // A mistyped confirmation writes nothing at all. Typed at a terminal, which
     // is the only place a confirmation is asked for: a piped value has no typist
     // and is read once.
-    let snapshot = fixture.read(ANA_FILE);
+    let snapshot = fixture.read(ALICE_FILE);
     fixture
         .set_on_a_terminal(
-            &["set", "ana", "api-token"],
+            &["set", "alice", "api-token"],
             "CANARY-typo-a\nCANARY-typo-b\n",
         )
         .expect_refusal("a mismatched confirmation");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         snapshot,
         "a mismatched confirmation still wrote the file"
     );
@@ -195,17 +195,17 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     // A name no declaration covers, named against all three declaration
     // surfaces — and against no option path outside safix's namespace.
     let refused = fixture
-        .set("ana", "not-declared-anywhere", "CANARY-unknown")
+        .set("alice", "not-declared-anywhere", "CANARY-unknown")
         .expect_refusal("an undeclared name");
     refused.says("flake.safix.catalogue.not-declared-anywhere");
-    refused.says("flake.safix.users.ana.private.not-declared-anywhere");
-    refused.says("sharedWith.ana.not-declared-anywhere");
+    refused.says("flake.safix.users.alice.private.not-declared-anywhere");
+    refused.says("sharedWith.alice.not-declared-anywhere");
     refused.silent_about("flake.users.");
     refused.silent_about("flake.homeSecrets.");
     assert_eq!(fixture.status(), "", "the refused name touched the tree");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "not-declared-anywhere"], "CANARY-unknown")
+            .run_graphical_with(&["set", "alice", "not-declared-anywhere"], "CANARY-unknown")
             .refusal_code(),
     );
 
@@ -215,34 +215,34 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     // redirecting straight to the final path would leave an empty unruled file
     // beside the others.
     let refused = fixture
-        .set("ana", "no-rule-secret", "CANARY-norule")
+        .set("alice", "no-rule-secret", "CANARY-norule")
         .expect_refusal("a path with no creation rule");
     refused.says("no creation rule");
     refused.says("safix fix");
     assert!(
-        !fixture.exists("secrets/safix/users/cy/secrets.yaml"),
+        !fixture.exists("secrets/safix/users/carol/secrets.yaml"),
         "an unruled file was created"
     );
     assert_eq!(fixture.status(), "", "the no-rule refusal left something");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "no-rule-secret"], "CANARY-norule")
+            .run_graphical_with(&["set", "alice", "no-rule-secret"], "CANARY-norule")
             .refusal_code(),
     );
 
     // A placement outside `*.yaml`. Every generated rule ends in `\.yaml$` so a
     // sweep can never reach encrypted material safix did not place.
     let refused = fixture
-        .set("ana", "not-yaml", "CANARY-notyaml")
+        .set("alice", "not-yaml", "CANARY-notyaml")
         .expect_refusal("a non-yaml placement");
     refused.says("not a *.yaml path");
     assert!(
-        !fixture.exists("secrets/safix/users/ana/secret.age"),
+        !fixture.exists("secrets/safix/users/alice/secret.age"),
         "a non-yaml file was written"
     );
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "not-yaml"], "x")
+            .run_graphical_with(&["set", "alice", "not-yaml"], "x")
             .refusal_code(),
     );
 
@@ -251,61 +251,61 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     // from both sources: an empty pipe is what a failed upstream command leaves,
     // and an empty first line is what a person who pressed return twice typed.
     fixture
-        .run_with(&["set", "ana", "api-token"], "")
+        .run_with(&["set", "alice", "api-token"], "")
         .expect_refusal("an empty pipe");
     fixture
-        .set_on_a_terminal(&["set", "ana", "api-token"], "\n\n")
+        .set_on_a_terminal(&["set", "alice", "api-token"], "\n\n")
         .expect_refusal("an empty typed value");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "")
+            .run_graphical_with(&["set", "alice", "api-token"], "")
             .refusal_code(),
     );
 
     // An unknown user is a distinct refusal from an unknown name.
     let refused = fixture
-        .set("cy", "api-token", "CANARY-nouser")
+        .set("carol", "api-token", "CANARY-nouser")
         .expect_refusal("an undeclared user");
     refused.says("not a declared user");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "cy", "api-token"], "x")
+            .run_graphical_with(&["set", "carol", "api-token"], "x")
             .refusal_code(),
     );
 
     // A dirty target file: committing it would carry an edit this command did
     // not make under a message naming one secret.
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
-    let edited = format!("{}hand edit\n", fixture.read(ANA_FILE));
-    fixture.write(ANA_FILE, &edited);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
+    let edited = format!("{}hand edit\n", fixture.read(ALICE_FILE));
+    fixture.write(ALICE_FILE, &edited);
     let refused = fixture
-        .set("ana", "api-token", "CANARY-dirty")
+        .set("alice", "api-token", "CANARY-dirty")
         .expect_refusal("a dirty target file");
     refused.says("uncommitted changes");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "x")
+            .run_graphical_with(&["set", "alice", "api-token"], "x")
             .refusal_code(),
     );
-    fixture.git(&["checkout", "--", ANA_FILE]);
+    fixture.git(&["checkout", "--", ALICE_FILE]);
 
     // Mid-merge and mid-rebase: a partial commit means something else there.
     let git_dir = fixture.git(&["rev-parse", "--absolute-git-dir"]);
     std::fs::write(format!("{git_dir}/MERGE_HEAD"), "").unwrap();
     let refused = fixture
-        .set("ana", "api-token", "CANARY-merge")
+        .set("alice", "api-token", "CANARY-merge")
         .expect_refusal("a run mid-merge");
     refused.says("mid-MERGE_HEAD");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "x")
+            .run_graphical_with(&["set", "alice", "api-token"], "x")
             .refusal_code(),
     );
     std::fs::remove_file(format!("{git_dir}/MERGE_HEAD")).unwrap();
 
     std::fs::create_dir(format!("{git_dir}/rebase-merge")).unwrap();
     fixture
-        .set("ana", "api-token", "CANARY-rebase")
+        .set("alice", "api-token", "CANARY-rebase")
         .expect_refusal("a run mid-rebase")
         .says("mid-rebase-merge");
     std::fs::remove_dir(format!("{git_dir}/rebase-merge")).unwrap();
@@ -354,11 +354,11 @@ fn recipient_drift_is_refused_before_anything_is_written() {
     let stranger = fixture.new_recipient();
 
     fixture.encrypt_to(
-        ANA_FILE,
-        &[&fixture.ana, &stranger],
+        ALICE_FILE,
+        &[&fixture.alice, &stranger],
         "api-token: \"fixture-value-for-api-token\"\n",
     );
-    fixture.git(&["add", "--", ANA_FILE]);
+    fixture.git(&["add", "--", ALICE_FILE]);
     fixture.git(&[
         "commit",
         "-q",
@@ -366,18 +366,18 @@ fn recipient_drift_is_refused_before_anything_is_written() {
         "fixture: recipients drifted from the declared audience",
     ]);
     assert!(
-        fixture.read(ANA_FILE).contains(&stranger),
+        fixture.read(ALICE_FILE).contains(&stranger),
         "the fixture file is not actually drifted"
     );
 
     let head_before = fixture.head();
-    let document_before = fixture.read(ANA_FILE);
+    let document_before = fixture.read(ALICE_FILE);
 
     let refused = fixture
-        .set("ana", "api-token", "CANARY-DRIFT-abcdef")
+        .set("alice", "api-token", "CANARY-DRIFT-abcdef")
         .expect_refusal("a value minted into a drifted file");
     refused.says(&stranger);
-    refused.says(ANA_FILE);
+    refused.says(ALICE_FILE);
     refused.says("safix fix");
 
     // The whole claim: the run left nothing behind. A refusal that had already
@@ -385,7 +385,7 @@ fn recipient_drift_is_refused_before_anything_is_written() {
     // still read correctly.
     assert_eq!(fixture.head(), head_before, "the refusal made a commit");
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         document_before,
         "the refusal rewrote the target file"
     );
@@ -403,7 +403,7 @@ fn recipient_drift_is_refused_before_anything_is_written() {
     // yet takes its recipients from `.sops.yaml`, so the drift that reaches it
     // is a stale creation rule rather than stale metadata. Judging the file
     // already in place would miss this arm entirely — there is no file in place.
-    fixture.write_policy(&["ana"]);
+    fixture.write_policy(&["alice"]);
     fixture.git(&["add", "--", ".sops.yaml"]);
     fixture.git(&[
         "commit",
@@ -414,16 +414,16 @@ fn recipient_drift_is_refused_before_anything_is_written() {
 
     let head_before = fixture.head();
     fixture
-        .set("ana", "wifi-psk", "CANARY-narrowed")
+        .set("alice", "wifi-psk", "CANARY-narrowed")
         .expect_refusal("a value minted into a file one of its audience cannot open")
-        .says(&fixture.bo);
+        .says(&fixture.bob);
 
     assert!(
         !fixture.exists(SHARED_FILE),
         "the refused creation left the file behind"
     );
     assert!(
-        !fixture.exists("secrets/safix/shared/ana,bo"),
+        !fixture.exists("secrets/safix/shared/alice,bob"),
         "the refused creation left the audience directory behind"
     );
     assert!(
@@ -434,8 +434,8 @@ fn recipient_drift_is_refused_before_anything_is_written() {
     assert_eq!(fixture.status(), "", "the refusal left the tree dirty");
 
     // Repaired, the same set goes through. `sops updatekeys` is what `safix fix`
-    // runs, and the rule grants ana alone, so it drops the extra identity.
-    fixture.write_policy(&["ana", "bo"]);
+    // runs, and the rule grants alice alone, so it drops the extra identity.
+    fixture.write_policy(&["alice", "bob"]);
     fixture.git(&["add", "--", ".sops.yaml"]);
     fixture.git(&[
         "commit",
@@ -443,8 +443,8 @@ fn recipient_drift_is_refused_before_anything_is_written() {
         "-m",
         "fixture: creation rule back in step with the audience",
     ]);
-    fixture.updatekeys(ANA_FILE);
-    fixture.git(&["add", "--", ANA_FILE]);
+    fixture.updatekeys(ALICE_FILE);
+    fixture.git(&["add", "--", ALICE_FILE]);
     fixture.git(&[
         "commit",
         "-q",
@@ -452,17 +452,17 @@ fn recipient_drift_is_refused_before_anything_is_written() {
         "fixture: re-wrapped to the declared audience",
     ]);
     assert!(
-        !fixture.read(ANA_FILE).contains(&stranger),
+        !fixture.read(ALICE_FILE).contains(&stranger),
         "the re-wrap did not drop the extra recipient"
     );
 
     let head_before = fixture.head();
     fixture
-        .set("ana", "api-token", "CANARY-after-rewrap")
+        .set("alice", "api-token", "CANARY-after-rewrap")
         .expect_success("the set after the drift was repaired");
     assert_ne!(fixture.head(), head_before, "the repaired set committed");
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-after-rewrap",
         "the repaired set did not store the value"
     );
@@ -476,18 +476,18 @@ fn recipient_drift_is_refused_before_anything_is_written() {
 #[test]
 fn a_staged_bystander_survives_the_run_and_does_not_make_it_commit() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
 
     fixture.write("unrelated.txt", "unrelated work in progress\n");
     fixture.git(&["add", "--", "unrelated.txt"]);
 
     fixture
-        .set("ana", "api-token", "CANARY-scoped")
+        .set("alice", "api-token", "CANARY-scoped")
         .expect_success("the scoped set");
 
     assert_eq!(
         fixture.paths_in("HEAD"),
-        vec![ANA_FILE.to_owned()],
+        vec![ALICE_FILE.to_owned()],
         "the commit reached beyond the target"
     );
     assert_eq!(
@@ -503,7 +503,7 @@ fn a_staged_bystander_survives_the_run_and_does_not_make_it_commit() {
 
     let head_before = fixture.head();
     fixture
-        .set("ana", "api-token", "CANARY-scoped")
+        .set("alice", "api-token", "CANARY-scoped")
         .expect_success("the scoped re-run");
     assert_eq!(
         fixture.head(),
@@ -521,7 +521,7 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
     // A SIGINT while the prompt is waiting. Standard input is a pipe nobody
     // writes to, so the read blocks until the signal arrives, and the exit
     // status is what tells an interrupted run from one that ran out of input.
-    let interrupted = fixture.interrupt_after("2", "INT", &["set", "ana", "wifi-psk"], "", &[]);
+    let interrupted = fixture.interrupt_after("2", "INT", &["set", "alice", "wifi-psk"], "", &[]);
     assert_eq!(interrupted.code, Some(130), "the run was not interrupted");
 
     assert!(
@@ -534,7 +534,7 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
     );
     // `mkdir -p` creates two levels for a first shared audience, so both go.
     assert!(
-        !fixture.exists("secrets/safix/shared/ana,bo"),
+        !fixture.exists("secrets/safix/shared/alice,bob"),
         "the interrupted run left the audience directory behind"
     );
     assert!(
@@ -550,11 +550,11 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
     // A backend that fails after the value has been read. The value is a canary
     // and must appear nowhere on disk; the target file must be untouched so the
     // next run retries rather than finding a half-written one.
-    fixture.make_sops_file(ANA_FILE, &["api-token", "bystander-one"]);
-    let before = fixture.ciphertext_lines(ANA_FILE);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "bystander-one"]);
+    let before = fixture.ciphertext_lines(ALICE_FILE);
     fixture
         .run_env(
-            &["set", "ana", "api-token"],
+            &["set", "alice", "api-token"],
             Some("CANARY-LEAK-abcdef\nCANARY-LEAK-abcdef\n"),
             &[("SAFIX_SOPS", "false")],
         )
@@ -565,7 +565,7 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
         "the value survived the aborted run"
     );
     assert_eq!(
-        fixture.ciphertext_lines(ANA_FILE),
+        fixture.ciphertext_lines(ALICE_FILE),
         before,
         "the failing backend still moved the target key"
     );

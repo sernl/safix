@@ -437,11 +437,11 @@ mod tests {
     #[test]
     fn a_companion_is_the_entry_plus_the_reserved_suffix_and_is_recognised_as_one() {
         assert_eq!(
-            companion_of("safix/ana/grafana"),
-            "safix/ana/grafana.safix-sync-state"
+            companion_of("safix/alice/grafana"),
+            "safix/alice/grafana.safix-sync-state"
         );
-        assert!(is_companion(&companion_of("safix/ana/grafana")));
-        assert!(!is_companion("safix/ana/grafana"));
+        assert!(is_companion(&companion_of("safix/alice/grafana")));
+        assert!(!is_companion("safix/alice/grafana"));
     }
 
     /// The suffix is the one the nix half reserves.
@@ -459,10 +459,10 @@ mod tests {
     fn no_argument_vector_can_carry_a_value() {
         let database = Path::new("/keys/master.kdbx");
         let vectors = [
-            read_arguments(database, "safix/ana/grafana"),
-            write_arguments(database, "safix/ana/grafana", Some("ana"), false),
-            write_arguments(database, "safix/ana/grafana", None, true),
-            group_arguments(database, "safix/ana"),
+            read_arguments(database, "safix/alice/grafana"),
+            write_arguments(database, "safix/alice/grafana", Some("alice"), false),
+            write_arguments(database, "safix/alice/grafana", None, true),
+            group_arguments(database, "safix/alice"),
             listing_arguments(database),
         ];
         for vector in &vectors {
@@ -483,8 +483,8 @@ mod tests {
     #[test]
     fn a_write_adds_what_is_absent_and_edits_what_is_there() {
         let database = Path::new("/keys/master.kdbx");
-        let added = write_arguments(database, "safix/ana/grafana", None, false).join(" ");
-        let edited = write_arguments(database, "safix/ana/grafana", None, true).join(" ");
+        let added = write_arguments(database, "safix/alice/grafana", None, false).join(" ");
+        let edited = write_arguments(database, "safix/alice/grafana", None, true).join(" ");
         assert!(added.starts_with("add --quiet --password-prompt"));
         assert!(edited.starts_with("edit --quiet --password-prompt"));
     }
@@ -492,19 +492,19 @@ mod tests {
     #[test]
     fn a_username_reaches_argv_and_its_absence_leaves_the_field_alone() {
         let database = Path::new("/keys/master.kdbx");
-        let named = write_arguments(database, "safix/ana/grafana", Some("ana@example"), true);
-        let unnamed = write_arguments(database, "safix/ana/grafana", None, true);
+        let named = write_arguments(database, "safix/alice/grafana", Some("alice@example"), true);
+        let unnamed = write_arguments(database, "safix/alice/grafana", None, true);
         assert!(named.contains(&"--username".to_owned()));
-        assert!(named.contains(&"ana@example".to_owned()));
+        assert!(named.contains(&"alice@example".to_owned()));
         assert!(!unnamed.contains(&"--username".to_owned()));
     }
 
     #[test]
     fn the_read_asks_for_the_protected_password_attribute_and_nothing_else() {
-        let arguments = read_arguments(Path::new("/keys/master.kdbx"), "safix/ana/grafana");
+        let arguments = read_arguments(Path::new("/keys/master.kdbx"), "safix/alice/grafana");
         assert_eq!(
             arguments.join(" "),
-            "show --quiet --show-protected --attributes Password /keys/master.kdbx safix/ana/grafana"
+            "show --quiet --show-protected --attributes Password /keys/master.kdbx safix/alice/grafana"
         );
     }
 
@@ -532,7 +532,7 @@ mod tests {
         // listing rather than about the command: the program named does not exist.
         assert!(
             database
-                .read("safix/ana/grafana")
+                .read("safix/alice/grafana")
                 .expect("absence")
                 .is_none()
         );
@@ -548,7 +548,7 @@ mod tests {
             groups: BTreeSet::new(),
         };
         let value = Secret::read_from(&mut b"two\nlines".as_slice()).expect("a fixture value");
-        let refusal = database.write("safix/ana/grafana", &value, None);
+        let refusal = database.write("safix/alice/grafana", &value, None);
         assert!(matches!(refusal, Err(Error::ValueSpansLines { .. })));
     }
 
@@ -559,15 +559,18 @@ mod tests {
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
             entries: BTreeSet::from([
-                "safix/ana/grafana".to_owned(),
-                "safix/ana/grafana.safix-sync-state".to_owned(),
+                "safix/alice/grafana".to_owned(),
+                "safix/alice/grafana.safix-sync-state".to_owned(),
                 "elsewhere/router".to_owned(),
             ]),
             groups: BTreeSet::new(),
         };
         assert_eq!(
             database.under("safix").collect::<Vec<_>>(),
-            ["safix/ana/grafana", "safix/ana/grafana.safix-sync-state"]
+            [
+                "safix/alice/grafana",
+                "safix/alice/grafana.safix-sync-state"
+            ]
         );
     }
 
@@ -577,10 +580,10 @@ mod tests {
             program: PathBuf::from("safix-no-such-store-command"),
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
-            entries: BTreeSet::from(["safix/ana/grafana".to_owned()]),
+            entries: BTreeSet::from(["safix/alice/grafana".to_owned()]),
             groups: BTreeSet::new(),
         };
-        let refusal = database.read("safix/ana/grafana");
+        let refusal = database.read("safix/alice/grafana");
         assert!(matches!(refusal, Err(Error::StoreUnavailable { .. })));
     }
 }

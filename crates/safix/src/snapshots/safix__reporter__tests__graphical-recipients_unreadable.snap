@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::recipients_unreadable
 
-  × could not read the recipients of secrets/safix/users/ana/secrets.yaml
+  × could not read the recipients of secrets/safix/users/alice/secrets.yaml
   ╰─▶ a sops age stanza names no recipient

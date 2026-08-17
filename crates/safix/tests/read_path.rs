@@ -16,18 +16,18 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture, SHARED_FILE};
+use harness::{ALICE_FILE, Fixture, SHARED_FILE};
 
 /// A value round-trips byte for byte, and `list` says where each name lives
 /// without saying what it is.
 #[test]
 fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "mail-password"]);
     fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
 
     let read = fixture
-        .run(&["get", "ana", "api-token"])
+        .run(&["get", "alice", "api-token"])
         .expect_success("get");
     assert_eq!(
         read.stdout, b"fixture-value-for-api-token",
@@ -40,17 +40,17 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     // but the value reaches standard output, which is what lets a pipe carry the
     // secret alone.
     fixture
-        .set("ana", "mail-password", "CANARY-round-trip")
+        .set("alice", "mail-password", "CANARY-round-trip")
         .expect_success("the round-trip set");
     let read = fixture
-        .run(&["get", "ana", "mail-password"])
+        .run(&["get", "alice", "mail-password"])
         .expect_success("get");
     assert_eq!(read.stdout, b"CANARY-round-trip", "not byte-identical");
 
     // A secret shared from another owner resolves to the shared file for the
     // recipient too, so both parties read one file.
     let read = fixture
-        .run(&["get", "ana", "wifi-psk"])
+        .run(&["get", "alice", "wifi-psk"])
         .expect_success("get on a granted secret");
     assert_eq!(read.stdout, b"fixture-value-for-wifi-psk");
 
@@ -58,7 +58,7 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     let read = fixture.run(&["get", "api-token"]).expect_success("get");
     assert_eq!(read.stdout, b"fixture-value-for-api-token");
 
-    let listing = fixture.run(&["list", "ana"]).expect_success("list");
+    let listing = fixture.run(&["list", "alice"]).expect_success("list");
     let table = listing.output();
     assert_eq!(
         row(&table, "NAME"),
@@ -70,7 +70,7 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     // first sense and not in the second, so the two columns disagree here.
     assert_eq!(
         row(&table, "api-token"),
-        vec!["api-token", "carries", "-", "-", "api-token", ANA_FILE],
+        vec!["api-token", "carries", "-", "-", "api-token", ALICE_FILE],
     );
     assert_eq!(
         row(&table, "wifi-psk"),
@@ -86,7 +86,7 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "-",
             "-",
             "custom-key",
-            ANA_FILE
+            ALICE_FILE
         ],
     );
     listing.silent_about("fixture-value-for");
@@ -103,9 +103,9 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
 fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
     let mut fixture = Fixture::new();
     fixture.seed_declarations();
-    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password", "custom-key"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "mail-password", "custom-key"]);
 
-    let extra = "secrets/safix/users/ana/ops-tooling.yaml";
+    let extra = "secrets/safix/users/alice/ops-tooling.yaml";
     fixture.govern_extra(extra);
     fixture.make_sops_file(extra, &["shared-tooling-token"]);
 
@@ -121,7 +121,7 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
     let stranger = fixture.new_recipient();
     fixture.encrypt_to(
         extra,
-        &[&fixture.ana, &stranger],
+        &[&fixture.alice, &stranger],
         "shared-tooling-token: \"fixture-value-for-tooling\"\n",
     );
     fixture.git(&["add", "--", extra]);
@@ -152,11 +152,11 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
 
     // A path no rule's directory covers is its own finding: naming a file
     // creates no rule for it.
-    let unruled = "secrets/safix/users/cy/stranded.yaml";
+    let unruled = "secrets/safix/users/carol/stranded.yaml";
     fixture.govern_extra(unruled);
     fixture.encrypt_to(
         unruled,
-        &[&fixture.ana],
+        &[&fixture.alice],
         "shared-tooling-token: \"fixture-value-for-tooling\"\n",
     );
     let report = fixture.run(&["check"]);
@@ -191,7 +191,7 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
 #[test]
 fn an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
 
     let stranger = fixture.scratch("stranger-identity.txt");
     let minted = std::process::Command::new("age-keygen")
@@ -220,7 +220,7 @@ fn an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt() {
     );
 
     // And it is a working identity, on a document it is a recipient of.
-    let theirs = "secrets/safix/users/cy/theirs.yaml";
+    let theirs = "secrets/safix/users/carol/theirs.yaml";
     fixture.encrypt_to(
         theirs,
         &[recipient],
@@ -241,7 +241,7 @@ fn an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt() {
 
     // Present, readable, working, and not a recipient of this one.
     let refused = fixture.run_env(
-        &["get", "ana", "api-token"],
+        &["get", "alice", "api-token"],
         None,
         &[("SOPS_AGE_KEY_FILE", &stranger.to_string_lossy())],
     );
@@ -259,7 +259,7 @@ fn an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt() {
     // The recipient identity opens the same file, so what the refusal above
     // reports is the identity rather than the file or the placement.
     let read = fixture
-        .run(&["get", "ana", "api-token"])
+        .run(&["get", "alice", "api-token"])
         .expect_success("get with the identity the file is encrypted to");
     assert_eq!(read.stdout, b"fixture-value-for-api-token");
 }

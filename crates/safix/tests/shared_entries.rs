@@ -18,7 +18,7 @@ mod harness;
 
 use std::path::Path;
 
-use harness::{ANA_FILE, Fixture, SHARED_FILE};
+use harness::{ALICE_FILE, Fixture, SHARED_FILE};
 
 /// One value, one file, one key, for every carrier: written by one of them and
 /// read back by the other.
@@ -28,7 +28,7 @@ fn both_carriers_resolve_one_file_and_read_one_value() {
     fixture.seed_shared("fleet-token", SHARED_FILE);
     fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
 
-    for user in ["ana", "bo"] {
+    for user in ["alice", "bob"] {
         let listing = fixture.run(&["list", user]).expect_success("list");
         let row: Vec<String> = listing
             .output()
@@ -53,14 +53,14 @@ fn both_carriers_resolve_one_file_and_read_one_value() {
     }
 
     fixture
-        .set("ana", "fleet-token", "CANARY-one-value-for-both")
+        .set("alice", "fleet-token", "CANARY-one-value-for-both")
         .expect_success("a carrier setting the shared value");
 
-    // bo's placement resolves the file ana wrote, so bo reads what ana minted. A
+    // bob's placement resolves the file alice wrote, so bob reads what alice minted. A
     // per-carrier copy would leave this reading nothing at all.
     let read = fixture
-        .run(&["get", "bo", "fleet-token"])
-        .expect_success("bo reading his fellow carrier's value");
+        .run(&["get", "bob", "fleet-token"])
+        .expect_success("bob reading his fellow carrier's value");
     assert_eq!(read.stdout, b"CANARY-one-value-for-both");
 
     // And exactly one file holds it: a second copy anywhere is the defect the
@@ -96,9 +96,9 @@ fn a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person(
     let mut fixture = Fixture::new();
     fixture.seed_shared("fleet-token", SHARED_FILE);
     fixture.make_sops_file(SHARED_FILE, &["wifi-psk", "fleet-token"]);
-    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "mail-password"]);
 
-    fixture.unshare_from("fleet-token", "ana", ANA_FILE);
+    fixture.unshare_from("fleet-token", "alice", ALICE_FILE);
 
     let report = fixture.run(&["check"]);
     assert_eq!(report.code, Some(1), "check did not report the revocation");
@@ -113,16 +113,16 @@ fn a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person(
         report
             .stderr
             .lines()
-            .any(|line| line.trim() == "- bo" || line.trim() == "  - bo"),
-        "check does not name bo as the reader outside the audience:\n{}",
+            .any(|line| line.trim() == "- bob" || line.trim() == "  - bob"),
+        "check does not name bob as the reader outside the audience:\n{}",
         report.stderr
     );
-    report.silent_about(&fixture.bo);
+    report.silent_about(&fixture.bob);
 
     // The remedy is a new value, and it is the `set` form because this entry has
     // no generator. `fix` may appear only as the last convergence step, never as
-    // the answer: re-wrapping a data key bo has already held revokes nothing.
-    report.says("safix set ana fleet-token");
+    // the answer: re-wrapping a data key bob has already held revokes nothing.
+    report.says("safix set alice fleet-token");
     report.says("fix is not the remedy");
 
     // Reported once. The stray is an unclaimed value too, and the two remedies
@@ -138,13 +138,13 @@ fn a_flip_to_shared_over_existing_values_is_reported_as_a_migration() {
     let mut fixture = Fixture::new();
     fixture.seed_shared("fleet-token", SHARED_FILE);
     fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
-    fixture.make_sops_file(ANA_FILE, &["api-token", "fleet-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "fleet-token"]);
 
     let report = fixture.run(&["check"]);
     assert_eq!(report.code, Some(1), "check did not report the migration");
 
     report.says(&format!(
-        "{ANA_FILE} holds a value under 'fleet-token' of its own"
+        "{ALICE_FILE} holds a value under 'fleet-token' of its own"
     ));
     report.says("migration rather than a disclosure");
     report.silent_about("This is a revocation.");
@@ -152,11 +152,11 @@ fn a_flip_to_shared_over_existing_values_is_reported_as_a_migration() {
     // per-carrier copies can disagree with each other. The tool must not pick
     // which one wins.
     report.says("Which one should win is yours to say");
-    report.says("safix set ana fleet-token");
+    report.says("safix set alice fleet-token");
 
     // The audience's own file is reported valueless for every carrier as well:
     // the migration is not done until a value is there.
     report.says(&format!(
-        "flake.safix.users.bo declares 'fleet-token' and {SHARED_FILE} holds no value"
+        "flake.safix.users.bob declares 'fleet-token' and {SHARED_FILE} holds no value"
     ));
 }

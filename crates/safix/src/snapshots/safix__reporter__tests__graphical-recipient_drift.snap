@@ -4,11 +4,11 @@ expression: render_graphical(&refusal)
 ---
 safix::recipient_drift
 
-  × secrets/safix/users/ana/secrets.yaml is not encrypted to the audience
+  × secrets/safix/users/alice/secrets.yaml is not encrypted to the audience
   │ declared for it.
   │ 
   │ Can open it and is not in its audience:
-  │   - age1cy
+  │   - age1carol
   │ 
   │ Is in its audience and cannot open it:
   │   - age1escrow
@@ -21,4 +21,4 @@ safix::recipient_drift
   │ Re-wrap the file to its declared audience, review the diff, then re-run:
   │ 
   │     safix fix
-  │     git diff -- secrets/safix/users/ana/secrets.yaml
+  │     git diff -- secrets/safix/users/alice/secrets.yaml

@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::no_creation_rule
 
-  × .sops.yaml has no creation rule for secrets/safix/shared/ana,bo/
+  × .sops.yaml has no creation rule for secrets/safix/shared/alice,bob/
   │ secrets.yaml
   │ 
   │ The recipient policy is generated from the declarations, and a file with

@@ -304,8 +304,9 @@ let
   # A shared audience's directory is its members joined by one character. That
   # character has to be outside the name alphabet, or two audiences reach one
   # directory and so one rule; and it has to be inert in a regex, or the rule
-  # generated for `ana+bo` matches `anabo` and never `ana+bo`, and every file in
-  # that directory fails closed under a rule that reads as if it covered them.
+  # generated for `alice+bob` matches `alicebob` and never `alice+bob`, and
+  # every file in that directory fails closed under a rule that reads as if it
+  # covered them.
   # The second is the one an injectivity claim alone misses, so it is asserted
   # here by matching rather than by inspecting the character.
   separatorMessagesOf =

@@ -1,5 +1,5 @@
 ---
 source: crates/safix/src/reporter.rs
-expression: render_plain(refusal)
+expression: render_plain(&refusal)
 ---
-safix: git commit -q -m chore(safix): set ana-alone for ana -- secrets/safix/users/ana/secrets.yaml failed
+safix: git commit -q -m chore(safix): set alice-alone for alice -- secrets/safix/users/alice/secrets.yaml failed

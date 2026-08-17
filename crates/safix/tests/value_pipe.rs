@@ -28,7 +28,7 @@ mod harness;
 
 use std::path::Path;
 
-use harness::{ANA_FILE, Fixture, real_sops, shim};
+use harness::{ALICE_FILE, Fixture, real_sops, shim};
 
 /// A `set` observed at the sops process: the value is stored, and it was in
 /// neither of the two channels a bystander can read.
@@ -45,7 +45,7 @@ fn the_value_reaches_sops_in_neither_argv_nor_the_environment() {
 
     fixture
         .run_env(
-            &["set", "ana", "api-token"],
+            &["set", "alice", "api-token"],
             Some("CANARY-piped-value"),
             &observed(&spool, &sops),
         )
@@ -54,7 +54,7 @@ fn the_value_reaches_sops_in_neither_argv_nor_the_environment() {
     // Stored, and readable again. Without this the two silences below would be
     // satisfied by a runtime that never sent sops the value in the first place.
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-piped-value",
         "the value did not round-trip, so how it travelled proves nothing"
     );
@@ -97,7 +97,7 @@ fn a_generated_value_reaches_sops_the_same_way() {
 
     fixture.seed_generator(
         "api-token",
-        ANA_FILE,
+        ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": "a value minted from nothing",
@@ -110,11 +110,11 @@ fn a_generated_value_reaches_sops_the_same_way() {
     );
 
     fixture
-        .run_env(&["generate", "ana"], None, &observed(&spool, &sops))
+        .run_env(&["generate", "alice"], None, &observed(&spool, &sops))
         .expect_success("the generate through the observed sops");
 
     assert_eq!(
-        fixture.value(ANA_FILE, "api-token"),
+        fixture.value(ALICE_FILE, "api-token"),
         "CANARY-minted-value",
         "the minted value did not round-trip, so how it travelled proves nothing"
     );

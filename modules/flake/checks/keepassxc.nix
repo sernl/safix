@@ -96,15 +96,15 @@
         }) record;
 
       # One fleet for every fixture, so a message that names the wrong person is
-      # a failure rather than a coincidence. ana holds a hand-set entry and a
-      # generated one; bo holds a hand-set entry alone.
+      # a failure rather than a coincidence. alice holds a hand-set entry and a
+      # generated one; bob holds a hand-set entry alone.
       fleet = fleetOf {
-        ana = {
+        alice = {
           recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
           private.tok = { };
           private.minted.generator.script = ''printf '%s' x > "$out/minted"'';
         };
-        bo = {
+        bob = {
           recipient = "age1fixturebbb00000000000000000000000000000000000000000000000";
           private.tok = { };
         };
@@ -113,7 +113,7 @@
       # A fleet whose custody does not resolve: a grant to nobody. Used to hold
       # the short-circuit — while custody is broken the mirror says nothing.
       brokenFleet = fleetOf {
-        ana = {
+        alice = {
           recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
           private.tok = { };
           sharedWith.nobody.tok = { };
@@ -132,10 +132,10 @@
         database = "/nonexistent/master.kdbx";
         group = "safix";
         mappings = {
-          push = mapping "safix-to-keepassxc" "ana" "tok" "ana/grafana";
-          pull = mapping "keepassxc-to-safix" "bo" "tok" "bo/router";
-          both = mapping "two-way" "ana" "tok" "ana/mail";
-          copy = mapping "backup" "ana" "minted" "ana/minted";
+          push = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+          pull = mapping "keepassxc-to-safix" "bob" "tok" "bob/router";
+          both = mapping "two-way" "alice" "tok" "alice/mail";
+          copy = mapping "backup" "alice" "minted" "alice/minted";
         };
       };
 
@@ -145,7 +145,7 @@
       badMode =
         (builtins.tryEval (
           builtins.deepSeq (recordOf {
-            mappings.a = mapping "push" "ana" "tok" "ana/grafana";
+            mappings.a = mapping "push" "alice" "tok" "alice/grafana";
           }) "resolved"
         )).success;
 
@@ -156,7 +156,7 @@
             messages=$(mktemp)
             printf '%s\n' ${
               lib.escapeShellArg (
-                builtins.head (violations fleet { mappings.a = mapping "two-way" "cy" "tok" "cy/x"; })
+                builtins.head (violations fleet { mappings.a = mapping "two-way" "carol" "tok" "carol/x"; })
               )
             } > "$messages"
 
@@ -184,52 +184,52 @@
           pullCapable = map keepassxc.pullCapable keepassxc.modes;
 
           stateSuffix = keepassxc.stateSuffix;
-          companion = keepassxc.companionOf (mapping "two-way" "ana" "tok" "ana/mail");
-          entryPath = keepassxc.entryPathOf "vault" (mapping "backup" "ana" "tok" "ana/mail");
+          companion = keepassxc.companionOf (mapping "two-way" "alice" "tok" "alice/mail");
+          entryPath = keepassxc.entryPathOf "vault" (mapping "backup" "alice" "tok" "alice/mail");
 
           soundMessages = violations fleet sound;
 
           unknownUserMessages = violations fleet {
-            mappings.a = mapping "safix-to-keepassxc" "cy" "tok" "cy/x";
+            mappings.a = mapping "safix-to-keepassxc" "carol" "tok" "carol/x";
           };
 
           unknownNameMessages = violations fleet {
-            mappings.a = mapping "safix-to-keepassxc" "ana" "absent" "ana/x";
+            mappings.a = mapping "safix-to-keepassxc" "alice" "absent" "alice/x";
           };
 
           pullOntoGeneratedMessages = violations fleet {
-            mappings.a = mapping "keepassxc-to-safix" "ana" "minted" "ana/minted";
+            mappings.a = mapping "keepassxc-to-safix" "alice" "minted" "alice/minted";
           };
 
           twoWayOntoGeneratedMessages = violations fleet {
-            mappings.a = mapping "two-way" "ana" "minted" "ana/minted";
+            mappings.a = mapping "two-way" "alice" "minted" "alice/minted";
           };
 
           # A push onto a generated entry is the ordinary case: the generator is
           # the value's only producer and the database receives a copy of what it
           # produced. `backup` is the same shape and is asserted by `sound`.
           pushOntoGeneratedMessages = violations fleet {
-            mappings.a = mapping "safix-to-keepassxc" "ana" "minted" "ana/minted";
+            mappings.a = mapping "safix-to-keepassxc" "alice" "minted" "alice/minted";
           };
 
           # One entry reached by two mappings that differ on the safix side, so
           # the duplicate is the database half and nothing else.
           oneEntryMessages = violations fleet {
             mappings = {
-              a = mapping "safix-to-keepassxc" "ana" "tok" "ana/grafana";
-              b = mapping "safix-to-keepassxc" "bo" "tok" "ana/grafana";
+              a = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+              b = mapping "safix-to-keepassxc" "bob" "tok" "alice/grafana";
             };
           };
 
           reservedNameMessages = violations fleet {
-            mappings.a = mapping "safix-to-keepassxc" "ana" "tok" "ana/grafana.safix-sync-state";
+            mappings.a = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana.safix-sync-state";
           };
 
           # Two faults in one mapping, both reported. The safix side does not
           # resolve and the entry path is reserved, and the second is judged on
           # the database half alone so the first does not suppress it.
           bothFaultsMessages = violations fleet {
-            mappings.a = mapping "two-way" "cy" "tok" "cy/x.safix-sync-state";
+            mappings.a = mapping "two-way" "carol" "tok" "carol/x.safix-sync-state";
           };
 
           # A declaration with no mapping is what a consumer who does not use
@@ -241,11 +241,11 @@
           # run-time refusal naming the option, because a consumer mid-way
           # through writing their declarations has a tree that still evaluates.
           noDatabaseMessages = violations fleet {
-            mappings.a = mapping "safix-to-keepassxc" "ana" "tok" "ana/grafana";
+            mappings.a = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
           };
 
           brokenCustody = violations brokenFleet {
-            mappings.a = mapping "safix-to-keepassxc" "cy" "tok" "cy/x";
+            mappings.a = mapping "safix-to-keepassxc" "carol" "tok" "carol/x";
           };
 
           # Without this the field above is vacuous: an empty message list proves
@@ -271,40 +271,40 @@
           ];
 
           stateSuffix = ".safix-sync-state";
-          companion = "ana/mail.safix-sync-state";
-          entryPath = "vault/ana/mail";
+          companion = "alice/mail.safix-sync-state";
+          entryPath = "vault/alice/mail";
 
           soundMessages = [ ];
 
           unknownUserMessages = [
-            "flake.safix.keepassxc.mappings.a names the user 'cy', which flake.safix.users does not declare"
+            "flake.safix.keepassxc.mappings.a names the user 'carol', which flake.safix.users does not declare"
           ];
 
           unknownNameMessages = [
-            "flake.safix.keepassxc.mappings.a names the secret 'absent', which flake.safix.users.ana does not hold"
+            "flake.safix.keepassxc.mappings.a names the secret 'absent', which flake.safix.users.alice does not hold"
           ];
 
           pullOntoGeneratedMessages = [
-            "flake.safix.keepassxc.mappings.a is keepassxc-to-safix into flake.safix.users.ana.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
+            "flake.safix.keepassxc.mappings.a is keepassxc-to-safix into flake.safix.users.alice.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
           ];
 
           twoWayOntoGeneratedMessages = [
-            "flake.safix.keepassxc.mappings.a is two-way into flake.safix.users.ana.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
+            "flake.safix.keepassxc.mappings.a is two-way into flake.safix.users.alice.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
           ];
 
           pushOntoGeneratedMessages = [ ];
 
           oneEntryMessages = [
-            "flake.safix.keepassxc.mappings a and b both name the entry safix/ana/grafana"
+            "flake.safix.keepassxc.mappings a and b both name the entry safix/alice/grafana"
           ];
 
           reservedNameMessages = [
-            "flake.safix.keepassxc.mappings.a names the entry safix/ana/grafana.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
+            "flake.safix.keepassxc.mappings.a names the entry safix/alice/grafana.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
           ];
 
           bothFaultsMessages = [
-            "flake.safix.keepassxc.mappings.a names the user 'cy', which flake.safix.users does not declare"
-            "flake.safix.keepassxc.mappings.a names the entry safix/cy/x.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
+            "flake.safix.keepassxc.mappings.a names the user 'carol', which flake.safix.users does not declare"
+            "flake.safix.keepassxc.mappings.a names the entry safix/carol/x.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
           ];
 
           emptyMirrorMessages = [ ];

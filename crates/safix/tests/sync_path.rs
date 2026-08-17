@@ -34,35 +34,47 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture};
+use harness::{ALICE_FILE, Fixture};
 
 /// The password the modelled database is opened with, fed to the one prompt.
 const UNLOCK: &str = "fixture-database-password\n";
 
-/// A fixture with one mapping of each mode, and ana holding a value for each.
+/// A fixture with one mapping of each mode, and alice holding a value for each.
 fn declared() -> Fixture {
     let mut fixture = Fixture::new();
-    fixture.seed_output("push-me", ANA_FILE);
-    fixture.seed_output("pull-me", ANA_FILE);
-    fixture.seed_output("both-ways", ANA_FILE);
-    fixture.seed_output("back-me-up", ANA_FILE);
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_output("pull-me", ALICE_FILE);
+    fixture.seed_output("both-ways", ALICE_FILE);
+    fixture.seed_output("back-me-up", ALICE_FILE);
 
     fixture.seed_sync_mapping(
         "push",
         "safix-to-keepassxc",
-        ("ana", "push-me"),
-        "ana/pushed",
-        Some("ana@example.invalid"),
+        ("alice", "push-me"),
+        "alice/pushed",
+        Some("alice@example.com"),
     );
     fixture.seed_sync_mapping(
         "pull",
         "keepassxc-to-safix",
-        ("ana", "pull-me"),
-        "ana/pulled",
+        ("alice", "pull-me"),
+        "alice/pulled",
         None,
     );
-    fixture.seed_sync_mapping("both", "two-way", ("ana", "both-ways"), "ana/both", None);
-    fixture.seed_sync_mapping("copy", "backup", ("ana", "back-me-up"), "ana/copied", None);
+    fixture.seed_sync_mapping(
+        "both",
+        "two-way",
+        ("alice", "both-ways"),
+        "alice/both",
+        None,
+    );
+    fixture.seed_sync_mapping(
+        "copy",
+        "backup",
+        ("alice", "back-me-up"),
+        "alice/copied",
+        None,
+    );
     fixture
 }
 
@@ -94,42 +106,42 @@ fn each_mode_converges_exactly_as_its_name_says() {
     // mapping — the person typed it — and nothing for the other three.
     for name in ["push-me", "both-ways", "back-me-up"] {
         fixture
-            .run_with(&["set", "ana", name], &format!("safix-{name}"))
+            .run_with(&["set", "alice", name], &format!("safix-{name}"))
             .expect_success("seeding the safix side");
     }
     fixture
-        .run_with(&["set", "ana", "pull-me"], "safix-before-the-pull")
+        .run_with(&["set", "alice", "pull-me"], "safix-before-the-pull")
         .expect_success("seeding the entry a pull overwrites");
-    fixture.store_seed("safix/ana/pulled", "kdbx-pulled");
+    fixture.store_seed("safix/alice/pulled", "kdbx-pulled");
 
     let run = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("one mapping of each mode, each with something to do");
 
     // Every declared mapping is in the report, with the outcome its mode gives it.
-    run.says("push  ana.push-me -> safix/ana/pushed  safix-to-keepassxc  updated");
-    run.says("pull  safix/ana/pulled -> ana.pull-me  keepassxc-to-safix  pulled");
-    run.says("both  ana.both-ways -> safix/ana/both  two-way  updated");
-    run.says("copy  ana.back-me-up -> safix/ana/copied  backup  updated");
+    run.says("push  alice.push-me -> safix/alice/pushed  safix-to-keepassxc  updated");
+    run.says("pull  safix/alice/pulled -> alice.pull-me  keepassxc-to-safix  pulled");
+    run.says("both  alice.both-ways -> safix/alice/both  two-way  updated");
+    run.says("copy  alice.back-me-up -> safix/alice/copied  backup  updated");
 
     // What each side holds afterwards.
     assert_eq!(
-        fixture.store_holds("safix/ana/pushed").as_deref(),
+        fixture.store_holds("safix/alice/pushed").as_deref(),
         Some("safix-push-me"),
         "the database did not converge to safix's value"
     );
     assert_eq!(
-        fixture.value(ANA_FILE, "pull-me"),
+        fixture.value(ALICE_FILE, "pull-me"),
         "kdbx-pulled",
         "safix did not converge to the database's value"
     );
     assert_eq!(
-        fixture.store_holds("safix/ana/both").as_deref(),
+        fixture.store_holds("safix/alice/both").as_deref(),
         Some("safix-both-ways"),
         "a two-way mapping with an empty database side did not bootstrap"
     );
     assert_eq!(
-        fixture.store_holds("safix/ana/copied").as_deref(),
+        fixture.store_holds("safix/alice/copied").as_deref(),
         Some("safix-back-me-up"),
         "a backup mapping did not write into absence"
     );
@@ -137,15 +149,15 @@ fn each_mode_converges_exactly_as_its_name_says() {
     // The username a mapping declares reaches the entry; one that declares none
     // leaves the field alone.
     assert_eq!(
-        fixture.store_username("safix/ana/pushed"),
-        "ana@example.invalid"
+        fixture.store_username("safix/alice/pushed"),
+        "alice@example.com"
     );
-    assert_eq!(fixture.store_username("safix/ana/both"), "");
+    assert_eq!(fixture.store_username("safix/alice/both"), "");
 
     // The two-way mapping recorded its agreement, and it is beside the entry
     // rather than in the repository.
     let companion = fixture
-        .store_holds("safix/ana/both.safix-sync-state")
+        .store_holds("safix/alice/both.safix-sync-state")
         .expect("a two-way mapping recorded no agreement");
     assert!(
         companion.starts_with("safix-sync-v1 "),
@@ -169,22 +181,25 @@ fn a_second_run_writes_nothing_anywhere() {
 
     for name in ["push-me", "both-ways", "back-me-up", "pull-me"] {
         fixture
-            .run_with(&["set", "ana", name], &format!("safix-{name}"))
+            .run_with(&["set", "alice", name], &format!("safix-{name}"))
             .expect_success("seeding the safix side");
     }
-    fixture.store_seed("safix/ana/pulled", "safix-pull-me");
+    fixture.store_seed("safix/alice/pulled", "safix-pull-me");
 
     fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("the first run");
 
     let head = fixture.head();
-    let ciphertext = fixture.ciphertext_lines(ANA_FILE);
-    let stored_before: Vec<Option<String>> =
-        ["safix/ana/pushed", "safix/ana/both", "safix/ana/copied"]
-            .into_iter()
-            .map(|entry| fixture.store_holds(entry))
-            .collect();
+    let ciphertext = fixture.ciphertext_lines(ALICE_FILE);
+    let stored_before: Vec<Option<String>> = [
+        "safix/alice/pushed",
+        "safix/alice/both",
+        "safix/alice/copied",
+    ]
+    .into_iter()
+    .map(|entry| fixture.store_holds(entry))
+    .collect();
     let invocations = fixture.store_invocations().len();
 
     let second = fixture
@@ -198,15 +213,18 @@ fn a_second_run_writes_nothing_anywhere() {
     assert_eq!(fixture.head(), head, "the second run committed");
     assert_eq!(fixture.status(), "", "the second run left the tree dirty");
     assert_eq!(
-        fixture.ciphertext_lines(ANA_FILE),
+        fixture.ciphertext_lines(ALICE_FILE),
         ciphertext,
         "the second run moved ciphertext"
     );
-    let stored_after: Vec<Option<String>> =
-        ["safix/ana/pushed", "safix/ana/both", "safix/ana/copied"]
-            .into_iter()
-            .map(|entry| fixture.store_holds(entry))
-            .collect();
+    let stored_after: Vec<Option<String>> = [
+        "safix/alice/pushed",
+        "safix/alice/both",
+        "safix/alice/copied",
+    ]
+    .into_iter()
+    .map(|entry| fixture.store_holds(entry))
+    .collect();
     assert_eq!(
         stored_after, stored_before,
         "the second run wrote into the database"
@@ -231,25 +249,25 @@ fn a_second_run_writes_nothing_anywhere() {
 #[test]
 fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("pull-me", ANA_FILE);
+    fixture.seed_output("pull-me", ALICE_FILE);
     fixture.seed_sync_mapping(
         "pull",
         "keepassxc-to-safix",
-        ("ana", "pull-me"),
-        "ana/pulled",
+        ("alice", "pull-me"),
+        "alice/pulled",
         None,
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
 
     // A hand-set write of another entry first, to compare the shape against.
-    fixture.seed_output("by-hand", ANA_FILE);
+    fixture.seed_output("by-hand", ALICE_FILE);
     fixture
-        .run_with(&["set", "ana", "by-hand"], "typed-by-a-person")
+        .run_with(&["set", "alice", "by-hand"], "typed-by-a-person")
         .expect_success("the hand-set write");
     let by_hand = fixture.paths_in("HEAD");
 
-    fixture.store_seed("safix/ana/pulled", "kdbx-pulled");
+    fixture.store_seed("safix/alice/pulled", "kdbx-pulled");
     fixture
         .run_sync(&["sync", "pull"], UNLOCK, &extra)
         .expect_success("pulling one mapping");
@@ -261,7 +279,7 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
     );
     assert_eq!(
         fixture.subject("HEAD"),
-        "chore(safix): sync pull for ana",
+        "chore(safix): sync pull for alice",
         "the commit does not name the mapping"
     );
     fixture.message("HEAD").lines().for_each(|line| {
@@ -270,7 +288,7 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
             "the commit message carries the value: {line}"
         );
     });
-    assert_eq!(fixture.value(ANA_FILE, "pull-me"), "kdbx-pulled");
+    assert_eq!(fixture.value(ALICE_FILE, "pull-me"), "kdbx-pulled");
     assert_eq!(fixture.status(), "", "the pull left the tree dirty");
 }
 
@@ -279,53 +297,59 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
 #[test]
 fn two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("both-ways", ANA_FILE);
-    fixture.seed_sync_mapping("both", "two-way", ("ana", "both-ways"), "ana/both", None);
+    fixture.seed_output("both-ways", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "both",
+        "two-way",
+        ("alice", "both-ways"),
+        "alice/both",
+        None,
+    );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
 
     fixture
-        .run_with(&["set", "ana", "both-ways"], "agreed-value")
+        .run_with(&["set", "alice", "both-ways"], "agreed-value")
         .expect_success("seeding the safix side");
     fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("bootstrapping the two-way mapping");
     assert_eq!(
-        fixture.store_holds("safix/ana/both").as_deref(),
+        fixture.store_holds("safix/alice/both").as_deref(),
         Some("agreed-value")
     );
 
     // The database side moves. safix is where the agreement left it, so safix
     // converges toward the database.
-    fixture.store_seed("safix/ana/both", "changed-in-the-database");
+    fixture.store_seed("safix/alice/both", "changed-in-the-database");
     let pulled = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("one side changed");
     pulled.says("two-way  pulled");
     assert_eq!(
-        fixture.value(ANA_FILE, "both-ways"),
+        fixture.value(ALICE_FILE, "both-ways"),
         "changed-in-the-database"
     );
 
     // safix's side moves. The database is where the agreement left it, so the
     // database converges toward safix.
     fixture
-        .run_with(&["set", "ana", "both-ways"], "changed-in-safix")
+        .run_with(&["set", "alice", "both-ways"], "changed-in-safix")
         .expect_success("moving safix's side");
     let pushed = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("the other side changed");
     pushed.says("two-way  updated");
     assert_eq!(
-        fixture.store_holds("safix/ana/both").as_deref(),
+        fixture.store_holds("safix/alice/both").as_deref(),
         Some("changed-in-safix")
     );
 
     // Both sides move. Nothing is written and the finding names both remedies.
     fixture
-        .run_with(&["set", "ana", "both-ways"], "safix-moved-again")
+        .run_with(&["set", "alice", "both-ways"], "safix-moved-again")
         .expect_success("moving safix's side again");
-    fixture.store_seed("safix/ana/both", "the-database-moved-too");
+    fixture.store_seed("safix/alice/both", "the-database-moved-too");
     let head = fixture.head();
     let conflict = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
@@ -338,12 +362,12 @@ fn two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did
     conflict.silent_about("the-database-moved-too");
     assert_eq!(fixture.head(), head, "a conflict committed");
     assert_eq!(
-        fixture.store_holds("safix/ana/both").as_deref(),
+        fixture.store_holds("safix/alice/both").as_deref(),
         Some("the-database-moved-too"),
         "a conflict wrote the database"
     );
     assert_eq!(
-        fixture.value(ANA_FILE, "both-ways"),
+        fixture.value(ALICE_FILE, "both-ways"),
         "safix-moved-again",
         "a conflict wrote safix"
     );
@@ -357,15 +381,21 @@ fn two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did
 #[test]
 fn a_backup_mapping_never_overwrites_and_reports_the_divergence() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("back-me-up", ANA_FILE);
-    fixture.seed_sync_mapping("copy", "backup", ("ana", "back-me-up"), "ana/copied", None);
+    fixture.seed_output("back-me-up", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "copy",
+        "backup",
+        ("alice", "back-me-up"),
+        "alice/copied",
+        None,
+    );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
 
     fixture
-        .run_with(&["set", "ana", "back-me-up"], "safix-value")
+        .run_with(&["set", "alice", "back-me-up"], "safix-value")
         .expect_success("seeding the safix side");
-    fixture.store_seed("safix/ana/copied", "a-value-the-person-typed");
+    fixture.store_seed("safix/alice/copied", "a-value-the-person-typed");
 
     let head = fixture.head();
     let run = fixture
@@ -378,7 +408,7 @@ fn a_backup_mapping_never_overwrites_and_reports_the_divergence() {
     run.silent_about("safix-value");
 
     assert_eq!(
-        fixture.store_holds("safix/ana/copied").as_deref(),
+        fixture.store_holds("safix/alice/copied").as_deref(),
         Some("a-value-the-person-typed"),
         "backup overwrote a value it holds it never overwrites"
     );
@@ -389,20 +419,20 @@ fn a_backup_mapping_never_overwrites_and_reports_the_divergence() {
 #[test]
 fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("push-me", ANA_FILE);
-    fixture.seed_output("pull-me", ANA_FILE);
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_output("pull-me", ALICE_FILE);
     fixture.seed_sync_mapping(
         "push",
         "safix-to-keepassxc",
-        ("ana", "push-me"),
-        "ana/pushed",
+        ("alice", "push-me"),
+        "alice/pushed",
         None,
     );
     fixture.seed_sync_mapping(
         "pull",
         "keepassxc-to-safix",
-        ("ana", "pull-me"),
-        "ana/pulled",
+        ("alice", "pull-me"),
+        "alice/pulled",
         None,
     );
     let extra = store_env(&fixture);
@@ -419,13 +449,13 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
     let empty = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_refusal("neither side holds anything");
-    empty.says("mirrors push-me for ana into the database");
-    empty.says("holds no entry at 'safix/ana/pulled'");
-    empty.says("safix set ana push-me");
+    empty.says("mirrors push-me for alice into the database");
+    empty.says("holds no entry at 'safix/alice/pulled'");
+    empty.says("safix set alice push-me");
 
     // A value carrying a newline, refused rather than trimmed to fit.
     fixture
-        .run_with(&["set", "ana", "push-me"], "trailing-newline\n")
+        .run_with(&["set", "alice", "push-me"], "trailing-newline\n")
         .expect_success("seeding a value with a trailing newline");
     let spans = fixture
         .run_sync(&["sync", "push"], UNLOCK, &extra)
@@ -437,7 +467,7 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
     // refusals leaving the tree where they found it.
     let head = fixture.head();
     assert!(
-        fixture.store_holds("safix/ana/pushed").is_none(),
+        fixture.store_holds("safix/alice/pushed").is_none(),
         "a refused value was written anyway"
     );
 
@@ -476,12 +506,12 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
 #[test]
 fn the_refusal_codes_are_each_their_own() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("push-me", ANA_FILE);
+    fixture.seed_output("push-me", ALICE_FILE);
     fixture.seed_sync_mapping(
         "push",
         "safix-to-keepassxc",
-        ("ana", "push-me"),
-        "ana/pushed",
+        ("alice", "push-me"),
+        "alice/pushed",
         None,
     );
     let extra = store_env(&fixture);
@@ -502,27 +532,27 @@ fn the_refusal_codes_are_each_their_own() {
 #[test]
 fn a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("push-me", ANA_FILE);
-    fixture.seed_output("unreadable", "secrets/safix/shared/ana,bo/secrets.yaml");
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_output("unreadable", "secrets/safix/shared/alice,bob/secrets.yaml");
     fixture.seed_sync_mapping(
         "push",
         "safix-to-keepassxc",
-        ("ana", "push-me"),
-        "ana/pushed",
+        ("alice", "push-me"),
+        "alice/pushed",
         None,
     );
     fixture.seed_sync_mapping(
         "opaque",
         "safix-to-keepassxc",
-        ("ana", "unreadable"),
-        "ana/opaque",
+        ("alice", "unreadable"),
+        "alice/opaque",
         None,
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
 
     fixture
-        .run_with(&["set", "ana", "push-me"], "a-value-safix-holds")
+        .run_with(&["set", "alice", "push-me"], "a-value-safix-holds")
         .expect_success("seeding the readable mapping");
 
     // A file encrypted to somebody else alone: it exists, its key is there, and
@@ -530,7 +560,7 @@ fn a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped() {
     let stranger = fixture.work.join("stranger.txt");
     harness::mint_identity(&stranger);
     fixture.encrypt_to(
-        "secrets/safix/shared/ana,bo/secrets.yaml",
+        "secrets/safix/shared/alice,bob/secrets.yaml",
         &[&harness::recipient_of(&stranger)],
         "unreadable: \"a value this operator cannot read\"\n",
     );
@@ -542,13 +572,13 @@ fn a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped() {
     run.says("not judged");
     // The one that could be judged still was, which is what makes the report
     // about the mappings rather than about the run that met the first problem.
-    run.says("push  ana.push-me -> safix/ana/pushed  safix-to-keepassxc  updated");
+    run.says("push  alice.push-me -> safix/alice/pushed  safix-to-keepassxc  updated");
     assert_eq!(
-        fixture.store_holds("safix/ana/pushed").as_deref(),
+        fixture.store_holds("safix/alice/pushed").as_deref(),
         Some("a-value-safix-holds")
     );
     assert!(
-        fixture.store_holds("safix/ana/opaque").is_none(),
+        fixture.store_holds("safix/alice/opaque").is_none(),
         "a mapping that could not be judged was written anyway"
     );
 }
@@ -563,14 +593,14 @@ fn a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped() {
 fn the_database_writes_of_a_run_are_one_burst() {
     let mut fixture = Fixture::new();
     for (id, name, path) in [
-        ("one", "first", "ana/first"),
-        ("two", "second", "ana/second"),
-        ("three", "third", "ana/third"),
+        ("one", "first", "alice/first"),
+        ("two", "second", "alice/second"),
+        ("three", "third", "alice/third"),
     ] {
-        fixture.seed_output(name, ANA_FILE);
-        fixture.seed_sync_mapping(id, "safix-to-keepassxc", ("ana", name), path, None);
+        fixture.seed_output(name, ALICE_FILE);
+        fixture.seed_sync_mapping(id, "safix-to-keepassxc", ("alice", name), path, None);
         fixture
-            .run_with(&["set", "ana", name], &format!("value-of-{name}"))
+            .run_with(&["set", "alice", name], &format!("value-of-{name}"))
             .expect_success("seeding a mapping");
     }
     let extra = store_env(&fixture);
@@ -590,7 +620,7 @@ fn the_database_writes_of_a_run_are_one_burst() {
         .map(|(at, _)| at)
         .collect();
     // Three entries and the two group levels their paths needed. `mkdir` creates
-    // one level, so `safix` and `safix/ana` are two invocations rather than one.
+    // one level, so `safix` and `safix/alice` are two invocations rather than one.
     assert_eq!(
         writes.len(),
         5,
@@ -613,37 +643,37 @@ fn the_database_writes_of_a_run_are_one_burst() {
 #[test]
 fn an_entry_no_mapping_declares_is_reported_and_never_removed() {
     let mut fixture = Fixture::new();
-    fixture.seed_output("push-me", ANA_FILE);
+    fixture.seed_output("push-me", ALICE_FILE);
     fixture.seed_sync_mapping(
         "push",
         "safix-to-keepassxc",
-        ("ana", "push-me"),
-        "ana/pushed",
+        ("alice", "push-me"),
+        "alice/pushed",
         None,
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
 
     fixture
-        .run_with(&["set", "ana", "push-me"], "a-value")
+        .run_with(&["set", "alice", "push-me"], "a-value")
         .expect_success("seeding the mapping");
     // What a removed mapping leaves: its entry, and the agreement it recorded.
-    fixture.store_seed("safix/ana/withdrawn", "the-value-it-last-held");
+    fixture.store_seed("safix/alice/withdrawn", "the-value-it-last-held");
     fixture.store_seed(
-        "safix/ana/withdrawn.safix-sync-state",
+        "safix/alice/withdrawn.safix-sync-state",
         "safix-sync-v1 abcdef",
     );
 
     let run = fixture
         .run_sync(&["sync"], UNLOCK, &extra)
         .expect_success("a run beside two leftovers");
-    run.says("safix/ana/withdrawn is in the group and no mapping declares it.");
-    run.says("safix/ana/withdrawn.safix-sync-state is safix's own record");
+    run.says("safix/alice/withdrawn is in the group and no mapping declares it.");
+    run.says("safix/alice/withdrawn.safix-sync-state is safix's own record");
     run.says("Nothing here will remove it");
     run.silent_about("the-value-it-last-held");
 
     assert_eq!(
-        fixture.store_holds("safix/ana/withdrawn").as_deref(),
+        fixture.store_holds("safix/alice/withdrawn").as_deref(),
         Some("the-value-it-last-held"),
         "a leftover entry was removed"
     );

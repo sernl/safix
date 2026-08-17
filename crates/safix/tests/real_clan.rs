@@ -81,7 +81,7 @@ mod against_a_real_clan {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use crate::harness::{ANA_FILE, Fixture, Run, real_clan, real_clan_seed};
+    use crate::harness::{ALICE_FILE, Fixture, Run, real_clan, real_clan_seed};
 
     /// The generator whose value the seed clan holds. It declares a validation,
     /// which is what lets clan be asked whether its definition has moved.
@@ -233,7 +233,7 @@ mod against_a_real_clan {
             "ntfy-token",
             direction,
             (MACHINE, generator, "token"),
-            ("ana", "api-token"),
+            ("alice", "api-token"),
         );
         Some((fixture, clan))
     }
@@ -261,7 +261,7 @@ mod against_a_real_clan {
 
     // ── clan to safix ──────────────────────────────────────────────────────
 
-    /// The bytes the real clan minted are the bytes that land in ana's file.
+    /// The bytes the real clan minted are the bytes that land in alice's file.
     ///
     /// The end-to-end import claim, and the one that makes the raw-capture
     /// contract real rather than recorded: `clan vars get` writes the value when
@@ -279,7 +279,7 @@ mod against_a_real_clan {
         run.silent_about(FROM_CLAN);
 
         assert_eq!(
-            fixture.value(ANA_FILE, "api-token"),
+            fixture.value(ALICE_FILE, "api-token"),
             FROM_CLAN,
             "the imported value is not what the real clan was holding"
         );
@@ -294,13 +294,13 @@ mod against_a_real_clan {
 
         bridge(&fixture, &clan, &["import"]).expect_success("the first import");
         let settled = fixture.head();
-        let document = fixture.read(ANA_FILE);
+        let document = fixture.read(ALICE_FILE);
 
         let again = bridge(&fixture, &clan, &["import"]).expect_success("the second import");
         again.says("0 updated, 1 unchanged");
         assert_eq!(fixture.head(), settled, "the second import committed");
         assert_eq!(
-            fixture.read(ANA_FILE),
+            fixture.read(ALICE_FILE),
             document,
             "the second import rewrote the file, which re-encrypts it for no reason"
         );
@@ -354,7 +354,7 @@ mod against_a_real_clan {
             return no_clan_here("exporting into a real clan");
         };
         fixture
-            .set("ana", "api-token", "CANARY-exported-for-real")
+            .set("alice", "api-token", "CANARY-exported-for-real")
             .expect_success("seeding the source");
         let clan_was_on = clan.head();
         let safix_was_on = fixture.head();
@@ -394,7 +394,7 @@ mod against_a_real_clan {
             return no_clan_here("converging an export against a real clan");
         };
         fixture
-            .set("ana", "api-token", "CANARY-exported-once")
+            .set("alice", "api-token", "CANARY-exported-once")
             .expect_success("seeding the source");
 
         bridge(&fixture, &clan, &["export"]).expect_success("the first export");
@@ -421,7 +421,7 @@ mod against_a_real_clan {
             return no_clan_here("refusing an export into a stale generator");
         };
         fixture
-            .set("ana", "api-token", "CANARY-would-be-lost")
+            .set("alice", "api-token", "CANARY-would-be-lost")
             .expect_success("seeding the source");
         clan.invalidate(MINTED);
         let settled = clan.head();
@@ -457,7 +457,7 @@ mod against_a_real_clan {
             return no_clan_here("auditing against a real clan");
         };
         fixture
-            .set("ana", "api-token", "CANARY-disagrees-with-clan")
+            .set("alice", "api-token", "CANARY-disagrees-with-clan")
             .expect_success("seeding a disagreement");
 
         let report = bridge(&fixture, &clan, &["audit"]).expect_refusal("auditing a diverged pair");
@@ -486,7 +486,7 @@ mod against_a_real_clan {
         };
 
         bridge(&fixture, &clan, &["import"]).expect_success("importing from a real clan");
-        let landed = fixture.value(ANA_FILE, "api-token");
+        let landed = fixture.value(ALICE_FILE, "api-token");
 
         assert_eq!(
             landed, FROM_CLAN,
@@ -513,7 +513,7 @@ mod against_a_real_clan {
             return no_clan_here("refusing a first export into a scheduled generator");
         };
         fixture
-            .set("ana", "api-token", "CANARY-would-be-replaced")
+            .set("alice", "api-token", "CANARY-would-be-replaced")
             .expect_success("seeding the source");
         let settled = clan.head();
 

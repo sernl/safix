@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::generator_definition_drifted
 
-  × clan considers the generator 'ntfy' on ana-workstation outdated, so
+  × clan considers the generator 'ntfy' on alice-workstation outdated, so
   │ exporting
   │ the mapping 'ntfy-token' would write a value clan's next generation
   │ replaces.
@@ -13,7 +13,7 @@ safix::generator_definition_drifted
   │ recorded one no longer matches the definition. That has already happened
   │ here, so the next routine
   │ 
-  │     clan vars generate ana-workstation
+  │     clan vars generate alice-workstation
   │ 
   │ would discard whatever this export wrote, without saying so.
   │ 

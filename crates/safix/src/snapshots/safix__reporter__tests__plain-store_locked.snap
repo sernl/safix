@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: /home/ana/.keys/master.kdbx needs its password and there is no terminal to ask on. Nothing
+safix: /home/alice/.keys/master.kdbx needs its password and there is no terminal to ask on. Nothing
 was read.
 
 The refusal is here rather than after the first mapping deliberately: a run

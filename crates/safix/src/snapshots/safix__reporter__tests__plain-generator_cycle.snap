@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the run order for flake.safix.users.ana carries a cycle of generators:
+safix: the run order for flake.safix.users.alice carries a cycle of generators:
 'base' -> 'derived' -> 'base'. Nothing can run first, so nothing runs.
 
 Nothing was written. The order is flake.safix.lib.generatorPlan's and

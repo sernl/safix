@@ -74,8 +74,8 @@ let
       2. Every `path_regex` is anchored with `^`. sops matches `path_regex`
          unanchored against the path relative to this file's directory, so an
          unanchored rule also matches the same suffix under any prefix:
-         `nested/secrets/safix/users/ana/x.yaml` would match a rule written for
-         `secrets/safix/users/ana/`. `[^/]*` rather than `.*` keeps each rule to
+         `nested/secrets/safix/users/alice/x.yaml` would match a rule written for
+         `secrets/safix/users/alice/`. `[^/]*` rather than `.*` keeps each rule to
          one directory level, so a file dropped in a subdirectory fails closed
          instead of silently inheriting a person's recipients. It is `[^/]*`
          rather than one literal filename so that a file placed beside a person's

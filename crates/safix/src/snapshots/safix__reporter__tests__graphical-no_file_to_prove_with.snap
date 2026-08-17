@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::no_file_to_prove_with
 
-  × cy's audience covers no file that exists, so there is nothing for the
+  × carol's audience covers no file that exists, so there is nothing for the
   │ card to open and the proof cannot run.
   │ 
   │ The card's identity and its recipient are written and are correct: the
@@ -14,7 +14,7 @@ safix::no_file_to_prove_with
   │ which
   │ is not the question.
   │ 
-  │ Give cy a secret, then re-run this verb:
+  │ Give carol a secret, then re-run this verb:
   │ 
-  │     safix set cy <name>
-  │     safix enroll cy
+  │     safix set carol <name>
+  │     safix enroll carol

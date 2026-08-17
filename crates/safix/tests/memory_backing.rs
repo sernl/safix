@@ -128,7 +128,7 @@ fn a_run_pointed_at_a_disk_backed_directory_refuses() {
     let mut fixture = Fixture::new();
     fixture.seed_generator(
         "staged",
-        harness::ANA_FILE,
+        harness::ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": null,
@@ -151,7 +151,7 @@ fn a_run_pointed_at_a_disk_backed_directory_refuses() {
 
     let refused = fixture
         .run_env(
-            &["generate", "ana", "staged"],
+            &["generate", "alice", "staged"],
             None,
             &[
                 ("SAFIX_STAGING_DIR", &disk_backed.to_string_lossy()),
@@ -184,7 +184,7 @@ fn the_acknowledgement_is_the_only_way_past_the_refusal() {
 
     fixture.seed_generator(
         "staged",
-        harness::ANA_FILE,
+        harness::ALICE_FILE,
         &[],
         &serde_json::json!({
             "dependencies": [], "description": null,
@@ -199,7 +199,7 @@ fn the_acknowledgement_is_the_only_way_past_the_refusal() {
     assert_eq!(
         fixture
             .run_graphical_env(
-                &["generate", "ana", "staged"],
+                &["generate", "alice", "staged"],
                 &[("SAFIX_STAGING_DIR", &named), ("XDG_RUNTIME_DIR", "")],
             )
             .refusal_code(),
@@ -208,14 +208,14 @@ fn the_acknowledgement_is_the_only_way_past_the_refusal() {
 
     fixture
         .run_env(
-            &["generate", "--allow-disk-staging", "ana", "staged"],
+            &["generate", "--allow-disk-staging", "alice", "staged"],
             None,
             &[("SAFIX_STAGING_DIR", &named), ("XDG_RUNTIME_DIR", "")],
         )
         .expect_success("staging under the acknowledgement");
 
     assert_eq!(
-        fixture.value(harness::ANA_FILE, "staged"),
+        fixture.value(harness::ALICE_FILE, "staged"),
         "CANARY-acknowledged"
     );
     assert!(

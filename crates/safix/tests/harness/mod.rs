@@ -67,9 +67,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
 
-/// ana's own file: the audience is one person, and the creation rule grants her
-/// alone.
-pub const ANA_FILE: &str = "secrets/safix/users/ana/secrets.yaml";
+/// alice's own file: the audience is one person, and the creation rule grants
+/// her alone.
+pub const ALICE_FILE: &str = "secrets/safix/users/alice/secrets.yaml";
 
 /// `^D`, the character a terminal in canonical mode reads as the end of input.
 ///
@@ -81,7 +81,7 @@ const END_OF_INPUT: u8 = 0x04;
 
 /// The file the pair shares, in the audience directory named for both in sorted
 /// order.
-pub const SHARED_FILE: &str = "secrets/safix/shared/ana,bo/secrets.yaml";
+pub const SHARED_FILE: &str = "secrets/safix/shared/alice,bob/secrets.yaml";
 
 /// The built binary under test.
 pub fn safix() -> &'static str {
@@ -252,12 +252,12 @@ pub struct Fixture {
     pub work: PathBuf,
     /// The repository the command operates on.
     pub repo: PathBuf,
-    /// ana's recipient, minted here.
-    pub ana: String,
-    /// bo's recipient, minted here. His private half is destroyed as soon as the
+    /// alice's recipient, minted here.
+    pub alice: String,
+    /// bob's recipient, minted here. His private half is destroyed as soon as the
     /// recipient is derived, which is also how the fixture shows that writing to
     /// a shared file needs no key but the writer's own.
-    pub bo: String,
+    pub bob: String,
     /// A disk-backed directory this fixture alone writes into, where one is
     /// reachable — see [`Fixture::disk_staging_dir`].
     disk_staging: Option<PathBuf>,
@@ -291,53 +291,53 @@ impl Fixture {
         let key_file = work.join("age-key.txt");
         run_to_success(
             Command::new("age-keygen").arg("-o").arg(&key_file),
-            "minting ana's identity",
+            "minting alice's identity",
         );
-        let ana = capture(Command::new("age-keygen").arg("-y").arg(&key_file));
+        let alice = capture(Command::new("age-keygen").arg("-y").arg(&key_file));
 
         // Two distinct recipients rather than one key under two anchors, so
         // "the created file took its recipients from the creation rule" is a
         // claim a file encrypted to the writer alone would fail.
-        let bo_key = work.join("bo-key.txt");
+        let bob_key = work.join("bob-key.txt");
         run_to_success(
-            Command::new("age-keygen").arg("-o").arg(&bo_key),
-            "minting bo's identity",
+            Command::new("age-keygen").arg("-o").arg(&bob_key),
+            "minting bob's identity",
         );
-        let bo = capture(Command::new("age-keygen").arg("-y").arg(&bo_key));
-        std::fs::remove_file(&bo_key).unwrap();
+        let bob = capture(Command::new("age-keygen").arg("-y").arg(&bob_key));
+        std::fs::remove_file(&bob_key).unwrap();
 
         let fixture = Self {
             work,
             repo,
-            ana: ana.clone(),
-            bo: bo.clone(),
+            alice: alice.clone(),
+            bob: bob.clone(),
             disk_staging: disk_backed_scratch(),
             key_file,
             placements: json!({
-                "ana": {
-                    "api-token":      placement(ANA_FILE, "api-token", "carries", "ana"),
-                    "mail-password":  placement(ANA_FILE, "mail-password", "private", "ana"),
-                    "aliased-secret": placement(ANA_FILE, "custom-key", "private", "ana"),
-                    "wifi-psk":       placement(SHARED_FILE, "wifi-psk", "shared", "bo"),
+                "alice": {
+                    "api-token":      placement(ALICE_FILE, "api-token", "carries", "alice"),
+                    "mail-password":  placement(ALICE_FILE, "mail-password", "private", "alice"),
+                    "aliased-secret": placement(ALICE_FILE, "custom-key", "private", "alice"),
+                    "wifi-psk":       placement(SHARED_FILE, "wifi-psk", "shared", "bob"),
                     "no-rule-secret": placement(
-                        "secrets/safix/users/cy/secrets.yaml", "no-rule-secret", "private", "ana"),
+                        "secrets/safix/users/carol/secrets.yaml", "no-rule-secret", "private", "alice"),
                     "not-yaml":       placement(
-                        "secrets/safix/users/ana/secret.age", "not-yaml", "private", "ana"),
+                        "secrets/safix/users/alice/secret.age", "not-yaml", "private", "alice"),
                 },
-                "bo": {
-                    "wifi-psk": placement(SHARED_FILE, "wifi-psk", "private", "bo"),
+                "bob": {
+                    "wifi-psk": placement(SHARED_FILE, "wifi-psk", "private", "bob"),
                 },
             }),
             audiences: json!({
-                ANA_FILE: {
-                    "audience": ["ana"],
-                    "dir": "secrets/safix/users/ana",
-                    "recipients": [ana],
+                ALICE_FILE: {
+                    "audience": ["alice"],
+                    "dir": "secrets/safix/users/alice",
+                    "recipients": [alice],
                 },
                 SHARED_FILE: {
-                    "audience": ["ana", "bo"],
-                    "dir": "secrets/safix/shared/ana,bo",
-                    "recipients": [ana, bo],
+                    "audience": ["alice", "bob"],
+                    "dir": "secrets/safix/shared/alice,bob",
+                    "recipients": [alice, bob],
                 },
             }),
             // A consumer who has never heard of clan evaluates exactly this,
@@ -351,18 +351,18 @@ impl Fixture {
             // this, and every test that declares no mapping drives it, so `sync`
             // has to be silent about an empty mirror rather than refuse.
             keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
-            subjects: json!({ "ana": [ana.clone()], "bo": [bo.clone()] }),
+            subjects: json!({ "alice": [alice.clone()], "bob": [bob.clone()] }),
             clan_flake: None,
             genplan: json!({
-                "ana": { "order": [], "outputs": {}, "inputs": {} },
-                "bo":  { "order": [], "outputs": {}, "inputs": {} },
+                "alice": { "order": [], "outputs": {}, "inputs": {} },
+                "bob":   { "order": [], "outputs": {}, "inputs": {} },
             }),
             extras: Vec::new(),
         };
 
-        fixture.write_policy(&["ana", "bo"]);
+        fixture.write_policy(&["alice", "bob"]);
         fixture.git(&["init", "-q"]);
-        fixture.git(&["config", "user.email", "selftest@example.invalid"]);
+        fixture.git(&["config", "user.email", "selftest@example.com"]);
         fixture.git(&["config", "user.name", "selftest"]);
         fixture.git(&["add", "-A"]);
         fixture.git(&["commit", "-q", "-m", "fixture: recipient policy"]);
@@ -388,15 +388,15 @@ impl Fixture {
     /// before any card exists, and the enrollment's edit is what adds one.
     pub fn write_policy(&self, shared_anchors: &[&str]) {
         let mut policy = String::from("keys:\n");
-        write!(policy, "  - &ana {}\n  - &bo {}\n", self.ana, self.bo).unwrap();
+        write!(policy, "  - &alice {}\n  - &bob {}\n", self.alice, self.bob).unwrap();
         policy.push_str(&rules_block(shared_anchors));
         std::fs::write(self.repo.join(".sops.yaml"), policy).unwrap();
-        std::fs::write(self.work.join("rules.txt"), rules_block(&["ana", "bo"])).unwrap();
+        std::fs::write(self.work.join("rules.txt"), rules_block(&["alice", "bob"])).unwrap();
     }
 
     /// Declare a placement for a name with no generator.
     pub fn seed_output(&mut self, name: &str, file: &str) {
-        self.placements["ana"][name] = placement(file, name, "private", "ana");
+        self.placements["alice"][name] = placement(file, name, "private", "alice");
         self.write_fixtures();
     }
 
@@ -407,9 +407,9 @@ impl Fixture {
     /// every entry; what makes this public is `public` naming a path, which is
     /// the one field the runtime branches on.
     pub fn seed_public_output(&mut self, name: &str, path: &str) {
-        self.placements["ana"][name] = json!({
-            "file": ANA_FILE, "key": name, "origin": "private",
-            "owner": "ana", "shared": false, "generator": null,
+        self.placements["alice"][name] = json!({
+            "file": ALICE_FILE, "key": name, "origin": "private",
+            "owner": "alice", "shared": false, "generator": null,
             "public": path,
         });
         self.write_fixtures();
@@ -425,7 +425,7 @@ impl Fixture {
     /// of: two placements, each with its carrier as owner, both naming one file
     /// and one key.
     pub fn seed_shared(&mut self, name: &str, file: &str) {
-        for user in ["ana", "bo"] {
+        for user in ["alice", "bob"] {
             self.placements[user][name] = json!({
                 "file": file, "key": name, "origin": "carries",
                 "owner": user, "shared": true, "generator": null, "public": null,
@@ -434,12 +434,12 @@ impl Fixture {
         self.write_fixtures();
     }
 
-    /// Drop bo from a shared entry, leaving the remaining carrier's own file as
-    /// its placement. The ciphertext is left exactly where it was, which is the
-    /// state a revocation is discovered in.
+    /// Drop bob from a shared entry, leaving the remaining carrier's own file
+    /// as its placement. The ciphertext is left exactly where it was, which is
+    /// the state a revocation is discovered in.
     pub fn unshare_from(&mut self, name: &str, remaining: &str, file: &str) {
-        if let Some(bo) = self.placements["bo"].as_object_mut() {
-            bo.remove(name);
+        if let Some(bob) = self.placements["bob"].as_object_mut() {
+            bob.remove(name);
         }
         self.placements[remaining][name]["file"] = json!(file);
         self.write_fixtures();
@@ -508,7 +508,7 @@ impl Fixture {
     /// The recipient policy, committed and generated alike, over one audience.
     ///
     /// [`Fixture::write_policy`] deliberately leaves the generated half naming
-    /// ana and bo whatever the committed half names, which is how a stale
+    /// alice and bob whatever the committed half names, which is how a stale
     /// artifact is fixtured. A test about a re-wrap needs the two to agree, or
     /// what `fix` writes and what it re-wraps to disagree by construction.
     pub fn write_policy_agreeing(&self, shared_anchors: &[&str]) {
@@ -524,9 +524,9 @@ impl Fixture {
     /// underscores — so a change to that mapping on one side and not the other
     /// fails here.
     pub fn seed_generator(&mut self, name: &str, file: &str, outputs: &[&str], record: &Value) {
-        self.placements["ana"][name] = json!({
+        self.placements["alice"][name] = json!({
             "file": file, "key": name, "origin": "private",
-            "owner": "ana", "shared": false, "generator": record.clone(),
+            "owner": "alice", "shared": false, "generator": record.clone(),
             "public": null,
         });
 
@@ -534,13 +534,13 @@ impl Fixture {
         // now that the script addresses its inputs by path rather than through a
         // shell identifier.
         let mut inputs = serde_json::Map::new();
-        if let Some(prompts) = self.placements["ana"][name]["generator"]["prompts"].as_object() {
+        if let Some(prompts) = self.placements["alice"][name]["generator"]["prompts"].as_object() {
             for prompt in prompts.keys() {
                 inputs.insert(prompt.clone(), json!({ "kind": "prompt", "name": prompt }));
             }
         }
         if let Some(dependencies) =
-            self.placements["ana"][name]["generator"]["dependencies"].as_array()
+            self.placements["alice"][name]["generator"]["dependencies"].as_array()
         {
             for dependency in dependencies.iter().filter_map(Value::as_str) {
                 inputs.insert(
@@ -552,12 +552,12 @@ impl Fixture {
 
         let mut declared = vec![name.to_owned()];
         declared.extend(outputs.iter().map(|output| (*output).to_owned()));
-        self.genplan["ana"]["order"]
+        self.genplan["alice"]["order"]
             .as_array_mut()
             .unwrap()
             .push(json!(name));
-        self.genplan["ana"]["outputs"][name] = json!(declared);
-        self.genplan["ana"]["inputs"][name] = Value::Object(inputs);
+        self.genplan["alice"]["outputs"][name] = json!(declared);
+        self.genplan["alice"]["inputs"][name] = Value::Object(inputs);
         self.write_fixtures();
     }
 
@@ -569,7 +569,7 @@ impl Fixture {
     /// order, so calling it twice for one name declares that generator twice —
     /// which is a fleet the resolver refuses rather than an edit.
     pub fn edit_generator(&mut self, name: &str, record: &Value) {
-        self.placements["ana"][name]["generator"] = record.clone();
+        self.placements["alice"][name]["generator"] = record.clone();
         self.write_fixtures();
     }
 
@@ -583,7 +583,7 @@ impl Fixture {
     /// resolve it afterwards.
     pub fn seed_card_custody(&mut self, serial: &str) {
         let name = format!("card-{serial}-piv-access");
-        self.placements["ana"][&name] = placement(ANA_FILE, &name, "private", "ana");
+        self.placements["alice"][&name] = placement(ALICE_FILE, &name, "private", "alice");
         self.write_fixtures();
     }
 
@@ -1407,7 +1407,7 @@ impl Fixture {
             .current_dir(&self.repo)
             .env("HOME", &self.work)
             .env("TMPDIR", self.work.join("tmp"))
-            .env("USER", "ana")
+            .env("USER", "alice")
             .env("SOPS_AGE_KEY_FILE", &self.key_file)
             .env("SAFIX_REPO_ROOT", &self.repo)
             .env("SAFIX_STAGING_DIR", self.staging_dir())
@@ -1654,7 +1654,7 @@ impl Fixture {
     /// them and tracked, because the policy the stub renders follows what git
     /// tracks.
     pub fn seed_declarations(&self) {
-        for (user, recipient) in [("ana", self.ana.clone()), ("bo", self.bo.clone())] {
+        for (user, recipient) in [("alice", self.alice.clone()), ("bob", self.bob.clone())] {
             self.write_declaration(user, &recipient);
         }
         self.git(&["add", "-A"]);
@@ -1899,9 +1899,9 @@ fn placement(file: &str, key: &str, origin: &str, owner: &str) -> Value {
 /// The creation rules, with the shared audience's granting the named anchors.
 fn rules_block(shared_anchors: &[&str]) -> String {
     let mut rules = String::from("creation_rules:\n");
-    rules.push_str("  - path_regex: ^secrets/safix/users/ana/[^/]*\\.yaml$\n");
-    rules.push_str("    key_groups:\n      - age:\n          - *ana\n");
-    rules.push_str("  - path_regex: ^secrets/safix/shared/ana,bo/[^/]*\\.yaml$\n");
+    rules.push_str("  - path_regex: ^secrets/safix/users/alice/[^/]*\\.yaml$\n");
+    rules.push_str("    key_groups:\n      - age:\n          - *alice\n");
+    rules.push_str("  - path_regex: ^secrets/safix/shared/alice,bob/[^/]*\\.yaml$\n");
     rules.push_str("    key_groups:\n      - age:\n");
     for anchor in shared_anchors {
         writeln!(rules, "          - *{anchor}").unwrap();

@@ -137,7 +137,7 @@
 
       audienceOfToken = fleet: (resolve.audiencesOf fleet).${fileOfToken fleet};
 
-      fileOfToken = fleet: (resolve.placementsOf fleet).ana.token.file;
+      fileOfToken = fleet: (resolve.placementsOf fleet).alice.token.file;
 
       # What one subject resolves, as name -> the file it reads, over either kind
       # of subject: a person selects with `user` and a machine with `machine`, and
@@ -192,8 +192,8 @@
         machines = typed (lib.types.attrsOf types.machine) (
           fixture.fleet.machines
           // {
-            deck = machine "deck" "ana";
-            rack = machine "rack" "bo";
+            deck = machine "deck" "alice";
+            rack = machine "rack" "bob";
           }
         );
         services = typed (lib.types.attrsOf types.service) (
@@ -201,7 +201,7 @@
           // {
             nginx = {
               machines = [ "deck" ];
-              owner = "ana";
+              owner = "alice";
               user = "nginx";
               group = "nginx";
             };
@@ -209,8 +209,8 @@
         );
         groups = typed (lib.types.attrsOf types.group) {
           oncall.members = [
-            "ana"
-            "bo"
+            "alice"
+            "bob"
           ];
           infra.members = [
             "deck"
@@ -234,33 +234,33 @@
 
       # ── machines as subjects ──
       machineGrant = fleetOf {
-        users.ana = holder "ana" { sharedWith.deck.token = { }; };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { sharedWith.deck.token = { }; };
+        machines.deck = machine "deck" "alice";
       };
 
       keylessMachine = fleetOf {
-        users.ana = holder "ana" { sharedWith.deck.token = { }; };
+        users.alice = holder "alice" { sharedWith.deck.token = { }; };
         machines.deck = {
-          owner = "ana";
+          owner = "alice";
         };
       };
 
       machineOwnedByNobody = fleetOf {
-        users.ana = holder "ana" { };
+        users.alice = holder "alice" { };
         machines.deck = machine "deck" "zed";
       };
 
       nameDeclaredTwice = fleetOf {
         users = {
-          ana = holder "ana" { };
+          alice = holder "alice" { };
           deck = keyholder "deck";
         };
-        machines.deck = machine "deck" "ana";
+        machines.deck = machine "deck" "alice";
       };
 
       unsafeMachineName = fleetOf {
-        users.ana = holder "ana" { };
-        machines."Deck" = machine "deck" "ana";
+        users.alice = holder "alice" { };
+        machines."Deck" = machine "deck" "alice";
       };
 
       # ── services as subjects ──
@@ -269,14 +269,14 @@
       serviceOn =
         hosts:
         fleetOf {
-          users.ana = holder "ana" { sharedWith.nginx.token = { }; };
+          users.alice = holder "alice" { sharedWith.nginx.token = { }; };
           machines = {
-            deck = machine "deck" "ana";
-            rack = machine "rack" "ana";
+            deck = machine "deck" "alice";
+            rack = machine "rack" "alice";
           };
           services.nginx = {
             machines = hosts;
-            owner = "ana";
+            owner = "alice";
             user = "nginx";
             group = "nginx";
           };
@@ -292,22 +292,22 @@
 
       # A service with no ownership fields, which is what resolves at either scope.
       ownerlessService = fleetOf {
-        users.ana = holder "ana" { sharedWith.nginx.token = { }; };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { sharedWith.nginx.token = { }; };
+        machines.deck = machine "deck" "alice";
         services.nginx = {
           machines = [ "deck" ];
-          owner = "ana";
+          owner = "alice";
         };
       };
 
       # A group whose member is a service, so the expansion crosses both kinds on
       # the way to a machine's key.
       serviceInGroup = fleetOf {
-        users.ana = holder "ana" { sharedWith.oncall.token = { }; };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { sharedWith.oncall.token = { }; };
+        machines.deck = machine "deck" "alice";
         services.nginx = {
           machines = [ "deck" ];
-          owner = "ana";
+          owner = "alice";
         };
         groups.oncall.members = [ "nginx" ];
       };
@@ -318,15 +318,15 @@
       twoServices =
         entry:
         fleetOf {
-          users.ana = {
-            recipient = keyOf "ana";
+          users.alice = {
+            recipient = keyOf "alice";
             private.token = entry;
             sharedWith = {
               alpha.token = { };
               beta.token = { };
             };
           };
-          machines.deck = machine "deck" "ana";
+          machines.deck = machine "deck" "alice";
           services = {
             alpha.machines = [ "deck" ];
             beta.machines = [ "deck" ];
@@ -341,8 +341,8 @@
       twoServicesOnePath = twoServices { path = _cfg: "/var/lib/fixture/token"; };
 
       serviceOverUndeclaredMachine = fleetOf {
-        users.ana = holder "ana" { };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { };
+        machines.deck = machine "deck" "alice";
         services.nginx.machines = [
           "rack"
           "deck"
@@ -350,8 +350,8 @@
       };
 
       serviceOwnedByNobody = fleetOf {
-        users.ana = holder "ana" { };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { };
+        machines.deck = machine "deck" "alice";
         services.nginx = {
           machines = [ "deck" ];
           owner = "zed";
@@ -359,14 +359,14 @@
       };
 
       serviceNameDeclaredTwice = fleetOf {
-        users.ana = holder "ana" { };
-        machines.nginx = machine "nginx" "ana";
+        users.alice = holder "alice" { };
+        machines.nginx = machine "nginx" "alice";
         services.nginx.machines = [ "nginx" ];
       };
 
       unsafeServiceName = fleetOf {
-        users.ana = holder "ana" { };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { };
+        machines.deck = machine "deck" "alice";
         services."Nginx".machines = [ "deck" ];
       };
 
@@ -374,53 +374,53 @@
       # key cannot be wrapped for it, reported with the service named as the
       # declaration that put the machine in the audience.
       serviceOnKeylessMachine = fleetOf {
-        users.ana = holder "ana" { sharedWith.nginx.token = { }; };
-        machines.deck.owner = "ana";
+        users.alice = holder "alice" { sharedWith.nginx.token = { }; };
+        machines.deck.owner = "alice";
         services.nginx.machines = [ "deck" ];
       };
 
       # ── groups ──
-      # bo and cy each hold a key and nothing else, so what the group's audience
-      # gains is exactly its members' recipients.
+      # bob and carol each hold a key and nothing else, so what the group's
+      # audience gains is exactly its members' recipients.
       groupFleet =
         members:
         fleetOf {
           users = {
-            ana = holder "ana" { sharedWith.oncall.token = { }; };
-            bo = keyholder "bo";
-            cy = keyholder "cy";
-            dee = keyholder "dee";
+            alice = holder "alice" { sharedWith.oncall.token = { }; };
+            bob = keyholder "bob";
+            carol = keyholder "carol";
+            dave = keyholder "dave";
           };
           groups.oncall.members = members;
         };
 
       groupGrant = groupFleet [
-        "bo"
-        "cy"
+        "bob"
+        "carol"
       ];
 
       grownGroup = groupFleet [
-        "bo"
-        "cy"
-        "dee"
+        "bob"
+        "carol"
+        "dave"
       ];
 
-      shrunkGroup = groupFleet [ "bo" ];
+      shrunkGroup = groupFleet [ "bob" ];
 
       # A group whose members are a group and a machine, so the expansion is
       # transitive and reaches both kinds of leaf.
       nestedGroup = fleetOf {
         users = {
-          ana = holder "ana" { sharedWith.outer.token = { }; };
-          bo = keyholder "bo";
+          alice = holder "alice" { sharedWith.outer.token = { }; };
+          bob = keyholder "bob";
         };
-        machines.deck = machine "deck" "ana";
+        machines.deck = machine "deck" "alice";
         groups = {
           outer.members = [
             "inner"
             "deck"
           ];
-          inner.members = [ "bo" ];
+          inner.members = [ "bob" ];
         };
       };
 
@@ -429,17 +429,17 @@
       # secret from outside.
       ownGroup = fleetOf {
         users = {
-          ana = holder "ana" { sharedWith.oncall.token = { }; };
-          bo = keyholder "bo";
+          alice = holder "alice" { sharedWith.oncall.token = { }; };
+          bob = keyholder "bob";
         };
         groups.oncall.members = [
-          "ana"
-          "bo"
+          "alice"
+          "bob"
         ];
       };
 
       groupCycle = fleetOf {
-        users.ana = holder "ana" { sharedWith.outer.token = { }; };
+        users.alice = holder "alice" { sharedWith.outer.token = { }; };
         groups = {
           outer.members = [ "inner" ];
           inner.members = [ "outer" ];
@@ -447,12 +447,12 @@
       };
 
       emptyGroup = fleetOf {
-        users.ana = holder "ana" { sharedWith.oncall.token = { }; };
+        users.alice = holder "alice" { sharedWith.oncall.token = { }; };
         groups.oncall.members = [ ];
       };
 
       unknownMember = fleetOf {
-        users.ana = holder "ana" { };
+        users.alice = holder "alice" { };
         groups.oncall.members = [ "zed" ];
       };
 
@@ -461,40 +461,40 @@
       # person has and is reported with the group named.
       keylessMember = fleetOf {
         users = {
-          ana = holder "ana" { sharedWith.oncall.token = { }; };
-          bo = { };
+          alice = holder "alice" { sharedWith.oncall.token = { }; };
+          bob = { };
         };
-        groups.oncall.members = [ "bo" ];
+        groups.oncall.members = [ "bob" ];
       };
 
       # A group member who already holds the name. Their own value and the
       # group's are two statements about one name in one resolved set.
       memberHoldsTheName = fleetOf {
         users = {
-          ana = holder "ana" { sharedWith.oncall.token = { }; };
-          bo = {
-            recipient = keyOf "bo";
+          alice = holder "alice" { sharedWith.oncall.token = { }; };
+          bob = {
+            recipient = keyOf "bob";
             private.token = { };
           };
         };
-        groups.oncall.members = [ "bo" ];
+        groups.oncall.members = [ "bob" ];
       };
 
       # ── silos ──
-      # ana is staff and shares with a contractor, which is the corporate case:
-      # one file both sides could open.
+      # alice is staff and shares with a contractor, which is the corporate
+      # case: one file both sides could open.
       siloFleet =
         grants:
         fleetOf {
           users = {
-            ana = holder "ana" grants;
-            bo = keyholder "bo";
-            cy = keyholder "cy";
+            alice = holder "alice" grants;
+            bob = keyholder "bob";
+            carol = keyholder "carol";
           };
           groups = {
-            staff.members = [ "ana" ];
-            contractors.members = [ "bo" ];
-            partners.members = [ "cy" ];
+            staff.members = [ "alice" ];
+            contractors.members = [ "bob" ];
+            partners.members = [ "carol" ];
           };
           silos.corp.groups = [
             "staff"
@@ -510,8 +510,8 @@
       # how many are left.
       crossSiloTwice = fleetOf {
         users = {
-          ana = {
-            recipient = keyOf "ana";
+          alice = {
+            recipient = keyOf "alice";
             private = {
               token = { };
               other = { };
@@ -521,11 +521,11 @@
               other = { };
             };
           };
-          bo = keyholder "bo";
+          bob = keyholder "bob";
         };
         groups = {
-          staff.members = [ "ana" ];
-          contractors.members = [ "bo" ];
+          staff.members = [ "alice" ];
+          contractors.members = [ "bob" ];
         };
         silos.corp.groups = [
           "staff"
@@ -536,9 +536,9 @@
       withinSilo = siloFleet { sharedWith.partners.token = { }; };
 
       groupInTwoSilos = fleetOf {
-        users.ana = holder "ana" { };
+        users.alice = holder "alice" { };
         groups = {
-          staff.members = [ "ana" ];
+          staff.members = [ "alice" ];
           contractors.members = [ ];
         };
         silos = {
@@ -551,8 +551,8 @@
       };
 
       siloOverANonGroup = fleetOf {
-        users.ana = holder "ana" { };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { };
+        machines.deck = machine "deck" "alice";
         silos.corp.groups = [
           "deck"
           "absent"
@@ -567,8 +567,8 @@
         grants:
         fleetOf {
           users = {
-            ana = {
-              recipient = keyOf "ana";
+            alice = {
+              recipient = keyOf "alice";
               private = {
                 token = { };
                 other = { };
@@ -576,21 +576,21 @@
               };
             }
             // grants;
-            bo = keyholder "bo";
-            cy = keyholder "cy";
+            bob = keyholder "bob";
+            carol = keyholder "carol";
           };
           machines = {
-            deck = machine "deck" "ana";
-            rack = machine "rack" "ana";
+            deck = machine "deck" "alice";
+            rack = machine "rack" "alice";
           };
           groups = {
             red.members = [
               "deck"
-              "bo"
+              "bob"
             ];
             blue.members = [
               "rack"
-              "cy"
+              "carol"
             ];
           };
           silos.corp.groups = [
@@ -618,23 +618,23 @@
         owner:
         fleetOf {
           users = {
-            ana = holder "ana" { sharedWith."ownerOf.deck".token = { }; };
-            bo = keyholder "bo";
-            cy = keyholder "cy";
+            alice = holder "alice" { sharedWith."ownerOf.deck".token = { }; };
+            bob = keyholder "bob";
+            carol = keyholder "carol";
           };
           machines.deck = machine "deck" owner;
         };
 
-      ownedByBo = ownerOfFleet "bo";
-      ownedByCy = ownerOfFleet "cy";
+      ownedByBo = ownerOfFleet "bob";
+      ownedByCy = ownerOfFleet "carol";
 
       ownerOfUnknownMachine = fleetOf {
-        users.ana = holder "ana" { sharedWith."ownerOf.rack".token = { }; };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { sharedWith."ownerOf.rack".token = { }; };
+        machines.deck = machine "deck" "alice";
       };
 
       ownerOfUnownedMachine = fleetOf {
-        users.ana = holder "ana" { sharedWith."ownerOf.deck".token = { }; };
+        users.alice = holder "alice" { sharedWith."ownerOf.deck".token = { }; };
         machines.deck = {
           recipient = keyOf "deck";
         };
@@ -642,8 +642,8 @@
 
       # An `ownerOf` grant resolving to its own author widens nothing.
       ownerOfSelf = fleetOf {
-        users.ana = holder "ana" { sharedWith."ownerOf.deck".token = { }; };
-        machines.deck = machine "deck" "ana";
+        users.alice = holder "alice" { sharedWith."ownerOf.deck".token = { }; };
+        machines.deck = machine "deck" "alice";
       };
 
       # ── the marked forms ──
@@ -655,10 +655,10 @@
           label = "a group and a person of that name";
           a = [
             "@oncall"
-            "ana"
+            "alice"
           ];
           b = [
-            "ana"
+            "alice"
             "oncall"
           ];
         }
@@ -666,21 +666,21 @@
           label = "an owner reference and a group of that name";
           a = [
             "@~deck"
-            "ana"
+            "alice"
           ];
           b = [
             "@deck"
-            "ana"
+            "alice"
           ];
         }
         {
           label = "a service and a person of that name";
           a = [
             "%nginx"
-            "ana"
+            "alice"
           ];
           b = [
-            "ana"
+            "alice"
             "nginx"
           ];
         }
@@ -688,11 +688,11 @@
           label = "a service and a group of that name";
           a = [
             "%nginx"
-            "ana"
+            "alice"
           ];
           b = [
             "@nginx"
-            "ana"
+            "alice"
           ];
         }
       ];
@@ -790,7 +790,7 @@
             # The machine's own scope resolves the entry, at the file the
             # audience picked: one file, read from both sides.
             resolvedByTheMachine = filesFor machineGrant { machine = "deck"; };
-            resolvedByTheOwner = filesFor machineGrant { user = "ana"; };
+            resolvedByTheOwner = filesFor machineGrant { user = "alice"; };
 
             # The rule the policy generates for it names the machine's key under
             # its own anchor, which is what a machine appearing in an audience
@@ -808,16 +808,16 @@
           undeclaredMachineMessage = resolve.unknownMachineMessage machineGrant.machines "rack";
 
           keylessMachineMessages = violationsOf keylessMachine;
-          keylessMachineFires = fires (filesFor keylessMachine { user = "ana"; });
+          keylessMachineFires = fires (filesFor keylessMachine { user = "alice"; });
 
           machineOwnedByNobodyMessages = violationsOf machineOwnedByNobody;
-          machineOwnedByNobodyFires = fires (filesFor machineOwnedByNobody { user = "ana"; });
+          machineOwnedByNobodyFires = fires (filesFor machineOwnedByNobody { user = "alice"; });
 
           nameDeclaredTwiceMessages = violationsOf nameDeclaredTwice;
-          nameDeclaredTwiceFires = fires (filesFor nameDeclaredTwice { user = "ana"; });
+          nameDeclaredTwiceFires = fires (filesFor nameDeclaredTwice { user = "alice"; });
 
           unsafeMachineNameMessages = violationsOf unsafeMachineName;
-          unsafeMachineNameFires = fires (filesFor unsafeMachineName { user = "ana"; });
+          unsafeMachineNameFires = fires (filesFor unsafeMachineName { user = "alice"; });
 
           # ── a service's audience is its machines ──
           serviceGrant = {
@@ -828,7 +828,7 @@
             # The machine resolves it, under the service's own key, and the key
             # inside the encrypted file is still the entry's own name.
             resolvedByTheMachine = filesFor serviceGrant { machine = "deck"; };
-            resolvedByTheOwner = filesFor serviceGrant { user = "ana"; };
+            resolvedByTheOwner = filesFor serviceGrant { user = "alice"; };
             sopsKeys = lib.mapAttrs (_n: s: s.sopsKey) (
               resolve.selectFor (
                 serviceGrant
@@ -919,10 +919,12 @@
           };
 
           emptyServiceMessages = violationsOf emptyService;
-          emptyServiceFires = fires (filesFor emptyService { user = "ana"; });
+          emptyServiceFires = fires (filesFor emptyService { user = "alice"; });
 
           serviceOverUndeclaredMachineMessages = violationsOf serviceOverUndeclaredMachine;
-          serviceOverUndeclaredMachineFires = fires (filesFor serviceOverUndeclaredMachine { user = "ana"; });
+          serviceOverUndeclaredMachineFires = fires (
+            filesFor serviceOverUndeclaredMachine { user = "alice"; }
+          );
 
           serviceOwnedByNobodyMessages = violationsOf serviceOwnedByNobody;
 
@@ -937,8 +939,8 @@
             audience = (audienceOfToken groupGrant).audience;
             file = fileOfToken groupGrant;
             recipients = (audienceOfToken groupGrant).recipients;
-            resolvedByAMember = filesFor groupGrant { user = "bo"; };
-            resolvedByANonMember = filesFor groupGrant { user = "dee"; };
+            resolvedByAMember = filesFor groupGrant { user = "bob"; };
+            resolvedByANonMember = filesFor groupGrant { user = "dave"; };
           };
 
           # Membership growth and membership shrink both leave the file where it
@@ -948,46 +950,46 @@
           growthIsARewrap = {
             sameFile = fileOfToken grownGroup == fileOfToken groupGrant;
             recipients = (audienceOfToken grownGroup).recipients;
-            resolvedByTheNewMember = filesFor grownGroup { user = "dee"; };
+            resolvedByTheNewMember = filesFor grownGroup { user = "dave"; };
           };
 
           shrinkIsARewrap = {
             sameFile = fileOfToken shrunkGroup == fileOfToken groupGrant;
             recipients = (audienceOfToken shrunkGroup).recipients;
-            removedMemberResolvesNothing = filesFor shrunkGroup { user = "cy"; };
+            removedMemberResolvesNothing = filesFor shrunkGroup { user = "carol"; };
           };
 
           nestedGroup = {
             audience = (audienceOfToken nestedGroup).audience;
             recipients = (audienceOfToken nestedGroup).recipients;
-            resolvedByTheNestedPerson = filesFor nestedGroup { user = "bo"; };
+            resolvedByTheNestedPerson = filesFor nestedGroup { user = "bob"; };
             resolvedByTheNestedMachine = filesFor nestedGroup { machine = "deck"; };
           };
 
           ownGroupIsNotACollision = {
             violations = violationsOf ownGroup;
             audience = (audienceOfToken ownGroup).audience;
-            ownerResolvesItOnce = filesFor ownGroup { user = "ana"; };
+            ownerResolvesItOnce = filesFor ownGroup { user = "alice"; };
           };
 
           groupCycleMessages = violationsOf groupCycle;
-          groupCycleFires = fires (filesFor groupCycle { user = "ana"; });
+          groupCycleFires = fires (filesFor groupCycle { user = "alice"; });
 
           emptyGroupMessages = violationsOf emptyGroup;
-          emptyGroupFires = fires (filesFor emptyGroup { user = "ana"; });
+          emptyGroupFires = fires (filesFor emptyGroup { user = "alice"; });
 
           unknownMemberMessages = violationsOf unknownMember;
-          unknownMemberFires = fires (filesFor unknownMember { user = "ana"; });
+          unknownMemberFires = fires (filesFor unknownMember { user = "alice"; });
 
           keylessMemberMessages = violationsOf keylessMember;
-          keylessMemberFires = fires (filesFor keylessMember { user = "bo"; });
+          keylessMemberFires = fires (filesFor keylessMember { user = "bob"; });
 
           memberHoldsTheNameMessages = violationsOf memberHoldsTheName;
-          memberHoldsTheNameFires = fires (filesFor memberHoldsTheName { user = "bo"; });
+          memberHoldsTheNameFires = fires (filesFor memberHoldsTheName { user = "bob"; });
 
           # ── silos ──
           crossSiloMessages = violationsOf crossSilo;
-          crossSiloFires = fires (filesFor crossSilo { user = "ana"; });
+          crossSiloFires = fires (filesFor crossSilo { user = "alice"; });
           crossSiloListsEveryGrant = violationsOf crossSiloTwice;
 
           # No rule and no file is generated for a refused audience, which is the
@@ -1001,7 +1003,7 @@
           };
 
           groupInTwoSilosMessages = violationsOf groupInTwoSilos;
-          groupInTwoSilosFires = fires (filesFor groupInTwoSilos { user = "ana"; });
+          groupInTwoSilosFires = fires (filesFor groupInTwoSilos { user = "alice"; });
 
           siloOverANonGroupMessages = violationsOf siloOverANonGroup;
 
@@ -1010,8 +1012,8 @@
           # is.
           machinesInTwoSilos = {
             violations = violationsOf ownsBothSides;
-            eachSideResolves = filesFor ownsBothSides { user = "ana"; };
-            spanningFileRefused = fires (filesFor spansBothSides { user = "ana"; });
+            eachSideResolves = filesFor ownsBothSides { user = "alice"; };
+            spanningFileRefused = fires (filesFor spansBothSides { user = "alice"; });
             spanningMessages = violationsOf spansBothSides;
           };
 
@@ -1020,7 +1022,7 @@
             audience = (audienceOfToken ownedByBo).audience;
             file = fileOfToken ownedByBo;
             recipients = (audienceOfToken ownedByBo).recipients;
-            resolvedBy = filesFor ownedByBo { user = "bo"; };
+            resolvedBy = filesFor ownedByBo { user = "bob"; };
 
             # The machine itself is not in the audience. The grant named the
             # owner, and a record that also handed the host the value would be a
@@ -1035,15 +1037,15 @@
           ownerChangeIsARewrap = {
             sameFile = fileOfToken ownedByCy == fileOfToken ownedByBo;
             recipients = (audienceOfToken ownedByCy).recipients;
-            newOwnerResolvesIt = filesFor ownedByCy { user = "cy"; };
-            oldOwnerResolvesNothing = filesFor ownedByCy { user = "bo"; };
+            newOwnerResolvesIt = filesFor ownedByCy { user = "carol"; };
+            oldOwnerResolvesNothing = filesFor ownedByCy { user = "bob"; };
           };
 
           ownerOfUnknownMachineMessages = violationsOf ownerOfUnknownMachine;
-          ownerOfUnknownMachineFires = fires (filesFor ownerOfUnknownMachine { user = "ana"; });
+          ownerOfUnknownMachineFires = fires (filesFor ownerOfUnknownMachine { user = "alice"; });
 
           ownerOfUnownedMachineMessages = violationsOf ownerOfUnownedMachine;
-          ownerOfUnownedMachineFires = fires (filesFor ownerOfUnownedMachine { user = "ana"; });
+          ownerOfUnownedMachineFires = fires (filesFor ownerOfUnownedMachine { user = "alice"; });
 
           ownerOfSelfMessages = violationsOf ownerOfSelf;
 
@@ -1067,7 +1069,7 @@
           # what lets a file's audience be turned into the recipients it is
           # wrapped for.
           referencesRoundTrip = roundTrips serviceInGroup [
-            "ana"
+            "alice"
             "deck"
             "nginx"
             "oncall"
@@ -1110,14 +1112,14 @@
         expected = {
           fixtureRosters = {
             machineGrant = {
-              people = [ "ana" ];
+              people = [ "alice" ];
               machines = [ "deck" ];
               services = [ ];
               groups = [ ];
               silos = [ ];
             };
             serviceGrant = {
-              people = [ "ana" ];
+              people = [ "alice" ];
               machines = [
                 "deck"
                 "rack"
@@ -1128,10 +1130,10 @@
             };
             groupGrant = {
               people = [
-                "ana"
-                "bo"
-                "cy"
-                "dee"
+                "alice"
+                "bob"
+                "carol"
+                "dave"
               ];
               machines = [ ];
               services = [ ];
@@ -1140,9 +1142,9 @@
             };
             crossSilo = {
               people = [
-                "ana"
-                "bo"
-                "cy"
+                "alice"
+                "bob"
+                "carol"
               ];
               machines = [ ];
               services = [ ];
@@ -1155,9 +1157,9 @@
             };
             ownedByBo = {
               people = [
-                "ana"
-                "bo"
-                "cy"
+                "alice"
+                "bob"
+                "carol"
               ];
               machines = [ "deck" ];
               services = [ ];
@@ -1166,9 +1168,9 @@
             };
             ownsBothSides = {
               people = [
-                "ana"
-                "bo"
-                "cy"
+                "alice"
+                "bob"
+                "carol"
               ];
               machines = [
                 "deck"
@@ -1206,28 +1208,28 @@
 
           machineGrant = {
             audience = [
-              "ana"
+              "alice"
               "deck"
             ];
-            file = "secrets/safix/shared/ana,deck/secrets.yaml";
+            file = "secrets/safix/shared/alice,deck/secrets.yaml";
             recipients = [
-              (keyOf "ana")
+              (keyOf "alice")
               (keyOf "deck")
             ];
-            resolvedByTheMachine.token = "/secrets/safix/shared/ana,deck/secrets.yaml";
-            resolvedByTheOwner.token = "/secrets/safix/shared/ana,deck/secrets.yaml";
+            resolvedByTheMachine.token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+            resolvedByTheOwner.token = "/secrets/safix/shared/alice,deck/secrets.yaml";
             anchors = [
-              "ana-safix"
+              "alice-safix"
               "deck-safix"
             ];
             ruleAnchors = [
               {
                 audience = [
-                  "ana"
+                  "alice"
                   "deck"
                 ];
                 anchors = [
-                  "ana-safix"
+                  "alice-safix"
                   "deck-safix"
                 ];
               }
@@ -1249,7 +1251,7 @@
           '';
 
           keylessMachineMessages = [
-            "flake.safix.users.ana.sharedWith.deck shares 'token', but flake.safix.machines.deck.recipient is null, so no copy can be encrypted to them"
+            "flake.safix.users.alice.sharedWith.deck shares 'token', but flake.safix.machines.deck.recipient is null, so no copy can be encrypted to them"
           ];
           keylessMachineFires = true;
 
@@ -1271,19 +1273,19 @@
           serviceGrant = {
             audience = [
               "%nginx"
-              "ana"
+              "alice"
             ];
-            file = "secrets/safix/shared/%nginx,ana/secrets.yaml";
+            file = "secrets/safix/shared/%nginx,alice/secrets.yaml";
             recipients = [
               (keyOf "deck")
-              (keyOf "ana")
+              (keyOf "alice")
             ];
-            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
-            resolvedByTheOwner.token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+            resolvedByTheOwner.token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
             sopsKeys."nginx/token" = "token";
             systemPlacement."nginx/token" = {
               mode = "0400";
-              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
               owner = "nginx";
               group = "nginx";
@@ -1295,16 +1297,16 @@
             recipients = [
               (keyOf "deck")
               (keyOf "rack")
-              (keyOf "ana")
+              (keyOf "alice")
             ];
-            resolvedByTheNewMachine."nginx/token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+            resolvedByTheNewMachine."nginx/token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
           };
 
           serviceShrinkIsARewrap = {
             sameFile = true;
             recipients = [
               (keyOf "rack")
-              (keyOf "ana")
+              (keyOf "alice")
             ];
             departedMachineResolvesNothing = { };
           };
@@ -1312,20 +1314,20 @@
           serviceInGroup = {
             audience = [
               "@oncall"
-              "ana"
+              "alice"
             ];
             recipients = [
               (keyOf "deck")
-              (keyOf "ana")
+              (keyOf "alice")
             ];
-            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
           };
 
           twoServicesOneMachine = {
             violations = [ ];
             resolved = {
-              "alpha/token" = "/secrets/safix/shared/%alpha,%beta,ana/secrets.yaml";
-              "beta/token" = "/secrets/safix/shared/%alpha,%beta,ana/secrets.yaml";
+              "alpha/token" = "/secrets/safix/shared/%alpha,%beta,alice/secrets.yaml";
+              "beta/token" = "/secrets/safix/shared/%alpha,%beta,alice/secrets.yaml";
             };
             keys = [
               "alpha/token"
@@ -1339,18 +1341,18 @@
             refused = true;
             ownerlessResolves."nginx/token" = {
               mode = "0400";
-              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
             };
             ownerlessAtSystemScope."nginx/token" = {
               mode = "0400";
-              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
             };
           };
 
           emptyServiceMessages = [
-            "flake.safix.users.ana.sharedWith.nginx shares 'token' with flake.safix.services.nginx, whose machines is empty, so the file would be encrypted to nobody"
+            "flake.safix.users.alice.sharedWith.nginx shares 'token' with flake.safix.services.nginx, whose machines is empty, so the file would be encrypted to nobody"
           ];
           emptyServiceFires = true;
 
@@ -1372,40 +1374,40 @@
           ];
 
           serviceOnKeylessMachineMessages = [
-            "flake.safix.users.ana.sharedWith.nginx shares 'token' with flake.safix.machines.deck, reached through flake.safix.services.nginx, but flake.safix.machines.deck.recipient is null, so no copy can be encrypted to them"
+            "flake.safix.users.alice.sharedWith.nginx shares 'token' with flake.safix.machines.deck, reached through flake.safix.services.nginx, but flake.safix.machines.deck.recipient is null, so no copy can be encrypted to them"
           ];
 
           groupGrant = {
             audience = [
               "@oncall"
-              "ana"
+              "alice"
             ];
-            file = "secrets/safix/shared/@oncall,ana/secrets.yaml";
+            file = "secrets/safix/shared/@oncall,alice/secrets.yaml";
             recipients = [
-              (keyOf "bo")
-              (keyOf "cy")
-              (keyOf "ana")
+              (keyOf "bob")
+              (keyOf "carol")
+              (keyOf "alice")
             ];
-            resolvedByAMember.token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+            resolvedByAMember.token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
             resolvedByANonMember = { };
           };
 
           growthIsARewrap = {
             sameFile = true;
             recipients = [
-              (keyOf "bo")
-              (keyOf "cy")
-              (keyOf "dee")
-              (keyOf "ana")
+              (keyOf "bob")
+              (keyOf "carol")
+              (keyOf "dave")
+              (keyOf "alice")
             ];
-            resolvedByTheNewMember.token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+            resolvedByTheNewMember.token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
           };
 
           shrinkIsARewrap = {
             sameFile = true;
             recipients = [
-              (keyOf "bo")
-              (keyOf "ana")
+              (keyOf "bob")
+              (keyOf "alice")
             ];
             removedMemberResolvesNothing = { };
           };
@@ -1413,24 +1415,24 @@
           nestedGroup = {
             audience = [
               "@outer"
-              "ana"
+              "alice"
             ];
             recipients = [
-              (keyOf "bo")
+              (keyOf "bob")
               (keyOf "deck")
-              (keyOf "ana")
+              (keyOf "alice")
             ];
-            resolvedByTheNestedPerson.token = "/secrets/safix/shared/@outer,ana/secrets.yaml";
-            resolvedByTheNestedMachine.token = "/secrets/safix/shared/@outer,ana/secrets.yaml";
+            resolvedByTheNestedPerson.token = "/secrets/safix/shared/@outer,alice/secrets.yaml";
+            resolvedByTheNestedMachine.token = "/secrets/safix/shared/@outer,alice/secrets.yaml";
           };
 
           ownGroupIsNotACollision = {
             violations = [ ];
             audience = [
               "@oncall"
-              "ana"
+              "alice"
             ];
-            ownerResolvesItOnce.token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+            ownerResolvesItOnce.token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
           };
 
           groupCycleMessages = [
@@ -1439,7 +1441,7 @@
           groupCycleFires = true;
 
           emptyGroupMessages = [
-            "flake.safix.users.ana.sharedWith.oncall shares 'token' with flake.safix.groups.oncall, which reaches no subject beyond flake.safix.users.ana, so the grant widens nothing"
+            "flake.safix.users.alice.sharedWith.oncall shares 'token' with flake.safix.groups.oncall, which reaches no subject beyond flake.safix.users.alice, so the grant widens nothing"
           ];
           emptyGroupFires = true;
 
@@ -1449,28 +1451,28 @@
           unknownMemberFires = true;
 
           keylessMemberMessages = [
-            "flake.safix.users.ana.sharedWith.oncall shares 'token' with flake.safix.users.bo, reached through flake.safix.groups.oncall, but flake.safix.users.bo.recipient is null, so no copy can be encrypted to them"
+            "flake.safix.users.alice.sharedWith.oncall shares 'token' with flake.safix.users.bob, reached through flake.safix.groups.oncall, but flake.safix.users.bob.recipient is null, so no copy can be encrypted to them"
           ];
           keylessMemberFires = true;
 
           memberHoldsTheNameMessages = [
-            "flake.safix.users.bo declares 'token' in flake.safix.users.bo.private, and flake.safix.users.ana.sharedWith.oncall shares a secret of that name with flake.safix.users.bo, reached through flake.safix.groups.oncall"
+            "flake.safix.users.bob declares 'token' in flake.safix.users.bob.private, and flake.safix.users.alice.sharedWith.oncall shares a secret of that name with flake.safix.users.bob, reached through flake.safix.groups.oncall"
           ];
           memberHoldsTheNameFires = true;
 
           crossSiloMessages = [
-            "flake.safix.users.ana's 'token' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bo and flake.safix.groups.staff reaches ana. secrets/safix/shared/@contractors,ana/secrets.yaml is one file with one data key, so it would be readable from both."
+            "flake.safix.users.alice's 'token' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bob and flake.safix.groups.staff reaches alice. secrets/safix/shared/@contractors,alice/secrets.yaml is one file with one data key, so it would be readable from both."
           ];
           crossSiloFires = true;
           crossSiloGeneratesNoRule = true;
           crossSiloListsEveryGrant = [
-            "flake.safix.users.ana's 'other' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bo and flake.safix.groups.staff reaches ana. secrets/safix/shared/@contractors,ana/secrets.yaml is one file with one data key, so it would be readable from both."
-            "flake.safix.users.ana's 'token' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bo and flake.safix.groups.staff reaches ana. secrets/safix/shared/@contractors,ana/secrets.yaml is one file with one data key, so it would be readable from both."
+            "flake.safix.users.alice's 'other' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bob and flake.safix.groups.staff reaches alice. secrets/safix/shared/@contractors,alice/secrets.yaml is one file with one data key, so it would be readable from both."
+            "flake.safix.users.alice's 'token' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bob and flake.safix.groups.staff reaches alice. secrets/safix/shared/@contractors,alice/secrets.yaml is one file with one data key, so it would be readable from both."
           ];
 
           withinSiloResolves = {
             violations = [ ];
-            file = "secrets/safix/shared/@partners,ana/secrets.yaml";
+            file = "secrets/safix/shared/@partners,alice/secrets.yaml";
           };
 
           groupInTwoSilosMessages = [
@@ -1486,78 +1488,78 @@
           machinesInTwoSilos = {
             violations = [ ];
             eachSideResolves = {
-              both = "/secrets/safix/users/ana/secrets.yaml";
-              other = "/secrets/safix/shared/@blue,ana/secrets.yaml";
-              token = "/secrets/safix/shared/@red,ana/secrets.yaml";
+              both = "/secrets/safix/users/alice/secrets.yaml";
+              other = "/secrets/safix/shared/@blue,alice/secrets.yaml";
+              token = "/secrets/safix/shared/@red,alice/secrets.yaml";
             };
             spanningFileRefused = true;
             spanningMessages = [
-              "flake.safix.users.ana's 'both' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.blue reaches cy, rack and flake.safix.groups.red reaches bo, deck. secrets/safix/shared/@blue,@red,ana/secrets.yaml is one file with one data key, so it would be readable from both."
+              "flake.safix.users.alice's 'both' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.blue reaches carol, rack and flake.safix.groups.red reaches bob, deck. secrets/safix/shared/@blue,@red,alice/secrets.yaml is one file with one data key, so it would be readable from both."
             ];
           };
 
           ownerOf = {
             audience = [
               "@~deck"
-              "ana"
+              "alice"
             ];
-            file = "secrets/safix/shared/@~deck,ana/secrets.yaml";
+            file = "secrets/safix/shared/@~deck,alice/secrets.yaml";
             recipients = [
-              (keyOf "bo")
-              (keyOf "ana")
+              (keyOf "bob")
+              (keyOf "alice")
             ];
-            resolvedBy.token = "/secrets/safix/shared/@~deck,ana/secrets.yaml";
+            resolvedBy.token = "/secrets/safix/shared/@~deck,alice/secrets.yaml";
             machineResolvesNothing = { };
           };
 
           ownerChangeIsARewrap = {
             sameFile = true;
             recipients = [
-              (keyOf "cy")
-              (keyOf "ana")
+              (keyOf "carol")
+              (keyOf "alice")
             ];
-            newOwnerResolvesIt.token = "/secrets/safix/shared/@~deck,ana/secrets.yaml";
+            newOwnerResolvesIt.token = "/secrets/safix/shared/@~deck,alice/secrets.yaml";
             oldOwnerResolvesNothing = { };
           };
 
           ownerOfUnknownMachineMessages = [
-            "flake.safix.users.ana.sharedWith names the owner of 'rack', which is not a declared machine of flake.safix.machines"
+            "flake.safix.users.alice.sharedWith names the owner of 'rack', which is not a declared machine of flake.safix.machines"
           ];
           ownerOfUnknownMachineFires = true;
 
           ownerOfUnownedMachineMessages = [
-            "flake.safix.users.ana.sharedWith names the owner of flake.safix.machines.deck, which records none, so the grant resolves to nobody"
+            "flake.safix.users.alice.sharedWith names the owner of flake.safix.machines.deck, which records none, so the grant resolves to nobody"
           ];
           ownerOfUnownedMachineFires = true;
 
           ownerOfSelfMessages = [
-            "flake.safix.users.ana.sharedWith.\"ownerOf.deck\" shares 'token' with the owner flake.safix.machines.deck records, which reaches no subject beyond flake.safix.users.ana, so the grant widens nothing"
+            "flake.safix.users.alice.sharedWith.\"ownerOf.deck\" shares 'token' with the owner flake.safix.machines.deck records, which reaches no subject beyond flake.safix.users.alice, so the grant widens nothing"
           ];
 
           markedElementsAreDistinct = [
             {
               label = "a group and a person of that name";
               distinct = true;
-              fileA = "secrets/safix/shared/@oncall,ana/secrets.yaml";
-              fileB = "secrets/safix/shared/ana,oncall/secrets.yaml";
+              fileA = "secrets/safix/shared/@oncall,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/alice,oncall/secrets.yaml";
             }
             {
               label = "an owner reference and a group of that name";
               distinct = true;
-              fileA = "secrets/safix/shared/@~deck,ana/secrets.yaml";
-              fileB = "secrets/safix/shared/@deck,ana/secrets.yaml";
+              fileA = "secrets/safix/shared/@~deck,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/@deck,alice/secrets.yaml";
             }
             {
               label = "a service and a person of that name";
               distinct = true;
-              fileA = "secrets/safix/shared/%nginx,ana/secrets.yaml";
-              fileB = "secrets/safix/shared/ana,nginx/secrets.yaml";
+              fileA = "secrets/safix/shared/%nginx,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/alice,nginx/secrets.yaml";
             }
             {
               label = "a service and a group of that name";
               distinct = true;
-              fileA = "secrets/safix/shared/%nginx,ana/secrets.yaml";
-              fileB = "secrets/safix/shared/@nginx,ana/secrets.yaml";
+              fileA = "secrets/safix/shared/%nginx,alice/secrets.yaml";
+              fileB = "secrets/safix/shared/@nginx,alice/secrets.yaml";
             }
           ];
 

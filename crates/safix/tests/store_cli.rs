@@ -203,7 +203,7 @@ fn vectors(entry: &str) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) 
     (
         safix_core::store::listing_arguments(database),
         safix_core::store::group_arguments(database, "safix"),
-        safix_core::store::write_arguments(database, entry, Some("ana@example.invalid"), false),
+        safix_core::store::write_arguments(database, entry, Some("alice@example.com"), false),
         safix_core::store::read_arguments(database, entry),
     )
 }
@@ -224,7 +224,7 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
         );
         return;
     };
-    let entry = "safix/ana/grafana";
+    let entry = "safix/alice/grafana";
     let (listing, group, write, read) = vectors(entry);
 
     // A database holding no entry lists one line, and it is a marker rather than
@@ -241,7 +241,7 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
 
     // A group must exist before an entry can be added under it, and `mkdir`
     // creates one level: the nested group is refused until its parent is there.
-    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/ana");
+    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
     let too_deep = scratch.run(&words(&nested), &format!("{UNLOCK}\n"));
     assert!(
         !too_deep.status,
@@ -268,7 +268,7 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
         .collect();
-    for wanted in ["safix/", "safix/ana/", entry] {
+    for wanted in ["safix/", "safix/alice/", entry] {
         assert!(
             lines.iter().any(|line| line == wanted),
             "the listing has no {wanted} in {lines:?}"
@@ -292,7 +292,7 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
         &format!("{UNLOCK}\n"),
     );
     assert!(
-        String::from_utf8_lossy(&summary.stdout).contains("UserName: ana@example.invalid"),
+        String::from_utf8_lossy(&summary.stdout).contains("UserName: alice@example.com"),
         "the username did not reach the entry: {}",
         String::from_utf8_lossy(&summary.stdout)
     );
@@ -321,9 +321,9 @@ fn a_wrong_password_and_an_absent_entry_are_both_refusals_and_a_newline_is_lost(
         );
         return;
     };
-    let entry = "safix/ana/grafana";
+    let entry = "safix/alice/grafana";
     let (_, group, write, read) = vectors(entry);
-    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/ana");
+    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
     assert!(scratch.run(&words(&group), &format!("{UNLOCK}\n")).status);
     assert!(scratch.run(&words(&nested), &format!("{UNLOCK}\n")).status);
 

@@ -52,7 +52,7 @@ fn no_flag_suspends_the_envelope() {
 
     for flag in ["--no-sandbox", "--sandbox=off", "--unsafe-no-sandbox"] {
         let run = fixture
-            .run(&["generate", flag, "ana"])
+            .run(&["generate", flag, "alice"])
             .expect_refusal(&format!("generate {flag}"));
         run.says("usage: safix generate");
         // Not by naming the flag as something it looked for and did not find: a
@@ -65,7 +65,7 @@ fn no_flag_suspends_the_envelope() {
     // reader rejecting what it does not know rather than rejecting everything
     // that starts with two dashes.
     fixture
-        .run(&["generate", "--regenerate", "--yes", "ana"])
+        .run(&["generate", "--regenerate", "--yes", "alice"])
         .expect_success("generate with the flags it does take");
 }
 
@@ -77,7 +77,7 @@ mod linux {
 
     use serde_json::{Value, json};
 
-    use crate::harness::{ANA_FILE, Fixture};
+    use crate::harness::{ALICE_FILE, Fixture};
 
     /// The value a fragment mints when it gets as far as minting one.
     const MINTED: &str = "CANARY-minted-inside";
@@ -198,7 +198,7 @@ mod linux {
         }
 
         let mut fixture = Fixture::new();
-        fixture.make_sops_file(ANA_FILE, &["api-token"]);
+        fixture.make_sops_file(ALICE_FILE, &["api-token"]);
         let script = format!(
             "printf '{LEAKED}' > \"$SAFIX_TEST_ESCAPE\"\n\
              printf '{MINTED}' > \"$out/hostile\""
@@ -210,13 +210,13 @@ mod linux {
              so the confined run establishes nothing"
         );
 
-        fixture.seed_generator("hostile", ANA_FILE, &[], &generator(&script, false));
+        fixture.seed_generator("hostile", ALICE_FILE, &[], &generator(&script, false));
         let before = fixture.head();
         let escape = fixture.repo.join(ESCAPE);
 
         let run = fixture
             .run_graphical_env(
-                &["generate", "ana", "hostile"],
+                &["generate", "alice", "hostile"],
                 &[("SAFIX_TEST_ESCAPE", &escape.to_string_lossy())],
             )
             .expect_refusal("a fragment writing outside its staging root");
@@ -231,7 +231,7 @@ mod linux {
             "the fragment wrote plaintext outside its staging root"
         );
         assert!(
-            !fixture.read(ANA_FILE).contains("hostile"),
+            !fixture.read(ALICE_FILE).contains("hostile"),
             "a value was stored for a generator whose fragment escaped"
         );
         assert_eq!(fixture.head(), before, "the refused run committed");
@@ -264,10 +264,10 @@ mod linux {
         let port = listener.local_addr().unwrap().port();
 
         let mut fixture = Fixture::new();
-        fixture.make_sops_file(ANA_FILE, &["api-token"]);
+        fixture.make_sops_file(ALICE_FILE, &["api-token"]);
         fixture.seed_generator(
             "reaching",
-            ANA_FILE,
+            ALICE_FILE,
             &[],
             &generator(
                 &format!(
@@ -281,7 +281,7 @@ mod linux {
         let before = fixture.head();
 
         let run = fixture
-            .run_graphical(&["generate", "ana", "reaching"])
+            .run_graphical(&["generate", "alice", "reaching"])
             .expect_refusal("a fragment reaching the network with no grant");
         assert_eq!(
             run.refusal_code(),
@@ -314,7 +314,7 @@ mod linux {
         let port = listener.local_addr().unwrap().port();
 
         let mut fixture = Fixture::new();
-        fixture.make_sops_file(ANA_FILE, &["api-token"]);
+        fixture.make_sops_file(ALICE_FILE, &["api-token"]);
         let script = format!(
             "if printf '{LEAKED}' > \"$SAFIX_TEST_ESCAPE\" 2>/dev/null; then\n\
                printf 'escape=landed\\n' >&2\n\
@@ -333,12 +333,12 @@ mod linux {
              so the confined run establishes nothing"
         );
 
-        fixture.seed_generator("granted", ANA_FILE, &[], &generator(&script, true));
+        fixture.seed_generator("granted", ALICE_FILE, &[], &generator(&script, true));
         let escape = fixture.repo.join(ESCAPE);
 
         let run = fixture
             .run_env(
-                &["generate", "ana", "granted"],
+                &["generate", "alice", "granted"],
                 None,
                 &[("SAFIX_TEST_ESCAPE", &escape.to_string_lossy())],
             )
@@ -364,7 +364,7 @@ mod linux {
             "the grant reopened the filesystem it is documented not to touch"
         );
         assert_eq!(
-            fixture.value(ANA_FILE, "granted"),
+            fixture.value(ALICE_FILE, "granted"),
             MINTED,
             "the granted generator stored no value, so its run proves nothing"
         );
@@ -380,10 +380,10 @@ mod linux {
     #[test]
     fn a_withheld_backend_refuses_the_run_before_the_first_fragment() {
         let mut fixture = Fixture::new();
-        fixture.make_sops_file(ANA_FILE, &["api-token"]);
+        fixture.make_sops_file(ALICE_FILE, &["api-token"]);
         fixture.seed_generator(
             "unreachable",
-            ANA_FILE,
+            ALICE_FILE,
             &[],
             &generator(
                 &format!("printf 'fragment-ran\\n' >&2; printf '{MINTED}' > \"$out/unreachable\""),
@@ -394,7 +394,7 @@ mod linux {
 
         let run = fixture
             .run_graphical_env(
-                &["generate", "ana", "unreachable"],
+                &["generate", "alice", "unreachable"],
                 &[("SAFIX_TEST_UNRESOLVABLE", "bubblewrap")],
             )
             .expect_refusal("generation with the backend withheld");

@@ -4,6 +4,6 @@ expression: render_graphical(&refusal)
 ---
 safix::not_a_yaml_path
 
-  × the declarations place 'bad-path' at secrets/safix/users/bo/notes.txt,
+  × the declarations place 'bad-path' at secrets/safix/users/bob/notes.txt,
   │ which is not a *.yaml path; every .sops.yaml creation rule ends in
   │ \.yaml$, so no rule covers it

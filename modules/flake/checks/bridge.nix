@@ -85,15 +85,15 @@
         }) record;
 
       # One fleet for every fixture, so a message that names the wrong person is
-      # a failure rather than a coincidence. ana holds a hand-set entry and a
-      # generated one; bo holds a hand-set entry alone.
+      # a failure rather than a coincidence. alice holds a hand-set entry and a
+      # generated one; bob holds a hand-set entry alone.
       fleet = fleetOf {
-        ana = {
+        alice = {
           recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
           private.tok = { };
           private.minted.generator.script = ''printf '%s' x > "$out/minted"'';
         };
-        bo = {
+        bob = {
           recipient = "age1fixturebbb00000000000000000000000000000000000000000000000";
           private.tok = { };
         };
@@ -102,7 +102,7 @@
       # A fleet whose custody does not resolve: a grant to nobody. Used to hold
       # the short-circuit — while custody is broken the bridge says nothing.
       brokenFleet = fleetOf {
-        ana = {
+        alice = {
           recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
           private.tok = { };
           sharedWith.nobody.tok = { };
@@ -124,8 +124,8 @@
       sound = {
         clanFlake = ".";
         mappings = {
-          down = mapping "clan-to-safix" "ana" "tok" "ntfy";
-          up = mapping "safix-to-clan" "bo" "tok" "other";
+          down = mapping "clan-to-safix" "alice" "tok" "ntfy";
+          up = mapping "safix-to-clan" "bob" "tok" "other";
         };
       };
 
@@ -136,7 +136,7 @@
         (builtins.tryEval (
           builtins.deepSeq (bridgeOf {
             clanFlake = ".";
-            mappings.a = mapping "import" "ana" "tok" "ntfy";
+            mappings.a = mapping "import" "alice" "tok" "ntfy";
           }) "resolved"
         )).success;
 
@@ -149,7 +149,7 @@
                 builtins.head (
                   violations fleet {
                     clanFlake = ".";
-                    mappings.a = mapping "clan-to-safix" "cy" "tok" "ntfy";
+                    mappings.a = mapping "clan-to-safix" "carol" "tok" "ntfy";
                   }
                 )
               )
@@ -177,17 +177,17 @@
 
           unknownUserMessages = violations fleet {
             clanFlake = ".";
-            mappings.a = mapping "clan-to-safix" "cy" "tok" "ntfy";
+            mappings.a = mapping "clan-to-safix" "carol" "tok" "ntfy";
           };
 
           unknownNameMessages = violations fleet {
             clanFlake = ".";
-            mappings.a = mapping "clan-to-safix" "ana" "absent" "ntfy";
+            mappings.a = mapping "clan-to-safix" "alice" "absent" "ntfy";
           };
 
           twoProducersMessages = violations fleet {
             clanFlake = ".";
-            mappings.a = mapping "clan-to-safix" "ana" "minted" "ntfy";
+            mappings.a = mapping "clan-to-safix" "alice" "minted" "ntfy";
           };
 
           # The same target reached by two mappings that differ on the clan
@@ -195,21 +195,21 @@
           oneTargetMessages = violations fleet {
             clanFlake = ".";
             mappings = {
-              a = mapping "clan-to-safix" "ana" "tok" "ntfy";
-              b = mapping "clan-to-safix" "ana" "tok" "other";
+              a = mapping "clan-to-safix" "alice" "tok" "ntfy";
+              b = mapping "clan-to-safix" "alice" "tok" "other";
             };
           };
 
           bothDirectionsMessages = violations fleet {
             clanFlake = ".";
             mappings = {
-              down = mapping "clan-to-safix" "ana" "tok" "ntfy";
-              up = mapping "safix-to-clan" "ana" "tok" "ntfy";
+              down = mapping "clan-to-safix" "alice" "tok" "ntfy";
+              up = mapping "safix-to-clan" "alice" "tok" "ntfy";
             };
           };
 
           noClanFlakeMessages = violations fleet {
-            mappings.a = mapping "clan-to-safix" "ana" "tok" "ntfy";
+            mappings.a = mapping "clan-to-safix" "alice" "tok" "ntfy";
           };
 
           # A mapping-free bridge with no clan named is the default a consumer
@@ -237,12 +237,12 @@
           # vacuous without it.
           handSetExportMessages = violations fleet {
             clanFlake = ".";
-            mappings.a = mapping "safix-to-clan" "ana" "tok" "ntfy";
+            mappings.a = mapping "safix-to-clan" "alice" "tok" "ntfy";
           };
 
           brokenCustody = violations brokenFleet {
             clanFlake = ".";
-            mappings.a = mapping "clan-to-safix" "cy" "tok" "ntfy";
+            mappings.a = mapping "clan-to-safix" "carol" "tok" "ntfy";
           };
 
           # Without this the field above is vacuous: an empty bridge message
@@ -261,23 +261,23 @@
           soundMessages = [ ];
 
           unknownUserMessages = [
-            "flake.safix.bridge.mappings.a names the user 'cy', which flake.safix.users does not declare"
+            "flake.safix.bridge.mappings.a names the user 'carol', which flake.safix.users does not declare"
           ];
 
           unknownNameMessages = [
-            "flake.safix.bridge.mappings.a names the secret 'absent', which flake.safix.users.ana does not hold"
+            "flake.safix.bridge.mappings.a names the secret 'absent', which flake.safix.users.alice does not hold"
           ];
 
           twoProducersMessages = [
-            "flake.safix.bridge.mappings.a imports into flake.safix.users.ana.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
+            "flake.safix.bridge.mappings.a imports into flake.safix.users.alice.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
           ];
 
           oneTargetMessages = [
-            "flake.safix.bridge.mappings a and b both write flake.safix.users.ana.tok"
+            "flake.safix.bridge.mappings a and b both write flake.safix.users.alice.tok"
           ];
 
           bothDirectionsMessages = [
-            "flake.safix.bridge.mappings down and up declare nonexistent:ntfy/token <-> flake.safix.users.ana.tok in both directions, which is a two-way synchronisation and has no conflict resolution"
+            "flake.safix.bridge.mappings down and up declare nonexistent:ntfy/token <-> flake.safix.users.alice.tok in both directions, which is a two-way synchronisation and has no conflict resolution"
           ];
 
           noClanFlakeMessages = [

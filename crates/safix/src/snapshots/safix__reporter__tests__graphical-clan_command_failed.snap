@@ -4,9 +4,9 @@ expression: render_graphical(&refusal)
 ---
 safix::clan_command_failed
 
-  × clan refused ana-workstation ntfy/token, transferring the mapping 'ntfy-
+  × clan refused alice-workstation ntfy/token, transferring the mapping 'ntfy-
   │ token'.
   │ 
   │ clan said:
   │ 
-  │ Error: Machine ana-workstation does not exist
+  │ Error: Machine alice-workstation does not exist

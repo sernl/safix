@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::generator_cycle
 
-  × the run order for flake.safix.users.ana carries a cycle of generators:
+  × the run order for flake.safix.users.alice carries a cycle of generators:
   │ 'base' -> 'derived' -> 'base'. Nothing can run first, so nothing runs.
   │ 
   │ Nothing was written. The order is flake.safix.lib.generatorPlan's and

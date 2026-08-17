@@ -61,12 +61,12 @@ mod tests {
     fn columns_are_padded_to_the_widest_cell_plus_two() {
         let rendered = aligned(&[
             row(&["NAME", "ORIGIN", "SHARED"]),
-            row(&["ana-alone", "private", "-"]),
+            row(&["alice-alone", "private", "-"]),
             row(&["api-token", "private", "-"]),
         ]);
         assert_eq!(
             rendered,
-            "NAME       ORIGIN   SHARED\nana-alone  private  -\napi-token  private  -\n"
+            "NAME         ORIGIN   SHARED\nalice-alone  private  -\napi-token    private  -\n"
         );
     }
 

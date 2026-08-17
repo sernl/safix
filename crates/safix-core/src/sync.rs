@@ -659,8 +659,8 @@ mod tests {
                 {{
                   "id": "grafana",
                   "mode": "{mode}",
-                  "safix": {{ "user": "ana", "name": "grafana-password" }},
-                  "kdbx": {{ "path": "ana/grafana", "username": null }}
+                  "safix": {{ "user": "alice", "name": "grafana-password" }},
+                  "kdbx": {{ "path": "alice/grafana", "username": null }}
                 }}
               ]
             }}"#
@@ -688,7 +688,7 @@ mod tests {
         let mapping = mirror.named("grafana").expect("the fixture mapping");
         assert_eq!(
             commit_subject(mapping),
-            "chore(safix): sync grafana for ana"
+            "chore(safix): sync grafana for alice"
         );
     }
 

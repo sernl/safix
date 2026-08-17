@@ -255,7 +255,7 @@
               # copies the suite makes of this clan are committed in by safix's own
               # runs and inherit only what travels with the directory.
               git -C "$clan" config user.name "safix-selftest"
-              git -C "$clan" config user.email "selftest@example.invalid"
+              git -C "$clan" config user.email "selftest@example.com"
               git -C "$clan" add -A
               git -C "$clan" commit -qm "the throwaway clan" --no-gpg-sign
 

@@ -4,16 +4,17 @@ expression: render_graphical(&refusal)
 ---
 safix::unknown_name
 
-  × 'no-such-secret' is not a secret flake.safix.users.ana holds.
+  × 'no-such-secret' is not a secret flake.safix.users.alice holds.
   │ 
   │ A secret is declared in exactly one of three places, and this resolves
   │ the owning file from all three:
   │ 
   │   1. flake.safix.catalogue.no-such-secret — the shared catalogue —
   │ selected by
-  │      flake.safix.users.ana.carries.no-such-secret
-  │   2. flake.safix.users.ana.private.no-such-secret — this user's own entry
-  │   3. flake.safix.users.<owner>.sharedWith.ana.no-such-secret — granted
+  │      flake.safix.users.alice.carries.no-such-secret
+  │   2. flake.safix.users.alice.private.no-such-secret — this user's own
+  │ entry
+  │   3. flake.safix.users.<owner>.sharedWith.alice.no-such-secret — granted
   │ from outside
   │ 
   │ Declare it in one of them, then re-run. A name reaching a set only
@@ -25,6 +26,6 @@ safix::unknown_name
   │ a single host's adjustment would apply everywhere that secret
   │ resolves rather than only where the adjustment does.
   │ 
-  │ Names flake.safix.users.ana holds:
-  │   - ana-alone
+  │ Names flake.safix.users.alice holds:
+  │   - alice-alone
   │   - team-vault

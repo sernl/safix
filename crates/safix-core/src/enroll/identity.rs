@@ -248,7 +248,7 @@ mod tests {
     /// recipient are fixture strings and open nothing.
     const PRINTED: &str = "\
 #       Serial: 12345678, Slot: 1
-#         Name: safix ana 12345678
+#         Name: safix alice 12345678
 #      Created: Mon, 17 Aug 2026 00:00:00 +0000
 #   PIN policy: Once   (A PIN is required once per session)
 # Touch policy: Cached (A physical touch is required for decryption, and is cached for 15 seconds)
@@ -258,7 +258,7 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
 
     #[test]
     fn the_argument_vector_carries_the_serial_the_name_and_both_policies() {
-        let arguments = generate_arguments(&Request::new("ana", "12345678"))
+        let arguments = generate_arguments(&Request::new("alice", "12345678"))
             .expect("the default policies are accepted");
         assert_eq!(
             arguments,
@@ -267,7 +267,7 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
                 "--serial",
                 "12345678",
                 "--name",
-                "safix ana 12345678",
+                "safix alice 12345678",
                 "--pin-policy",
                 "once",
                 "--touch-policy",
@@ -278,11 +278,11 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
 
     #[test]
     fn no_slot_is_named_so_the_plugin_picks_the_first_empty_one() {
-        let arguments = generate_arguments(&Request::new("ana", "12345678"))
+        let arguments = generate_arguments(&Request::new("alice", "12345678"))
             .expect("the default policies are accepted");
         assert!(!arguments.iter().any(|word| word == "--slot"));
 
-        let mut named = Request::new("ana", "12345678");
+        let mut named = Request::new("alice", "12345678");
         named.slot = Some(String::from("3"));
         let arguments = generate_arguments(&named).expect("a named slot is accepted");
         assert!(arguments.windows(2).any(|pair| pair == ["--slot", "3"]));
@@ -290,7 +290,7 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
 
     #[test]
     fn a_touch_policy_of_never_is_refused_before_anything_runs() {
-        let mut request = Request::new("ana", "12345678");
+        let mut request = Request::new("alice", "12345678");
         request.touch_policy = String::from("never");
         assert!(matches!(
             generate_arguments(&request),
@@ -340,6 +340,9 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
 
     #[test]
     fn the_identity_is_named_for_the_person_and_the_card() {
-        assert_eq!(Request::new("ana", "12345678").name(), "safix ana 12345678");
+        assert_eq!(
+            Request::new("alice", "12345678").name(),
+            "safix alice 12345678"
+        );
     }
 }

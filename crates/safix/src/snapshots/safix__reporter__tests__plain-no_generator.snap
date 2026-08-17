@@ -12,4 +12,4 @@ A generator is declared on the entry, beside its mode and its path:
 Only a value you are free to choose can have one. A credential some
 server already knows is set by hand:
 
-    safix set ana api-token
+    safix set alice api-token

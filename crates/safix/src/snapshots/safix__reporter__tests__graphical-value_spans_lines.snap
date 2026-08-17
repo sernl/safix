@@ -4,7 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::value_spans_lines
 
-  × the value for 'safix/ana/grafana' carries a newline, and the store's own
+  × the value for 'safix/alice/grafana' carries a newline, and the store's own
   │ command reads
   │ an entry's password as one line. Nothing was written.
   │ 

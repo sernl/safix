@@ -2,9 +2,9 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: secrets/safix/users/ana/secrets.yaml already has uncommitted changes:
+safix: secrets/safix/users/alice/secrets.yaml already has uncommitted changes:
 
- M secrets/safix/users/ana/secrets.yaml
+ M secrets/safix/users/alice/secrets.yaml
 
 This commits the file it writes, so committing it now would carry that
 change under a message naming only one secret. Commit or discard it

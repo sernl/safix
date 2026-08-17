@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: Ana Smith is not a well-formed user name.
+safix: Alice Smith is not a well-formed user name.
 
 A user name is interpolated into the path of the file their secrets are
 placed in and into the path_regex of a .sops.yaml creation rule, so the

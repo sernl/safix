@@ -62,7 +62,7 @@ let
     options = {
       user = lib.mkOption {
         type = lib.types.str;
-        example = "ana";
+        example = "alice";
         description = "The `flake.safix.users` entry that holds the value.";
       };
 

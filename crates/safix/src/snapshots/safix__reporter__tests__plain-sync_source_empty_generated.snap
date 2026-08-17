@@ -2,12 +2,12 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the mapping 'wg-key' mirrors wg-private for ana into the database, and it holds
+safix: the mapping 'wg-key' mirrors wg-private for alice into the database, and it holds
 no value yet. Nothing was written.
 
-secrets/safix/users/ana/secrets.yaml does not carry the key. Evaluation could not have caught this: an
+secrets/safix/users/alice/secrets.yaml does not carry the key. Evaluation could not have caught this: an
 entry declares where a value lives, not that one is there.
 
 Give it a value, then re-run:
 
-    safix generate ana wg-private
+    safix generate alice wg-private

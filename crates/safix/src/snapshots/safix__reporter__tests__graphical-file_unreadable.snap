@@ -1,8 +1,8 @@
 ---
 source: crates/safix/src/reporter.rs
-expression: render_graphical(refusal)
+expression: render_graphical(&refusal)
 ---
 safix::file_unreadable
 
-  × could not read secrets/safix/users/ana/secrets.yaml.safix-tmp.4213.yaml
+  × could not read secrets/safix/users/alice/secrets.yaml.safix-tmp.4213.yaml
   ╰─▶ permission denied

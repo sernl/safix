@@ -50,7 +50,7 @@ const VALUE: &str = "CANARY-drill-value";
 #[test]
 fn a_line_added_to_standard_output_is_caught_on_that_channel_alone() {
     let fixture = ready();
-    assert_caught(&fixture, &["list", "ana"], "stdout", "stdout");
+    assert_caught(&fixture, &["list", "alice"], "stdout", "stdout");
 }
 
 /// A line the runtime does not write is caught on standard error.
@@ -61,7 +61,7 @@ fn a_line_added_to_standard_output_is_caught_on_that_channel_alone() {
 #[test]
 fn a_line_added_to_standard_error_is_caught_on_that_channel_alone() {
     let fixture = ready();
-    assert_caught(&fixture, &["list", "cy"], "stderr", "stderr");
+    assert_caught(&fixture, &["list", "carol"], "stderr", "stderr");
 }
 
 /// An exit status the runtime does not return is caught on the status channel.
@@ -72,14 +72,14 @@ fn a_line_added_to_standard_error_is_caught_on_that_channel_alone() {
 #[test]
 fn a_changed_exit_status_is_caught_on_that_channel_alone() {
     let fixture = ready();
-    assert_caught(&fixture, &["list", "ana"], "status", "status");
+    assert_caught(&fixture, &["list", "alice"], "status", "status");
 }
 
 /// A file left in the repository is caught on the repository channel.
 #[test]
 fn a_file_left_in_the_repository_is_caught_on_that_channel_alone() {
     let fixture = ready();
-    assert_caught(&fixture, &["list", "ana"], "effects", "effects");
+    assert_caught(&fixture, &["list", "alice"], "effects", "effects");
 }
 
 /// A plaintext value left in the temporary directory is caught on the residue
@@ -91,7 +91,7 @@ fn a_file_left_in_the_repository_is_caught_on_that_channel_alone() {
 #[test]
 fn a_value_left_in_the_temporary_directory_is_caught_on_that_channel_alone() {
     let fixture = ready();
-    assert_caught(&fixture, &["list", "ana"], "residue", "residue");
+    assert_caught(&fixture, &["list", "alice"], "residue", "residue");
 }
 
 /// A repository with one value in it, which is what gives `list` something to
@@ -99,7 +99,7 @@ fn a_value_left_in_the_temporary_directory_is_caught_on_that_channel_alone() {
 fn ready() -> Fixture {
     let fixture = Fixture::new();
     fixture
-        .set("ana", "api-token", VALUE)
+        .set("alice", "api-token", VALUE)
         .expect_success("the value the drills are run over");
     fixture
 }

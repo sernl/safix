@@ -50,7 +50,7 @@ mod harness;
 mod linux {
     use std::path::Path;
 
-    use crate::harness::{ANA_FILE, Fixture, Run, safix, shim};
+    use crate::harness::{ALICE_FILE, Fixture, Run, safix, shim};
 
     /// Distinctive enough that a match is this fixture's value rather than a
     /// coincidence in a store path, and short enough to survive strace's own
@@ -79,7 +79,7 @@ mod linux {
             "ntfy-token",
             direction,
             (BRIDGE_MACHINE, "ntfy", "token"),
-            ("ana", "api-token"),
+            ("alice", "api-token"),
         );
         fixture
     }
@@ -93,7 +93,7 @@ mod linux {
         let observed = trace(
             &fixture,
             safix(),
-            &["set", "ana", "api-token"],
+            &["set", "alice", "api-token"],
             Some(TYPED),
             &[],
             &[TYPED],
@@ -101,7 +101,7 @@ mod linux {
         .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
-            fixture.value(ANA_FILE, "api-token"),
+            fixture.value(ALICE_FILE, "api-token"),
             TYPED,
             "the traced run did not store the value, so the trace proves nothing"
         );
@@ -117,7 +117,7 @@ mod linux {
         let mut fixture = Fixture::new();
         fixture.seed_generator(
             "api-token",
-            ANA_FILE,
+            ALICE_FILE,
             &[],
             &serde_json::json!({
                 "dependencies": [], "description": "a value minted from nothing",
@@ -132,7 +132,7 @@ mod linux {
         let observed = trace(
             &fixture,
             safix(),
-            &["generate", "ana"],
+            &["generate", "alice"],
             None,
             &[],
             &[MINTED],
@@ -140,7 +140,7 @@ mod linux {
         .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
-            fixture.value(ANA_FILE, "api-token"),
+            fixture.value(ALICE_FILE, "api-token"),
             MINTED,
             "the traced run did not store the minted value, so the trace proves nothing"
         );
@@ -177,7 +177,7 @@ mod linux {
             .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
-            down.value(ANA_FILE, "api-token"),
+            down.value(ALICE_FILE, "api-token"),
             IMPORTED,
             "the traced import did not store the value, so the trace proves nothing"
         );
@@ -187,7 +187,7 @@ mod linux {
         );
 
         let up = bridged("safix-to-clan");
-        up.set("ana", "api-token", EXPORTED)
+        up.set("alice", "api-token", EXPORTED)
             .expect_success("seeding the export's source");
 
         let mut environment = up.clan_env();
@@ -223,7 +223,7 @@ mod linux {
         let outcome = trace(
             &fixture,
             shim(),
-            &["set", "ana", "api-token"],
+            &["set", "alice", "api-token"],
             Some(TYPED),
             &[
                 ("SAFIX_SHIM_ROLE", "mutate"),
@@ -273,7 +273,7 @@ mod linux {
         let escape = fixture.repo.join(ESCAPE);
         fixture.seed_generator(
             "api-token",
-            ANA_FILE,
+            ALICE_FILE,
             &[],
             &serde_json::json!({
                 "dependencies": [], "description": null,
@@ -291,7 +291,7 @@ mod linux {
         let (run, text) = traced(
             &fixture,
             safix(),
-            &["generate", "ana"],
+            &["generate", "alice"],
             None,
             &[("SAFIX_TEST_ESCAPE", &escape.to_string_lossy())],
             "trace=open,openat,write",

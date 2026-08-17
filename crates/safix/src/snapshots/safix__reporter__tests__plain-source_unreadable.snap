@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the mapping 'ntfy-token' exports ntfy-token for ana, and secrets/safix/users/ana/secrets.yaml did not
+safix: the mapping 'ntfy-token' exports ntfy-token for alice, and secrets/safix/users/alice/secrets.yaml did not
 decrypt. sops has said why, above this.
 
 The mapping is refused rather than transferred. A value that cannot be

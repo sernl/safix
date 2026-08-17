@@ -4,8 +4,8 @@ expression: render_graphical(&refusal)
 ---
 safix::store_locked
 
-  × /home/ana/.keys/master.kdbx needs its password and there is no terminal to
-  │ ask on. Nothing
+  × /home/alice/.keys/master.kdbx needs its password and there is no terminal
+  │ to ask on. Nothing
   │ was read.
   │ 
   │ The refusal is here rather than after the first mapping deliberately: a

@@ -30,7 +30,7 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture};
+use harness::{ALICE_FILE, Fixture};
 
 /// A piped value is stored as its own bytes, and nothing was asked.
 ///
@@ -43,14 +43,14 @@ use harness::{ANA_FILE, Fixture};
 #[test]
 fn a_piped_value_is_stored_as_its_own_bytes_and_nothing_is_asked() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token", "mail-password"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "mail-password"]);
 
     let run = fixture
-        .run_with(&["set", "ana", "api-token"], "CANARY-piped\n")
+        .run_with(&["set", "alice", "api-token"], "CANARY-piped\n")
         .expect_success("a piped value carrying a trailing newline");
 
     let read = fixture
-        .run(&["get", "ana", "api-token"])
+        .run(&["get", "alice", "api-token"])
         .expect_success("reading the piped value back");
     assert_eq!(
         read.stdout, b"CANARY-piped\n",
@@ -70,19 +70,19 @@ fn a_piped_value_is_stored_as_its_own_bytes_and_nothing_is_asked() {
     // they name, one commit naming the secret and not the value.
     assert_eq!(
         fixture.subject("HEAD"),
-        "chore(safix): set api-token for ana"
+        "chore(safix): set api-token for alice"
     );
-    assert_eq!(fixture.paths_in("HEAD"), vec![ANA_FILE.to_owned()]);
+    assert_eq!(fixture.paths_in("HEAD"), vec![ALICE_FILE.to_owned()]);
     assert!(!fixture.message("HEAD").contains("CANARY-piped"));
     assert_eq!(fixture.status(), "", "the piped write left the tree dirty");
 
     // A value with no trailing newline is stored without one, which is the other
     // half of "exactly as sent".
     fixture
-        .run_with(&["set", "ana", "mail-password"], "CANARY-no-newline")
+        .run_with(&["set", "alice", "mail-password"], "CANARY-no-newline")
         .expect_success("a piped value carrying no trailing newline");
     let read = fixture
-        .run(&["get", "ana", "mail-password"])
+        .run(&["get", "alice", "mail-password"])
         .expect_success("reading it back");
     assert_eq!(read.stdout, b"CANARY-no-newline");
 }
@@ -97,22 +97,22 @@ fn a_piped_value_is_stored_as_its_own_bytes_and_nothing_is_asked() {
 #[test]
 fn an_empty_pipe_is_refused_as_an_empty_value() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
-    let before = fixture.read(ANA_FILE);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
+    let before = fixture.read(ALICE_FILE);
 
     fixture
-        .run_with(&["set", "ana", "api-token"], "")
+        .run_with(&["set", "alice", "api-token"], "")
         .expect_refusal("an empty pipe")
         .says("the value is empty");
     assert_eq!(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "")
+            .run_graphical_with(&["set", "alice", "api-token"], "")
             .refusal_code(),
         "empty_value"
     );
 
     assert_eq!(
-        fixture.read(ANA_FILE),
+        fixture.read(ALICE_FILE),
         before,
         "the refused empty pipe wrote the file"
     );
@@ -133,17 +133,20 @@ fn an_empty_pipe_is_refused_as_an_empty_value() {
 #[test]
 fn a_terminal_gets_the_hidden_double_prompt() {
     let fixture = Fixture::new();
-    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
 
     let run = fixture
-        .set_on_a_terminal(&["set", "ana", "api-token"], "CANARY-typed\nCANARY-typed\n")
+        .set_on_a_terminal(
+            &["set", "alice", "api-token"],
+            "CANARY-typed\nCANARY-typed\n",
+        )
         .expect_success("a value typed twice at a terminal");
-    run.says("setting api-token for ana");
+    run.says("setting api-token for alice");
     run.says("The value is not echoed");
     run.silent_about("CANARY-typed");
 
     let read = fixture
-        .run(&["get", "ana", "api-token"])
+        .run(&["get", "alice", "api-token"])
         .expect_success("reading the typed value back");
     assert_eq!(
         read.stdout, b"CANARY-typed",
@@ -151,7 +154,7 @@ fn a_terminal_gets_the_hidden_double_prompt() {
     );
 
     let refused = fixture
-        .set_on_a_terminal(&["set", "ana", "api-token"], "CANARY-typed\n")
+        .set_on_a_terminal(&["set", "alice", "api-token"], "CANARY-typed\n")
         .expect_refusal("a value typed once at a terminal");
     refused.says("no confirmation read");
     assert_eq!(

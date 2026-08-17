@@ -778,9 +778,9 @@ mod tests {
     use super::*;
 
     const PLACEMENT: &str = r#"{
-      "ana": {
+      "alice": {
         "api-token": {
-          "file": "secrets/safix/users/ana/secrets.yaml",
+          "file": "secrets/safix/users/alice/secrets.yaml",
           "generator": {
             "dependencies": [], "description": null,
             "files": { "api-token-pub": { "secret": false } },
@@ -789,22 +789,22 @@ mod tests {
             "script": "printf '%s' fixture > $out/api-token",
             "share": false, "validation": null
           },
-          "key": "api-token", "origin": "private", "owner": "ana",
+          "key": "api-token", "origin": "private", "owner": "alice",
           "public": null, "shared": false
         }
       },
-      "cy": {}
+      "carol": {}
     }"#;
 
     #[test]
     fn placements_deserialize_from_the_shape_nix_emits() {
         let placements: Placements = serde_json::from_str(PLACEMENT).unwrap();
-        let ana = placements.held_by("ana").unwrap();
-        let token = ana.get("api-token").unwrap();
+        let alice = placements.held_by("alice").unwrap();
+        let token = alice.get("api-token").unwrap();
         assert_eq!(token.origin, Origin::Private);
         let generator = token.generator.as_ref().unwrap();
         assert_eq!(generator.runtime_inputs, ["coreutils"]);
-        assert!(placements.declares("cy"));
+        assert!(placements.declares("carol"));
 
         // The entry a generator hangs off has no slot to say otherwise and is
         // always encrypted; a further output says for itself.
@@ -825,19 +825,21 @@ mod tests {
         let placements: Placements = serde_json::from_str(PLACEMENT).unwrap();
         let plan: GeneratorPlan = serde_json::from_str(
             r#"{
-              "ana": {
+              "alice": {
                 "order": ["api-token"],
                 "outputs": { "api-token": ["api-token", "api-token-pub"] },
                 "inputs": { "api-token": {} }
               },
-              "cy": { "order": [], "outputs": {}, "inputs": {} }
+              "carol": { "order": [], "outputs": {}, "inputs": {} }
             }"#,
         )
         .unwrap();
 
         for name in ["api-token", "api-token-pub", "nobody-writes-this"] {
-            let off_the_plan = plan.for_user("ana").unwrap().producer_of(name);
-            let off_the_placements = placements.producer_of("ana", name).map(|(entry, _)| entry);
+            let off_the_plan = plan.for_user("alice").unwrap().producer_of(name);
+            let off_the_placements = placements
+                .producer_of("alice", name)
+                .map(|(entry, _)| entry);
             assert_eq!(
                 off_the_plan, off_the_placements,
                 "the two readings disagree about what writes '{name}'"
@@ -845,15 +847,15 @@ mod tests {
         }
 
         // A user who holds nothing, and one the declarations do not name at all.
-        assert!(placements.producer_of("cy", "api-token").is_none());
+        assert!(placements.producer_of("carol", "api-token").is_none());
         assert!(placements.producer_of("nobody", "api-token").is_none());
     }
 
     #[test]
     fn holders_lists_users_with_no_secrets_and_holders_does_not() {
         let placements: Placements = serde_json::from_str(PLACEMENT).unwrap();
-        assert_eq!(placements.users().collect::<Vec<_>>(), ["ana", "cy"]);
-        assert_eq!(placements.holders().collect::<Vec<_>>(), ["ana"]);
+        assert_eq!(placements.users().collect::<Vec<_>>(), ["alice", "carol"]);
+        assert_eq!(placements.holders().collect::<Vec<_>>(), ["alice"]);
     }
 
     #[test]
@@ -871,7 +873,7 @@ mod tests {
     }
 
     const PLAN: &str = r#"{
-      "ana": {
+      "alice": {
         "order": ["base", "derived", "aside", "far"],
         "outputs": {
           "base": ["base", "base-pub"], "derived": ["derived"],
@@ -889,19 +891,19 @@ mod tests {
     #[test]
     fn the_plan_deserializes_and_resolves_an_output_to_the_generator_writing_it() {
         let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
-        let ana = plan.for_user("ana").unwrap();
-        assert_eq!(ana.producer_of("base-pub"), Some("base"));
-        assert_eq!(ana.producer_of("derived"), Some("derived"));
-        assert_eq!(ana.producer_of("nobody-writes-this"), None);
+        let alice = plan.for_user("alice").unwrap();
+        assert_eq!(alice.producer_of("base-pub"), Some("base"));
+        assert_eq!(alice.producer_of("derived"), Some("derived"));
+        assert_eq!(alice.producer_of("nobody-writes-this"), None);
     }
 
     #[test]
     fn a_cascade_is_transitive_and_stays_in_the_plans_order() {
         let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
-        let ana = plan.for_user("ana").unwrap();
-        assert_eq!(ana.cascade("base"), ["base", "derived", "far"]);
-        assert_eq!(ana.cascade("derived"), ["derived", "far"]);
-        assert_eq!(ana.cascade("aside"), ["aside"]);
+        let alice = plan.for_user("alice").unwrap();
+        assert_eq!(alice.cascade("base"), ["base", "derived", "far"]);
+        assert_eq!(alice.cascade("derived"), ["derived", "far"]);
+        assert_eq!(alice.cascade("aside"), ["aside"]);
     }
 
     /// One user's plan, as the four fields and nothing else.
@@ -919,7 +921,7 @@ mod tests {
     #[test]
     fn a_topological_order_carries_no_cycle() {
         let plan: GeneratorPlan = serde_json::from_str(PLAN).unwrap();
-        assert_eq!(plan.for_user("ana").unwrap().cycle(), None);
+        assert_eq!(plan.for_user("alice").unwrap().cycle(), None);
     }
 
     /// Two generators each reading the other's output.
@@ -1011,14 +1013,14 @@ mod tests {
         {
           "id": "grafana",
           "mode": "safix-to-keepassxc",
-          "safix": { "user": "ana", "name": "grafana-password" },
-          "kdbx": { "path": "ana/grafana", "username": "ana@example.invalid" }
+          "safix": { "user": "alice", "name": "grafana-password" },
+          "kdbx": { "path": "alice/grafana", "username": "alice@example.com" }
         },
         {
           "id": "router",
           "mode": "two-way",
-          "safix": { "user": "bo", "name": "router" },
-          "kdbx": { "path": "bo/router", "username": null }
+          "safix": { "user": "bob", "name": "router" },
+          "kdbx": { "path": "bob/router", "username": null }
         }
       ]
     }"#;
@@ -1031,11 +1033,8 @@ mod tests {
 
         let grafana = mirror.named("grafana").unwrap();
         assert_eq!(grafana.mode, Mode::SafixToKeepassxc);
-        assert_eq!(mirror.entry_of(grafana), "safix/ana/grafana");
-        assert_eq!(
-            grafana.kdbx.username.as_deref(),
-            Some("ana@example.invalid")
-        );
+        assert_eq!(mirror.entry_of(grafana), "safix/alice/grafana");
+        assert_eq!(grafana.kdbx.username.as_deref(), Some("alice@example.com"));
 
         let router = mirror.named("router").unwrap();
         assert_eq!(router.mode, Mode::TwoWay);
@@ -1063,8 +1062,8 @@ mod tests {
     #[test]
     fn an_unknown_field_on_a_mapping_is_refused_rather_than_dropped() {
         let with_extra = MIRROR.replace(
-            r#""path": "bo/router""#,
-            r#""path": "bo/router", "url": "x""#,
+            r#""path": "bob/router""#,
+            r#""path": "bob/router", "url": "x""#,
         );
         assert!(serde_json::from_str::<Keepassxc>(&with_extra).is_err());
     }
@@ -1088,11 +1087,11 @@ mod tests {
     #[test]
     fn holders_of_separates_named_users_from_orphaned_keys() {
         let recipients: Recipients = serde_json::from_str(
-            r#"{"ana": ["age1a", "age1escrow"], "bo": ["age1b"], "cy": ["age1c"]}"#,
+            r#"{"alice": ["age1a", "age1escrow"], "bob": ["age1b"], "carol": ["age1c"]}"#,
         )
         .unwrap();
         let found = recipients.holders_of(&["age1b".into(), "age1stray".into()]);
-        assert_eq!(found.named, ["bo"]);
+        assert_eq!(found.named, ["bob"]);
         assert_eq!(found.orphaned, ["age1stray"]);
     }
 }
@@ -1201,8 +1200,8 @@ mod properties {
     /// in one directory, under one rule.
     #[test]
     fn a_marker_inside_the_alphabet_collapses_a_reference_onto_a_subject() {
-        let group = ["ana".to_owned(), "xops".to_owned()];
-        let person = ["ana".to_owned(), "ops".to_owned()];
+        let group = ["alice".to_owned(), "xops".to_owned()];
+        let person = ["alice".to_owned(), "ops".to_owned()];
 
         let marked = |audience: &[String], marker: &str| {
             let mut marked = audience.to_vec();
@@ -1213,7 +1212,7 @@ mod properties {
         };
 
         // A marker of `x` is inside the alphabet, so marking `ops` reaches the
-        // directory `ana,xops` that a person named `xops` already has.
+        // directory `alice,xops` that a person named `xops` already has.
         assert_eq!(
             marked(&person, "x"),
             directory_of(&group, AUDIENCE_SEPARATOR)
@@ -1230,8 +1229,8 @@ mod properties {
 
     #[test]
     fn a_separator_inside_the_alphabet_is_forgeable_across_an_element_boundary() {
-        let pair = ["ana".to_owned(), "bo-cy".to_owned()];
-        let other = ["ana-bo".to_owned(), "cy".to_owned()];
+        let pair = ["alice".to_owned(), "bob-carol".to_owned()];
+        let other = ["alice-bob".to_owned(), "carol".to_owned()];
 
         assert_eq!(directory_of(&pair, "-"), directory_of(&other, "-"));
         assert_ne!(

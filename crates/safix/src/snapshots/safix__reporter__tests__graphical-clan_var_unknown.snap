@@ -6,7 +6,7 @@ safix::clan_var_unknown
 
   × the mapping 'ntfy-token' names a var clan does not have.
   │ 
-  │     machine     ana-workstation
+  │     machine     alice-workstation
   │     generator   ntfy
   │     file        token
   │ 
@@ -16,4 +16,4 @@ safix::clan_var_unknown
   │ 
   │ Check the three names against clan's own list:
   │ 
-  │     clan vars list ana-workstation
+  │     clan vars list alice-workstation

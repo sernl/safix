@@ -2,12 +2,13 @@
 # checks safix exports are instantiated here the way a consumer instantiates
 # them rather than called with arguments assembled beside them.
 #
-# Three people who do not exist, one machine, and one service on it. ana and bo
-# each carry a catalogue entry into their own custody and share a second one
-# between them; ana escrows to a recovery identity, holds a generated secret,
-# declares a path, and grants one entry to the service; bo declares ownership
-# fields, which is what makes his profile the one the user-scope refusal fires on;
-# cy records a recipient and holds nothing, which earns an anchor and no rule.
+# Three people who do not exist, one machine, and one service on it. alice and
+# bob each carry a catalogue entry into their own custody and share a second one
+# between them; alice escrows to a recovery identity, holds a generated secret,
+# declares a path, and grants one entry to the service; bob declares ownership
+# fields, which is what makes his profile the one the user-scope refusal fires
+# on; carol records a recipient and holds nothing, which earns an anchor and no
+# rule.
 #
 # The recipients are literals shaped like an age public key and are not keys.
 # Nothing in this repository encrypts anything, nothing here has a private half
@@ -19,17 +20,17 @@
 # the same binding a consumer's flake gives them, so a rename of an option or a
 # change to a default reaches the checks here the way it would reach theirs.
 let
-  anaKey = "age1fixtureaaa00000000000000000000000000000000000000000000000";
-  boKey = "age1fixturebbb00000000000000000000000000000000000000000000000";
-  cyKey = "age1fixtureccc00000000000000000000000000000000000000000000000";
+  aliceKey = "age1fixtureaaa00000000000000000000000000000000000000000000000";
+  bobKey = "age1fixturebbb00000000000000000000000000000000000000000000000";
+  carolKey = "age1fixtureccc00000000000000000000000000000000000000000000000";
   escrowKey = "age1fixturevault0000000000000000000000000000000000000000000000";
   hostKey = "age1fixturehost00000000000000000000000000000000000000000000000";
 in
 {
   inherit
-    anaKey
-    boKey
-    cyKey
+    aliceKey
+    bobKey
+    carolKey
     escrowKey
     hostKey
     ;
@@ -52,15 +53,15 @@ in
     };
 
     users = {
-      ana = {
-        recipient = anaKey;
-        recipientNote = "ana — fixture identity, decrypts nothing";
+      alice = {
+        recipient = aliceKey;
+        recipientNote = "alice — fixture identity, decrypts nothing";
         # The dotted anchor form below is, shape for shape, what `safix enroll`
         # writes into a declaration (crates/safix-core/src/enroll/declaration.rs
         # asserts the emitted text); its acceptance through the real option here
         # is what proves an enrolled record evaluates.
-        recoveryRecipients."ana-escrow".key = escrowKey;
-        recoveryRecipients."ana-escrow".note = "ana's escrow — a second identity she holds";
+        recoveryRecipients."alice-escrow".key = escrowKey;
+        recoveryRecipients."alice-escrow".note = "alice's escrow — a second identity she holds";
 
         carries = {
           ops-tooling = { };
@@ -71,14 +72,14 @@ in
           # The entry the materialization check reads: it declares a path, so
           # the two scopes have a path to be identical about rather than two
           # provisioner defaults that differ by construction.
-          ana-alone = {
+          alice-alone = {
             mode = "0440";
-            sopsKey = "ana_alone";
-            path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/ana-alone";
+            sopsKey = "alice_alone";
+            path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/alice-alone";
           };
 
-          # Held by ana and granted onward, which is what gives ana and bo a
-          # shared audience. `team-vault` lands in that same directory: the
+          # Held by alice and granted onward, which is what gives alice and bob
+          # a shared audience. `team-vault` lands in that same directory: the
           # audience picks the file, so two names with one audience are one
           # file.
           ops-handover = {
@@ -130,14 +131,14 @@ in
         };
 
         sharedWith = {
-          bo.ops-handover = { };
+          bob.ops-handover = { };
           fixture-web.web-token = { };
         };
       };
 
-      bo = {
-        recipient = boKey;
-        recipientNote = "bo — fixture identity, decrypts nothing";
+      bob = {
+        recipient = bobKey;
+        recipientNote = "bob — fixture identity, decrypts nothing";
 
         carries = {
           ops-tooling = { };
@@ -146,38 +147,38 @@ in
 
         private = {
           # Ownership fields, which only the system scope has an axis for. This
-          # is what the user-scope refusal fires on, and it is declared on bo
-          # rather than on ana so that ana's profile stays materializable at
+          # is what the user-scope refusal fires on, and it is declared on bob
+          # rather than on alice so that alice's profile stays materializable at
           # both scopes and the two claims do not have to share a fixture.
-          bo-service = {
+          bob-service = {
             mode = "0400";
-            owner = "bo";
+            owner = "bob";
             group = "staff";
-            path = _cfg: "/var/lib/safix-fixture/bo-service";
+            path = _cfg: "/var/lib/safix-fixture/bob-service";
           };
         };
       };
 
       # A recipient and nothing held. Every audience excludes them, so they
       # appear in the keys block and in no rule.
-      cy = {
-        recipient = cyKey;
-        recipientNote = "cy — fixture identity, decrypts nothing";
+      carol = {
+        recipient = carolKey;
+        recipientNote = "carol — fixture identity, decrypts nothing";
       };
     };
 
     machines.fixture-host = {
       recipient = hostKey;
       recipientNote = "fixture-host — the age form of a host identity that does not exist";
-      owner = "ana";
+      owner = "alice";
     };
 
     # One granted service, so the exported checks are instantiated over a fleet
-    # that has one. It declares no ownership, which keeps ana's own profile
-    # materializable at either scope: the ownership asymmetry is bo's to carry.
+    # that has one. It declares no ownership, which keeps alice's own profile
+    # materializable at either scope: the ownership asymmetry is bob's to carry.
     services.fixture-web = {
       machines = [ "fixture-host" ];
-      owner = "ana";
+      owner = "alice";
     };
   };
 }

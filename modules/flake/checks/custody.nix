@@ -45,13 +45,14 @@
 # refusal reads as a fact that is not true.
 # Deriving `isShared` from the catalogue alone — dropping the clause that reads
 # the holder's `private` — fails this check through `sharedNameHeldPrivately`,
-# and not as a differing field: `ana` holds that name privately and so does not
-# carry it, which is exactly the shape the perHost/perTag refusal is worded for,
-# so the fixture throws that refusal at her instead of resolving. The two rules
-# interlock, and the message is the evidence — a person is told her own private
-# entry was reached through a host-scoped selection she never wrote. The fixture
-# has two other carriers rather than one so that the answer being defended is a
-# shared file bearing two other names, not another person's own file.
+# and not as a differing field: `alice` holds that name privately and so does
+# not carry it, which is exactly the shape the perHost/perTag refusal is worded
+# for, so the fixture throws that refusal at her instead of resolving. The two
+# rules interlock, and the message is the evidence — a person is told her own
+# private entry was reached through a host-scoped selection she never wrote. The
+# fixture has two other carriers rather than one so that the answer being
+# defended is a shared file bearing two other names, not another person's own
+# file.
 # Setting the audience separator to one the name alphabet admits fails
 # `audienceSeparator`'s own assertion before any check evaluates, so nothing here
 # is reached. Joining with `-and-` directly, bypassing that assertion, is what
@@ -99,7 +100,7 @@
 
       catalogue = typed (lib.types.attrsOf types.entry) {
         shared-token = { };
-        pinned.path = _cfg: "/home/ana/pinned";
+        pinned.path = _cfg: "/home/alice/pinned";
       };
 
       mkUser =
@@ -156,28 +157,28 @@
 
       # ── the control: a grant that is valid in every respect ──
       valid = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       # All three sources at once, under one scope block. `own-note` is in no
       # catalogue, which is the point of `private`: declaring it is selecting it,
       # and nothing registry-wide has to learn the name.
       union = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo = {
+        bob = {
           recipient = fixtureRecipient;
           custody = {
             carries.pinned = { };
@@ -195,7 +196,7 @@
       };
 
       unknownRecipient = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
@@ -205,25 +206,25 @@
       };
 
       notHeld = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.absent = { };
+            sharedWith.bob.absent = { };
           };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       keylessRecipient = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.cy.shared-token = { };
+            sharedWith.carol.shared-token = { };
           };
         };
-        cy = { };
+        carol = { };
       };
 
       # A defect belonging to a user no fixture below resolves. `violations`
@@ -232,11 +233,11 @@
       # per-resolution validation would leave it dormant until whichever party
       # is built next.
       dormant = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        cy = {
+        carol = {
           recipient = fixtureRecipient;
           custody.sharedWith.nobody.shared-token = { };
         };
@@ -249,7 +250,7 @@
       # which catalogue they are read against.
       sharedCatalogue = typed (lib.types.attrsOf types.entry) {
         shared-token.shared = true;
-        pinned.path = _cfg: "/home/ana/pinned";
+        pinned.path = _cfg: "/home/alice/pinned";
       };
 
       sharedViolationsOf =
@@ -279,27 +280,28 @@
       # Two carriers and nothing else. Against the shared catalogue this is one
       # value in one file; against the unshared one it is two independent copies.
       sharedPair = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        bo = {
+        bob = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
       };
 
       # The same shared entry with one carrier. Read beside `sharedPair`, which
-      # differs only by bo carrying it too, this is what says an audience change
-      # is a change of file: the entry does not stay put and gain a recipient, it
-      # moves. That is why widening and narrowing an audience are migrations here
-      # rather than re-wraps, and why `safix fix` cannot be the remedy for either.
+      # differs only by bob carrying it too, this is what says an audience
+      # change is a change of file: the entry does not stay put and gain a
+      # recipient, it moves. That is why widening and narrowing an audience are
+      # migrations here rather than re-wraps, and why `safix fix` cannot be the
+      # remedy for either.
       sharedSolo = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       # A private entry whose name collides with a shared catalogue entry, while
@@ -307,15 +309,15 @@
       # is her value in her own file, not a resolution into an audience file that
       # bears two other names and none of her keys.
       sharedNameHeldPrivately = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.private.shared-token = { };
         };
-        bo = {
+        bob = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        cy = {
+        carol = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
@@ -324,51 +326,51 @@
       # A carrier with no key. Carrying is what puts them in the audience, so the
       # data key would have to be wrapped for a recipient that does not exist.
       sharedKeylessCarrier = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        cy.custody.carries.shared-token = { };
+        carol.custody.carries.shared-token = { };
       };
 
-      # Both mechanisms naming one audience. bo receives the grant and does not
+      # Both mechanisms naming one audience. bob receives the grant and does not
       # carry the entry, so this fires on the double declaration alone and not
       # also on the own-and-granted collision.
       sharedAndGranted = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       # `shared` on an entry that has no carriers but its holder.
       sharedPrivately = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.private.own-note.shared = true;
         };
       };
 
       # Reaching a shared entry through a host-scoped selection. One file serves
-      # every host, so this puts bo nowhere in the audience while resolving the
+      # every host, so this puts bob nowhere in the audience while resolving the
       # audience's file for him.
       sharedViaScope = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        bo = {
+        bob = {
           recipient = fixtureRecipient;
           custody.perHost.somewhere.add.shared-token = { };
         };
       };
 
       carriedAndPrivate = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
@@ -378,82 +380,82 @@
       };
 
       ownAndShared = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo = {
+        bob = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
       };
 
       sharedTwice = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        dee = {
+        dave = {
           recipient = fixtureRecipient;
           custody = {
             carries.shared-token = { };
-            sharedWith.bo.shared-token = { };
+            sharedWith.bob.shared-token = { };
           };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       # The same fleet as `valid` with the grant withdrawn: the secret narrows
       # back to its owner's own file and leaves the recipient's set entirely.
       revokedGrant = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.shared-token = { };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       ownerWithoutRecipient = fleetOf {
-        cy.custody.carries.shared-token = { };
+        carol.custody.carries.shared-token = { };
       };
 
       anchorConflict = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           recoveryRecipients.master = "age1fixture111111111111111111111111111111111111111111111111111";
         };
-        dee = {
+        dave = {
           recipient = fixtureRecipient;
           recoveryRecipients.master = "age1fixture222222222222222222222222222222222222222222222222222";
         };
       };
 
       unsafeUserName = fleetOf {
-        Ana.recipient = fixtureRecipient;
+        Alice.recipient = fixtureRecipient;
       };
 
       # A traversal or a path separator in every authoring surface that can put a
       # name into a resolved set and that resolves without the catalogue. The
-      # grant names a secret ana does hold and bo records a key, so the name rule
+      # grant names a secret alice does hold and bob records a key, so the name rule
       # is the only one this fleet breaks — which is what makes the refusal, and
       # not some second defect, the thing that stops the resolution.
       unsafeSecretName = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             private."tokens/linear" = { };
-            sharedWith.bo."tokens/linear" = { };
+            sharedWith.bob."tokens/linear" = { };
             perHost.somewhere.add."shared,token" = { };
             perTag.laptop.force."../escapes" = { };
           };
         };
-        bo.recipient = fixtureRecipient;
+        bob.recipient = fixtureRecipient;
       };
 
       # `carries` separately, and asserted on its message alone: a traversal name
@@ -461,7 +463,7 @@
       # name rule stands and a `fires` claim over it would pass vacuously. The
       # fixture above is where the refusal is shown to be what does the stopping.
       unsafeCarriedName = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries."../shared-token" = { };
         };
@@ -471,7 +473,7 @@
       # single character — so that tightening the predicate to catch the fleet
       # above cannot quietly start refusing names it is meant to admit.
       legalSecretNames = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.private = {
             "0-leading-digit" = { };
@@ -491,12 +493,12 @@
         {
           label = "separator inside a name";
           a = [
-            "ana"
-            "bo-and-carl"
+            "alice"
+            "bob-and-carol"
           ];
           b = [
-            "ana-and-bo"
-            "carl"
+            "alice-and-bob"
+            "carol"
           ];
         }
         {
@@ -517,7 +519,7 @@
       # because safix derives every file from its audience and an entry naming
       # one of its own would carry recipients nothing computes.
       authoredSopsFile = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.private.own-note.sopsFile = "/elsewhere/secrets.yaml";
         };
@@ -526,7 +528,7 @@
       # Not a custody violation but a selection error, and the two must stay
       # distinguishable: this fleet breaks no rule and still cannot resolve.
       offCatalogue = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.carries.absent = { };
         };
@@ -535,11 +537,11 @@
       # Two entries on one path. The provisioner unlinks whatever occupies a path
       # it manages, so the second to activate deletes the first's output.
       collidingPaths = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody = {
             carries.pinned = { };
-            private.shadow.path = _cfg: "/home/ana/pinned";
+            private.shadow.path = _cfg: "/home/alice/pinned";
           };
         };
       };
@@ -548,7 +550,7 @@
       # ownership axis. Refused rather than dropped: a dropped ownership field
       # reads afterwards as an ownership claim that was honoured.
       ownedEntry = fleetOf {
-        ana = {
+        alice = {
           recipient = fixtureRecipient;
           custody.private.service-key.owner = "svc";
         };
@@ -559,7 +561,7 @@
         resolve.materializeFor {
           inherit users catalogue scope;
           root = "";
-          user = "ana";
+          user = "alice";
           hostname = "somewhere";
           tags = [ ];
         } { };
@@ -569,7 +571,7 @@
         name = "safix-custody";
         actual = {
           validViolations = violationsOf valid;
-          validResolves = !(fires (resolvesFor valid "bo"));
+          validResolves = !(fires (resolvesFor valid "bob"));
 
           # An emptied fixture would otherwise let every claim below pass by
           # having nothing to judge.
@@ -596,9 +598,9 @@
           inboundResolves = lib.mapAttrs (_n: s: {
             inherit (s) origin owner;
             inherit (s.base) mode;
-          }) (resolvesFor valid "bo");
-          inboundSelected = builtins.attrNames (selectsFor valid "bo");
-          outboundStillOwned = builtins.attrNames (selectsFor valid "ana");
+          }) (resolvesFor valid "bob");
+          inboundSelected = builtins.attrNames (selectsFor valid "bob");
+          outboundStillOwned = builtins.attrNames (selectsFor valid "alice");
 
           # A shared secret is a single ciphertext in a file both parties read,
           # not a copy in each of their own files. An encrypted file's data key
@@ -607,27 +609,27 @@
           # in either person's own file would hand the other everything that
           # person holds.
           sharedPlacement = {
-            owner = filesOf valid "ana";
-            recipient = filesOf valid "bo";
+            owner = filesOf valid "alice";
+            recipient = filesOf valid "bob";
           };
 
           # Withdrawing the grant narrows the audience, so the secret goes back
           # to its owner's own file and leaves the recipient's set. What it does
           # not do is unread the value: only a new one does that.
           revokedPlacement = {
-            owner = filesOf revokedGrant "ana";
-            recipient = filesOf revokedGrant "bo";
+            owner = filesOf revokedGrant "alice";
+            recipient = filesOf revokedGrant "bob";
           };
 
           # All three sources at once, each landing in the file its own audience
           # picks.
-          unionPlacement = filesOf union "bo";
+          unionPlacement = filesOf union "bob";
 
           # A private entry selects itself and keeps its own fields, with no
           # catalogue entry of that name anywhere.
           privateEntry =
             let
-              own = (selectsFor union "bo").own-note;
+              own = (selectsFor union "bob").own-note;
             in
             {
               inherit (own) mode sopsKey;
@@ -637,77 +639,77 @@
 
           # One scope block over the union: omit reaches a private entry and an
           # inbound one, and force still beats omit within a resolution.
-          unionUnscoped = builtins.attrNames (selectsAt union "bo" "everywhere" [ ]);
-          unionOmitted = builtins.attrNames (selectsAt union "bo" "trimmed" [ ]);
-          unionForced = builtins.attrNames (selectsAt union "bo" "trimmed" [ "laptop" ]);
+          unionUnscoped = builtins.attrNames (selectsAt union "bob" "everywhere" [ ]);
+          unionOmitted = builtins.attrNames (selectsAt union "bob" "trimmed" [ ]);
+          unionForced = builtins.attrNames (selectsAt union "bob" "trimmed" [ "laptop" ]);
 
           unknownRecipientMessages = violationsOf unknownRecipient;
-          unknownRecipientFires = fires (resolvesFor unknownRecipient "ana");
+          unknownRecipientFires = fires (resolvesFor unknownRecipient "alice");
 
           notHeldMessages = violationsOf notHeld;
-          notHeldFires = fires (resolvesFor notHeld "bo");
+          notHeldFires = fires (resolvesFor notHeld "bob");
 
           keylessRecipientMessages = violationsOf keylessRecipient;
-          keylessRecipientFires = fires (resolvesFor keylessRecipient "cy");
+          keylessRecipientFires = fires (resolvesFor keylessRecipient "carol");
 
-          # Validation is record-wide: the defect is cy's and ana's resolution
-          # is refused by it.
+          # Validation is record-wide: the defect is carol's and alice's
+          # resolution is refused by it.
           dormantMessages = violationsOf dormant;
-          dormantFiresForOthers = fires (resolvesFor dormant "ana");
+          dormantFiresForOthers = fires (resolvesFor dormant "alice");
 
           sharedPairMessages = sharedViolationsOf sharedPair;
           sharedPairFiles = {
-            ana = (selectsInShared sharedPair "ana").shared-token.sopsFile;
-            bo = (selectsInShared sharedPair "bo").shared-token.sopsFile;
+            alice = (selectsInShared sharedPair "alice").shared-token.sopsFile;
+            bob = (selectsInShared sharedPair "bob").shared-token.sopsFile;
           };
           unsharedPairFiles = {
-            ana = (selectsFor sharedPair "ana").shared-token.sopsFile;
-            bo = (selectsFor sharedPair "bo").shared-token.sopsFile;
+            alice = (selectsFor sharedPair "alice").shared-token.sopsFile;
+            bob = (selectsFor sharedPair "bob").shared-token.sopsFile;
           };
 
-          sharedSoloFile = (selectsInShared sharedSolo "ana").shared-token.sopsFile;
+          sharedSoloFile = (selectsInShared sharedSolo "alice").shared-token.sopsFile;
 
           sharedNameHeldPrivatelyFiles = {
-            ana = (selectsInShared sharedNameHeldPrivately "ana").shared-token.sopsFile;
-            bo = (selectsInShared sharedNameHeldPrivately "bo").shared-token.sopsFile;
+            alice = (selectsInShared sharedNameHeldPrivately "alice").shared-token.sopsFile;
+            bob = (selectsInShared sharedNameHeldPrivately "bob").shared-token.sopsFile;
           };
 
           sharedKeylessCarrierMessages = sharedViolationsOf sharedKeylessCarrier;
-          sharedKeylessCarrierFires = fires (resolvesInShared sharedKeylessCarrier "cy");
+          sharedKeylessCarrierFires = fires (resolvesInShared sharedKeylessCarrier "carol");
 
           sharedAndGrantedMessages = sharedViolationsOf sharedAndGranted;
-          sharedAndGrantedFires = fires (resolvesInShared sharedAndGranted "bo");
+          sharedAndGrantedFires = fires (resolvesInShared sharedAndGranted "bob");
 
           sharedPrivatelyMessages = sharedViolationsOf sharedPrivately;
-          sharedPrivatelyFires = fires (resolvesInShared sharedPrivately "ana");
+          sharedPrivatelyFires = fires (resolvesInShared sharedPrivately "alice");
 
-          sharedViaScopeFires = fires (selectsInShared sharedViaScope "bo");
+          sharedViaScopeFires = fires (selectsInShared sharedViaScope "bob");
 
           carriedAndPrivateMessages = violationsOf carriedAndPrivate;
-          carriedAndPrivateFires = fires (resolvesFor carriedAndPrivate "ana");
+          carriedAndPrivateFires = fires (resolvesFor carriedAndPrivate "alice");
 
           ownAndSharedMessages = violationsOf ownAndShared;
-          ownAndSharedFires = fires (resolvesFor ownAndShared "bo");
+          ownAndSharedFires = fires (resolvesFor ownAndShared "bob");
 
           sharedTwiceMessages = violationsOf sharedTwice;
-          sharedTwiceFires = fires (resolvesFor sharedTwice "bo");
+          sharedTwiceFires = fires (resolvesFor sharedTwice "bob");
 
           ownerWithoutRecipientMessages = violationsOf ownerWithoutRecipient;
-          ownerWithoutRecipientFires = fires (resolvesFor ownerWithoutRecipient "cy");
+          ownerWithoutRecipientFires = fires (resolvesFor ownerWithoutRecipient "carol");
 
           anchorConflictMessages = violationsOf anchorConflict;
-          anchorConflictFires = fires (resolvesFor anchorConflict "ana");
+          anchorConflictFires = fires (resolvesFor anchorConflict "alice");
 
           unsafeUserNameMessages = violationsOf unsafeUserName;
-          unsafeUserNameFires = fires (resolvesFor unsafeUserName "Ana");
+          unsafeUserNameFires = fires (resolvesFor unsafeUserName "Alice");
 
           unsafeSecretNameMessages = violationsOf unsafeSecretName;
-          unsafeSecretNameFires = fires (resolvesFor unsafeSecretName "ana");
+          unsafeSecretNameFires = fires (resolvesFor unsafeSecretName "alice");
 
           unsafeCarriedNameMessages = violationsOf unsafeCarriedName;
 
           legalSecretNameMessages = violationsOf legalSecretNames;
-          legalSecretNameResolves = !(fires (resolvesFor legalSecretNames "ana"));
+          legalSecretNameResolves = !(fires (resolvesFor legalSecretNames "alice"));
 
           # Selecting for a person nobody declared. This is not a violation of
           # the declarations — they may be entirely well-formed — but of the
@@ -742,12 +744,12 @@
           # A placement error rather than a custody one, and it stays legible as
           # such: no rule is broken and the resolution still refuses.
           authoredSopsFileMessages = violationsOf authoredSopsFile;
-          authoredSopsFileFires = fires (selectsFor authoredSopsFile "ana");
+          authoredSopsFileFires = fires (selectsFor authoredSopsFile "alice");
 
           # A selection error rather than a custody one, and it has to stay
           # legible as such: no rule is broken and the resolution still refuses.
           offCatalogueMessages = violationsOf offCatalogue;
-          offCatalogueFires = fires (selectsFor offCatalogue "ana");
+          offCatalogueFires = fires (selectsFor offCatalogue "alice");
 
           collidingPathsMessages = violationsOf collidingPaths;
           collidingPathsFires = fires (materializes collidingPaths "system");
@@ -762,60 +764,60 @@
 
           fixtureRosters = {
             valid = [
-              "ana"
-              "bo"
+              "alice"
+              "bob"
             ];
             union = [
-              "ana"
-              "bo"
+              "alice"
+              "bob"
             ];
             dormant = [
-              "ana"
-              "cy"
+              "alice"
+              "carol"
             ];
             sharedPair = [
-              "ana"
-              "bo"
+              "alice"
+              "bob"
             ];
             sharedNameHeldPrivately = [
-              "ana"
-              "bo"
-              "cy"
+              "alice"
+              "bob"
+              "carol"
             ];
             sharedTwice = [
-              "ana"
-              "bo"
-              "dee"
+              "alice"
+              "bob"
+              "dave"
             ];
           };
 
           recipientsRecorded = {
-            ana = true;
-            cy = false;
+            alice = true;
+            carol = false;
           };
 
           inboundResolves.shared-token = {
             origin = "shared";
-            owner = "ana";
+            owner = "alice";
             mode = "0400";
           };
           inboundSelected = [ "shared-token" ];
           outboundStillOwned = [ "shared-token" ];
 
           sharedPlacement = {
-            owner.shared-token = "/secrets/safix/shared/ana,bo/secrets.yaml";
-            recipient.shared-token = "/secrets/safix/shared/ana,bo/secrets.yaml";
+            owner.shared-token = "/secrets/safix/shared/alice,bob/secrets.yaml";
+            recipient.shared-token = "/secrets/safix/shared/alice,bob/secrets.yaml";
           };
 
           revokedPlacement = {
-            owner.shared-token = "/secrets/safix/users/ana/secrets.yaml";
+            owner.shared-token = "/secrets/safix/users/alice/secrets.yaml";
             recipient = { };
           };
 
           unionPlacement = {
-            own-note = "/secrets/safix/users/bo/secrets.yaml";
-            pinned = "/secrets/safix/users/bo/secrets.yaml";
-            shared-token = "/secrets/safix/shared/ana,bo/secrets.yaml";
+            own-note = "/secrets/safix/users/bob/secrets.yaml";
+            pinned = "/secrets/safix/users/bob/secrets.yaml";
+            shared-token = "/secrets/safix/shared/alice,bob/secrets.yaml";
           };
 
           privateEntry = {
@@ -837,22 +839,22 @@
           ];
 
           unknownRecipientMessages = [
-            "flake.safix.users.ana.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
+            "flake.safix.users.alice.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
           ];
           unknownRecipientFires = true;
 
           notHeldMessages = [
-            "flake.safix.users.ana.sharedWith.bo names 'absent', which flake.safix.users.ana declares in neither carries nor private"
+            "flake.safix.users.alice.sharedWith.bob names 'absent', which flake.safix.users.alice declares in neither carries nor private"
           ];
           notHeldFires = true;
 
           keylessRecipientMessages = [
-            "flake.safix.users.ana.sharedWith.cy shares 'shared-token', but flake.safix.users.cy.recipient is null, so no copy can be encrypted to them"
+            "flake.safix.users.alice.sharedWith.carol shares 'shared-token', but flake.safix.users.carol.recipient is null, so no copy can be encrypted to them"
           ];
           keylessRecipientFires = true;
 
           dormantMessages = [
-            "flake.safix.users.cy.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
+            "flake.safix.users.carol.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
           ];
           dormantFiresForOthers = true;
 
@@ -861,78 +863,78 @@
           # what `shared = false` means and what the flag changes.
           sharedPairMessages = [ ];
           sharedPairFiles = {
-            ana = "/secrets/safix/shared/ana,bo/secrets.yaml";
-            bo = "/secrets/safix/shared/ana,bo/secrets.yaml";
+            alice = "/secrets/safix/shared/alice,bob/secrets.yaml";
+            bob = "/secrets/safix/shared/alice,bob/secrets.yaml";
           };
           unsharedPairFiles = {
-            ana = "/secrets/safix/users/ana/secrets.yaml";
-            bo = "/secrets/safix/users/bo/secrets.yaml";
+            alice = "/secrets/safix/users/alice/secrets.yaml";
+            bob = "/secrets/safix/users/bob/secrets.yaml";
           };
 
-          sharedSoloFile = "/secrets/safix/users/ana/secrets.yaml";
+          sharedSoloFile = "/secrets/safix/users/alice/secrets.yaml";
 
           sharedNameHeldPrivatelyFiles = {
-            ana = "/secrets/safix/users/ana/secrets.yaml";
-            bo = "/secrets/safix/shared/bo,cy/secrets.yaml";
+            alice = "/secrets/safix/users/alice/secrets.yaml";
+            bob = "/secrets/safix/shared/bob,carol/secrets.yaml";
           };
 
           sharedKeylessCarrierMessages = [
-            "flake.safix.users.cy.carries names 'shared-token', which flake.safix.catalogue.shared-token shares, but flake.safix.users.cy.recipient is null, so no copy can be encrypted to them"
+            "flake.safix.users.carol.carries names 'shared-token', which flake.safix.catalogue.shared-token shares, but flake.safix.users.carol.recipient is null, so no copy can be encrypted to them"
           ];
           sharedKeylessCarrierFires = true;
 
           sharedAndGrantedMessages = [
-            "flake.safix.catalogue.shared-token is shared, so its audience is every user whose carries names it, and flake.safix.users.ana.sharedWith.bo shares a secret of that name as well; drop the grant and let flake.safix.users.bo.carries say it"
+            "flake.safix.catalogue.shared-token is shared, so its audience is every user whose carries names it, and flake.safix.users.alice.sharedWith.bob shares a secret of that name as well; drop the grant and let flake.safix.users.bob.carries say it"
           ];
           sharedAndGrantedFires = true;
 
           sharedPrivatelyMessages = [
-            "flake.safix.users.ana.private.own-note sets shared = true, but a private entry has no carriers other than its holder; declare it in flake.safix.catalogue and let each carrier's carries select it"
+            "flake.safix.users.alice.private.own-note sets shared = true, but a private entry has no carriers other than its holder; declare it in flake.safix.catalogue and let each carrier's carries select it"
           ];
           sharedPrivatelyFires = true;
 
           sharedViaScopeFires = true;
 
           carriedAndPrivateMessages = [
-            "flake.safix.users.ana declares 'shared-token' in both flake.safix.users.ana.carries and flake.safix.users.ana.private"
+            "flake.safix.users.alice declares 'shared-token' in both flake.safix.users.alice.carries and flake.safix.users.alice.private"
           ];
           carriedAndPrivateFires = true;
 
           ownAndSharedMessages = [
-            "flake.safix.users.bo declares 'shared-token' in flake.safix.users.bo.carries, and flake.safix.users.ana.sharedWith.bo shares a secret of that name"
+            "flake.safix.users.bob declares 'shared-token' in flake.safix.users.bob.carries, and flake.safix.users.alice.sharedWith.bob shares a secret of that name"
           ];
           ownAndSharedFires = true;
 
           sharedTwiceMessages = [
-            "flake.safix.users.bo receives 'shared-token' from more than one grant: flake.safix.users.ana.sharedWith.bo and flake.safix.users.dee.sharedWith.bo"
+            "flake.safix.users.bob receives 'shared-token' from more than one grant: flake.safix.users.alice.sharedWith.bob and flake.safix.users.dave.sharedWith.bob"
           ];
           sharedTwiceFires = true;
 
           ownerWithoutRecipientMessages = [
-            "flake.safix.users.cy declares 'shared-token', but flake.safix.users.cy.recipient is null, so secrets/safix/users/cy/secrets.yaml has no recipient to encrypt it to"
+            "flake.safix.users.carol declares 'shared-token', but flake.safix.users.carol.recipient is null, so secrets/safix/users/carol/secrets.yaml has no recipient to encrypt it to"
           ];
           ownerWithoutRecipientFires = true;
 
           anchorConflictMessages = [
-            "flake.safix.users gives the recipient policy anchor 'master' more than one key, declared by flake.safix.users.ana and flake.safix.users.dee"
+            "flake.safix.users gives the recipient policy anchor 'master' more than one key, declared by flake.safix.users.alice and flake.safix.users.dave"
           ];
           anchorConflictFires = true;
 
           unsafeUserNameMessages = [
-            "flake.safix.users names 'Ana', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
+            "flake.safix.users names 'Alice', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
           ];
           unsafeUserNameFires = true;
 
           unsafeSecretNameMessages = [
-            "flake.safix.users.ana.private names 'tokens/linear', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
-            "flake.safix.users.ana.sharedWith.bo names 'tokens/linear', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
-            "flake.safix.users.ana.perHost.somewhere.add names 'shared,token', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
-            "flake.safix.users.ana.perTag.laptop.force names '../escapes', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
+            "flake.safix.users.alice.private names 'tokens/linear', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
+            "flake.safix.users.alice.sharedWith.bob names 'tokens/linear', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
+            "flake.safix.users.alice.perHost.somewhere.add names 'shared,token', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
+            "flake.safix.users.alice.perTag.laptop.force names '../escapes', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
           ];
           unsafeSecretNameFires = true;
 
           unsafeCarriedNameMessages = [
-            "flake.safix.users.ana.carries names '../shared-token', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
+            "flake.safix.users.alice.carries names '../shared-token', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
           ];
 
           undeclaredUserFires = true;
@@ -940,7 +942,7 @@
             safix: 'zed' is not a declared user of flake.safix.users.
 
             Declared users:
-              - ana
+              - alice
 
             A profile selects with safix.user, which at user scope defaults to the
             profile's own username, so an account name that differs from the
@@ -955,8 +957,8 @@
             {
               label = "separator inside a name";
               distinct = true;
-              fileA = "secrets/safix/shared/ana,bo-and-carl/secrets.yaml";
-              fileB = "secrets/safix/shared/ana-and-bo,carl/secrets.yaml";
+              fileA = "secrets/safix/shared/alice,bob-and-carol/secrets.yaml";
+              fileB = "secrets/safix/shared/alice-and-bob,carol/secrets.yaml";
             }
             {
               label = "separator forged across an element boundary";
@@ -981,7 +983,7 @@
           ownedEntryAtSystemScope = {
             mode = "0400";
             owner = "svc";
-            sopsFile = "/secrets/safix/users/ana/secrets.yaml";
+            sopsFile = "/secrets/safix/users/alice/secrets.yaml";
           };
         };
       };

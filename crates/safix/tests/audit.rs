@@ -47,7 +47,7 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture, Run};
+use harness::{ALICE_FILE, Fixture, Run};
 
 /// The var the fixture mappings name on clan's side.
 const VAR: &str = "ntfy/token";
@@ -85,7 +85,7 @@ fn with_mapping(direction: &str) -> Fixture {
         "ntfy-token",
         direction,
         (MACHINE, "ntfy", "token"),
-        ("ana", "api-token"),
+        ("alice", "api-token"),
     );
     fixture
 }
@@ -104,7 +104,7 @@ fn a_diverged_mapping_is_reported_naming_the_mapping_and_no_value() {
     for direction in DIRECTIONS {
         let fixture = with_mapping(direction);
         fixture
-            .set("ana", "api-token", "CANARY-held-by-safix")
+            .set("alice", "api-token", "CANARY-held-by-safix")
             .expect_success("seeding the safix side");
         fixture.clan_seed(MACHINE, VAR, "CANARY-held-by-clan");
         let before = fixture.head();
@@ -145,7 +145,7 @@ fn a_mapping_whose_two_sides_agree_produces_no_finding() {
     for direction in DIRECTIONS {
         let fixture = with_mapping(direction);
         fixture
-            .set("ana", "api-token", "CANARY-in-step")
+            .set("alice", "api-token", "CANARY-in-step")
             .expect_success("seeding the safix side");
         fixture.clan_seed(MACHINE, VAR, "CANARY-in-step");
 
@@ -167,7 +167,7 @@ fn a_mapping_whose_two_sides_agree_produces_no_finding() {
 fn a_transfer_resolves_what_the_audit_reported() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-to-be-exported")
+        .set("alice", "api-token", "CANARY-to-be-exported")
         .expect_success("seeding the safix side");
     fixture.clan_seed(MACHINE, VAR, "CANARY-clan-still-holds");
 
@@ -193,7 +193,7 @@ fn a_transfer_resolves_what_the_audit_reported() {
 fn one_side_holding_a_value_alone_is_reported_by_which_side_it_is() {
     let source = with_mapping("safix-to-clan");
     source
-        .set("ana", "api-token", "CANARY-never-exported")
+        .set("alice", "api-token", "CANARY-never-exported")
         .expect_success("seeding the source");
 
     let report = audit(&source, &["audit"], &[]);
@@ -204,7 +204,7 @@ fn one_side_holding_a_value_alone_is_reported_by_which_side_it_is() {
 
     let destination = with_mapping("clan-to-safix");
     destination
-        .set("ana", "api-token", "CANARY-from-nowhere")
+        .set("alice", "api-token", "CANARY-from-nowhere")
         .expect_success("seeding the destination");
 
     let backwards = audit(&destination, &["audit"], &[]);
@@ -251,11 +251,11 @@ fn a_mapping_the_operator_cannot_decrypt_is_reported_rather_than_skipped() {
     fixture.clan_seed(MACHINE, VAR, "CANARY-held-by-clan");
 
     fixture.encrypt_to(
-        ANA_FILE,
+        ALICE_FILE,
         &[&stranger],
-        "api-token: \"CANARY-ana-cannot-read\"\n",
+        "api-token: \"CANARY-alice-cannot-read\"\n",
     );
-    fixture.git(&["add", "--", ANA_FILE]);
+    fixture.git(&["add", "--", ALICE_FILE]);
     fixture.git(&["commit", "-q", "-m", "fixture: encrypted to someone else"]);
 
     let report = audit(&fixture, &["audit"], &[]);
@@ -269,7 +269,7 @@ fn a_mapping_the_operator_cannot_decrypt_is_reported_rather_than_skipped() {
     report.says("could not be judged");
     report.says("rather than left out");
     report.silent_about("CANARY-held-by-clan");
-    report.silent_about("CANARY-ana-cannot-read");
+    report.silent_about("CANARY-alice-cannot-read");
     report.silent_about("no disagreement");
 }
 
@@ -282,7 +282,7 @@ fn a_mapping_the_operator_cannot_decrypt_is_reported_rather_than_skipped() {
 fn an_absent_clan_refuses_the_audit_before_anything_is_compared() {
     let fixture = with_mapping("safix-to-clan");
     fixture
-        .set("ana", "api-token", "CANARY-never-compared")
+        .set("alice", "api-token", "CANARY-never-compared")
         .expect_success("seeding the safix side");
 
     let refused = audit(
@@ -319,7 +319,7 @@ fn a_named_mapping_is_audited_whichever_direction_it_is_declared() {
     for direction in DIRECTIONS {
         let fixture = with_mapping(direction);
         fixture
-            .set("ana", "api-token", "CANARY-named")
+            .set("alice", "api-token", "CANARY-named")
             .expect_success("seeding the safix side");
         fixture.clan_seed(MACHINE, VAR, "CANARY-named");
 

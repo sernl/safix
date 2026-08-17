@@ -89,9 +89,9 @@
       # returns nothing at all while any custody rule is broken.
       fixtureRecipient = "age1fixture000000000000000000000000000000000000000000000000000";
 
-      # One user named `ana`, holding exactly the private entries given.
+      # One user named `alice`, holding exactly the private entries given.
       fleetOf = private: {
-        ana = typed types.profile {
+        alice = typed types.profile {
           inherit private;
           recipient = fixtureRecipient;
           recoveryRecipients = { };
@@ -180,7 +180,7 @@
           ];
         };
 
-        crossUser.a = gen { dependencies = [ "bo/their-token" ]; };
+        crossUser.a = gen { dependencies = [ "bob/their-token" ]; };
 
         unknownDependency.a = gen { dependencies = [ "absent" ]; };
 
@@ -261,7 +261,7 @@
       # A tree holding one generated public value, and one holding none, so the
       # accessor's two throws and its one read are each reached over a root this
       # file wrote rather than over the repository.
-      publicLeaf = "public/safix/users/ana/keys-pub";
+      publicLeaf = "public/safix/users/alice/keys-pub";
 
       generatedRoot = pkgs.runCommand "safix-public-fixture" { } ''
         mkdir -p "$out/${publicLeaf}"
@@ -279,7 +279,7 @@
       reachingPlan = {
         rules = [
           {
-            audience = [ "ana" ];
+            audience = [ "alice" ];
             pathRegex = "^public/safix/.*";
           }
         ];
@@ -290,7 +290,7 @@
       # bare `private` record.
       disagreeing =
         let
-          bo = "age1fixturebbb00000000000000000000000000000000000000000000000";
+          bob = "age1fixturebbb00000000000000000000000000000000000000000000000";
         in
         {
           catalogue.split-shared = typed types.entry { shared = true; };
@@ -304,14 +304,14 @@
             };
           };
           users = {
-            ana = typed types.profile {
+            alice = typed types.profile {
               private = disagreeing.private;
               carries.split-shared = { };
               recipient = fixtureRecipient;
             };
-            bo = typed types.profile {
+            bob = typed types.profile {
               carries.split-shared = { };
-              recipient = bo;
+              recipient = bob;
             };
           };
         };
@@ -335,7 +335,7 @@
           validPlans = !(planFires fixtures.valid);
           # The order the well-formed fixture resolves to, so the claim above is
           # that a plan comes back and not merely that nothing threw.
-          validOrder = (resolve.generatorPlanOf { users = fleetOf fixtures.valid; }).ana.order;
+          validOrder = (resolve.generatorPlanOf { users = fleetOf fixtures.valid; }).alice.order;
 
           crossUserMessages = violationsOf fixtures.crossUser;
           crossUserFires = planFires fixtures.crossUser;
@@ -380,14 +380,14 @@
           # file to read and the "not generated yet" answer has a name it does
           # not hold. Reading it at evaluation is the whole point of declaring an
           # output public, and this is that read.
-          publicValueReadsTheFile = resolve.publicValueOf publicFleet generatedRoot "ana" "keys-pub";
+          publicValueReadsTheFile = resolve.publicValueOf publicFleet generatedRoot "alice" "keys-pub";
           publicValueOnAnUngeneratedOutput = fires (
-            resolve.publicValueOf publicFleet emptyRoot "ana" "keys-pub"
+            resolve.publicValueOf publicFleet emptyRoot "alice" "keys-pub"
           );
-          publicValueOnASecretOutput = fires (resolve.publicValueOf publicFleet generatedRoot "ana" "keys");
+          publicValueOnASecretOutput = fires (resolve.publicValueOf publicFleet generatedRoot "alice" "keys");
           # `path` answers for both, and answers with a path rather than a value.
-          pathOfThePublicHalf = resolve.outputPathOf publicFleet "ana" "keys-pub";
-          pathOfTheSecretHalf = resolve.outputPathOf publicFleet "ana" "keys";
+          pathOfThePublicHalf = resolve.outputPathOf publicFleet "alice" "keys-pub";
+          pathOfTheSecretHalf = resolve.outputPathOf publicFleet "alice" "keys";
 
           # ── severity: a rule that would reach the public store ──
           # Both checks have to fail, and which one fails is recorded rather than
@@ -403,8 +403,8 @@
 
           publicMessages = violationsOf fixtures.publicOutput;
           publicPaths = resolve.publicPathsOf publicFleet;
-          publicOnTheEncryptedHalf = (resolve.placementsOf publicFleet).ana.keys.public;
-          publicShare = (resolve.placementsOf publicFleet).ana.keys.generator.share;
+          publicOnTheEncryptedHalf = (resolve.placementsOf publicFleet).alice.keys.public;
+          publicShare = (resolve.placementsOf publicFleet).alice.keys.generator.share;
           publicRuleReaches = checks.publicRuleMessages publicFleet;
 
           unsafePromptNameMessages = violationsOf fixtures.unsafePromptName;
@@ -419,7 +419,7 @@
           networkGrantMessages = violationsOf fixtures.networkGrant;
           networkGrants = lib.mapAttrs (_: placement: placement.generator.network) (
             lib.filterAttrs (_: placement: placement.generator != null) (
-              (resolve.placementsOf { users = fleetOf fixtures.networkGrant; }).ana
+              (resolve.placementsOf { users = fleetOf fixtures.networkGrant; }).alice
             )
           );
 
@@ -436,7 +436,7 @@
 
           validTools = [ ];
           misspelledTool = [
-            "flake.safix.users.ana's generator on 'a' names runtimeInputs 'opensll', which is not an attribute of nixpkgs"
+            "flake.safix.users.alice's generator on 'a' names runtimeInputs 'opensll', which is not an attribute of nixpkgs"
           ];
 
           validMessages = [ ];
@@ -447,83 +447,83 @@
           ];
 
           crossUserMessages = [
-            "flake.safix.users.ana's generator on 'a' depends on 'bo/their-token', which names another person's secret. Custody here is independent: the machine running the generator holds no identity that opens another person's file, so there is no plaintext for the script to read. Give this user their own entry for that value instead."
+            "flake.safix.users.alice's generator on 'a' depends on 'bob/their-token', which names another person's secret. Custody here is independent: the machine running the generator holds no identity that opens another person's file, so there is no plaintext for the script to read. Give this user their own entry for that value instead."
           ];
           crossUserFires = true;
 
           unknownDependencyMessages = [
-            "flake.safix.users.ana's generator on 'a' depends on 'absent', which flake.safix.users.ana does not hold"
+            "flake.safix.users.alice's generator on 'a' depends on 'absent', which flake.safix.users.alice does not hold"
           ];
           unknownDependencyFires = true;
 
           selfDependencyMessages = [
-            "flake.safix.users.ana's generator on 'a' depends on 'a', which this same generator produces; a generator cannot read an output of its own run"
-            "flake.safix.users.ana's generator on 'b' depends on 'b-pub', which this same generator produces; a generator cannot read an output of its own run"
+            "flake.safix.users.alice's generator on 'a' depends on 'a', which this same generator produces; a generator cannot read an output of its own run"
+            "flake.safix.users.alice's generator on 'b' depends on 'b-pub', which this same generator produces; a generator cannot read an output of its own run"
           ];
           selfDependencyFires = true;
 
           unknownFileMessages = [
-            "flake.safix.users.ana's generator on 'a' names 'absent' in its files, which flake.safix.users.ana does not hold"
+            "flake.safix.users.alice's generator on 'a' names 'absent' in its files, which flake.safix.users.alice does not hold"
           ];
           unknownFileFires = true;
 
           selfFileMessages = [
-            "flake.safix.users.ana's generator on 'a' names 'a' in its own files; the entry a generator is declared on is already one of its outputs"
+            "flake.safix.users.alice's generator on 'a' names 'a' in its own files; the entry a generator is declared on is already one of its outputs"
           ];
           selfFileFires = true;
 
           fileHasGeneratorMessages = [
-            "flake.safix.users.ana's generator on 'a' names 'b' in its files, and 'b' carries a generator of its own. One value cannot have two producers: whichever ran last would win, and which ran last is not a declaration."
+            "flake.safix.users.alice's generator on 'a' names 'b' in its files, and 'b' carries a generator of its own. One value cannot have two producers: whichever ran last would win, and which ran last is not a declaration."
           ];
           fileHasGeneratorFires = true;
 
           fileClaimedTwiceMessages = [
-            "flake.safix.users.ana has 'shared-out' named in the files of more than one generator: 'a' and 'b'"
+            "flake.safix.users.alice has 'shared-out' named in the files of more than one generator: 'a' and 'b'"
           ];
           fileClaimedTwiceFires = true;
 
           authoredShareMessages = [
-            "flake.safix.users.ana's generator on 'a' sets `share` directly, which is derived and not authored. It is true exactly when every entry the generator writes is `shared`; set `shared` on those entries instead."
+            "flake.safix.users.alice's generator on 'a' sets `share` directly, which is derived and not authored. It is true exactly when every entry the generator writes is `shared`; set `shared` on those entries instead."
           ];
           authoredShareFires = true;
 
           retiredInputMessages = [
-            "flake.safix.users.ana's generator on 'a' references an input as $in_<name>, which was the read-once descriptor interface safix 0.1 used and 0.2 removed (openspec change 'clan-generator-contract'). A prompt is now the file $prompts/<name>; a dependency is now the file $in/<generator>/<name>, where <generator> is the entry the generator producing it is declared on. Both are re-readable, which a descriptor was not."
+            "flake.safix.users.alice's generator on 'a' references an input as $in_<name>, which was the read-once descriptor interface safix 0.1 used and 0.2 removed (openspec change 'clan-generator-contract'). A prompt is now the file $prompts/<name>; a dependency is now the file $in/<generator>/<name>, where <generator> is the entry the generator producing it is declared on. Both are re-readable, which a descriptor was not."
           ];
           retiredInputFires = true;
 
           retiredOutputNameMessages = [
-            "flake.safix.users.ana's generator on 'a' references $out_name in its script, where it names nothing. $out_name belongs to `validation`, which is unchanged: it names the output under judgement, and the candidate still arrives on standard input. A script addresses its outputs as $out/<name>."
+            "flake.safix.users.alice's generator on 'a' references $out_name in its script, where it names nothing. $out_name belongs to `validation`, which is unchanged: it names the output under judgement, and the candidate still arrives on standard input. A script addresses its outputs as $out/<name>."
           ];
           retiredOutputNameFires = true;
 
           noOutputReferenceMessages = [
-            "flake.safix.users.ana's generator on 'a' never references $out, so it would write no output file and be refused at run time with \"did not write a file for 'a'\" — a message naming the symptom rather than the cause. Under the 0.2 contract (openspec change 'clan-generator-contract') a script writes each declared output to $out/<name>; standard output is no longer the value."
+            "flake.safix.users.alice's generator on 'a' never references $out, so it would write no output file and be refused at run time with \"did not write a file for 'a'\" — a message naming the symptom rather than the cause. Under the 0.2 contract (openspec change 'clan-generator-contract') a script writes each declared output to $out/<name>; standard output is no longer the value."
           ];
           noOutputReferenceFires = true;
 
           shareDisagreementMessages = [
-            "flake.safix.users.ana's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs resolve to one audience, so one file, so one write. Make them agree, or split this into two generators and have the second depend on the first."
+            "flake.safix.users.alice's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs resolve to one audience, so one file, so one write. Make them agree, or split this into two generators and have the second depend on the first."
           ];
           shareDisagreementFires = true;
 
           publicValueReadsTheFile = "a public key, in the clear\n";
           publicValueOnAnUngeneratedOutput = true;
           publicValueOnASecretOutput = true;
-          pathOfThePublicHalf = "public/safix/users/ana/keys-pub/value";
-          pathOfTheSecretHalf = "secrets/safix/users/ana/secrets.yaml";
+          pathOfThePublicHalf = "public/safix/users/alice/keys-pub/value";
+          pathOfTheSecretHalf = "secrets/safix/users/alice/secrets.yaml";
 
           reachingRuleFailsPublicCheck = true;
           reachingRuleFailsCatchAll = true;
 
           publicMessages = [ ];
-          publicPaths = [ "public/safix/users/ana/keys-pub/value" ];
+          publicPaths = [ "public/safix/users/alice/keys-pub/value" ];
           publicOnTheEncryptedHalf = null;
           publicShare = false;
           publicRuleReaches = [ ];
 
           unsafePromptNameMessages = [
-            "flake.safix.users.ana's generator on 'a' declares a prompt named 'Pass Phrase', which is not [a-z0-9][a-z0-9_-]* and so cannot be addressed from the script"
+            "flake.safix.users.alice's generator on 'a' declares a prompt named 'Pass Phrase', which is not [a-z0-9][a-z0-9_-]* and so cannot be addressed from the script"
           ];
           unsafePromptNameFires = true;
 
@@ -534,7 +534,7 @@
           };
 
           cycleMessages = [
-            "flake.safix.users.ana declares a cycle of generators: 'a' -> 'b' -> 'a'. Nothing can run first, so nothing runs."
+            "flake.safix.users.alice declares a cycle of generators: 'a' -> 'b' -> 'a'. Nothing can run first, so nothing runs."
           ];
           cycleFires = true;
         };

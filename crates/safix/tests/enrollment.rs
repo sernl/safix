@@ -53,7 +53,7 @@
 
 mod harness;
 
-use harness::{ANA_FILE, Fixture};
+use harness::{ALICE_FILE, Fixture};
 use safix_core::enroll::{custody, proof};
 
 /// The serial the fixture's one card answers with.
@@ -138,12 +138,12 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     fixture.seed_declarations();
     fixture.seed_card_custody(SERIAL);
     fixture
-        .set("ana", "mail-password", "before-the-card")
-        .expect_success("giving ana something to hold");
+        .set("alice", "mail-password", "before-the-card")
+        .expect_success("giving alice something to hold");
     let head = fixture.head();
 
     let environment = card_env(&fixture, SERIAL, CARD);
-    let run = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&environment));
+    let run = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&environment));
 
     // The proof cannot pass with no card, and the report says so rather than
     // claiming the enrollment finished.
@@ -239,14 +239,14 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     );
 
     // ── the wiring ──
-    let declaration = fixture.read("safix/users/ana.nix");
+    let declaration = fixture.read("safix/users/alice.nix");
     assert!(
         declaration.contains("recoveryRecipients = {")
             && declaration.contains(&format!("\"yubikey-{SERIAL}\".key = \"{CARD}\";")),
-        "the card is not an anchor in ana's recoveryRecipients: {declaration}"
+        "the card is not an anchor in alice's recoveryRecipients: {declaration}"
     );
     assert!(
-        declaration.contains(&format!("recipient = \"{}\";", fixture.ana)),
+        declaration.contains(&format!("recipient = \"{}\";", fixture.alice)),
         "the primary recipient was disturbed"
     );
     assert!(
@@ -257,13 +257,15 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     assert_ne!(fixture.head(), head, "nothing was committed");
     let subject = fixture.subject("HEAD~1");
     assert!(
-        subject.contains(&format!("enroll {SERIAL} as a recovery recipient for ana")),
+        subject.contains(&format!(
+            "enroll {SERIAL} as a recovery recipient for alice"
+        )),
         "the ceremony's commit is not the one that names it: {subject}"
     );
     let ceremony = fixture.paths_in("HEAD~1");
     assert_eq!(
         ceremony,
-        vec![".sops.yaml".to_owned(), "safix/users/ana.nix".to_owned()],
+        vec![".sops.yaml".to_owned(), "safix/users/alice.nix".to_owned()],
         "the ceremony's commit is not the record it edited and the policy that saw it"
     );
 
@@ -278,7 +280,7 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
         "the regenerated policy does not carry the card just enrolled: {policy}"
     );
     assert!(
-        policy.contains(&fixture.ana),
+        policy.contains(&fixture.alice),
         "the regenerated policy dropped the software recipient"
     );
     assert_eq!(
@@ -291,10 +293,10 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     // ── the credentials' custody ──
     assert_eq!(
         fixture.subject("HEAD"),
-        format!("chore(safix): store the PIV access for {SERIAL} in ana's custody"),
+        format!("chore(safix): store the PIV access for {SERIAL} in alice's custody"),
         "the credentials were not stored through the ordinary write path"
     );
-    let stored = fixture.value(ANA_FILE, &custody::secret_name(SERIAL));
+    let stored = fixture.value(ALICE_FILE, &custody::secret_name(SERIAL));
     assert_eq!(
         stored,
         format!("PIN={pin}\nPUK={puk}"),
@@ -323,26 +325,26 @@ fn a_backup_card_sits_beside_the_first_and_changes_nothing_about_it() {
     let fixture = Fixture::new();
     fixture.seed_declarations();
     fixture
-        .set("ana", "mail-password", "before-the-cards")
-        .expect_success("giving ana something to hold");
+        .set("alice", "mail-password", "before-the-cards")
+        .expect_success("giving alice something to hold");
 
     let first = card_env(&fixture, SERIAL, CARD);
     fixture.run_on_terminal(
-        &["enroll", "ana", "--serial", SERIAL, "--no-store-pin"],
+        &["enroll", "alice", "--serial", SERIAL, "--no-store-pin"],
         "",
         &as_pairs(&first),
     );
-    let after_first = fixture.read("safix/users/ana.nix");
+    let after_first = fixture.read("safix/users/alice.nix");
     let identity_after_first = fixture.card_identity();
 
     let second = card_env(&fixture, &format!("{SERIAL} {BACKUP}"), BACKUP_CARD);
     fixture.run_on_terminal(
-        &["enroll", "ana", "--serial", BACKUP, "--no-store-pin"],
+        &["enroll", "alice", "--serial", BACKUP, "--no-store-pin"],
         "",
         &as_pairs(&second),
     );
 
-    let after_second = fixture.read("safix/users/ana.nix");
+    let after_second = fixture.read("safix/users/alice.nix");
     assert!(
         after_second.contains(&format!("\"{CARD}\"")),
         "the first card was dropped: {after_second}"
@@ -390,54 +392,63 @@ fn the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone() {
 
     // Two cards and nothing to choose between them.
     let two = card_env(&fixture, &format!("{SERIAL} {BACKUP}"), CARD);
-    let refused = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&two));
+    let refused = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&two));
     refused.says(SERIAL);
     refused.says(BACKUP);
     refused.says("--serial");
-    codes.push(refusal_code(&fixture, &["enroll", "ana"], &as_pairs(&two)));
+    codes.push(refusal_code(
+        &fixture,
+        &["enroll", "alice"],
+        &as_pairs(&two),
+    ));
 
     // No smartcard service.
     let mut absent = card_env(&fixture, SERIAL, CARD);
     absent.push(("SAFIX_CARD_STUB_NO_PCSCD".to_owned(), "yes".to_owned()));
-    let refused = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&absent));
+    let refused = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&absent));
     refused.says("services.pcscd.enable");
     codes.push(refusal_code(
         &fixture,
-        &["enroll", "ana"],
+        &["enroll", "alice"],
         &as_pairs(&absent),
     ));
 
     // No card at all.
     let none = card_env(&fixture, "", CARD);
     fixture
-        .run_on_terminal(&["enroll", "ana"], "", &as_pairs(&none))
+        .run_on_terminal(&["enroll", "alice"], "", &as_pairs(&none))
         .says("no card is connected");
-    codes.push(refusal_code(&fixture, &["enroll", "ana"], &as_pairs(&none)));
+    codes.push(refusal_code(
+        &fixture,
+        &["enroll", "alice"],
+        &as_pairs(&none),
+    ));
 
     // A touch nobody has to make.
     let touchless = card_env(&fixture, SERIAL, CARD);
     let refused = fixture.run_on_terminal(
-        &["enroll", "ana", "--touch-policy", "never"],
+        &["enroll", "alice", "--touch-policy", "never"],
         "",
         &as_pairs(&touchless),
     );
     refused.says("smartcard emulating a file");
     codes.push(refusal_code(
         &fixture,
-        &["enroll", "ana", "--touch-policy", "never"],
+        &["enroll", "alice", "--touch-policy", "never"],
         &as_pairs(&touchless),
     ));
 
     // An OTP slot, refused with the hazard named rather than as an unknown
     // option. Every spelling somebody would reach for gets the same refusal.
     for asked in ["--otp", "--otp-slot", "--challenge-response"] {
-        let refused = fixture.run_on_terminal(&["enroll", "ana", asked], "", &as_pairs(&touchless));
+        let refused =
+            fixture.run_on_terminal(&["enroll", "alice", asked], "", &as_pairs(&touchless));
         refused.says("does not write, reprogram or delete an OTP slot");
         refused.says("the database stops opening");
     }
     codes.push(refusal_code(
         &fixture,
-        &["enroll", "ana", "--otp-slot"],
+        &["enroll", "alice", "--otp-slot"],
         &as_pairs(&touchless),
     ));
 
@@ -447,7 +458,7 @@ fn the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     // already written to it.
     let before = fixture.card_recorded("argv");
     fixture
-        .run_env(&["enroll", "ana"], None, &as_pairs(&touchless))
+        .run_env(&["enroll", "alice"], None, &as_pairs(&touchless))
         .expect_refusal("enrollment with no terminal")
         .says("enrollment needs a terminal");
     assert_eq!(
@@ -469,7 +480,7 @@ fn the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     );
     assert_eq!(fixture.head(), head, "a refusal committed something");
     assert_eq!(
-        fixture.read("safix/users/ana.nix").matches(CARD).count(),
+        fixture.read("safix/users/alice.nix").matches(CARD).count(),
         0,
         "a refusal left a recipient behind"
     );
@@ -491,7 +502,7 @@ fn a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once() {
     ));
 
     let run = fixture.run_on_terminal(
-        &["enroll", "ana", "--no-store-pin"],
+        &["enroll", "alice", "--no-store-pin"],
         "87654321\n",
         &as_pairs(&environment),
     );
@@ -533,14 +544,14 @@ fn a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once() {
 fn a_person_with_no_custody_record_is_refused_before_the_recipient_is_wired() {
     let fixture = Fixture::new();
     fixture.seed_declarations();
-    fixture.git(&["rm", "-q", "--", "safix/users/bo.nix"]);
-    fixture.git(&["commit", "-q", "-m", "fixture: bo's record is elsewhere"]);
+    fixture.git(&["rm", "-q", "--", "safix/users/bob.nix"]);
+    fixture.git(&["commit", "-q", "-m", "fixture: bob's record is elsewhere"]);
     let head = fixture.head();
 
     let environment = card_env(&fixture, SERIAL, CARD);
-    let refused = fixture.run_on_terminal(&["enroll", "bo"], "", &as_pairs(&environment));
-    refused.says("safix/users/bo.nix");
-    refused.says("safix adduser bo");
+    let refused = fixture.run_on_terminal(&["enroll", "bob"], "", &as_pairs(&environment));
+    refused.says("safix/users/bob.nix");
+    refused.says("safix adduser bob");
     assert_eq!(fixture.head(), head, "the refusal committed something");
 
     // The identity was generated and appended before the record was reached,
@@ -569,7 +580,7 @@ fn a_rejected_pin_aborts_after_one_attempt() {
     ));
     wrong.retain(|(name, _)| name != "SAFIX_CARD_STUB_ACCEPTS_ANY");
 
-    let refused = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&wrong));
+    let refused = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&wrong));
     refused.says("refused the PIN");
     refused.says("One attempt, deliberately");
     assert_eq!(
@@ -579,7 +590,7 @@ fn a_rejected_pin_aborts_after_one_attempt() {
     );
     assert_eq!(fixture.head(), head, "a rejected PIN committed something");
     assert!(
-        !fixture.read("safix/users/ana.nix").contains(CARD),
+        !fixture.read("safix/users/alice.nix").contains(CARD),
         "a rejected PIN still wired the recipient"
     );
 }
@@ -591,8 +602,8 @@ fn the_proof_is_isolated_from_every_ambient_identity() {
     fixture.seed_declarations();
     fixture.seed_card_custody(SERIAL);
     fixture
-        .set("ana", "mail-password", "a-value-the-card-would-open")
-        .expect_success("giving ana something to hold");
+        .set("alice", "mail-password", "a-value-the-card-would-open")
+        .expect_success("giving alice something to hold");
 
     let spool = fixture.scratch_dir("sops-spy");
     let sops = harness::real_sops();
@@ -605,7 +616,7 @@ fn the_proof_is_isolated_from_every_ambient_identity() {
         spool.to_string_lossy().into_owned(),
     ));
 
-    let run = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&environment));
+    let run = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&environment));
     assert_eq!(run.code, Some(1), "the proof passed with no card present");
     run.says("INCOMPLETE");
 
@@ -659,7 +670,7 @@ fn the_proof_is_isolated_from_every_ambient_identity() {
 
     // The additive wiring is in place even though the proof is outstanding.
     assert!(
-        fixture.read("safix/users/ana.nix").contains(CARD),
+        fixture.read("safix/users/alice.nix").contains(CARD),
         "a failed proof took the recipient back out"
     );
     assert!(
@@ -695,7 +706,7 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
     harness::mint_identity(&stand_in);
     let recipient = harness::recipient_of(&stand_in);
     fixture.encrypt_to(
-        ANA_FILE,
+        ALICE_FILE,
         &[&recipient],
         "mail-password: opened-by-the-stand-in\n",
     );
@@ -712,11 +723,11 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
         "the isolated source holds more than one identity"
     );
 
-    let outcome = proof::decrypt_with(&workspace, &source, ANA_FILE).expect("sops can be run");
+    let outcome = proof::decrypt_with(&workspace, &source, ALICE_FILE).expect("sops can be run");
     assert_eq!(
         outcome,
         proof::Outcome::Proven {
-            file: ANA_FILE.to_owned()
+            file: ALICE_FILE.to_owned()
         },
         "the isolated source did not open the file it is a recipient of"
     );
@@ -731,7 +742,7 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
     let other = proof::write_isolated_source(&fixture.scratch_dir("proof-other"), &stranger_stub);
     assert!(
         matches!(
-            proof::decrypt_with(&workspace, &other.expect("it can be written"), ANA_FILE),
+            proof::decrypt_with(&workspace, &other.expect("it can be written"), ALICE_FILE),
             Ok(proof::Outcome::Refused { .. })
         ),
         "a source that is not a recipient opened the file"
@@ -755,7 +766,7 @@ fn clan_and_the_hook_receive_the_enrollment_after_it_is_committed() {
     environment.extend(fixture.clan_env());
 
     let run = fixture.run_on_terminal(
-        &["enroll", "ana", "--no-store-pin"],
+        &["enroll", "alice", "--no-store-pin"],
         "",
         &as_pairs(&environment),
     );
@@ -772,14 +783,14 @@ fn clan_and_the_hook_receive_the_enrollment_after_it_is_committed() {
     );
     assert_eq!(
         fixture.clan_recorded("registered").trim(),
-        format!("add ana {CARD}"),
+        format!("add alice {CARD}"),
         "clan did not accept the registration it was asked for"
     );
 
     let log = fixture.read("enroll-hook-log.txt");
     assert_eq!(
         log,
-        format!("user=ana\nserial={SERIAL}\nrecipient={CARD}\n"),
+        format!("user=alice\nserial={SERIAL}\nrecipient={CARD}\n"),
         "the hook was not given the person, the serial and the recipient"
     );
     assert!(
@@ -801,7 +812,7 @@ fn a_run_with_no_hook_and_no_clan_says_what_it_did_not_do() {
     fixture.seed_declarations();
     let environment = card_env(&fixture, SERIAL, CARD);
     let run = fixture.run_on_terminal(
-        &["enroll", "ana", "--no-store-pin"],
+        &["enroll", "alice", "--no-store-pin"],
         "",
         &as_pairs(&environment),
     );
@@ -816,12 +827,12 @@ fn the_mirrored_credentials_travel_standard_input_and_round_trip() {
     fixture.seed_declarations();
     fixture.seed_card_custody(SERIAL);
     fixture
-        .set("ana", "mail-password", "before-the-card")
-        .expect_success("giving ana something to hold");
+        .set("alice", "mail-password", "before-the-card")
+        .expect_success("giving alice something to hold");
 
     let environment = card_env(&fixture, SERIAL, CARD);
     fixture.run_on_terminal(
-        &["enroll", "ana", "--mirror-to-store"],
+        &["enroll", "alice", "--mirror-to-store"],
         "",
         &as_pairs(&environment),
     );
@@ -888,7 +899,7 @@ fn a_ykman_drive_that_asks_past_its_bound_stops_the_run() {
         "change-puk".to_owned(),
     ));
 
-    let refused = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&environment));
+    let refused = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&environment));
     refused.says("refused the PIN");
     refused.says("One attempt, deliberately");
 
@@ -906,7 +917,7 @@ fn a_ykman_drive_that_asks_past_its_bound_stops_the_run() {
     );
     assert_eq!(fixture.head(), head, "the aborted run committed something");
     assert!(
-        !fixture.read("safix/users/ana.nix").contains(CARD),
+        !fixture.read("safix/users/alice.nix").contains(CARD),
         "the aborted run still wired a recipient"
     );
 }

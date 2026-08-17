@@ -4,7 +4,7 @@
 
 No real recipient, no real hostname and no real user name enters this repository.
 
-Fixture people are `ana`, `bo` and `cy`.
+Fixture people are `alice`, `bob` and `carol`.
 Fixture recipients are strings shaped like an `age1` public key and are not keys; `modules/flake/checks/fixture-fleet.nix` holds them, and the note at the top of that file explains what each fixture person exists to exercise.
 Every key that a test actually decrypts with is minted inside that test's own scratch directory and dies with it.
 

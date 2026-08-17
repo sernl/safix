@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::unparsable
 
-  × generated /srv/fleet/safix/users/dee.nix does not parse; nothing was
+  × generated /srv/fleet/safix/users/dave.nix does not parse; nothing was
   │ staged

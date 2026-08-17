@@ -177,7 +177,7 @@ mod tests {
     use super::*;
 
     const WRAPPED: &str = r#"
-ana_alone: ENC[AES256_GCM,data:abc,iv:xyz,tag:t,type:str]
+alice_alone: ENC[AES256_GCM,data:abc,iv:xyz,tag:t,type:str]
 blank: ENC[AES256_GCM,data:,iv:xyz,tag:t,type:str]
 sops:
     age:
@@ -211,8 +211,8 @@ sops:
     #[test]
     fn keys_exclude_the_metadata_block_and_flag_the_empty_ciphertext() {
         let keys = keys_of(WRAPPED).unwrap();
-        assert_eq!(keys.keys().collect::<Vec<_>>(), ["ana_alone", "blank"]);
-        assert_eq!(keys.get("ana_alone"), Some(&KeyState { empty: false }));
+        assert_eq!(keys.keys().collect::<Vec<_>>(), ["alice_alone", "blank"]);
+        assert_eq!(keys.get("alice_alone"), Some(&KeyState { empty: false }));
         assert_eq!(keys.get("blank"), Some(&KeyState { empty: true }));
     }
 

@@ -60,7 +60,7 @@ in
     extraGovernedFiles = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "secrets/safix/users/ana/ops-tooling.yaml" ];
+      example = [ "secrets/safix/users/alice/ops-tooling.yaml" ];
       description = ''
         Encrypted files a consumer wants governed that no declaration implies,
         as repository-relative paths.

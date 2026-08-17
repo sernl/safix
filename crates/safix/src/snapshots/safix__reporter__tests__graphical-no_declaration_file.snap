@@ -4,14 +4,14 @@ expression: render_graphical(&refusal)
 ---
 safix::no_declaration_file
 
-  × safix/users/cy.nix is not a custody record this can extend, so cy's
+  × safix/users/carol.nix is not a custody record this can extend, so carol's
   │ recovery
   │ recipients were not touched.
   │ 
   │ Enrollment adds a recipient to a record that already declares one. The
   │ record is written by:
   │ 
-  │     safix adduser cy <age-recipient>
+  │     safix adduser carol <age-recipient>
   │ 
   │ A record living somewhere else is supported — declarations merge, so where
   │ one is written is not something safix knows — but the edit has to have a

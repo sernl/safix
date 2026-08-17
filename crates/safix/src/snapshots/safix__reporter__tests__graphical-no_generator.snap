@@ -14,4 +14,4 @@ safix::no_generator
   │ Only a value you are free to choose can have one. A credential some
   │ server already knows is set by hand:
   │ 
-  │     safix set ana api-token
+  │     safix set alice api-token

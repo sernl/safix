@@ -4,8 +4,8 @@ expression: render_graphical(&refusal)
 ---
 safix::clan_user_registration_failed
 
-  × clan would not register the card as ana's key:
-  │ Error: user ana already exists
+  × clan would not register the card as alice's key:
+  │ Error: user alice already exists
   │ 
   │ The identity, the recipient and the re-wrap are committed on the safix
   │ side. clan owns its own store, so the registration is clan's to accept and

@@ -18,13 +18,14 @@
 # the first exists and is asserted rather than described.
 #
 # ── which person appears at which scope ──
-# The system-scope configuration resolves bo rather than ana. ana's `ana-alone`
-# declares its path as a function of a home-manager configuration —
-# `cfg.home.homeDirectory` — so her set is materializable in a profile and not in
-# a system configuration. That is a property of that one declaration and the
-# `path`-is-a-function-of-the-consuming-configuration contract, not of safix, and
-# it is not assertable here: it surfaces as a missing attribute rather than a
-# `throw`, and `builtins.tryEval` catches only thrown and asserted errors.
+# The system-scope configuration resolves bob rather than alice. alice's
+# `alice-alone` declares its path as a function of a home-manager
+# configuration — `cfg.home.homeDirectory` — so her set is materializable in a
+# profile and not in a system configuration. That is a property of that one
+# declaration and the `path`-is-a-function-of-the-consuming-configuration
+# contract, not of safix, and it is not assertable here: it surfaces as a
+# missing attribute rather than a `throw`, and `builtins.tryEval` catches only
+# thrown and asserted errors.
 # `selectionIsScopeFree` carries the claim that survives — that what arrives at
 # either scope is exactly what the scope-free resolver selected — on each side.
 #
@@ -206,12 +207,12 @@ in
           }
         ) secrets;
 
-      moduleView = viewOf (moduleForm "ana").config.sops.secrets;
-      handView = viewOf (handForm "ana").config.sops.secrets;
+      moduleView = viewOf (moduleForm "alice").config.sops.secrets;
+      handView = viewOf (handForm "alice").config.sops.secrets;
 
-      # A person who resolves nothing on this host: cy records a recipient and
-      # holds no entry, so every audience excludes them.
-      inertProfile = moduleForm "cy";
+      # A person who resolves nothing on this host: carol records a recipient
+      # and holds no entry, so every audience excludes them.
+      inertProfile = moduleForm "carol";
 
       activationOrder =
         profile:
@@ -220,7 +221,7 @@ in
         in
         map (entry: entry.name) sorted.result;
 
-      anaOrder = activationOrder (moduleForm "ana");
+      aliceOrder = activationOrder (moduleForm "alice");
 
       indexOf = order: name: lib.lists.findFirstIndex (n: n == name) null order;
 
@@ -234,30 +235,30 @@ in
 
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
 
-      # bo declares ownership fields, which the user scope has no axis for.
-      boUserProfile = (moduleForm "bo").config.sops.secrets;
+      # bob declares ownership fields, which the user scope has no axis for.
+      bobUserProfile = (moduleForm "bob").config.sops.secrets;
 
       names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
 
       # A profile bound to declarations and given no host. Standalone
       # home-manager cannot derive one, so this is the mistake a consumer
       # actually makes.
-      unaddressedProfile = mkHome "ana" [
+      unaddressedProfile = mkHome "alice" [
         config.flake.homeModules.default
         { safix.lib = safix; }
       ];
 
       # A profile that imports the module and says nothing else, which must stay
       # a no-op rather than become a demand.
-      unwiredProfile = mkHome "ana" [ config.flake.homeModules.default ];
+      unwiredProfile = mkHome "alice" [ config.flake.homeModules.default ];
 
       # A profile that names a person and is bound to nothing, which is what
       # omitting `safix.flake` produces. It is the state that used to be silent:
       # `safix.lib` null makes every other assertion vacuously true and the
       # resolved set empty, so the profile built and established nothing.
-      flakelessProfile = mkHome "ana" [
+      flakelessProfile = mkHome "alice" [
         config.flake.homeModules.default
-        { safix.user = "ana"; }
+        { safix.user = "alice"; }
       ];
 
       # The messages a mis-wired profile prints. Read off the pure function
@@ -276,11 +277,11 @@ in
       brokenBinding = {
         lib = safix // {
           violations = [
-            "flake.safix.users.ana.sharedWith names 'dz', which is not a declared user"
-            "flake.safix.users.bo.recipient is null"
+            "flake.safix.users.alice.sharedWith names 'dz', which is not a declared user"
+            "flake.safix.users.bob.recipient is null"
           ];
         };
-        user = "ana";
+        user = "alice";
         machine = null;
         inherit hostname;
         tags = [ ];
@@ -341,10 +342,10 @@ in
 
       # The state the README's three-line user-scope form used to produce: a
       # person whose declarations resolve, on a profile that names no identity.
-      identityFreeProfile = bareProfile "ana" [ ];
+      identityFreeProfile = bareProfile "alice" [ ];
 
-      identityGivenProfile = bareProfile "ana" [
-        { safix.identity.sshKeyPaths = [ "/home/ana/.ssh/agenix" ]; }
+      identityGivenProfile = bareProfile "alice" [
+        { safix.identity.sshKeyPaths = [ "/home/alice/.ssh/agenix" ]; }
       ];
 
       # A person nobody declared. `safix.user` defaults to the profile's own
@@ -384,7 +385,7 @@ in
           ];
         };
 
-      systemView = viewOf (nixosFor "bo").config.sops.secrets;
+      systemView = viewOf (nixosFor "bob").config.sops.secrets;
 
       sortNames = lib.sort (a: b: a < b);
     in
@@ -406,8 +407,8 @@ in
                 "owner"
                 "group"
                 "mode"
-              ] systemView.bo-service;
-              hostnameFromTheHost = (nixosFor "bo").config.safix.hostname;
+              ] systemView.bob-service;
+              hostnameFromTheHost = (nixosFor "bob").config.safix.hostname;
 
               # Selection is custody and custody has no scope: what arrives at the
               # system scope is exactly what the scope-free resolver selected.
@@ -415,7 +416,7 @@ in
               selectionIsScopeFree =
                 sortNames (
                   safix.resolveNames {
-                    user = "bo";
+                    user = "bob";
                     hostname = "server";
                     tags = [ ];
                   }
@@ -423,13 +424,13 @@ in
             };
             expected = {
               established = [
-                "bo-service"
+                "bob-service"
                 "ops-handover"
                 "ops-tooling"
                 "team-vault"
               ];
               systemCarriesOwnership = {
-                owner = "bo";
+                owner = "bob";
                 group = "staff";
                 mode = "0400";
               };
@@ -504,14 +505,14 @@ in
               # field by field, through sops-nix's own option types.
               equivalence = moduleView == handView;
               established = sortNames (builtins.attrNames moduleView);
-              entry = moduleView.ana-alone;
+              entry = moduleView.alice-alone;
 
               # Selection is custody and custody has no scope: what arrived in the
               # profile is exactly what the scope-free resolver selected.
               selectionIsScopeFree =
                 sortNames (
                   safix.resolveNames {
-                    user = "ana";
+                    user = "alice";
                     inherit hostname;
                     tags = [ ];
                   }
@@ -537,13 +538,13 @@ in
               # The user-scope half of the ownership asymmetry. The system half is
               # in `safix-consumption-system`, which only a Linux builder can
               # evaluate.
-              userScopeRefusesOwnership = fires boUserProfile;
+              userScopeRefusesOwnership = fires bobUserProfile;
             };
 
             expected = {
               equivalence = true;
               established = [
-                "ana-alone"
+                "alice-alone"
                 "api-token"
                 "ops-handover"
                 "ops-tooling"
@@ -554,11 +555,11 @@ in
               selectionIsScopeFree = true;
               entry = {
                 format = "yaml";
-                key = "ana_alone";
+                key = "alice_alone";
                 mode = "0440";
-                name = "ana-alone";
-                path = "/home/ana/.config/safix-fixture/ana-alone";
-                sopsFile = "/secrets/safix/users/ana/secrets.yaml";
+                name = "alice-alone";
+                path = "/home/alice/.config/safix-fixture/alice-alone";
+                sopsFile = "/secrets/safix/users/alice/secrets.yaml";
               };
 
               inert = {
@@ -598,7 +599,7 @@ in
                     configured = true;
                     cfg = {
                       lib = safix;
-                      user = "ana";
+                      user = "alice";
                       machine = null;
                       hostname = null;
                     };
@@ -657,7 +658,7 @@ in
                         configured = true;
                         cfg = {
                           lib = null;
-                          user = "ana";
+                          user = "alice";
                           machine = null;
                           hostname = null;
                         };
@@ -671,7 +672,7 @@ in
                   configured = true;
                   cfg = {
                     lib = safix;
-                    user = "ana";
+                    user = "alice";
                     machine = null;
                     inherit hostname;
                   };
@@ -684,7 +685,7 @@ in
               flakeWithoutLib = {
                 refuses =
                   fires
-                    (mkHome "ana" [
+                    (mkHome "alice" [
                       config.flake.homeModules.default
                       { safix.flake = { }; }
                     ]).config.safix.lib;
@@ -717,11 +718,11 @@ in
                     [
                       (homeCommon.noIdentityMessage {
                         cfg = {
-                          user = "ana";
+                          user = "alice";
                           machine = null;
                           inherit hostname;
                         };
-                        resolved.ana-alone = { };
+                        resolved.alice-alone = { };
                       })
                     ];
                 withIdentity = sortNames (builtins.attrNames identityGivenProfile.config.safix.secrets);
@@ -739,9 +740,9 @@ in
                     [
                       "'zed' is not a declared user of flake.safix.users"
                       "safix.user"
-                      "  - ana\n"
-                      "  - bo\n"
-                      "  - cy\n"
+                      "  - alice\n"
+                      "  - bob\n"
+                      "  - carol\n"
                     ]
                     [ (resolve.unknownUserMessage config.flake.safix.users "zed") ];
               };
@@ -759,8 +760,8 @@ in
                   names
                     [
                       "safix"
-                      "flake.safix.users.ana.sharedWith names 'dz'"
-                      "flake.safix.users.bo.recipient is null"
+                      "flake.safix.users.alice.sharedWith names 'dz'"
+                      "flake.safix.users.bob.recipient is null"
                     ]
                     [ (homeCommon.violationMessage brokenBinding) ];
               };
@@ -790,7 +791,7 @@ in
                 refuses = true;
                 namesTheOptions = true;
                 withIdentity = [
-                  "ana-alone"
+                  "alice-alone"
                   "api-token"
                   "ops-handover"
                   "ops-tooling"
@@ -813,21 +814,21 @@ in
           safix-consumption-ordering = mkStructuralCheck {
             name = "safix-consumption-ordering";
             actual = {
-              present = builtins.elem "safixIdentityPreflight" anaOrder;
+              present = builtins.elem "safixIdentityPreflight" aliceOrder;
 
               # The guarantee the preflight's own message rests on.
-              safixBeforeCheckLinkTargets = before anaOrder "safixIdentityPreflight" "checkLinkTargets";
+              safixBeforeCheckLinkTargets = before aliceOrder "safixIdentityPreflight" "checkLinkTargets";
 
               # The reason it has to exist: sops-nix's entry is registered as a
               # bare string, so it sorts wherever the DAG puts it, which is after
               # the point at which a refusal would still be atomic.
-              provisionerAfterCheckLinkTargets = before anaOrder "checkLinkTargets" "sops-nix";
+              provisionerAfterCheckLinkTargets = before aliceOrder "checkLinkTargets" "sops-nix";
 
               # The stronger fact home.nix's non-atomicity prose rests on: the
               # provisioner runs after the generation is linked and after the
               # systemd daemon reload, so a failure there is loud but late.
-              provisionerAfterLinkGeneration = before anaOrder "linkGeneration" "sops-nix";
-              provisionerAfterReloadSystemd = before anaOrder "reloadSystemd" "sops-nix";
+              provisionerAfterLinkGeneration = before aliceOrder "linkGeneration" "sops-nix";
+              provisionerAfterReloadSystemd = before aliceOrder "reloadSystemd" "sops-nix";
 
               # Read, do not decrypt: the script names each configured identity and
               # exits non-zero, and it invokes no decryptor. `runsTheDecryptor`
@@ -837,10 +838,10 @@ in
               # rather than implying that a readable identity can open the files.
               script =
                 let
-                  text = (moduleForm "ana").config.home.activation.safixIdentityPreflight.data;
+                  text = (moduleForm "alice").config.home.activation.safixIdentityPreflight.data;
                 in
                 {
-                  namesTheIdentity = lib.hasInfix "/home/ana/.ssh/agenix" text;
+                  namesTheIdentity = lib.hasInfix "/home/alice/.ssh/agenix" text;
                   refuses = lib.hasInfix "exit 1" text;
                   runsTheDecryptor = lib.hasInfix "bin/sops-install-secrets" text;
                   statesItsLimit = lib.hasInfix "readability" text && lib.hasInfix "not a recipient" text;

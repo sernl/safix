@@ -236,8 +236,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// Which help text an invocation asks for, if any.
 ///
 /// The whole argument list is scanned rather than only its head, because the
-/// shell runtime scans it: `safix list ana -h` explains `list` rather than
-/// listing ana's secrets, and an operator who appends `-h` to a command they
+/// shell runtime scans it: `safix list alice -h` explains `list` rather than
+/// listing alice's secrets, and an operator who appends `-h` to a command they
 /// have already typed gets the explanation.
 fn help_requested(subcommand: &str, rest: &[String]) -> Option<&'static str> {
     if !rest

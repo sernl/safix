@@ -94,25 +94,25 @@ in
       # The configuration an entry's `path` is a function of. A fixture stands in
       # for the consumer's own config here, which is the whole reason `path` is a
       # function: safix cannot know the shape of the tree it lands in.
-      fixtureCfg.home.homeDirectory = "/home/ana";
+      fixtureCfg.home.homeDirectory = "/home/alice";
 
       materializations = {
-        ana-user = safix.materialize {
-          user = "ana";
+        alice-user = safix.materialize {
+          user = "alice";
           hostname = "workstation";
           tags = [ ];
           scope = "user";
         } fixtureCfg;
 
-        ana-system = safix.materialize {
-          user = "ana";
+        alice-system = safix.materialize {
+          user = "alice";
           hostname = "workstation";
           tags = [ ];
           scope = "system";
         } fixtureCfg;
 
-        bo-system = safix.materialize {
-          user = "bo";
+        bob-system = safix.materialize {
+          user = "bob";
           hostname = "server";
           tags = [ ];
           scope = "system";
@@ -120,12 +120,13 @@ in
       };
 
       # ── the perturbations ──
-      keylessGrantee = perturbed { users.bo.recipient = null; };
+      keylessGrantee = perturbed { users.bob.recipient = null; };
       misspelledTool = perturbed {
-        users.ana.private.api-token.generator.runtimeInputs = [ "opensll" ];
+        users.alice.private.api-token.generator.runtimeInputs = [ "opensll" ];
       };
       collidingPaths = perturbed {
-        users.ana.private.api-token.path = cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/ana-alone";
+        users.alice.private.api-token.path =
+          cfg: "${cfg.home.homeDirectory}/.config/safix-fixture/alice-alone";
       };
 
       plan = policy.plan registry;
@@ -141,8 +142,8 @@ in
         rules = plan.rules ++ [
           {
             pathRegex = "^.*\\.yaml$";
-            audience = [ "ana" ];
-            anchors = [ "ana-safix" ];
+            audience = [ "alice" ];
+            anchors = [ "alice-safix" ];
           }
         ];
       };
@@ -158,7 +159,7 @@ in
       metacharAudiences = lib.mapAttrs (_f: a: a // { dir = swapSeparator a.dir; }) audiences;
 
       drift = pkgs.writeText "safix-drifted-policy" (
-        lib.replaceStrings [ fixture.anaKey ] [ fixture.cyKey ] safix.policyText
+        lib.replaceStrings [ fixture.aliceKey ] [ fixture.carolKey ] safix.policyText
       );
       generated = pkgs.writeText "safix-generated-policy" safix.policyText;
 
@@ -193,7 +194,7 @@ in
 
           # 8.6 — a grant to someone holding no key. The message has to name the
           # person, because the remedy is theirs.
-          custodyDrill = namesOneOf [ "bo" ] (safixChecks.custodyMessages keylessGrantee);
+          custodyDrill = namesOneOf [ "bob" ] (safixChecks.custodyMessages keylessGrantee);
 
           # 8.5 — a misspelled runtime tool, which is otherwise discovered at a
           # rotation. The message has to name the spelling that was written.
@@ -252,7 +253,7 @@ in
               collidingPaths
               // {
                 root = ./.;
-                user = "ana";
+                user = "alice";
                 hostname = "workstation";
                 tags = [ ];
                 scope = "user";
@@ -264,19 +265,19 @@ in
         expected = {
           fixtureRoster = {
             people = [
-              "ana"
-              "bo"
-              "cy"
+              "alice"
+              "bob"
+              "carol"
             ];
             files = [
-              "secrets/safix/shared/%fixture-web,ana/secrets.yaml"
-              "secrets/safix/shared/ana,bo/secrets.yaml"
-              "secrets/safix/users/ana/secrets.yaml"
-              "secrets/safix/users/bo/secrets.yaml"
+              "secrets/safix/shared/%fixture-web,alice/secrets.yaml"
+              "secrets/safix/shared/alice,bob/secrets.yaml"
+              "secrets/safix/users/alice/secrets.yaml"
+              "secrets/safix/users/bob/secrets.yaml"
             ];
             generators = [
-              "ana/api-token"
-              "ana/wg-private"
+              "alice/api-token"
+              "alice/wg-private"
             ];
           };
           quietOnFixture = {

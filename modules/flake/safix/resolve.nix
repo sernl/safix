@@ -567,7 +567,7 @@ let
   #
   # Three answers, and two of them are throws. An ungenerated public output names
   # the command that would produce it, because an evaluation failing with "run
-  # `safix generate ana wg-public`" is strictly better than one failing with a
+  # `safix generate alice wg-public`" is strictly better than one failing with a
   # path that is not there — that message is clan's and is copied.
   #
   # A secret output is where this departs from clan, which leaves the option

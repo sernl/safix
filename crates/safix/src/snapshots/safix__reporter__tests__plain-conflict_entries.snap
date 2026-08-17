@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: secrets/safix/users/ana/secrets.yaml has unmerged conflict entries. Resolve them before setting a secret.
+safix: secrets/safix/users/alice/secrets.yaml has unmerged conflict entries. Resolve them before setting a secret.

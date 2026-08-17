@@ -240,8 +240,12 @@ mod tests {
 
     #[test]
     fn the_epilogue_names_the_public_half_and_never_a_file_of_private_ones() {
-        let rendered = epilogue("ana", "/home/ana/.config/sops/age/keys.txt", "age1fixture");
-        assert!(rendered.contains("flake.safix.users.ana.recipient = \"age1fixture\";"));
+        let rendered = epilogue(
+            "alice",
+            "/home/alice/.config/sops/age/keys.txt",
+            "age1fixture",
+        );
+        assert!(rendered.contains("flake.safix.users.alice.recipient = \"age1fixture\";"));
         assert!(rendered.contains("The private half stays in that file and is not printed."));
         assert!(rendered.ends_with("names the private half.\n"));
     }

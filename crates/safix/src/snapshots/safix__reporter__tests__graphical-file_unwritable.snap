@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::file_unwritable
 
-  × could not write secrets/safix/users/ana/secrets.yaml
+  × could not write secrets/safix/users/alice/secrets.yaml
   ╰─▶ permission denied

@@ -2,8 +2,8 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: clan refused ana-workstation ntfy/token, transferring the mapping 'ntfy-token'.
+safix: clan refused alice-workstation ntfy/token, transferring the mapping 'ntfy-token'.
 
 clan said:
 
-Error: Machine ana-workstation does not exist
+Error: Machine alice-workstation does not exist

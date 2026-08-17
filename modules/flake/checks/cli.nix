@@ -89,7 +89,7 @@
 # operator cannot act on sops' own wording, because the rule they are missing is
 # generated.
 # Pointing `--filename-override` at the writer's own file rather than at the
-# target's path fails `set-new`, whose shared file then names ana and not bo.
+# target's path fails `set-new`, whose shared file then names alice and not bob.
 # The fixture mints two distinct recipients for that drill to have anything to
 # catch: with one key under both anchors, a file encrypted to the writer alone
 # satisfies every other assertion and hands the other party a file they cannot

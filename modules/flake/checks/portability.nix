@@ -79,8 +79,8 @@ let
     }).config.flake.safix.lib;
 
   # ── the fleet the three shapes resolve ──
-  # ana holds four entries and grants one to a machine, one to a group and one to
-  # a service. bo is the group's other member; deck is the machine, which ana owns
+  # alice holds four entries and grants one to a machine, one to a group and one to
+  # a service. bob is the group's other member; deck is the machine, which alice owns
   # and the service runs on.
   #
   # The service declares no ownership, which is what lets one fleet reach all three
@@ -90,8 +90,8 @@ let
   # is not something the agreement comparison can express.
   fleet = {
     users = {
-      ana = {
-        recipient = keyOf "ana";
+      alice = {
+        recipient = keyOf "alice";
         private = {
           fleet-token = { };
           oncall-token = { };
@@ -105,20 +105,20 @@ let
         };
         perTag.portable.omit.laptop-token = { };
       };
-      bo.recipient = keyOf "bo";
+      bob.recipient = keyOf "bob";
     };
     machines.deck = {
       recipient = keyOf "deck";
-      owner = "ana";
+      owner = "alice";
       tags = [ "portable" ];
     };
     services.nginx = {
       machines = [ "deck" ];
-      owner = "ana";
+      owner = "alice";
     };
     groups.oncall.members = [
-      "ana"
-      "bo"
+      "alice"
+      "bob"
     ];
     silos.corp.groups = [ "oncall" ];
   };
@@ -140,26 +140,26 @@ let
   # named is what stops the resolution.
   broken = {
     keylessMachine = {
-      users.ana = {
-        recipient = keyOf "ana";
+      users.alice = {
+        recipient = keyOf "alice";
         private.token = { };
         sharedWith.deck.token = { };
       };
-      machines.deck.owner = "ana";
+      machines.deck.owner = "alice";
     };
 
     crossSilo = {
       users = {
-        ana = {
-          recipient = keyOf "ana";
+        alice = {
+          recipient = keyOf "alice";
           private.token = { };
           sharedWith.contractors.token = { };
         };
-        bo.recipient = keyOf "bo";
+        bob.recipient = keyOf "bob";
       };
       groups = {
-        staff.members = [ "ana" ];
-        contractors.members = [ "bo" ];
+        staff.members = [ "alice" ];
+        contractors.members = [ "bob" ];
       };
       silos.corp.groups = [
         "staff"
@@ -168,8 +168,8 @@ let
     };
 
     groupCycle = {
-      users.ana = {
-        recipient = keyOf "ana";
+      users.alice = {
+        recipient = keyOf "alice";
         private.token = { };
         sharedWith.outer.token = { };
       };
@@ -180,8 +180,8 @@ let
     };
 
     ownerOfUnownedMachine = {
-      users.ana = {
-        recipient = keyOf "ana";
+      users.alice = {
+        recipient = keyOf "alice";
         private.token = { };
         sharedWith."ownerOf.deck".token = { };
       };
@@ -190,8 +190,8 @@ let
 
     collidingSubjectName = {
       users = {
-        ana = {
-          recipient = keyOf "ana";
+        alice = {
+          recipient = keyOf "alice";
           private.token = { };
         };
         deck.recipient = keyOf "deck";
@@ -277,13 +277,13 @@ in
             config.flake.homeModules.default
             {
               home = {
-                username = "ana";
-                homeDirectory = "/home/ana";
+                username = "alice";
+                homeDirectory = "/home/alice";
                 stateVersion = "24.05";
               };
               safix = {
                 lib = safix;
-                identity.sshKeyPaths = [ "/home/ana/.ssh/agenix" ];
+                identity.sshKeyPaths = [ "/home/alice/.ssh/agenix" ];
               }
               // subject
               // extra;
@@ -307,12 +307,12 @@ in
         {
           person =
             if nixos then
-              viewOf (nixosFor { user = "ana"; } projection).sops.secrets
+              viewOf (nixosFor { user = "alice"; } projection).sops.secrets
             else
               viewOf
                 (home {
                   subject = {
-                    user = "ana";
+                    user = "alice";
                   }
                   // hostnameForHome;
                 }).sops.secrets;
@@ -374,11 +374,11 @@ in
           safix = projectionOf broken.${fleetName};
         in
         {
-          nixos = fires (nixosFor { user = "ana"; } safix).sops.secrets;
+          nixos = fires (nixosFor { user = "alice"; } safix).sops.secrets;
           homeInNixos =
             fires
               (homeFor {
-                subject.user = "ana";
+                subject.user = "alice";
                 inherit safix;
                 osConfig = insideNixos;
               }).safix.secrets;
@@ -386,7 +386,7 @@ in
             fires
               (homeFor {
                 subject = {
-                  user = "ana";
+                  user = "alice";
                   inherit hostname;
                 };
                 inherit safix;
@@ -541,11 +541,11 @@ in
                 "nginx/service-token"
               ]);
               placement = lib.genAttrs allShapes (_: {
-                fleet-token = "/secrets/safix/shared/ana,deck/secrets.yaml";
-                laptop-token = "/secrets/safix/users/ana/secrets.yaml";
-                oncall-token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
-                service-token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
-                "nginx/service-token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+                fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+                laptop-token = "/secrets/safix/users/alice/secrets.yaml";
+                oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
+                service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                "nginx/service-token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               });
             };
 
@@ -554,7 +554,7 @@ in
               key = "fleet-token";
               mode = "0400";
               name = "fleet-token";
-              sopsFile = "/secrets/safix/shared/ana,deck/secrets.yaml";
+              sopsFile = "/secrets/safix/shared/alice,deck/secrets.yaml";
             });
 
             systemIdentity = {
@@ -570,13 +570,13 @@ in
               key = "service-token";
               mode = "0400";
               name = "nginx/service-token";
-              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
             });
 
             servicePath = {
               nixos = "/run/secrets/nginx/service-token";
-              homeInNixos = "/home/ana/.config/sops-nix/secrets/nginx/service-token";
-              standalone = "/home/ana/.config/sops-nix/secrets/nginx/service-token";
+              homeInNixos = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
+              standalone = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
             };
 
             serviceOwnership = {
@@ -599,10 +599,10 @@ in
             };
 
             grantsStayWithTheirOwner = {
-              fleet-token = "/secrets/safix/shared/ana,deck/secrets.yaml";
-              laptop-token = "/secrets/safix/users/ana/secrets.yaml";
-              oncall-token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
-              service-token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+              laptop-token = "/secrets/safix/users/alice/secrets.yaml";
+              oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
+              service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
             };
           };
         };

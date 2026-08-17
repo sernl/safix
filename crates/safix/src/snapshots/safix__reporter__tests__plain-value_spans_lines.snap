@@ -2,7 +2,7 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the value for 'safix/ana/grafana' carries a newline, and the store's own command reads
+safix: the value for 'safix/alice/grafana' carries a newline, and the store's own command reads
 an entry's password as one line. Nothing was written.
 
 What would land is the bytes before the first newline, which is a mirror

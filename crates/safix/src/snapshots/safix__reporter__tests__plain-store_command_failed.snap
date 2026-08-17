@@ -2,13 +2,13 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: the store's own command refused over the entry 'safix/ana/grafana'.
+safix: the store's own command refused over the entry 'safix/alice/grafana'.
 
 It was run as:
 
-    keepassxc-cli add --quiet --password-prompt /home/ana/.keys/master.kdbx safix/ana/grafana
+    keepassxc-cli add --quiet --password-prompt /home/alice/.keys/master.kdbx safix/alice/grafana
 
 No value is in that line: the database's password and the entry's both
 travel standard input. The command said:
 
-Could not create entry with path safix/ana/grafana.
+Could not create entry with path safix/alice/grafana.

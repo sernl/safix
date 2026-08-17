@@ -692,11 +692,11 @@ mod tests {
     #[test]
     fn an_incomplete_run_says_so_and_says_that_nothing_was_undone() {
         let rendered = epilogue(
-            "ana",
+            "alice",
             "12345678",
             "age1yubikey1qfixture",
             &proof::Outcome::Refused {
-                file: String::from("secrets/safix/users/ana/secrets.yaml"),
+                file: String::from("secrets/safix/users/alice/secrets.yaml"),
                 status: 1,
             },
         );
@@ -708,15 +708,15 @@ mod tests {
     #[test]
     fn a_proven_run_names_the_file_it_opened() {
         let rendered = epilogue(
-            "ana",
+            "alice",
             "12345678",
             "age1yubikey1qfixture",
             &proof::Outcome::Proven {
-                file: String::from("secrets/safix/users/ana/secrets.yaml"),
+                file: String::from("secrets/safix/users/alice/secrets.yaml"),
             },
         );
         assert!(rendered.contains("The proof passed"));
-        assert!(rendered.contains("secrets/safix/users/ana/secrets.yaml"));
+        assert!(rendered.contains("secrets/safix/users/alice/secrets.yaml"));
         assert!(!rendered.contains("INCOMPLETE"));
     }
 

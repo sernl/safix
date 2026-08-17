@@ -28,7 +28,7 @@ When standard input is not a terminal the value is read from it instead, whole,
 and stored exactly as sent — `echo` pipes a trailing newline and `printf` does
 not, and nothing here removes one:
 
-  printf '%s' \"$TOKEN\" | safix set ana grafana-token
+  printf '%s' \"$TOKEN\" | safix set alice grafana-token
 
 This replaces nothing. A terminal still gets the prompt above, unchanged. What
 the piped form drops is the confirmation, and that is the point rather than a

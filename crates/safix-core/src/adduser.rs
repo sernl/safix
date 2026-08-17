@@ -434,10 +434,10 @@ mod tests {
 
     #[test]
     fn the_scaffold_names_the_recipient_and_no_private_key() {
-        let text = declaration("ana", WELL_FORMED);
+        let text = declaration("alice", WELL_FORMED);
         assert!(text.contains(&format!("recipient = \"{WELL_FORMED}\";")));
-        assert!(text.contains("flake.safix.users.ana = {"));
+        assert!(text.contains("flake.safix.users.alice = {"));
         assert!(text.contains("carries = { };"));
-        assert!(text.starts_with("# safix/users/ana.nix — ana's custody record."));
+        assert!(text.starts_with("# safix/users/alice.nix — alice's custody record."));
     }
 }

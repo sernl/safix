@@ -4,5 +4,5 @@ expression: render_graphical(&refusal)
 ---
 safix::no_value_yet
 
-  × secrets/safix/users/bo/secrets.yaml does not exist yet, so 'bo-service'
-  │ has no value. Set one with: safix set bo bo-service
+  × secrets/safix/users/bob/secrets.yaml does not exist yet, so 'bob-service'
+  │ has no value. Set one with: safix set bob bob-service

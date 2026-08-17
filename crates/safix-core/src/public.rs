@@ -112,11 +112,13 @@ mod tests {
 
     #[test]
     fn a_path_is_public_only_under_the_prefix_and_at_the_leaf() {
-        assert!(is_public_path("public/safix/users/ana/wg-public/value"));
-        assert!(is_public_path("public/safix/shared/ana,bo/wg-public/value"));
-        assert!(!is_public_path("secrets/safix/users/ana/secrets.yaml"));
+        assert!(is_public_path("public/safix/users/alice/wg-public/value"));
+        assert!(is_public_path(
+            "public/safix/shared/alice,bob/wg-public/value"
+        ));
+        assert!(!is_public_path("secrets/safix/users/alice/secrets.yaml"));
         assert!(!is_public_path(
-            "public/safix/users/ana/wg-public/notes.txt"
+            "public/safix/users/alice/wg-public/notes.txt"
         ));
     }
 }
