@@ -40,12 +40,14 @@ zeroize = "1"
 # Terminal control for the two prompts of `set`, the two signals an aborted
 # `set` has to shred its scratch file on, and `statfs`, which is how the staging
 # root asks the kernel whether a mount is memory-backed rather than inferring it
-# from the path. `process` and `pty` are the integration suite's: a drill that
-# signals the command alone rather than its whole process group is what opens the
-# window in which a child of the runtime is still running, and a pseudoterminal is
-# the only way left to reach `set`'s prompt path now that a pipe takes the stream
-# source. All are safe wrappers over what would otherwise be `unsafe` in a crate
-# that forbids it.
+# from the path. `process` is the integration suite's: a drill that signals the
+# command alone rather than its whole process group is what opens the window in
+# which a child of the runtime is still running. `pty` has two callers with the
+# same need. The suite reaches `set`'s prompt path with one, because a pipe now
+# takes the stream source instead; and `safix enroll` drives ykman and the age
+# plugin through one, because each reads a credential from a terminal and from
+# nowhere else, and an argument vector is not a channel a PIN may travel. All are
+# safe wrappers over what would otherwise be `unsafe` in a crate that forbids it.
 rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs", "process", "pty"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
