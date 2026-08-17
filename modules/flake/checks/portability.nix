@@ -1,9 +1,10 @@
 # Holds every subject-model resolution and refusal over all three consumption
 # shapes, and fails on a divergence between them.
 #
-# The claim is design decision D6's: machines, groups, silos and ownership behave
-# identically whether a profile is a NixOS system scope, a home-manager profile
-# inside NixOS, or a standalone home-manager profile on a non-NixOS distribution.
+# The claim is design decision D6's: machines, services, groups, silos and
+# ownership behave identically whether a profile is a NixOS system scope, a
+# home-manager profile inside NixOS, or a standalone home-manager profile on a
+# non-NixOS distribution.
 # It is a claim about three evaluations rather than about one function, so three
 # profiles are evaluated over one fleet and their answers compared to each other
 # — not to a literal. A literal would say what the answer is; the comparison says
@@ -45,6 +46,13 @@
 # module.
 # Requiring a hostname for a machine resolution fails
 # `standalone.resolvesWithoutAHostname`.
+# Keying a service's entries by the bare name fails `serviceEntry` and
+# `servicePath` on every shape; leaving `sopsKey` unset for one fails
+# `serviceEntry.key`, which is the severe half — the provisioner would read the
+# composed name as the key inside the document.
+# Dropping a service's ownership at user scope rather than refusing leaves
+# `serviceOwnership.system` green and fails its two home fields, which is the
+# asymmetry this pair exists to hold.
 {
   config,
   inputs,
@@ -71,8 +79,15 @@ let
     }).config.flake.safix.lib;
 
   # ── the fleet the three shapes resolve ──
-  # ana holds two entries and grants one to a machine and one to a group. bo is
-  # the group's other member; deck is the machine, which ana owns.
+  # ana holds four entries and grants one to a machine, one to a group and one to
+  # a service. bo is the group's other member; deck is the machine, which ana owns
+  # and the service runs on.
+  #
+  # The service declares no ownership, which is what lets one fleet reach all three
+  # shapes: an ownership axis exists at system scope alone, so a service declaring
+  # one cannot resolve at the two home shapes at all. That asymmetry is held over
+  # `owningService` below rather than here, because a refusal on two of three shapes
+  # is not something the agreement comparison can express.
   fleet = {
     users = {
       ana = {
@@ -81,10 +96,12 @@ let
           fleet-token = { };
           oncall-token = { };
           laptop-token = { };
+          service-token = { };
         };
         sharedWith = {
           deck.fleet-token = { };
           oncall.oncall-token = { };
+          nginx.service-token = { };
         };
         perTag.portable.omit.laptop-token = { };
       };
@@ -95,11 +112,25 @@ let
       owner = "ana";
       tags = [ "portable" ];
     };
+    services.nginx = {
+      machines = [ "deck" ];
+      owner = "ana";
+    };
     groups.oncall.members = [
       "ana"
       "bo"
     ];
     silos.corp.groups = [ "oncall" ];
+  };
+
+  # The same declaration with the service claiming an account and a group. The
+  # system scope carries both to the provisioner; a user-scope profile has no axis
+  # for either and refuses rather than dropping the claim.
+  owningService = lib.recursiveUpdate fleet {
+    services.nginx = {
+      user = "nginx";
+      group = "nginx";
+    };
   };
 
   projection = projectionOf fleet;
@@ -295,6 +326,21 @@ in
                     machine = "deck";
                   };
                 }).sops.secrets;
+
+          # The machine's arrival unstripped, which is where the path the
+          # provisioner parks each entry at is readable. It is outside `decided`
+          # because a system path and a home path legitimately differ; what is
+          # asserted over it is that the provisioner accepts a service's composed
+          # name and nests it, on each shape, rather than that the three agree.
+          machineRaw =
+            if nixos then
+              (nixosFor { machine = "deck"; } projection).sops.secrets
+            else
+              (home {
+                subject = {
+                  machine = "deck";
+                };
+              }).sops.secrets;
         };
 
       homeShape = osConfig: args: homeFor (args // { safix = projection; } // { inherit osConfig; });
@@ -409,6 +455,45 @@ in
             # not the others.
             refusals = lib.genAttrs (builtins.attrNames broken) refusalsOf;
 
+            # ── the service, across the three shapes ──
+            # The entry a service was granted arrives on the machine the service
+            # runs on, under the service's own composed name, and the provisioner
+            # takes that name and nests the file under it. Read off each shape's own
+            # arrival rather than from safix, because the claim is about what
+            # sops-nix does with the name safix hands it.
+            serviceEntry = lib.mapAttrs (_n: v: v.machine."nginx/service-token") shapes;
+            servicePath = lib.mapAttrs (_n: v: v.machineRaw."nginx/service-token".path) shapes;
+
+            # The ownership asymmetry, over the one capability that is scope-specific.
+            # The system scope carries the service's account and group to the
+            # provisioner; the two home shapes have no axis for either and refuse.
+            # An ownerless service resolves at every shape, which the fleet above is
+            # the whole of.
+            serviceOwnership =
+              let
+                owning = projectionOf owningService;
+              in
+              {
+                system = lib.getAttrs [
+                  "owner"
+                  "group"
+                  "mode"
+                ] (nixosFor { machine = "deck"; } owning).sops.secrets."nginx/service-token";
+                homeInNixos =
+                  fires
+                    (homeFor {
+                      subject.machine = "deck";
+                      safix = owning;
+                      osConfig = insideNixos;
+                    }).safix.secrets;
+                standalone =
+                  fires
+                    (homeFor {
+                      subject.machine = "deck";
+                      safix = owning;
+                    }).safix.secrets;
+              };
+
             # ── the standalone shape ──
             # It resolves a machine's entries with no `osConfig`, no NixOS
             # configuration and no hostname of its own. Nothing about the
@@ -449,12 +534,18 @@ in
                 "fleet-token"
                 "laptop-token"
                 "oncall-token"
+                "service-token"
               ]);
-              machine = lib.genAttrs allShapes (_: [ "fleet-token" ]);
+              machine = lib.genAttrs allShapes (_: [
+                "fleet-token"
+                "nginx/service-token"
+              ]);
               placement = lib.genAttrs allShapes (_: {
                 fleet-token = "/secrets/safix/shared/ana,deck/secrets.yaml";
                 laptop-token = "/secrets/safix/users/ana/secrets.yaml";
                 oncall-token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+                service-token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+                "nginx/service-token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
               });
             };
 
@@ -474,8 +565,35 @@ in
 
             refusals = lib.genAttrs (builtins.attrNames broken) (_: lib.genAttrs allShapes (_: true));
 
+            serviceEntry = lib.genAttrs allShapes (_: {
+              format = "yaml";
+              key = "service-token";
+              mode = "0400";
+              name = "nginx/service-token";
+              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+            });
+
+            servicePath = {
+              nixos = "/run/secrets/nginx/service-token";
+              homeInNixos = "/home/ana/.config/sops-nix/secrets/nginx/service-token";
+              standalone = "/home/ana/.config/sops-nix/secrets/nginx/service-token";
+            };
+
+            serviceOwnership = {
+              system = {
+                owner = "nginx";
+                group = "nginx";
+                mode = "0400";
+              };
+              homeInNixos = true;
+              standalone = true;
+            };
+
             standalone = {
-              machine = [ "fleet-token" ];
+              machine = [
+                "fleet-token"
+                "nginx/service-token"
+              ];
               resolvesWithoutAHostname = true;
               tagsComeFromTheDeclaration = [ "portable" ];
             };
@@ -484,6 +602,7 @@ in
               fleet-token = "/secrets/safix/shared/ana,deck/secrets.yaml";
               laptop-token = "/secrets/safix/users/ana/secrets.yaml";
               oncall-token = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+              service-token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
             };
           };
         };
