@@ -132,6 +132,33 @@
 # commit whose message names only what safix did. Accepting `--host` with no hook
 # configured fails the same check, which then finds a hostname silently
 # discarded.
+#
+# ── the enrollment drills, all observed red during this change ──
+# Sampling the pseudo-terminal's echo state only when the master has nothing to
+# read fails `enroll-one-attempt`: the child restores the echo the instant it has
+# the line and turns it off again for a second prompt, both inside one polling
+# interval, so a watcher looking for the transition sees none and the run stalls
+# where it should have refused. The check reads the attempt count for that reason
+# rather than only the refusal.
+# Inferring the child's exit from the master reporting `EIO` rather than asking it
+# fails every enrollment check: `Command::spawn` borrows the command rather than
+# consuming it, so the parent holds a description of the slave for as long as the
+# command is alive and the master never reports it.
+# Dispatching the card stub's plugin role on `--generate` appearing anywhere
+# rather than on the word the vector opens with fails `enroll` and
+# `enroll-one-attempt`: `piv access change-management-key --protect --generate`
+# carries it too, and the stub then prompts for a PIN in the middle of
+# provisioning.
+# Staging every governed file rather than the ones that exist fails `enroll` on
+# the commit: a governed file is a path a declaration implies rather than a file
+# anybody has written, and `git add` on an absent path refuses the whole ceremony.
+# Taking the first identity file the spy recorded rather than the first that is
+# not the ambient one fails `enroll-proof-isolation`, which is the assertion that
+# exists to catch a proof reading the software key: every invocation before the
+# proof was handed that key, and the proof's own is the one after them.
+# Writing a newline after the last value fed to a store rather than only between
+# values fails `enroll-custody` on the round trip, which finds a byte in the
+# stored credential that nobody put there.
 { ... }:
 {
   perSystem =
@@ -372,6 +399,73 @@
       checks.safix-adduser-hook =
         mode "safix-adduser-hook" "custody"
           "host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit";
+
+      # The enrollment ceremony over one factory-fresh card: a generated PIN and
+      # a distinct generated PUK reach ykman as flags, a random management key is
+      # put on the card and named nowhere, the generator is answered once on a
+      # terminal, the identity block lands where keygen appends, the recipient
+      # lands in recoveryRecipients, the credentials are stored through the
+      # ordinary write path, and no argument vector anywhere names the OTP
+      # applet. The proof does not pass, because no card is present and the
+      # isolation is what decides that — see the head of
+      # `crates/safix/tests/enrollment.rs`.
+      checks.safix-enroll =
+        mode "safix-enroll" "enrollment"
+          "enrollment_provisions_generates_wires_and_commits_once";
+
+      # A backup card is the same verb run again: its own identity, its own
+      # recipient beside the first, and neither run knowing about the other.
+      checks.safix-enroll-backup =
+        mode "safix-enroll-backup" "enrollment"
+          "a_backup_card_sits_beside_the_first_and_changes_nothing_about_it";
+
+      # Every refusal the card surface produces, each for its own reason: two
+      # cards with no serial named, no smartcard service, no card, a touch policy
+      # of never, and an OTP slot asked for under any of the spellings somebody
+      # would reach for. The OTP one is refused with the database-lockout hazard
+      # named rather than as an unknown option, which is the whole point of it
+      # being a refusal.
+      checks.safix-enroll-refusals =
+        mode "safix-enroll-refusals" "enrollment"
+          "the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone";
+
+      # A PIN the card refuses costs one retry and not three. The claim is the
+      # count: a run that answered every prompt would walk a card's counter to
+      # zero and block it, which is a card nobody can use again without the PUK.
+      checks.safix-enroll-one-attempt =
+        mode "safix-enroll-one-attempt" "enrollment"
+          "a_rejected_pin_aborts_after_one_attempt";
+
+      # The proof's isolation, which is what makes the proof about the card. An
+      # ambient software identity opens the file the proof names, and the run is
+      # handed an identity source holding one line — the card's stub — so a proof
+      # that passed with no card would mean the isolation had failed.
+      checks.safix-enroll-proof-isolation =
+        mode "safix-enroll-proof-isolation" "enrollment"
+          "the_proof_is_isolated_from_every_ambient_identity";
+
+      # The proof machinery's passing path, hardware-free: the isolated source
+      # opens a file it is a recipient of, and one that is not a recipient does
+      # not. A separate check from the isolation because wrapping a data key to a
+      # card's recipient runs the plugin, and the plugin runs the card.
+      checks.safix-enroll-proof =
+        mode "safix-enroll-proof" "enrollment"
+          "the_proof_opens_a_file_with_the_isolated_source_alone";
+
+      # Registration reaches clan through clan's own command and the consumer
+      # through flake.safix.enrollHook, which receives the person, the serial and
+      # the recipient, and runs after safix's commit has landed — so what it
+      # writes is left uncommitted and safix's message names only what safix did.
+      checks.safix-enroll-hook =
+        mode "safix-enroll-hook" "enrollment"
+          "clan_and_the_hook_receive_the_enrollment_after_it_is_committed";
+
+      # The credentials' second home: they reach the store on standard input,
+      # round-trip through the same transport, and neither store's argument vector
+      # ever carries one.
+      checks.safix-enroll-custody =
+        mode "safix-enroll-custody" "enrollment"
+          "the_mirrored_credentials_travel_standard_input_and_round_trip";
 
       # A shared entry is one value: both carriers' placements name one file and
       # one key, one of them mints, the other reads back what was minted, and

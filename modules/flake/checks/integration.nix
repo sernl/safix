@@ -6,7 +6,7 @@
 # that names a mode runs one test out of that build. Compiling it once per named
 # check would be the same evidence at twenty-two times the cost.
 #
-# The three programs a test drives are named in the environment rather than found
+# The programs a test drives are named in the environment rather than found
 # on a path, because `CARGO_BIN_EXE_*` is fixed when the test compiles and points
 # inside the build directory of whatever compiled it. `crates/safix/tests/harness`
 # reads these and falls back to the compiled-in path, so `cargo test` in a
@@ -68,6 +68,7 @@ in
           SAFIX_TEST_NIX_STUB = "${suite}/libexec/safix-nix-stub";
           SAFIX_TEST_SHIM = "${suite}/libexec/safix-test-shim";
           SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
+          SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
         };
       }
       ''
