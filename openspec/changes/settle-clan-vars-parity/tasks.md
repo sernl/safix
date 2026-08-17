@@ -1,9 +1,9 @@
 ## 1. The definition record
 
-- [ ] 1.1 Compute the digest over the canonical generator record — script, `runtimeInputs`, prompts, `files` with modes and secret flags, dependencies, validation — with a leading format-version tag (design D1, D2)
-- [ ] 1.2 Write the record to `state/safix/definitions/...` in the same commit as the minted value, for mint and for regeneration alike; an interrupted mint leaves neither
-- [ ] 1.3 Unit-test the digest: an edit to each field of the record changes it; a value change does not; two mints under one definition agree
-- [ ] 1.4 Integration-test the commit atomicity: the record rides the mint's commit, and an interrupted run leaves no record for the value it did not commit
+- [x] 1.1 Compute the digest over the canonical generator record — script, `runtimeInputs`, prompts, `files` with modes and secret flags, dependencies, validation — with a leading format-version tag (design D1, D2). `crates/safix-core/src/definition.rs` holds the canonical form and `digest.rs` the SHA-256 it is reduced through. The `files` record carries secret flags and no mode: a mode is a registry field of the entry rather than of the generator, does not travel on `Generator`, and decides where a decrypted value lands rather than what a mint produces — recorded in the module's own "What the digest covers"
+- [x] 1.2 Write the record to `state/safix/definitions/...` in the same commit as the minted value, for mint and for regeneration alike; an interrupted mint leaves neither
+- [x] 1.3 Unit-test the digest: an edit to each field of the record changes it; a value change does not; two mints under one definition agree. A value cannot reach the digest at all — `definition::digest` takes the generator record and nothing else — so the second claim is asserted as the two uncovered fields leaving it alone, plus the canonical form's own content
+- [x] 1.4 Integration-test the commit atomicity: the record rides the mint's commit, and an interrupted run leaves no record for the value it did not commit
 
 ## 2. The drift finding
 

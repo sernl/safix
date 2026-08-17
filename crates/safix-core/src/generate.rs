@@ -24,6 +24,16 @@
 //! several roots holding plaintext at once, over a longer window, with no
 //! ordering between the shreds.
 //!
+//! # What a run records about the declaration it ran
+//!
+//! Each generator's outputs are accompanied by a [`definition`] record — a digest
+//! of the declaration that minted them, written in the same commit as the values.
+//! Nothing here reads it; [`crate::check`] does, and reports a value whose
+//! declaration has changed since. It is written from this module because this is
+//! the only place that knows a mint happened, and it rides the mint's own commit
+//! because a record and a value that landed in different commits would be a pair
+//! `git log` reads as two unrelated events.
+//!
 //! # What a run leaves when it stops
 //!
 //! Nothing, up to the generator it stopped in. Each generator's outputs are
@@ -36,6 +46,7 @@
 //! generators that already committed stay committed, which is what the cascade
 //! confirmation warns about before it starts rather than after.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use crate::error::{Error, Result};
@@ -45,7 +56,7 @@ use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::sops::document;
 use crate::workspace::Workspace;
-use crate::{git, public, scratch, set};
+use crate::{definition, git, public, scratch, set};
 
 /// Where a generator's prompts are answered and its cascade confirmed.
 ///
@@ -287,6 +298,20 @@ impl Target {
     }
 }
 
+/// The definition records one generator's run is to leave behind.
+///
+/// One line for the whole run, because one generator has one declaration however
+/// many outputs it writes, and one path per output, because drift is reported
+/// against the entry an operator holds rather than against the generator. They
+/// travel together so that the write path takes one argument rather than a pair
+/// it could be handed out of step.
+struct Records {
+    /// The repository-relative path of each output's record.
+    paths: Vec<String>,
+    /// The line every one of them holds.
+    line: String,
+}
+
 /// One generator: its inputs, its run, its outputs, and one commit.
 fn run_one(
     workspace: &Workspace,
@@ -303,7 +328,20 @@ fn run_one(
     })?;
     let outputs = mine.outputs.get(generator).cloned().unwrap_or_default();
 
+    let record = workspace
+        .resolve(user, generator)?
+        .generator
+        .as_ref()
+        .ok_or_else(|| Error::NoGenerator {
+            user: user.to_owned(),
+            name: generator.to_owned(),
+        })?;
+
     let mut targets = Vec::with_capacity(outputs.len());
+    let mut records = Records {
+        paths: Vec::with_capacity(outputs.len()),
+        line: definition::line(record),
+    };
     let mut missing = 0_usize;
     for output in &outputs {
         let placement = workspace.resolve(user, output)?;
@@ -317,6 +355,9 @@ fn run_one(
         if !holds_a_value(workspace, &target)? {
             missing = missing.saturating_add(1);
         }
+        records
+            .paths
+            .push(definition::record_path(output, placement));
         targets.push(target);
     }
 
@@ -343,15 +384,6 @@ fn run_one(
     for file in &distinct {
         set::refuse_bad_repository_state(workspace, file)?;
     }
-
-    let record = workspace
-        .resolve(user, generator)?
-        .generator
-        .as_ref()
-        .ok_or_else(|| Error::NoGenerator {
-            user: user.to_owned(),
-            name: generator.to_owned(),
-        })?;
 
     let names = outputs.join(", ");
     log(progress, &format!("safix: generating {names} for {user}"));
@@ -394,6 +426,7 @@ fn run_one(
         &distinct,
         &targets,
         &values,
+        &records,
     )
 }
 
@@ -661,6 +694,12 @@ fn validate(
 /// covers the public store, so an encrypted public output would be a document
 /// nothing has a rule for — which is exactly what `safix-public-no-rule` checks
 /// stays impossible.
+///
+/// The definition records ride the same staging and the same commit, for the
+/// reason they exist: a record left behind by a run that did not commit its value
+/// would assert a mint this repository never made, and a value committed without
+/// its record would be one `check` has nothing to say about until the next
+/// rotation.
 fn write(
     workspace: &Workspace,
     progress: &dyn Progress,
@@ -668,6 +707,7 @@ fn write(
     distinct: &[String],
     targets: &[Target],
     values: &[Secret],
+    records: &Records,
 ) -> Result<Outcome> {
     let mut candidates = Vec::with_capacity(distinct.len());
     for relative in distinct {
@@ -752,7 +792,13 @@ fn write(
         candidates.push(candidate);
     }
 
-    for (candidate, relative) in candidates.iter().zip(distinct.iter()) {
+    let staged_records = stage_records(workspace, records)?;
+
+    for (candidate, relative) in candidates
+        .iter()
+        .zip(distinct.iter())
+        .chain(staged_records.iter().zip(records.paths.iter()))
+    {
         let absolute = workspace.absolute(relative);
         std::fs::rename(candidate, &absolute).map_err(|cause| Error::FileUnwritable {
             path: absolute.display().to_string(),
@@ -761,12 +807,55 @@ fn write(
     }
     scratch::keep_dirs();
 
+    let mut committed: Vec<String> = distinct.to_vec();
+    committed.extend(records.paths.iter().cloned());
+
     git::commit_written_files(
         workspace.git(),
         workspace.root(),
         progress,
         message,
-        distinct,
+        &committed,
     )?;
     Ok(Outcome::Ran)
+}
+
+/// Write each definition record to a candidate beside its target.
+///
+/// A candidate and a rename rather than a write in place, which is the discipline
+/// every other write here takes and is what makes an interrupted run leave no
+/// record: the candidate is registered before it exists, so the sweep removes it
+/// however the run ends, and the file at the real path is only ever a complete
+/// one.
+///
+/// The candidate carries no `.yaml` suffix, unlike [`set::candidate_path`]'s.
+/// That suffix is there because sops reads a document's format off the extension,
+/// and nothing here goes through sops: a record is one line of plaintext this
+/// module writes and [`crate::check`] reads.
+fn stage_records(workspace: &Workspace, records: &Records) -> Result<Vec<PathBuf>> {
+    let mut staged = Vec::with_capacity(records.paths.len());
+    for relative in &records.paths {
+        let absolute = workspace.absolute(relative);
+        let mut name = absolute.as_os_str().to_owned();
+        name.push(format!(".safix-tmp.{}", std::process::id()));
+        let candidate = PathBuf::from(name);
+        scratch::register_file(&candidate);
+
+        if let Some(directory) = absolute.parent()
+            && !directory.is_dir()
+        {
+            scratch::register_dir(directory);
+            std::fs::create_dir_all(directory).map_err(|cause| Error::FileUnwritable {
+                path: directory.display().to_string(),
+                cause,
+            })?;
+        }
+
+        std::fs::write(&candidate, &records.line).map_err(|cause| Error::FileUnwritable {
+            path: candidate.display().to_string(),
+            cause,
+        })?;
+        staged.push(candidate);
+    }
+    Ok(staged)
 }

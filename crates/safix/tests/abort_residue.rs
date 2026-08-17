@@ -12,10 +12,11 @@
 //! fixture rather than a race here: sops is a shim that signals the runtime
 //! itself, from inside the window, and then finishes normally.
 //!
-//! Each window is held to four things: the exit status the signal implies, a
+//! Each window is held to five things: the exit status the signal implies, a
 //! repository identical to the one the run found, no candidate document left
-//! beside the target, and the typed value present in no file under the
-//! repository or under the run's temporary directory.
+//! beside the target, no definition record for a value that was never committed,
+//! and the typed value present in no file under the repository or under the run's
+//! temporary directory.
 
 // A test's failure is the point; see the note at the head of `harness/mod.rs`.
 #![allow(
@@ -150,7 +151,7 @@ fn a_signal_during_encryption_stops_before_the_rename() {
     assert_pristine(&fixture, &before, "CANARY-second-value");
 }
 
-/// The four things every interrupted run is held to.
+/// The five things every interrupted run is held to.
 fn assert_pristine(fixture: &Fixture, before: &str, value: &str) {
     assert_eq!(
         fixture.head(),
@@ -165,6 +166,15 @@ fn assert_pristine(fixture: &Fixture, before: &str, value: &str) {
     assert!(
         !fixture.exists(SHARED_FILE),
         "the interrupted run wrote the file"
+    );
+
+    // A record asserts that a value was minted under a declaration. An
+    // interrupted run minted nothing it committed, so a record left behind would
+    // be an assertion about a mint this repository never made — and `check` would
+    // then report drift against a value that is not there.
+    assert!(
+        !fixture.exists("state/safix/definitions"),
+        "the interrupted run left a definition record for a value it did not commit"
     );
 
     let candidates = fixture.scratch_files();
@@ -319,6 +329,58 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
         "an interrupted generator left a staging root"
     );
     assert_pristine(&fixture, &before, "CANARY-mid-generation");
+}
+
+/// A generator interrupted while sops holds its candidate open leaves no
+/// definition record.
+///
+/// The window task 1.4 of `settle-clan-vars-parity` names, and the only one in
+/// which the claim is not vacuous. Every window above it stops before the values
+/// exist, so no record was ever due; here the script has run, the values are in
+/// memory, the candidate document is staged, and the run is one rename away from
+/// committing. A record that landed in this window would assert a mint whose value
+/// the interrupted run did not commit, and the next `check` would report drift
+/// against a value that is not there.
+///
+/// The signal comes from inside sops for the reason the `set` window above gives:
+/// it is a fixture rather than a race. `generate` drives the same `sops set`, so
+/// the same hold applies.
+#[test]
+fn a_generator_interrupted_during_encryption_leaves_no_definition_record() {
+    let mut fixture = Fixture::new();
+    let before = fixture.head();
+
+    fixture.seed_generator(
+        "recorded",
+        ANA_FILE,
+        &[],
+        &serde_json::json!({
+            "dependencies": [], "description": null,
+            "files": {}, "prompts": {}, "share": false,
+            "runtimeInputs": [],
+            "script": "printf 'CANARY-minted-not-committed' > \"$out/recorded\"",
+            "validation": null,
+        }),
+    );
+
+    let sops = real_sops();
+    let run = fixture.run_env(
+        &["generate", "ana", "recorded"],
+        None,
+        &[
+            ("SAFIX_SOPS", shim()),
+            ("SAFIX_SHIM_ROLE", "interrupt"),
+            ("SAFIX_SHIM_SOPS", &sops),
+            ("SAFIX_SHIM_HOLD", "set"),
+        ],
+    );
+
+    assert_eq!(run.code, Some(130), "an interrupted mint exits 130");
+    assert!(
+        !fixture.exists("state/safix/definitions/ana/recorded"),
+        "the interrupted mint recorded a definition for a value it did not commit"
+    );
+    assert_pristine(&fixture, &before, "CANARY-minted-not-committed");
 }
 
 /// A signal while a validation fragment is judging a candidate is not a

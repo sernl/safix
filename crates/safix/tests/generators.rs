@@ -106,11 +106,17 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
 
     // One commit per generator, and the multi-output generator's two files in
     // one of them: a keypair split across two commits is a tree holding halves
-    // that do not match.
+    // that do not match. Each output's definition record rides that same commit,
+    // which is the property `check`'s drift finding rests on.
     assert_ne!(fixture.head(), before, "generate committed nothing");
     let paired = fixture.commit_matching("generate paired, paired-pub");
     assert!(!paired.is_empty(), "no commit names both outputs");
-    let mut expected = vec![ANA_FILE.to_owned(), SHARED_FILE.to_owned()];
+    let mut expected = vec![
+        ANA_FILE.to_owned(),
+        SHARED_FILE.to_owned(),
+        "state/safix/definitions/ana/paired".to_owned(),
+        "state/safix/definitions/ana/paired-pub".to_owned(),
+    ];
     expected.sort();
     assert_eq!(fixture.paths_in(&paired), expected);
     assert!(
@@ -743,11 +749,19 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
     );
 
     // One commit, naming both paths: a keypair split across two commits is a
-    // tree holding halves that do not match.
+    // tree holding halves that do not match. The public half's record is in it
+    // too — a public output is a generated value like any other, and the question
+    // "was this minted under the declaration that is there now" is the same
+    // question for it.
     assert_ne!(fixture.head(), before, "the keypair committed nothing");
     let commit = fixture.commit_matching("generate wg-private, wg-public");
     assert!(!commit.is_empty(), "no commit names both halves");
-    let mut expected_paths = vec![ANA_FILE.to_owned(), PUBLIC.to_owned()];
+    let mut expected_paths = vec![
+        ANA_FILE.to_owned(),
+        PUBLIC.to_owned(),
+        "state/safix/definitions/ana/wg-private".to_owned(),
+        "state/safix/definitions/ana/wg-public".to_owned(),
+    ];
     expected_paths.sort();
     assert_eq!(fixture.paths_in(&commit), expected_paths);
 
