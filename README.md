@@ -394,6 +394,7 @@ $ safix generate   # mint whatever has a recipe
 $ safix import     # pull declared clan vars into safix
 $ safix export     # push declared safix values into clan
 $ safix audit      # report which declared mappings' two sides disagree
+$ safix sync       # converge declared entries with your password database
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
 $ safix enroll     # a hardware key, from a blank card to a proven recovery identity
@@ -679,6 +680,61 @@ It is a verb of its own rather than more rows in `check`, and the reason is what
 Comparing a mapping's two sides needs both of those: it decrypts the safix side, and it runs clan's own command once per mapping.
 So the verb that needs them carries them, `check` keeps both of its properties, and a mapping you cannot decrypt is reported as one that could not be judged rather than quietly left out — a report that dropped those would be a report about who ran it.
 
+## The mirror in your password database
+
+Some secrets are read by tools and some are also read by a person — typed into a web login, a phone, another machine's prompt.
+`safix sync` ends the drift between the two, one declared mapping at a time.
+
+```nix
+{
+  flake.safix.keepassxc = {
+    database = "/home/ana/.keys/master.kdbx";
+    group = "safix";
+
+    mappings.grafana = {
+      mode = "safix-to-keepassxc";
+      safix = { user = "ana"; name = "grafana-password"; };
+      kdbx = { path = "ana/grafana"; username = "ana@example.invalid"; };
+    };
+  };
+}
+```
+
+Then `safix sync` converges every mapping and `safix sync grafana` narrows the run to one.
+
+**The mode is declared, not passed.**
+`safix-to-keepassxc` makes the database follow safix and reports the database-side edit it overwrote.
+`keepassxc-to-safix` makes safix follow the database, through the same path a hand-set value takes — the same recipient-drift refusal, the same staged write, a commit naming the mapping and never the value.
+`two-way` converges toward whichever side changed since the last agreement.
+`backup` writes safix's value where the database has none and never overwrites one that differs.
+The vocabulary is the one this fleet's file-sync declaration already uses for pairs, and the mode lives in the declaration because a remembered flag on a verb is exactly the drifting operational knowledge a declaration exists to end.
+
+**Nothing is ever deleted, in any mode.**
+Remove a mapping and its last database value stays until a person removes it; the report says the entry is there and that nothing declares it.
+Deletion propagation is the one part of the sync model deliberately not taken: an accidental deletion of a secret is not a state a sync should be able to reach.
+
+**A conflict is a finding, never a guess.**
+A two-way mapping remembers the last state both sides agreed on; when both have moved since, nothing is written and the report names the two one-way modes that each resolve it.
+Last-writer-wins over secrets rewards whichever clock lied best.
+
+That memory is a digest of the agreed value, and it lives in a companion entry beside the mapped one, inside the encrypted database — never in the repository.
+That is a security decision rather than a filing one: a committed digest of a secret confirms a guessed value offline, for anyone who has the tree.
+The companion's name is the entry's plus `.safix-sync-state`, and evaluation refuses a mapping that tries to declare one.
+Deleting it is safe and takes the mapping back to bootstrap semantics: write where one side is empty, report everything else.
+
+**One database, one prompt, and a bounded cost.**
+`database` is a string rather than a nix path, because a path is copied into the world-readable store on every evaluation and this file is 292 MB.
+The password is asked for once per run and travels standard input; so does every value, and no value reaches an argument vector or an environment variable on any leg.
+Without a terminal to ask on, the run refuses before reading anything.
+
+A kdbx save rewrites the whole file, so both sides of every mapping are read and compared first, every database write of a run is issued consecutively, and a run over mappings that agree writes nothing anywhere.
+A value carrying a newline is refused rather than written: the store's own command reads an entry's password as one line, and nothing here trims the byte for you — `printf` where `echo` minted it.
+
+The session's secret service is not a second way in, and the reason is worth stating: the collection KeePassXC publishes is its own *exposed group*, so an entry found or created through it lives where your exposure setting says rather than where the declaration says.
+`safix enroll --mirror-to-store` does use it, and correctly — that entry is safix's own and is addressed by an attribute, so the exposed group is the right home for it.
+
+`sync` manages no keyring: no database is created, no database key is changed, and no hardware slot is touched under any flag.
+
 ## The checks safix hands you
 
 ```nix
@@ -697,7 +753,7 @@ So the verb that needs them carries them, `check` keeps both of its properties, 
 }
 ```
 
-Called with no arguments it returns six checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all — whose probes carry the public store's shape and the definition record's, so a rule reaching either fails — the non-interaction between the rules and the public store, and the audience separator.
+Called with no arguments it returns eight checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all — whose probes carry the public store's shape and the definition record's, so a rule reaching either fails — the non-interaction between the rules and the public store, the audience separator, and the two relationship families, which are silent until you hand them your own records: `bridge = config.flake.safix.lib.bridge` and `keepassxc = config.flake.safix.lib.keepassxc`.
 `committedPolicy` adds the drift check, which fails while the committed `.sops.yaml` and the generated one differ and whose failure names `safix fix`.
 `materializations` adds the path-collision check, which forces the materializations you hand it so that the refusal reaches the hosts nobody has built this week.
 
@@ -736,6 +792,8 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the two records a consumer declares | `modules/flake/safix/options.nix` |
 | the option types and their reference documentation | `modules/flake/safix/types.nix` |
 | the resolution algebra | `modules/flake/safix/resolve.nix` |
+| the clan bridge's mappings and their refusals | `modules/flake/safix/bridge.nix` |
+| the password-database mirror's mappings and their refusals | `modules/flake/safix/keepassxc.nix` |
 | the recipient policy renderer | `modules/flake/safix/policy.nix` |
 | the checks a consumer instantiates | `modules/flake/safix/checks.nix` |
 | the flake module a consumer imports | `modules/flake/safix/default.nix` |
