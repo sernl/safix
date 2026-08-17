@@ -165,11 +165,12 @@ The secret is still alice's everywhere; it simply does not land on that host.
 This is why a carrier of a shared entry who omits it on one host stays in the audience: omitting is about placement, and custody is about carrying.
 Reaching an entry only through a `perHost` or `perTag` `add` is refused, because a host-scoped selection puts nobody in any audience and would leave that person resolving a file they are not encrypted to.
 
-## Subjects: machines, services, groups, silos, ownership, organizations
+## Subjects: machines, services, groups, silos, ownership, organizations, delegation
 
 Everything above is a person sharing with a person.
 The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, a service running on machines, a group of subjects, or an organization holding recovery custody.
 Nothing in this section changes anything until you declare it, and declaring a machine, a service, a group, a silo or an organization that nothing references generates the same policy, the same rules and the same files, byte for byte.
+Delegation, at the end of the section, is inert in a stronger sense: it changes who may run a scaffolding verb and never what any file holds, so a fleet that declares one derives the byte-identical tree.
 
 ### A machine is a subject
 
@@ -306,6 +307,63 @@ $ sops secrets/safix/shared/=acme,alice/secrets.yaml
 `ownerOf` resolves through the record to acme's custody keys exactly as it resolves to a person's own, and `=` marks the organization the way `@` marks a group.
 A group may not contain one — a principal is not a member, and an audience wanting acme's custody names acme.
 An organization whose custody is empty is refused everywhere it is reached: by an `escrowedTo`, by a grant, by an ownership resolution.
+
+### Delegation is a record with two consenting sides, and it is not authorization
+
+Read this one first, because it is what the rest of the section is bounded by.
+Delegation binds the cooperative path and is not authorization: the tree is the authorization, anyone who can commit can edit these declarations by hand, evaluation refuses structure rather than people, and no delegation record places a key in any audience.
+What it buys is that a scaffold and the identity it is attributed to cannot disagree.
+
+```nix
+flake.safix.organizations.acme.managers = [ "alice" ];
+flake.safix.users.bob.managedBy = "acme";
+```
+
+Think of it as acme saying who scaffolds on its behalf and bob saying he is one of the people they scaffold for.
+Both halves are declarations and neither confers a read: a manager scaffolds, never mints, and never reads by virtue of managing — bob's audience is exactly what it was, and the generated policy is byte-identical to what it was before either line existed.
+The consent is bob's own, for the reason `escrowedTo` is: nothing acme declares can subject anyone to it, so a review of bob's record shows everything that binds bob.
+
+Where both halves are declared, `safix enroll` and `safix group` accept acme's managers and refuse anybody else:
+
+```console
+$ safix enroll bob            # run by alice
+safix: alice is a declared manager of acme, which flake.safix.users.bob.managedBy
+       names, so this scaffold is recorded as acme's.
+
+$ safix enroll bob            # run by mallory
+safix: flake.safix.users.bob is delegated to flake.safix.organizations.acme by
+       flake.safix.users.bob.managedBy.
+       mallory is not among the managers named there, so nothing about it was
+       edited.
+```
+
+The acting identity is the one the commit will carry — `user.name` and `user.email` as the repository resolves them — and there is no flag naming somebody else, because a flag would let the check and the attribution disagree.
+It is matched to a declared person by name and by nothing else; a commit identity the declarations do not name is its own refusal, whose remedy is `git config user.name` rather than an edit to anybody's `managers`.
+A permitted scaffold records the organization in its commit, so history says whose act it was as well as who made it.
+
+A person no organization manages is scaffolded by whoever can commit, exactly as before.
+
+### `safix group`: membership as a verb, with the disclosures a hand edit owes
+
+```console
+$ safix group add oncall bob
+$ safix group remove oncall bob
+```
+
+One name inserted into or removed from the `members` list in `safix/groups/<group>.nix`, parsed before anything is staged, with `.sops.yaml` regenerated from the declarations that edit implies and the two committed together.
+It writes no value and re-wraps nothing: a membership change is a reason to run `safix fix`, and the report says so.
+
+`remove` prints what removing cannot do.
+A subject that has been in a group has held the data key of every file that group's audience names, so they have read every value in them and no re-wrap unreads it — `safix check` reports the shrink as the revocation it is, with rotation named as the remedy, and `safix fix` aligns ciphertext with policy and is explicitly not that remedy.
+
+Delegation over a group is the silo set that holds it.
+
+```nix
+flake.safix.silos.corp.groups = [ "oncall" "contractors" ];
+```
+
+A set whose groups reach acme's managed people is acme's, so every group in it — `contractors` included, which may hold none of them — is acme's managers' to edit.
+That reuses the one organizational boundary the model already has rather than inventing a per-group owner field, and a group no silo set names is covered by nobody and stays editable by whoever can commit.
 
 ## Generators: the value writes itself
 
@@ -540,6 +598,7 @@ $ safix sync       # converge declared entries with your password database
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
 $ safix enroll     # a hardware key, from a blank card to a proven recovery identity
+$ safix group      # add or remove one subject in a group's declared membership
 ```
 
 Think of `check` and `fix` as `git status` and `git add` for secret policy.
