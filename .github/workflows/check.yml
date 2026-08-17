@@ -5,12 +5,15 @@
 # the real git against a throwaway repository, and evaluation alone would prove
 # nothing about them.
 #
-# Two jobs, run together rather than one behind the other, because the two
-# kinds of failure cost different amounts to find. `eval` instantiates every
-# output for every system safix declares and builds none of them, so an
-# evaluation error on aarch64-linux — a platform this workflow rents no runner
-# for — is a red mark within a few minutes instead of a platform nobody hears
-# from. `build` then builds the surface on the two platforms GitHub does rent.
+# Two jobs, run together rather than one behind the other, because the two kinds
+# of failure cost different amounts to find. `eval` evaluates every output for
+# every system safix declares and builds almost nothing, so an evaluation error
+# on aarch64-linux — a platform this workflow rents no runner for — and a
+# formatting mistake are both red marks within a few minutes rather than at the
+# end of a build. `build` then builds the surface on the two platforms GitHub
+# does rent. Running them side by side rather than in sequence is deliberate: the
+# fast answer is worth having early, and it is not worth making the slow one wait
+# for it.
 #
 # `build` runs nix-fast-build rather than `nix flake check`. `nix flake check`
 # stops at the first failing derivation and then names every other check as
@@ -98,12 +101,12 @@ jobs:
       # The whole of it — this flake's nixpkgs closure, the second one clan-core
       # pins for the nested clan that `safix-bridge-real-clan` builds inside
       # itself, a rust toolchain and a Qt application — comes to 8.5 GiB, against
-      # 87 GiB free on a linux runner and 97 GiB on a darwin one. The last step
-      # reports both numbers on every run, so the day a runner image or the
-      # surface changes that arithmetic, the run says so rather than dying of a
-      # full disk. Reclaiming the image's own tooling was tried and taken back
-      # out: it left `/` at one gigabyte free, which is a new failure mode in
-      # exchange for headroom nothing was using.
+      # 87 GiB free on a linux runner and 97 GiB on a darwin one. The last step of
+      # this job reports the store's size and what is left on the filesystem, so
+      # the day a runner image or the surface changes that arithmetic the run says
+      # so rather than dying of a full disk. Reclaiming the image's own tooling
+      # was tried and taken back out: it left `/` at one gigabyte free, which is a
+      # new way to fail in exchange for headroom nothing was using.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
