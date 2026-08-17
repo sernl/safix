@@ -1,10 +1,10 @@
 # Holds every subject-model resolution and refusal over all three consumption
 # shapes, and fails on a divergence between them.
 #
-# The claim is design decision D6's: machines, services, groups, silos and
-# ownership behave identically whether a profile is a NixOS system scope, a
-# home-manager profile inside NixOS, or a standalone home-manager profile on a
-# non-NixOS distribution.
+# The claim is design decision D6's: machines, services, groups, silos,
+# ownership and organizations behave identically whether a profile is a NixOS
+# system scope, a home-manager profile inside NixOS, or a standalone
+# home-manager profile on a non-NixOS distribution.
 # It is a claim about three evaluations rather than about one function, so three
 # profiles are evaluated over one fleet and their answers compared to each other
 # — not to a literal. A literal would say what the answer is; the comparison says
@@ -53,6 +53,10 @@
 # Dropping a service's ownership at user scope rather than refusing leaves
 # `serviceOwnership.system` green and fails its two home fields, which is the
 # asymmetry this pair exists to hold.
+# Resolving an organization only where the flake module binds the record — rather
+# than in the algebra the three shapes share — fails `organizationEntry` and
+# `organizationOwnedEntry` on every shape at once, which is the same evidence the
+# refusal rows carry: the model lives in `resolve.nix` and not in a module.
 {
   config,
   inputs,
@@ -79,9 +83,16 @@ let
     }).config.flake.safix.lib;
 
   # ── the fleet the three shapes resolve ──
-  # alice holds four entries and grants one to a machine, one to a group and one to
-  # a service. bob is the group's other member; deck is the machine, which alice owns
-  # and the service runs on.
+  # alice holds six entries and grants one to a machine, one to a group, one to a
+  # service, one to an organization and one to the owner of the machine that
+  # organization owns. bob is the group's other member; deck is the machine alice
+  # owns and the service runs on; rack is acme's, which is what makes the `ownerOf`
+  # grant resolve to custody keys rather than to a person's recipient.
+  #
+  # alice also consents to acme's escrow, so every file she holds carries acme's
+  # custody on every shape. That is the half with no element of its own: it widens
+  # who can open her files and moves nothing, so a shape that resolved it
+  # differently would differ in a `sopsFile` rather than in a name.
   #
   # The service declares no ownership, which is what lets one fleet reach all three
   # shapes: an ownership axis exists at system scope alone, so a service declaring
@@ -92,16 +103,21 @@ let
     users = {
       alice = {
         recipient = keyOf "alice";
+        escrowedTo = [ "acme" ];
         private = {
           fleet-token = { };
           oncall-token = { };
           laptop-token = { };
           service-token = { };
+          corp-token = { };
+          corp-handover = { };
         };
         sharedWith = {
           deck.fleet-token = { };
           oncall.oncall-token = { };
           nginx.service-token = { };
+          acme.corp-token = { };
+          "ownerOf.rack".corp-handover = { };
         };
         perTag.portable.omit.laptop-token = { };
       };
@@ -112,6 +128,10 @@ let
       owner = "alice";
       tags = [ "portable" ];
     };
+    machines.rack = {
+      recipient = keyOf "rack";
+      owner = "acme";
+    };
     services.nginx = {
       machines = [ "deck" ];
       owner = "alice";
@@ -120,6 +140,7 @@ let
       "alice"
       "bob"
     ];
+    organizations.acme.custody.acme-escrow.key = keyOf "acme-escrow";
     silos.corp.groups = [ "oncall" ];
   };
 
@@ -186,6 +207,25 @@ let
         sharedWith."ownerOf.deck".token = { };
       };
       machines.deck.recipient = keyOf "deck";
+    };
+
+    emptyOrganizationCustody = {
+      users.alice = {
+        recipient = keyOf "alice";
+        escrowedTo = [ "acme" ];
+        private.token = { };
+      };
+      organizations.acme = { };
+    };
+
+    organizationInAGroup = {
+      users.alice = {
+        recipient = keyOf "alice";
+        private.token = { };
+        sharedWith.oncall.token = { };
+      };
+      groups.oncall.members = [ "acme" ];
+      organizations.acme.custody.acme-escrow.key = keyOf "acme-escrow";
     };
 
     collidingSubjectName = {
@@ -430,6 +470,14 @@ in
             # mode its owner declared.
             machineEntry = lib.mapAttrs (_n: v: v.machine.fleet-token) shapes;
 
+            # The same, over the two entries an organization is the audience of:
+            # one granted to acme directly and one granted to the owner of the
+            # machine acme owns. Read back through sops-nix's own option types, so a
+            # shape that stopped emitting a field shows up as a divergence rather
+            # than as a missing key.
+            organizationEntry = lib.mapAttrs (_n: v: v.person.corp-token) shapes;
+            organizationOwnedEntry = lib.mapAttrs (_n: v: v.person.corp-handover) shapes;
+
             # The identity a machine's system scope opens those entries with is
             # the one it already had. safix names none — the profile sets no
             # `safix.identity.*` — and sops-nix's own default stands: the host's
@@ -531,6 +579,8 @@ in
                 machine = true;
               };
               person = lib.genAttrs allShapes (_: [
+                "corp-handover"
+                "corp-token"
                 "fleet-token"
                 "laptop-token"
                 "oncall-token"
@@ -541,6 +591,8 @@ in
                 "nginx/service-token"
               ]);
               placement = lib.genAttrs allShapes (_: {
+                corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+                corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
                 fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
                 laptop-token = "/secrets/safix/users/alice/secrets.yaml";
                 oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
@@ -555,6 +607,22 @@ in
               mode = "0400";
               name = "fleet-token";
               sopsFile = "/secrets/safix/shared/alice,deck/secrets.yaml";
+            });
+
+            organizationEntry = lib.genAttrs allShapes (_: {
+              format = "yaml";
+              key = "corp-token";
+              mode = "0400";
+              name = "corp-token";
+              sopsFile = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+            });
+
+            organizationOwnedEntry = lib.genAttrs allShapes (_: {
+              format = "yaml";
+              key = "corp-handover";
+              mode = "0400";
+              name = "corp-handover";
+              sopsFile = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
             });
 
             systemIdentity = {
@@ -599,6 +667,8 @@ in
             };
 
             grantsStayWithTheirOwner = {
+              corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+              corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
               fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
               laptop-token = "/secrets/safix/users/alice/secrets.yaml";
               oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
