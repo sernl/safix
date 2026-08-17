@@ -82,6 +82,7 @@
         ./modules/flake/checks/policy.nix
         ./modules/flake/checks/real-clan.nix
         ./modules/flake/checks/single-runtime.nix
+        ./modules/flake/checks/subjects.nix
         ./modules/flake/devshell.nix
         ./modules/flake/rust.nix
         ./modules/flake/safix

@@ -1016,7 +1016,7 @@ let
     r: g:
     lib.optionalString (
       g.reference != g.leaf
-    ) " with ${subjectPath r g.leaf}, reached through ${referenceNoun r g.reference},";
+    ) " with ${subjectPath r g.leaf}, reached through ${referenceNoun r g.reference}";
 
   # Group name -> the groups it names as members. The whole of the graph a cycle
   # can live in: a member that is not a group is a leaf and closes nothing.
@@ -1368,11 +1368,18 @@ let
       # An empty group and a group whose only member is its own grantor both widen
       # nothing, and a widening that widens nothing is a declaration that reads as
       # sharing and resolves as custody of one.
-      emptyReach = lib.concatMap (
-        g:
-        lib.optional (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference) == [ ])
-          "${grantPath g} shares '${g.name}' with ${referenceNoun r g.reference}, which reaches no subject beyond flake.safix.users.${g.owner}, so the grant widens nothing"
-      ) resolvable;
+      #
+      # Silent while any group cycle stands. A group inside a cycle expands to
+      # nothing, so every grant naming one would report this as well, and one
+      # fault producing two unrelated sentences is worse than the second sentence
+      # is worth.
+      emptyReach = lib.optionals (groupCycle == [ ]) (
+        lib.concatMap (
+          g:
+          lib.optional (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference) == [ ])
+            "${grantPath g} shares '${g.name}' with ${referenceNoun r g.reference}, which reaches no subject beyond flake.safix.users.${g.owner}, so the grant widens nothing"
+        ) resolvable
+      );
 
       noRecipientKey = lib.concatMap (
         g:
