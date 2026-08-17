@@ -44,6 +44,12 @@
 # nobody has watched fail is not evidence, and those five are what show that
 # each channel these checks read can fail.
 #
+# Judging the run order after walking it rather than before fails
+# `generate-cycle`, whose fixture puts a generator ahead of the cycle in the
+# order: the walk mints and commits that one, then reports the first missing
+# input as an empty output. Observed during this change, which is why the check's
+# assertions are about when the refusal arrives rather than that it does.
+#
 # Passing `sops set` without `--idempotent` fails `set-existing` on the
 # byte-identity of a re-run. The drill only bites because the check waits out a
 # second first: sops stamps `lastmodified` at one-second resolution and reuses an
@@ -216,6 +222,16 @@
       checks.safix-generate-refusals =
         mode "safix-generate-refusals" "generators"
           "generate_refusals_each_have_their_own_code_and_write_nothing";
+
+      # A run order carrying a cycle, refused before the first generator rather
+      # than at the one whose input never arrives. The plan is one the resolver
+      # does not emit — it refuses a cycle at evaluation and leaves the
+      # generators inside one out of the order — so the subject here is the
+      # runtime's own reading of a plan it did not get from that refusal, which
+      # is what a stand-in for nix and an embedder of the library both hand it.
+      checks.safix-generate-cycle =
+        mode "safix-generate-cycle" "generators"
+          "a_run_order_carrying_a_cycle_is_refused_before_anything_runs";
 
       # What one generator's process may see of another's. A script that reads
       # standard input to end of input does not eat the answer to a later

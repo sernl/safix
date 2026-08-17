@@ -363,6 +363,81 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
     );
 }
 
+/// A run order carrying a cycle is refused before any generator runs.
+///
+/// `resolve.nix` answers the graph question at evaluation and leaves the
+/// generators inside a cycle out of the order, so this is a plan the nix half
+/// does not emit. The stub emits it because a stand-in for nix and a program
+/// embedding the library are exactly the two callers for which that refusal has
+/// not already been thrown, and the plan is a value with public fields for both
+/// of them.
+///
+/// What the assertions are about is when the refusal arrives rather than that it
+/// does. A generator sits ahead of the cycle in the order, so a runtime that
+/// walked the order and met the cycle where the first missing input surfaced
+/// would have minted and committed that one first — and a committed value is a
+/// distributed one, which is the reason the resolver put the question at
+/// evaluation to begin with.
+///
+/// Naming a generator outside the cycle is refused too, which is the resolver's
+/// treatment rather than a wider one: an evaluation with anything stuck is
+/// refused whole rather than emitting an order for the rest.
+#[test]
+fn a_run_order_carrying_a_cycle_is_refused_before_anything_runs() {
+    let mut fixture = Fixture::new();
+    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+
+    fixture.seed_generator(
+        "aside",
+        ANA_FILE,
+        &[],
+        &plain("printf '%s' minted-aside > \"$out/aside\""),
+    );
+    for (name, reads) in [("front", "rear"), ("rear", "front")] {
+        fixture.seed_generator(
+            name,
+            ANA_FILE,
+            &[],
+            &json!({
+                "script": format!("cat \"$in/{reads}/{reads}\" > \"$out/{name}\""),
+                "runtimeInputs": ["coreutils"],
+                "prompts": {}, "dependencies": [reads], "files": {},
+                "share": false, "validation": null, "description": null,
+            }),
+        );
+    }
+
+    let head_before = fixture.head();
+    let refused = fixture
+        .run(&["generate", "ana"])
+        .expect_refusal("a run order carrying a cycle");
+    refused.says("carries a cycle of generators");
+    refused.says("'front' -> 'rear' -> 'front'");
+    assert_eq!(
+        fixture.run_graphical(&["generate", "ana"]).refusal_code(),
+        "generator_cycle"
+    );
+
+    fixture
+        .run(&["generate", "ana", "aside"])
+        .expect_refusal("a generator outside the cycle, under the same plan")
+        .says("carries a cycle of generators");
+
+    assert_eq!(
+        fixture.head(),
+        head_before,
+        "the refused run committed something"
+    );
+    assert!(
+        !fixture.ciphertext_lines(ANA_FILE).contains_key("aside"),
+        "the generator ahead of the cycle in the order minted a value"
+    );
+    assert!(
+        fixture.scratch_files().is_empty(),
+        "the refused run left a scratch file"
+    );
+}
+
 /// What one generator's process may see of another's.
 ///
 /// Both claims are about the boundary between consecutive generators rather than
