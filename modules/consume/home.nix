@@ -24,6 +24,12 @@
 # the whole of what its failure message claims — `safix-consumption-ordering`
 # holds it against a real evaluation of a profile rather than against this
 # comment.
+#
+# The limit that message states beside the guarantee — that presence and
+# readability are all it checked, and an identity which has both and is not a
+# recipient still fails afterwards — is `safix-identity-recipiency`, against
+# fixture ciphertext. It is the one sentence on this path that an evaluation
+# cannot hold.
 {
   config,
   options,

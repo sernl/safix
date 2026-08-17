@@ -44,6 +44,11 @@
 # nobody has watched fail is not evidence, and those five are what show that
 # each channel these checks read can fail.
 #
+# Handing the refusing run of `identity-recipiency` an identity the file is
+# encrypted to fails it on the assertion that exists to catch it, which is what
+# separates the claim from one that would hold over any unusable key file.
+# Observed during this change.
+#
 # Judging the run order after walking it rather than before fails
 # `generate-cycle`, whose fixture puts a generator ahead of the cycle in the
 # order: the walk mints and commits that one, then reports the first missing
@@ -202,6 +207,18 @@
       checks.safix-get-list =
         mode "safix-get-list" "read_path"
           "get_round_trips_a_value_and_list_reports_where_it_lives";
+
+      # The sentence the consumption module's identity preflight makes about what
+      # it did not check: an identity present, readable and not a recipient of
+      # these files does not open them. `safix-consumption-ordering` holds the
+      # ordering that guard rests on against a real profile evaluation, and
+      # everything else on that path was an evaluation too, so this is the half of
+      # the guard's own message that needed ciphertext to be held at all. The
+      # stranger's identity is shown to open a document it is a recipient of
+      # first, or the claim would hold over a key file that was simply broken.
+      checks.safix-identity-recipiency =
+        mode "safix-identity-recipiency" "read_path"
+          "an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt";
 
       # A generator with no inputs mints and commits; one with a prompt reads it
       # from $prompts twice, which the descriptor interface this replaced could

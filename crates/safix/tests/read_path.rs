@@ -168,6 +168,102 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
     report.says("no creation rule's directory covers it");
 }
 
+/// What the consumption module's identity preflight checks, and what it says it
+/// does not: an identity present and readable and not a recipient.
+///
+/// `modules/consume/home.nix` refuses a home activation whose identity paths are
+/// missing or unreadable, and its own message states the limit of that — "a key
+/// that exists and is readable but is not a recipient of these files still fails
+/// later, in sops-install-secrets". Everything `add-consumption-modules` verified
+/// was an evaluation, so the sentence about what happens later was the one claim
+/// on that path no check held.
+///
+/// This holds it against fixture ciphertext instead of against an activation:
+/// nothing here switches a profile, and the decryption boundary a run reaches is
+/// the same sops reading the same `SOPS_AGE_KEY_FILE` that `sops-install-secrets`
+/// reads. What is not asserted is the activation itself — the ordering is
+/// `safix-consumption-ordering`'s, against a real home-manager evaluation.
+///
+/// The stranger's identity is shown to open a document it is a recipient of
+/// before it is shown not to open one it is not. Without that, the refusal would
+/// hold just as well over a key file that was malformed, empty, or not a key at
+/// all, and the claim is about recipiency rather than about a broken file.
+#[test]
+fn an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt() {
+    let fixture = Fixture::new();
+    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+
+    let stranger = fixture.scratch("stranger-identity.txt");
+    let minted = std::process::Command::new("age-keygen")
+        .arg("-o")
+        .arg(&stranger)
+        .output()
+        .expect("could not run age-keygen");
+    assert!(
+        minted.status.success(),
+        "could not mint a stranger identity"
+    );
+    let recipient = std::process::Command::new("age-keygen")
+        .arg("-y")
+        .arg(&stranger)
+        .output()
+        .expect("could not run age-keygen");
+    assert!(recipient.status.success(), "could not derive the recipient");
+    let recipient = String::from_utf8(recipient.stdout).unwrap();
+    let recipient = recipient.trim();
+
+    // The two predicates the preflight applies, in the order it applies them.
+    assert!(stranger.exists(), "the stranger's identity is not present");
+    assert!(
+        std::fs::File::open(&stranger).is_ok(),
+        "the stranger's identity is not readable"
+    );
+
+    // And it is a working identity, on a document it is a recipient of.
+    let theirs = "secrets/safix/users/cy/theirs.yaml";
+    fixture.encrypt_to(
+        theirs,
+        &[recipient],
+        "theirs: \"fixture-value-for-theirs\"\n",
+    );
+    let opened = std::process::Command::new("sops")
+        .arg("decrypt")
+        .arg(theirs)
+        .current_dir(&fixture.repo)
+        .env("SOPS_AGE_KEY_FILE", &stranger)
+        .output()
+        .expect("could not run sops");
+    assert!(
+        opened.status.success(),
+        "the stranger's identity does not open the document it is a recipient of:\n{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+
+    // Present, readable, working, and not a recipient of this one.
+    let refused = fixture.run_env(
+        &["get", "ana", "api-token"],
+        None,
+        &[("SOPS_AGE_KEY_FILE", &stranger.to_string_lossy())],
+    );
+    assert!(
+        !refused.succeeded(),
+        "a non-recipient identity read the value:\n{}",
+        refused.combined()
+    );
+    assert!(
+        refused.stdout.is_empty(),
+        "a refused read put bytes on standard output"
+    );
+    refused.silent_about("fixture-value-for-api-token");
+
+    // The recipient identity opens the same file, so what the refusal above
+    // reports is the identity rather than the file or the placement.
+    let read = fixture
+        .run(&["get", "ana", "api-token"])
+        .expect_success("get with the identity the file is encrypted to");
+    assert_eq!(read.stdout, b"fixture-value-for-api-token");
+}
+
 /// `--version` is answered, on standard output, and exits zero.
 ///
 /// A decision rather than an observation, and one that had a single pin. The
