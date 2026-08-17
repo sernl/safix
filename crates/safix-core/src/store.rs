@@ -68,6 +68,16 @@ use crate::secret::Secret;
 /// path carrying the suffix is refused, so the two name spaces cannot overlap.
 pub const STATE_SUFFIX: &str = ".safix-sync-state";
 
+/// What the store's own listing prints instead of nothing when it has nothing to
+/// list.
+///
+/// Measured rather than assumed: `ls -R -f` over a database holding no entry
+/// prints this one line. Without skipping it a fresh database would be read as
+/// holding one entry with that name, and while nothing would then be written to
+/// it, "the database holds this" would be false — which is the sort of thing the
+/// rest of this module is built not to guess about.
+const EMPTY_LISTING: &str = "[empty]";
+
 /// The entry a mapping's last agreement is recorded in, beside the entry itself.
 #[must_use]
 pub fn companion_of(entry: &str) -> String {
@@ -119,6 +129,9 @@ impl Database {
         };
         let listing = database.listing()?;
         for line in listing.lines() {
+            if line.is_empty() || line == EMPTY_LISTING {
+                continue;
+            }
             match line.strip_suffix('/') {
                 Some(group) => database.groups.insert(group.to_owned()),
                 None => database.entries.insert(line.to_owned()),

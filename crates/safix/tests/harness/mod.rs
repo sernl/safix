@@ -266,6 +266,7 @@ pub struct Fixture {
     audiences: Value,
     genplan: Value,
     bridge: Value,
+    keepassxc: Value,
     clan_flake: Option<PathBuf>,
     extras: Vec<String>,
 }
@@ -340,6 +341,11 @@ impl Fixture {
             // refuse, and that is asserted by every other test's fixture being
             // this one.
             bridge: json!({ "clanFlake": null, "mappings": [] }),
+            // The same statement about the mirror that `bridge` above makes about
+            // clan: a consumer who has never heard of this evaluates exactly
+            // this, and every test that declares no mapping drives it, so `sync`
+            // has to be silent about an empty mirror rather than refuse.
+            keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
             clan_flake: None,
             genplan: json!({
                 "ana": { "order": [], "outputs": {}, "inputs": {} },
@@ -566,6 +572,156 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare one keepassxc mapping, as `flake.safix.lib.keepassxc` resolves it.
+    ///
+    /// The shape is the one `modules/flake/safix/default.nix` projects: the
+    /// database and the group once for the consumer, and one record per mapping
+    /// carrying the attribute name it was declared under. Built rather than
+    /// pasted, so a field added on the nix side has to be added here too and the
+    /// fixture cannot drift into answering an older schema.
+    pub fn seed_sync_mapping(
+        &mut self,
+        id: &str,
+        mode: &str,
+        safix: (&str, &str),
+        path: &str,
+        username: Option<&str>,
+    ) {
+        let (user, name) = safix;
+        self.keepassxc["database"] = json!(self.kdbx().to_string_lossy());
+        self.keepassxc["mappings"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "id": id,
+                "mode": mode,
+                "safix": { "user": user, "name": name },
+                "kdbx": {
+                    "path": path,
+                    "username": username.map_or(Value::Null, |name| json!(name)),
+                },
+            }));
+        self.write_fixtures();
+    }
+
+    /// Declare the group every mapping's entry path is relative to.
+    pub fn sync_group_is(&mut self, group: &str) {
+        self.keepassxc["group"] = json!(group);
+        self.write_fixtures();
+    }
+
+    /// Declare mappings and no database, which is the state `sync` refuses in.
+    pub fn forget_the_database(&mut self) {
+        self.keepassxc["database"] = Value::Null;
+        self.write_fixtures();
+    }
+
+    /// The database path the fixture declares.
+    ///
+    /// Inside the fixture's own scratch directory, which is on tmpfs and removed
+    /// on every exit path. Nothing in this suite ever names a database of the
+    /// operator's, and `refuse_a_real_database` is the structural guard that makes
+    /// that a property rather than a habit.
+    pub fn kdbx(&self) -> PathBuf {
+        self.work.join("fixture.kdbx")
+    }
+
+    /// What the modelled database holds for one entry, if it holds anything.
+    pub fn store_holds(&self, entry: &str) -> Option<String> {
+        from_hex(
+            &std::fs::read_to_string(
+                self.card_spool()
+                    .join(format!("kdbx-{}", entry.replace('/', "%"))),
+            )
+            .ok()?,
+        )
+    }
+
+    /// Put a value into the modelled database without going through safix.
+    ///
+    /// The person's own edit, which is what every divergence fixture is: it
+    /// creates the groups the path needs, then the entry, exactly as the model's
+    /// own `add` would.
+    pub fn store_seed(&self, entry: &str, value: &str) {
+        let spool = self.card_spool();
+        std::fs::create_dir_all(&spool).unwrap();
+
+        let mut groups: Vec<String> = read_lines(&spool.join("kdbx-groups"));
+        let mut path = String::new();
+        let mut segments: Vec<&str> = entry.split('/').collect();
+        segments.pop();
+        for segment in segments {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(segment);
+            if !groups.contains(&path) {
+                groups.push(path.clone());
+            }
+        }
+        write_lines(&spool.join("kdbx-groups"), &groups);
+
+        let mut entries: Vec<String> = read_lines(&spool.join("kdbx-entries"));
+        let line = format!("{entry} ");
+        if !entries.iter().any(|held| held.starts_with(&line)) {
+            entries.push(line);
+        }
+        write_lines(&spool.join("kdbx-entries"), &entries);
+
+        std::fs::write(
+            spool.join(format!("kdbx-{}", entry.replace('/', "%"))),
+            to_hex(value),
+        )
+        .unwrap();
+    }
+
+    /// Every entry the modelled database holds, in path order.
+    pub fn store_entries(&self) -> Vec<String> {
+        read_lines(&self.card_spool().join("kdbx-entries"))
+            .into_iter()
+            .filter_map(|line| line.split_once(' ').map(|(name, _)| name.to_owned()))
+            .collect()
+    }
+
+    /// The username the modelled database holds for one entry.
+    pub fn store_username(&self, entry: &str) -> String {
+        read_lines(&self.card_spool().join("kdbx-entries"))
+            .into_iter()
+            .find_map(|line| {
+                line.strip_prefix(&format!("{entry} "))
+                    .map(str::trim)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every argument vector the store's own command was invoked with, in order.
+    ///
+    /// What the burst discipline is asserted against: the words of each
+    /// invocation, so a read between two writes is visible as a line.
+    pub fn store_invocations(&self) -> Vec<String> {
+        self.card_recorded("kdbx-argv")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The environment a sync run needs: the store's own command pointed at the
+    /// stub, and the spool it records into.
+    ///
+    /// Two variables rather than one for the reason [`Fixture::card_env`] has
+    /// four: the runtime reaches the tool by its own override, and a single one
+    /// would let a rename go unnoticed.
+    pub fn store_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("SAFIX_KEEPASSXC_CLI".to_owned(), card_stub().to_owned()),
+            (
+                "SAFIX_CARD_STUB_SPOOL".to_owned(),
+                self.card_spool().to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
     /// Where the stubbed clan keeps its store, its spool and its switches.
     pub fn clan_spool(&self) -> PathBuf {
         self.work.join("clan-spool")
@@ -707,6 +863,7 @@ impl Fixture {
         write_json(&self.work.join("audiences.json"), &self.audiences);
         write_json(&self.work.join("genplan.json"), &self.genplan);
         write_json(&self.work.join("bridge.json"), &self.bridge);
+        write_json(&self.work.join("keepassxc.json"), &self.keepassxc);
         write_json(&self.work.join("recipients.json"), &recipients);
         write_json(&self.work.join("governed.json"), &governed);
         if !self.work.join("hook.json").exists() {
@@ -759,9 +916,33 @@ impl Fixture {
     /// not be made. `feed` is written to the terminal after the child is running,
     /// which is how a prompt the run makes of the operator is answered.
     pub fn run_on_terminal(&self, arguments: &[&str], feed: &str, extra: &[(&str, &str)]) -> Run {
+        self.on_terminal(arguments, feed, extra, false)
+    }
+
+    /// The same, in a session of its own.
+    ///
+    /// `safix sync` refuses without a terminal and reads the database's password
+    /// from `/dev/tty` when that opens, so a run on a developer's machine would
+    /// ask *their* terminal for it and wait. Detaching leaves the run with no
+    /// controlling terminal, so `/dev/tty` does not open and the prompt falls back
+    /// to standard input — which is the pseudo-terminal this allocates, and is
+    /// what the feed answers. In a build sandbox there is no controlling terminal
+    /// to begin with and this is the same run.
+    pub fn run_sync(&self, arguments: &[&str], feed: &str, extra: &[(&str, &str)]) -> Run {
+        self.on_terminal(arguments, feed, extra, true)
+    }
+
+    fn on_terminal(
+        &self,
+        arguments: &[&str],
+        feed: &str,
+        extra: &[(&str, &str)],
+        detach: bool,
+    ) -> Run {
         use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 
         refuse_a_real_card(arguments, extra);
+        refuse_a_real_database(self, arguments, extra);
         let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("no pseudo-terminal");
         grantpt(&master).expect("could not grant the pseudo-terminal");
         unlockpt(&master).expect("could not unlock the pseudo-terminal");
@@ -772,7 +953,14 @@ impl Fixture {
             .open(String::from_utf8_lossy(name.as_bytes()).into_owned())
             .expect("the slave end does not open");
 
-        let mut command = Command::new(safix());
+        let mut command = match (detach, detached()) {
+            (true, Some(setsid)) => {
+                let mut command = Command::new(setsid);
+                command.arg("-w").arg(safix());
+                command
+            }
+            _ => Command::new(safix()),
+        };
         command.args(arguments);
         self.environment(&mut command, Reporter::Plain);
         for (variable, value) in extra {
@@ -1113,6 +1301,7 @@ impl Fixture {
         extra: &[(&str, &str)],
     ) -> Run {
         refuse_a_real_card(arguments, extra);
+        refuse_a_real_database(self, arguments, extra);
         let mut command = match (stdin, detached()) {
             (Some(_), Some(setsid)) => {
                 let mut command = Command::new(setsid);
@@ -1159,6 +1348,7 @@ impl Fixture {
             )
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
+            .env("SAFIX_FIXTURE_KEEPASSXC", self.work.join("keepassxc.json"))
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
             .env(
                 "SAFIX_FIXTURE_ENROLL_HOOK",
@@ -1685,6 +1875,67 @@ fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
              the reader is not a fixture. Build the environment with Fixture::card_env."
         );
     }
+}
+
+/// Refuse a sync run that has not been pointed at the store stub.
+///
+/// The counterpart of [`refuse_a_real_card`], and it exists for the same reason
+/// with a different loss at the end of it. The machines this suite is developed on
+/// have the real `keepassxc-cli` and the operator's own 292 MB database, and a run
+/// that reached it would edit or create entries in the fleet's root of trust. A
+/// run whose database is anywhere but the fixture's own scratch directory is
+/// refused here, loudly, before a process is spawned.
+///
+/// Both halves are checked, because either one alone would let the accident
+/// through: the override has to name the stub, and the database the fixture
+/// declares has to be under the scratch directory. A test that builds its
+/// environment any way other than [`Fixture::store_env`] fails on the first, and
+/// one that declares a database of its own fails on the second.
+fn refuse_a_real_database(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
+    if arguments.first() != Some(&"sync") {
+        return;
+    }
+    let named = extra
+        .iter()
+        .find(|(variable, _)| *variable == "SAFIX_KEEPASSXC_CLI")
+        .map(|(_, value)| *value);
+    assert_eq!(
+        named,
+        Some(card_stub()),
+        "a sync run was not pointed at the store stub through SAFIX_KEEPASSXC_CLI; it \
+         would have reached the real keepassxc-cli, and the database on this machine is \
+         not a fixture. Build the environment with Fixture::store_env."
+    );
+
+    let declared = std::fs::read_to_string(fixture.work.join("keepassxc.json")).unwrap_or_default();
+    let scratch = fixture.work.to_string_lossy().into_owned();
+    for word in declared.split('"') {
+        let names_a_database = word
+            .rsplit_once('.')
+            .is_some_and(|(_, tail)| tail == "kdbx");
+        assert!(
+            !names_a_database || word.starts_with(&scratch),
+            "a sync run declared the database '{word}', which is outside the fixture's own \
+             scratch directory {scratch}. Declare Fixture::kdbx and nothing else."
+        );
+    }
+}
+
+/// One list the fixture keeps for the modelled database, as lines.
+fn read_lines(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn write_lines(path: &Path, lines: &[String]) {
+    let mut sorted = lines.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    std::fs::write(path, sorted.join("\n") + "\n").unwrap();
 }
 
 /// One age identity, minted into a named file.

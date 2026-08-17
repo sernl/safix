@@ -175,6 +175,39 @@
 # first, because a prompt's text is written after the echo goes off.
 # Answering whatever a drive asks rather than a bounded number of prompts fails
 # `enroll-one-attempt-ykman`, whose stub asks once more than the drive needs.
+# ── the sync drills, all observed red during this change ──
+# Making the two-way tiebreak answer "neither side matches the agreement" fails
+# `safix-sync-two-way` on the one-side-changed cases, and making it pick safix's
+# value instead of reporting a conflict fails the same check on the both-changed
+# case. The pair is what holds the tiebreak to the recorded state rather than to a
+# constant: either alone would pass over a runtime that always did the other.
+# Dropping the newline refusal fails `safix-sync-refusals`, which then finds the
+# entry written with the bytes before the newline — a mirror that lies about what
+# it holds, and a mapping that would rewrite the whole database on every run
+# afterwards because the comparison is byte-exact.
+# Writing the recorded agreement into the repository as well as into the database
+# fails `safix-sync`, `safix-sync-two-way` and `safix-sync-converges`: the first
+# two on the no-oracle search, which looks for the value, for its digest taken by
+# `sha256sum`, and for the record's own format tag, and the third on the tree
+# being dirty. The first attempt at this drill wrote into a directory that does
+# not exist and swallowed the failure, so nothing turned red and the drill proved
+# nothing — the second wrote where the run's working directory is, which is what
+# made the claim severe rather than vacuous.
+# Reading one entry back after writing it fails `safix-sync-burst`, which finds a
+# read between two writes. Placing that read *before* the write does not fail it
+# and must not: the entry is absent then, so the read is answered from the listing
+# without spawning anything, and there is no save for it to sit inside.
+# Dropping the store override from a run's environment, or declaring a database
+# outside the fixture's own scratch directory, fails every sync check before a
+# process is spawned, on the harness's own guard. That drill was run deliberately
+# and its failure mode is not a red check: the machines this is developed on have
+# the operator's own database, which is the fleet's root of trust, so a run that
+# reached it would edit entries in it. The guard is structural for that reason
+# rather than a convention to be remembered — see `refuse_a_real_database`.
+# `store_cli.rs` needed no drill for its own subject and produced a finding
+# instead: `ls -R -f` over a database holding nothing prints `[empty]` rather than
+# nothing, which the runtime has to skip and which no model would have revealed.
+#
 # Dropping one of the four card-surface overrides from a run's environment fails
 # every enrollment check before a process is spawned, on the harness's own guard.
 # That drill was run deliberately and is the one whose failure mode is not a red
@@ -196,6 +229,13 @@
       mode =
         name: target: test:
         integration.runOne config.checks.safix-integration name target test;
+
+      # The one mode that needs a tool the rest of the page has no use for: the
+      # real store command, whose closure is a Qt application. See
+      # ./integration.nix for why it is not in `backends`.
+      withStore =
+        name: target: test:
+        integration.runOneWith [ integration.keepassxc ] config.checks.safix-integration name target test;
     in
     {
       # A file the declarations place a secret in but that nobody has run sops
@@ -506,6 +546,79 @@
       checks.safix-enroll-custody =
         mode "safix-enroll-custody" "enrollment"
           "the_mirrored_credentials_travel_standard_input_and_round_trip";
+
+      # One mapping of each mode over one run: the database converges to safix,
+      # safix converges to the database through the ordinary write path, a two-way
+      # mapping with an empty database side bootstraps and records its agreement
+      # beside the entry, and a backup mapping writes into absence. The username a
+      # mapping declares reaches the entry, no value reaches standard output, and
+      # no digest of one reaches the repository.
+      checks.safix-sync = mode "safix-sync" "sync_path" "each_mode_converges_exactly_as_its_name_says";
+
+      # Convergence, which is load-bearing rather than an optimisation here: a kdbx
+      # save rewrites the whole file. A second run over the same tree reports every
+      # mapping unchanged, commits nothing, moves no ciphertext, and issues no
+      # write of any kind against the database — asserted from the store's own
+      # invocation log rather than from the report.
+      checks.safix-sync-converges =
+        mode "safix-sync-converges" "sync_path"
+          "a_second_run_writes_nothing_anywhere";
+
+      # A pulled value lands as a commit indistinguishable in shape from a
+      # hand-set write — the same paths, a subject naming the mapping, and no value
+      # in the message.
+      checks.safix-sync-pull =
+        mode "safix-sync-pull" "sync_path"
+          "a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write";
+
+      # The three-way decision, over the agreement the companion entry remembers:
+      # one side moved converges toward it in each direction, and both sides moved
+      # writes nothing and names the two one-way modes that each resolve it.
+      checks.safix-sync-two-way =
+        mode "safix-sync-two-way" "sync_path"
+          "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
+
+      # backup's whole content: a database value that differs is reported and never
+      # overwritten.
+      checks.safix-sync-backup =
+        mode "safix-sync-backup" "sync_path"
+          "a_backup_mapping_never_overwrites_and_reports_the_divergence";
+
+      # Every refusal, each for its own reason: a mapping nothing declares, a safix
+      # side holding nothing, a database side holding no entry, a value carrying a
+      # newline the store's command cannot carry, a database that will not open, a
+      # run with no terminal to ask the password on, and mappings declared with no
+      # database. None leaves a commit, a dirty tree, or a partial write.
+      checks.safix-sync-refusals =
+        mode "safix-sync-refusals" "sync_path"
+          "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
+
+      # A mapping whose safix side does not decrypt for whoever is running is
+      # reported as one that could not be judged rather than skipped, and the
+      # mappings beside it are still judged.
+      checks.safix-sync-unjudgeable =
+        mode "safix-sync-unjudgeable" "sync_path"
+          "a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped";
+
+      # The burst discipline the 292 MB rewrite is bounded by: every database write
+      # of a run is issued consecutively, with no read between two of them.
+      checks.safix-sync-burst =
+        mode "safix-sync-burst" "sync_path"
+          "the_database_writes_of_a_run_are_one_burst";
+
+      # Entries no mapping declares, including the companion of a mapping that is
+      # gone, are reported as information and left where they are. No mode deletes.
+      checks.safix-sync-leftovers =
+        mode "safix-sync-leftovers" "sync_path"
+          "an_entry_no_mapping_declares_is_reported_and_never_removed";
+
+      # The store's own command, driven for real against a database the check
+      # creates. Every other sync check drives the model, which answers the vectors
+      # safix sends because it was written to; this one establishes that those
+      # vectors mean to keepassxc-cli what the runtime thinks they mean. It found
+      # one thing no model would have: `ls` prints `[empty]` rather than nothing for
+      # a database holding no entry, which the runtime has to skip.
+      checks.safix-store-cli = withStore "safix-store-cli" "store_cli" "";
 
       # A shared entry is one value: both carriers' placements name one file and
       # one key, one of them mints, the other reads back what was minted, and

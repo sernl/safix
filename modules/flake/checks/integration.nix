@@ -47,6 +47,7 @@ let
 in
 {
   inherit backends;
+  inherit (pkgs) keepassxc;
 
   # One check that runs one test of the compiled suite.
   #
@@ -60,9 +61,21 @@ in
   # silently ceasing to assert anything. The result line is read for that.
   runOne =
     suite: name: target: filter:
+    runOneWith [ ] suite name target filter;
+
+  # The same, with something on `PATH` that the rest of the suite has no reason to
+  # carry.
+  #
+  # One check needs the real `keepassxc-cli`, whose closure is a Qt application.
+  # Putting it in `backends` would make every check on this page carry it for the
+  # sake of one, and leaving it out entirely would make that check state an absence
+  # and pass — which is how a claim stops being made without anybody deciding to
+  # stop making it.
+  runOneWith =
+    extra: suite: name: target: filter:
     pkgs.runCommand name
       {
-        nativeBuildInputs = backends;
+        nativeBuildInputs = backends ++ extra;
         env = {
           SAFIX_TEST_BINARY = "${suite}/libexec/safix";
           SAFIX_TEST_NIX_STUB = "${suite}/libexec/safix-nix-stub";

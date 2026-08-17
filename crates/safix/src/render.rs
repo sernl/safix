@@ -659,18 +659,28 @@ pub fn sync(report: &safix_core::sync::Report) -> String {
 
     for entry in &report.lingering {
         out.push('\n');
-        detail(
-            &mut out,
-            &format!("{entry} is in the group and no mapping declares it."),
-        );
-        detail(
-            &mut out,
-            "No mode deletes an entry, so this is what a mapping that was removed",
-        );
-        detail(
-            &mut out,
-            "leaves behind. Nothing here will remove it; a person does that.",
-        );
+        if safix_core::store::is_companion(entry) {
+            detail(
+                &mut out,
+                &format!("{entry} is safix's own record of a two-way agreement, and the"),
+            );
+            detail(
+                &mut out,
+                "mapping it belonged to is no longer declared. It holds no value \u{2014} only a",
+            );
+            detail(&mut out, "digest of one \u{2014} and removing it is safe.");
+        } else {
+            detail(
+                &mut out,
+                &format!("{entry} is in the group and no mapping declares it."),
+            );
+            detail(
+                &mut out,
+                "No mode deletes an entry, so this is what a mapping that was removed",
+            );
+            detail(&mut out, "leaves behind.");
+        }
+        detail(&mut out, "Nothing here will remove it; a person does that.");
     }
 
     let tally = report.tally();

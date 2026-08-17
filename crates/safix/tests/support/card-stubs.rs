@@ -138,7 +138,7 @@ fn main() -> ! {
         "--generate" => plugin(&arguments),
         "list" | "--device" => ykman(&arguments),
         "store" | "lookup" => secret_tool(&arguments),
-        "add" => keepassxc(&arguments),
+        "add" | "edit" | "show" | "mkdir" | "ls" => keepassxc(&arguments),
         other => refuse(&format!("no card-stub role answers `{other}`")),
     }
 }
@@ -363,24 +363,254 @@ fn secret_tool(arguments: &[String]) -> ! {
 }
 
 /// A password store that records the two values it read from standard input.
+///
+/// Two shapes, and the first is matched exactly rather than parsed. `safix
+/// enroll --store-database` writes one entry through the four words below, and
+/// what that path's checks read is the two values it fed; a general parser would
+/// answer the same vector but would let a change to enrollment's own invocation
+/// pass unnoticed. Everything `safix sync` sends goes through the small database
+/// model after it.
 fn keepassxc(arguments: &[String]) -> ! {
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
-    match words.as_slice() {
-        ["add", "--password-prompt", database, entry] => {
-            let fed = drained();
-            let mut lines = fed.split(|byte| *byte == b'\n');
-            let unlock = lines.next().unwrap_or_default().to_vec();
-            let password = lines.next().unwrap_or_default().to_vec();
-            record("store-entry", &format!("{database} {entry}"));
-            store(&format!("unlock-{entry}"), &unlock);
-            store(&format!("store-{entry}"), &password);
-            std::process::exit(0);
+    if let ["add", "--password-prompt", database, entry] = words.as_slice() {
+        let fed = drained();
+        let mut lines = fed.split(|byte| *byte == b'\n');
+        let unlock = lines.next().unwrap_or_default().to_vec();
+        let password = lines.next().unwrap_or_default().to_vec();
+        record("store-entry", &format!("{database} {entry}"));
+        store(&format!("unlock-{entry}"), &unlock);
+        store(&format!("store-{entry}"), &password);
+        std::process::exit(0);
+    }
+    database_model(&words);
+}
+
+/// Where the modelled database keeps its groups.
+const GROUPS: &str = "kdbx-groups";
+
+/// Where it keeps its entries.
+const ENTRIES: &str = "kdbx-entries";
+
+/// The database password a test says this database has.
+const DB_PASSWORD: &str = "SAFIX_CARD_STUB_DB_PASSWORD";
+
+/// A subcommand this invocation refuses, for the drills.
+const STORE_REFUSES: &str = "SAFIX_CARD_STUB_STORE_REFUSES";
+
+/// The verbs `safix sync` drives, against a database this file models.
+///
+/// Faithful to `keepassxc-cli` 2.7.12 in the four ways the runtime depends on,
+/// each measured against a scratch database rather than assumed: a group must
+/// exist before an entry can be added under it and `mkdir` creates one level; an
+/// existing group and an existing entry are both refused; `ls -R -f` lists groups
+/// with a trailing slash and entries without one; and `show -s -a Password`
+/// prints the value followed by a newline of its own, while `add`/`edit -p` read
+/// the value as one line and drop anything past the first newline.
+fn database_model(words: &[&str]) -> ! {
+    if let Some(refused) = named(STORE_REFUSES)
+        && words.first() == Some(&refused.as_str())
+    {
+        refuse(&format!(
+            "keepassxc-cli refused {refused}, for a reason of its own"
+        ));
+    }
+
+    let verb = words.first().copied().unwrap_or_default();
+    let flags: Vec<&str> = words
+        .iter()
+        .skip(1)
+        .filter(|word| word.starts_with("--"))
+        .copied()
+        .collect();
+    let username = following_flag(words, "--username");
+    let entry = positionals(words).get(1).copied().unwrap_or_default();
+
+    record("kdbx-argv", &words.join(" "));
+
+    let fed = drained();
+    let (unlock, value, truncated) = split_fed(&fed);
+    if let Some(expected) = named(DB_PASSWORD)
+        && expected.as_bytes() != unlock.as_slice()
+    {
+        refuse("Invalid credentials were provided, please try again.");
+    }
+    if truncated {
+        record("kdbx-truncated", entry);
+    }
+
+    match verb {
+        "ls" => list_everything(),
+        "mkdir" => make_group(entry),
+        "add" | "edit" => {
+            if !flags.contains(&"--password-prompt") {
+                refuse("keepassxc-cli: the value must arrive on standard input");
+            }
+            write_entry(verb == "add", entry, &value, username.as_deref());
         }
+        "show" => show_entry(entry),
         other => {
-            eprintln!("keepassxc-cli: unrecognized arguments: {}", other.join(" "));
+            eprintln!("keepassxc-cli: unrecognized arguments: {other}");
             std::process::exit(2);
         }
     }
+}
+
+/// The words that are neither the verb, a flag, nor a flag's value.
+///
+/// The database comes first and the entry or the group second, which is the shape
+/// every one of these commands takes. Two of the flags carry a value, and skipping
+/// it is what keeps `Password` from being read as an entry path.
+fn positionals<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
+    let mut positional: Vec<&str> = Vec::new();
+    let mut rest = words.get(1..).unwrap_or_default();
+    while let Some((first, tail)) = rest.split_first() {
+        if ["--username", "--attributes"].contains(first) {
+            rest = tail.get(1..).unwrap_or_default();
+            continue;
+        }
+        if first.starts_with("--") {
+            rest = tail;
+            continue;
+        }
+        positional.push(first);
+        rest = tail;
+    }
+    positional
+}
+
+/// Every group with a trailing slash and every entry without one.
+fn list_everything() -> ! {
+    let groups = read_list(GROUPS);
+    let entries = read_list(ENTRIES);
+    // The marker the real command prints instead of nothing, which the runtime
+    // skips. Reproduced so that the skip is exercised here as well as by
+    // `store_cli.rs`: a stub that printed nothing would leave the one line the
+    // runtime has to ignore untested against the model.
+    if groups.is_empty() && entries.is_empty() {
+        println!("[empty]");
+        std::process::exit(0);
+    }
+    for group in groups {
+        println!("{group}/");
+    }
+    for line in entries {
+        if let Some((name, _)) = line.split_once(' ') {
+            println!("{name}");
+        }
+    }
+    std::process::exit(0)
+}
+
+/// One group, refusing an existing one and one whose parent is absent.
+fn make_group(group: &str) -> ! {
+    let mut groups = read_list(GROUPS);
+    if groups.iter().any(|held| held == group) {
+        refuse(&format!("Group {group} already exists!"));
+    }
+    if let Some((parent, _)) = group.rsplit_once('/')
+        && !groups.iter().any(|held| held == parent)
+    {
+        refuse(&format!("Group {parent} not found."));
+    }
+    groups.push(group.to_owned());
+    write_list(GROUPS, &groups);
+    std::process::exit(0)
+}
+
+/// One entry's value, added where there is none and edited where there is.
+fn write_entry(adding: bool, entry: &str, value: &[u8], username: Option<&str>) -> ! {
+    let mut entries = read_list(ENTRIES);
+    let held = entries
+        .iter()
+        .position(|line| line.starts_with(&format!("{entry} ")));
+    if adding {
+        if held.is_some() {
+            refuse(&format!("Could not create entry with path {entry}."));
+        }
+        if let Some((group, _)) = entry.rsplit_once('/')
+            && !read_list(GROUPS).iter().any(|had| had == group)
+        {
+            refuse(&format!("Could not create entry with path {entry}."));
+        }
+        entries.push(format!("{entry} {}", username.unwrap_or_default()));
+    } else {
+        let Some(at) = held else {
+            refuse(&format!("Could not find entry with path {entry}."));
+        };
+        if let (Some(username), Some(line)) = (username, entries.get_mut(at)) {
+            *line = format!("{entry} {username}");
+        }
+    }
+    write_list(ENTRIES, &entries);
+    store(&kdbx_key(entry), value);
+    std::process::exit(0)
+}
+
+/// One entry's value, with the newline the real command appends.
+fn show_entry(entry: &str) -> ! {
+    let entries = read_list(ENTRIES);
+    if !entries
+        .iter()
+        .any(|line| line.starts_with(&format!("{entry} ")))
+    {
+        refuse(&format!("Could not find entry with path {entry}."));
+    }
+    let held = retrieve(&kdbx_key(entry)).unwrap_or_default();
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(&held);
+    // The byte the runtime removes on the way back in.
+    let _ = out.write_all(b"\n");
+    let _ = out.flush();
+    std::process::exit(0)
+}
+
+/// The database password, the value, and whether anything past the value's first
+/// newline was dropped.
+///
+/// The real command reads each of the two as one line, so bytes after the second
+/// newline reach the entry not at all. Reproduced rather than tolerated, because
+/// the runtime's refusal of a value carrying a newline is what this is the other
+/// half of.
+fn split_fed(fed: &[u8]) -> (Vec<u8>, Vec<u8>, bool) {
+    let mut lines = fed.splitn(2, |byte| *byte == b'\n');
+    let unlock = lines.next().unwrap_or_default().to_vec();
+    let rest = lines.next().unwrap_or_default();
+    let mut past = rest.splitn(2, |byte| *byte == b'\n');
+    let value = past.next().unwrap_or_default().to_vec();
+    let truncated = past.next().is_some();
+    (unlock, value, truncated)
+}
+
+/// Where one entry's value is filed in the spool.
+fn kdbx_key(entry: &str) -> String {
+    format!("kdbx-{}", entry.replace('/', "%"))
+}
+
+/// One list the model keeps, as lines.
+fn read_list(name: &str) -> Vec<String> {
+    std::fs::read_to_string(spool().join(name))
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn write_list(name: &str, lines: &[String]) {
+    let mut sorted = lines.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    let _ = std::fs::create_dir_all(spool());
+    let _ = std::fs::write(spool().join(name), sorted.join("\n") + "\n");
+}
+
+/// The value following a flag, when the flag is there.
+fn following_flag(words: &[&str], flag: &str) -> Option<String> {
+    words
+        .iter()
+        .position(|word| *word == flag)
+        .and_then(|at| words.get(at.saturating_add(1)))
+        .map(|value| (*value).to_owned())
 }
 
 /// One prompt on standard error with the terminal's echo off around the read,
