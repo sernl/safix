@@ -1022,7 +1022,8 @@ The evaluation half, the command, the exported checks, the materializations and 
 Every push and pull request builds the whole surface on x86_64-linux and aarch64-darwin and evaluates it for aarch64-linux, which nothing there builds.
 `.github/workflows/check.yml` carries the one thing a linux runner has to be told first: Ubuntu denies unprivileged user namespaces, and the checks that drive a generator are made of them.
 darwin has no tmpfs, so `Staging::establish` refuses there and `--allow-disk-staging` is the acknowledgement the runtime documents; the suite runs under it on that platform, the refusal itself is asserted, and the tmpfs guarantee — which needs a memory-backed mount to compare against — is claimed on linux and absent rather than half-made on darwin.
-The darwin leg is not green: a GitHub macOS runner refuses `sandbox_apply`, so the envelope a generator fragment runs inside cannot be applied there and the four generator tests that need one fail, as checks that exist to fail on a machine that cannot run the envelope should.
+A GitHub macOS runner refuses `sandbox_apply`, so the envelope a generator fragment runs inside cannot be applied there; that leg builds the checks which do not need the integration suite, derived from the store rather than listed, and says in its own summary what it left out.
+The narrowing is the runner's and lives in the workflow: a Mac that can apply a sandbox profile gets the whole surface under `nix flake check`.
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.

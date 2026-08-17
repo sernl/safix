@@ -100,30 +100,28 @@ jobs:
         include:
           - system: x86_64-linux
             runner: ubuntu-latest
-          # This leg is red, and what is left of its redness is the runner rather
-          # than the platform. The staging half is settled: darwin has no
-          # memory-backed mount, the runtime's answer to that is a refusal naming
-          # `--allow-disk-staging`, and the suite runs under that acknowledgement
-          # — see `stagingEnv` in modules/flake/checks/integration.nix.
-          #
-          # What remains is the envelope. A generator fragment runs inside
-          # `/usr/bin/sandbox-exec` on darwin, and on a GitHub macOS runner
-          # applying a profile fails outright:
+          # This leg runs a scoped surface, and the scope is the runner's rather
+          # than the platform's. A generator fragment runs inside
+          # `/usr/bin/sandbox-exec` on darwin, and a GitHub macOS runner will not
+          # let it apply a profile at all:
           #
           #     sandbox-exec: sandbox_apply: Operation not permitted
           #     safix: the generator for 'slow' exited 71; nothing was written.
           #
-          # nix's own sandbox is not the obstacle: it reports `sandbox = false`
-          # on this runner already, so unlike ubuntu's user-namespace restriction
-          # there is no setting left to relax. Four generator tests of
-          # `abort_residue` fail on it, and they carry `safix-integration` and the
-          # fifty-seven checks that run one of its tests with them.
+          # nix's own sandbox is not the obstacle — it reports `sandbox = false`
+          # on this runner already — so unlike ubuntu's user-namespace
+          # restriction there is nothing left to relax. Four generator tests of
+          # `abort_residue` fail on it, `safix-integration` runs every target in
+          # one derivation and so fails with them, and every check that runs one
+          # of its tests fails for want of a suite to run.
           #
-          # It is left showing for the reason those checks exist: they are meant
-          # to fail on a machine that cannot run the envelope, and this machine
-          # cannot. Whether a platform whose runner cannot apply the envelope is
-          # worth a matrix entry is a question about the matrix, and it is not
-          # answered here.
+          # What is excluded is therefore that whole family, and it is derived
+          # rather than listed: the step below asks the store which checks need
+          # the integration suite and removes exactly those. Nothing narrows on
+          # linux, nothing is narrowed in the flake, and a real Mac — which can
+          # apply a sandbox profile — still gets every check under `nix flake
+          # check`. This is a statement about a rented runner, made where the
+          # runner is rented.
           - system: aarch64-darwin
             runner: macos-latest
     steps:
@@ -189,6 +187,54 @@ jobs:
             fi
           done
 
+      # The scope this runner can execute, asked rather than remembered.
+      #
+      # `safix-integration` compiles the suite and runs every target of it in one
+      # derivation, and each check that names a behavioural mode runs one test out
+      # of that build. So a runner that cannot apply a sandbox profile fails four
+      # generator tests, fails the suite with them, and fails every check built on
+      # the suite for want of one. That family is what comes out here, and it
+      # comes out by provenance: `--referrers-closure` names every derivation that
+      # reaches the suite's, and the checks whose own derivations are in that set
+      # are exactly the ones a runner without the envelope cannot execute.
+      #
+      # Derived and not listed, because a list would be a second place to
+      # remember a check exists — a new mode added to the suite joins this family
+      # on the day it is written, without anybody editing this file. The excluded
+      # names are printed and put in the job summary, so a run says what it did
+      # not do rather than quietly doing less.
+      - name: which checks this runner cannot execute
+        if: runner.os == 'macOS'
+        id: scope
+        run: |
+          suite=$(nix path-info --derivation '.#checks.${{ matrix.system }}.safix-integration')
+          nix run --inputs-from . --option flake-registry '' nixpkgs#nix-eval-jobs -- \
+            --flake '.#checks.${{ matrix.system }}' --workers 4 \
+            | jq -r 'select(.drvPath != null) | "\(.attr)\t\(.drvPath)"' > attrs.tsv
+          nix-store --query --referrers-closure "$suite" > dependents.txt
+
+          excluded=$(awk -F'\t' 'NR==FNR { seen[$0]; next } ($2 in seen) { print $1 }' \
+            dependents.txt attrs.tsv | sort)
+          if [ -z "$excluded" ]; then
+            echo "nothing reaches the integration suite, which cannot be right" >&2
+            exit 1
+          fi
+
+          quoted=$(printf '%s\n' "$excluded" | sed 's/.*/"&"/' | tr '\n' ' ')
+          echo "select=checks: builtins.removeAttrs checks [ $quoted]" >> "$GITHUB_OUTPUT"
+
+          total=$(wc -l < attrs.tsv | tr -d ' ')
+          count=$(printf '%s\n' "$excluded" | wc -l | tr -d ' ')
+          {
+            echo "### Excluded on this runner"
+            echo
+            echo "$count of $total checks need the integration suite, which needs an"
+            echo "envelope this runner cannot apply. A real Mac builds all $total."
+            echo
+            printf '%s\n' "$excluded" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$excluded"
+
       # `--inputs-from .` so that `nixpkgs` means the nixpkgs this flake pins,
       # rather than whatever the global registry resolves it to: a second nixpkgs
       # would be a second closure to fetch for one tool. With the flake supplying
@@ -215,14 +261,24 @@ jobs:
       # with a token, which nix-fast-build takes as `--cachix-cache`, and which
       # needs a secret a workflow file cannot create for itself.
       - name: build every check, and report every failure rather than the first
+        env:
+          SELECT: ${{ steps.scope.outputs.select }}
         run: |
+          # Empty on linux, where the step that sets it does not run and the whole
+          # surface is built.
+          scope=()
+          if [ -n "${SELECT:-}" ]; then
+            scope=(--select "$SELECT")
+          fi
+
           nix run --inputs-from . --option flake-registry '' nixpkgs#nix-fast-build -- \
             --flake '.#checks.${{ matrix.system }}' \
             --skip-cached \
             --no-nom \
             --eval-workers 4 \
             --result-format junit \
-            --result-file check-results.xml
+            --result-file check-results.xml \
+            "${scope[@]}"
 
       - name: the junit file itself
         if: ${{ !cancelled() }}
