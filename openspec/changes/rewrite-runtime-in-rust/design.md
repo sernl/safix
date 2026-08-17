@@ -67,10 +67,14 @@ A variant carrying formatted prose instead of data would make the message the on
 `miette` renders at the command edge, and every variant's rendering is held by an `insta` snapshot.
 Message parity with the shell runtime is not a rendering coincidence; it is the subject of D7.
 
-### D5. Concurrency is bounded and confined to three fan-outs
+### D5. Concurrency is bounded, and only where a fan-out survives the port
 
-`tokio` appears in exactly three places, each already a fan-out in the script: re-wrapping files in `fix`, probing files in `check`, and independent branches of the generator DAG.
-Each is bounded by a semaphore rather than spawning per item.
+`tokio` appears in one place: re-wrapping files in `fix --yes`, bounded by a semaphore rather than spawning per item, with the output replayed in declaration order so that which re-wrap finished first is not observable.
+
+Three sites were planned, one per fan-out in the script, and two did not survive contact with the rust implementation of the same work.
+`check`'s probes are subprocesses in the script and in-process metadata reads here, so there is no fan-out left to bound; D11 records that where it was found.
+The generator walk is sequential for three reasons the module states where a reader meets them — one standard input for prompts, a commit order that is the plan's rather than the scheduler's, and one staging root holding plaintext at a time.
+Neither withdrawal is an omission and neither retracts a measured speedup, because none was ever measured: this document promises no performance claim, so a bound over work that no longer fans out is not added on the chance that it would help.
 
 Everywhere else is sequential, and that is a correctness requirement rather than a simplification.
 The script's write discipline is sequential — stage before regenerate, regenerate before commit — and the reason is recorded at `safix.sh:1663`: a flake evaluation reads the files git knows about, so regenerating a policy before staging a new scaffold renders the policy of a fleet that does not include it.

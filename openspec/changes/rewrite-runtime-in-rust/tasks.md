@@ -115,7 +115,13 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 - [x] 6.5 Property tests on the parsing and joining logic, with the audience separator's injectivity stated as a property
 - [ ] 6.6 Add the bounded concurrency for the `check` probes, and assert the output ordering is independent of completion order
 
-  Superseded by D11 rather than deferred. The probes are subprocesses in the shell runtime and in-process reads in the rust one, so there is no fan-out here to bound; adding concurrency would be a change to what the harness compares rather than an optimisation under it.
+  Superseded by D11 rather than deferred, and one half of the reason first recorded here has since lapsed.
+  The half that stands: the probes are subprocesses in the shell runtime and in-process metadata reads in the rust one, so there is no fan-out here to bound, and a bound over reads is a concurrency whose speedup this change's own non-goals refuse to introduce before a measurement exists.
+  The half that lapsed: that adding it would change what the harness compares, which stopped being a reason when `rust-only-runtime` retired the harness.
+
+  Left open rather than ticked, because what closes it is a decision about two other artifacts rather than about this box.
+  D5 enumerated three concurrency sites and one landed — 7.5's `fix` re-wrap — and it has been corrected to say so.
+  The delta spec's "Where concurrency is permitted" scenario still reads "they are exactly those three", which is a requirement the implementation does not meet, and rewording a normative requirement is a decision about what this change promises rather than a record of what it did.
 - [x] 6.7 Verify: the harness passes for `get`, `list` and `check`
 
 ## 7. Stage 4 — the write paths
@@ -133,7 +139,11 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 - [x] 7.5 Add the bounded concurrency for the `fix` re-wrap
 
   Confined to `--yes`, because a confirmation cannot be fanned out. Bounded by `SAFIX_FIX_CONCURRENCY`, output replayed in declaration order, and `safix-differential-converge` compares both the fanned-out and the serial bound.
-- [ ] 7.6 Cover the real-activation gap carried out of `add-consumption-modules` with a fixture-ciphertext test
+- [x] 7.6 Cover the real-activation gap carried out of `add-consumption-modules` with a fixture-ciphertext test
+
+  The gap is that change's 3.6. The identity preflight states, beside its guarantee, the limit of it: presence and readability are all it checked, and an identity which has both and is not a recipient of these files still fails afterwards, in `sops-install-secrets`. Every verification of that change was an evaluation, so that sentence was the one claim on the consumption path with no check under it.
+
+  `safix-identity-recipiency` holds it against fixture ciphertext. No activation runs — the discipline at the head of this file forbids it — and the boundary a run does reach is the same sops reading the same `SOPS_AGE_KEY_FILE` the provisioner reads. The stranger's identity is shown to open a document it is a recipient of before it is shown not to open one it is not, or the refusal would hold equally over a key file that was merely broken; the drill pointing the refusing run at a recipient identity was observed red on the assertion written for it. The module header now names the check beside the sentence, as it already named `safix-consumption-ordering` beside the ordering.
 - [x] 7.7 Verify: the harness passes for `set`, `adduser` and `fix`, including the abort paths
 
   Over `safix-differential-write`, `-refuse`, `-guard`, `-converge`, `-abort`, `-pipes` and `-adduser`.
@@ -148,13 +158,23 @@ Delivered with stage 2 rather than after it, because a harness with nothing to c
 
   The status is the value `mint` returns through, and `Error::GeneratorFailed` carries it. `safix-differential-genrefuse` drives a script that exits 3 and compares the refusal naming that number.
 
-- [ ] 8.3 Port the cycle refusal with the participating nodes carried in the variant
+- [x] 8.3 Port the cycle refusal with the participating nodes carried in the variant
 
-  Not ported, and it is not a gap: the cycle refusal is `flake.safix.lib.generatorPlan`'s, thrown at evaluation by `resolve.nix`, and an order existing at all is that refusal's postcondition. The runtime reads the order and re-derives nothing, so a cycle never reaches it. Restating the refusal here would be a second implementation of a claim `safix-generators` already holds.
+  Ported, against the reason first recorded here for not porting it. That reason was that a cycle never reaches the runtime: the cycle refusal is `flake.safix.lib.generatorPlan`'s, thrown at evaluation by `resolve.nix`, and an order existing at all is that refusal's postcondition. True of the command driving a consumer's flake, and not of the library D1 publishes. `GeneratorPlan` is a value with public fields, `UserPlan::cascade`'s single forward pass is documented as resting on the order being topological, and both a stand-in for nix and a program embedding `safix-core` hand the runtime a plan no refusal has been thrown over. The schemas already treat the nix half as a producer whose drift is refused rather than assumed away — that is what `deny_unknown_fields` and `NixSchemaMismatch` are — and an order that is not a run order is the same class of drift, reached silently rather than refused.
+
+  `UserPlan::cycle` checks the claim, `Error::GeneratorCycle` carries the participating generators, and it is not a second implementation of the resolver's: it re-derives no order and answers only whether the one it was handed is one. The walk backtracks rather than following one prerequisite per node, because the resolver's trick is sound inside a set it has already established is stuck.
+
+  `safix-generate-cycle` holds the refusal to arriving before the first generator rather than merely arriving. The drill judging the order after walking it was observed red: the run mints and commits the generator sitting ahead of the cycle in the order, then reports the first missing input as an empty output — a committed value and a refusal naming the wrong cause, which is the harm `resolve.nix` puts the question at evaluation to avoid.
+
+  Not comparable against the retired shell runtime, in the same way `NixSchemaMismatch` was not: no fixture produces it from both sides at once. D11 records that shape.
 
 - [ ] 8.4 Add the bounded concurrency across independent branches, and assert a dependent branch never starts before its predecessor finishes
 
-  Deliberately not added, and the module says why where a reader meets it. Three things depend on the walk being sequential: a prompt is read from one standard input, so two generators prompting at once is not a faster question but an unanswerable one; each generator commits as it goes, so the commit order is the plan's rather than the scheduler's, which is what the differential comparison of the repository rests on; and a generator's inputs reach it on descriptors whose close-on-exec flag is cleared just before the spawn, so any process started in that window would inherit them. The third is the isolation the whole descriptor discipline exists for, and latency is not worth it.
+  The concurrency half is deliberately not added, and the module says why where a reader meets it. Three things depend on the walk being sequential: a prompt is read from one standard input, so two generators prompting at once is not a faster question but an unanswerable one; each generator commits as it goes, so the commit order is the plan's rather than the scheduler's, which is what the differential comparison of the repository rests on; and each generator's plaintext lives in a staging root for the duration of its run, so a fan-out would buy latency at the price of several roots holding plaintext at once, over a longer window, with no ordering between the shreds. The third is the isolation the staging discipline exists for, and latency is not worth it.
+
+  The assertion half is held, and was before this box was read again. `safix-generate` drives a generator whose script reads `$in/seeded/seeded` and asserts the value it minted from it, which is a claim no run where the dependent started before its predecessor finished can satisfy: the file it reads would not have been there. The predecessor's commit is asserted in the same test, so the ordering is held at both the value and the commit.
+
+  Left open rather than ticked for the same reason 6.6 is: the delta spec's "Where concurrency is permitted" scenario reads "they are exactly those three", and one landed.
 
 - [x] 8.5 Verify: the harness passes for `generate` and `keygen`
 

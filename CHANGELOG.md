@@ -32,6 +32,13 @@ A change to it is a breaking change whether or not any rust changed.
   `openspec/changes/clan-bridge/design.md` records the decision under "The audit's shape, and its name", together with the two shapes it was taken over.
 - `safix-bridge-audit`, one more single-runtime check, running `crates/safix/tests/audit.rs`.
   Its two drills were observed red: making two present values compare equal fails the diverged-mapping test and the one that transfers between two audits, and skipping the mapping that will not decrypt fails only the test written for it and leaves the rest of the target green.
+- `safix generate` refuses a run order carrying a cycle of generators, naming the ones participating in it, before the first generator runs.
+  Nothing a consumer's flake evaluates reaches it: `flake.safix.lib.generatorPlan` refuses a cycle at evaluation and leaves the generators inside one out of the order, so an order carrying one came from a stand-in for nix or from a program embedding `safix-core`, for which the plan is a value with public fields rather than that refusal's postcondition.
+  Refused before the walk rather than at the generator whose input never arrives, because a run commits as it goes: the alternative mints and commits every generator ahead of the cycle and then reports the first missing input as an empty output.
+  `Error::GeneratorCycle` carries the participating generators, so an embedder branches on them rather than on the message.
+- `safix-generate-cycle` and `safix-identity-recipiency`, two more checks over one test each.
+  The first holds the cycle refusal to when it arrives; the second holds the sentence the consumption module's identity preflight makes about what it did not check — that an identity present and readable and not a recipient of these files does not open them — against fixture ciphertext, which is the one claim on that path an evaluation cannot hold.
+  Both drills were observed red, each on the assertion written for it.
 
 ### Changed
 
