@@ -100,6 +100,22 @@ The behavioural claims — a write outside staging fails, a connection without t
 The strace reading in `syscall_proof.rs` extends to observe the envelope from outside the runtime, linux-only, with the non-linux half saying what it did not do.
 The no-backend refusal is tested by hiding the backend from the resolved toolset.
 
+### D8. The grant joins the definition digest, and the format tag moves with it
+
+Added after `settle-clan-vars-parity` landed the definition record; its task 5.4 note records the coupling from the other side.
+
+`network` is part of the generator record, and a flip has to read as definition drift.
+The reason is the one the record exists for: the value in the file was produced by a fragment that could not reach the network, a declaration that grants one describes a mint that can, and the two ciphertexts are indistinguishable.
+A digest that covered every other field would report nothing over the flip, which is the invisible edit the record was built to make visible.
+
+Covering a new field moves every digest, so `definition::FORMAT` moves to `safix-definition-v2` in the same commit.
+That is the mechanism the tag was put there for rather than a concession: a record carrying `v1` reads as unknown-version, and an unknown version is no finding at all, so every value minted before this is grandfathered and drift coverage over the existing population resumes at the natural mint rate.
+Leaving the tag at `v1` was the alternative and is what would have reported the whole tree as drifted on the day this landed.
+
+The claim is held at two strengths, matching the rest of this change: a unit test that the two grants digest apart and that a `v1` line is not read, and an integration drill in which a generator gains the grant with nothing else changed and `check` reports it, the record stays put until a regeneration adopts it, and the report names no value.
+
+Where the spec-level scenario belongs is left open: the requirement the claim hangs off — that a minted value carries a record of its definition — is `settle-clan-vars-parity`'s ADDED requirement, and that change archives after this one, so a scenario written into this change's delta would reach the main spec before the requirement it depends on.
+
 ## Risks / Trade-offs
 
 - [Bubblewrap cannot nest inside the nix build sandbox, so CI's build-sandboxed checks cannot run the real envelope] → this did not hold; see D3a. The nesting works on this fleet, `safix-generate-envelope` runs the real envelope under `nix build`, and the fallback the risk named — construction tests always, behavioural suite outside the build sandbox — was not needed.

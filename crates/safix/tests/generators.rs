@@ -732,7 +732,7 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
         .trim_end_matches('\n')
         .split_once(' ')
         .expect("the record is a tag and a digest");
-    assert_eq!(tag, "safix-definition-v1");
+    assert_eq!(tag, "safix-definition-v2");
     assert_eq!(hex.len(), 64, "the digest is not a sha256: {hex}");
     assert!(
         hex.chars().all(|digit| digit.is_ascii_hexdigit()),
@@ -835,8 +835,11 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
     );
 
     // A record this version cannot read says nothing, which is what keeps a change
-    // to the canonical form from reporting every value in the tree as drifted.
-    fixture.write(RECORD, "safix-definition-v2 0000\n");
+    // to the canonical form from reporting every value in the tree as drifted. The
+    // fixture is a `v1` line rather than an invented tag, because that is the
+    // grandfathering this repository actually has to do: every record written
+    // before `network` joined the canonical form carries it.
+    fixture.write(RECORD, "safix-definition-v1 0000\n");
     fixture
         .run(&["check", "ana"])
         .silent_about("minted by the generator on");
@@ -845,6 +848,79 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
     // the record, and asserting drift over an absent one would be a claim about
     // when the tool changed.
     std::fs::remove_file(fixture.repo.join(RECORD)).unwrap();
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+}
+
+/// A generator that gains the network reads as definition drift.
+///
+/// The coupling between the envelope and the definition record, and the reason the
+/// canonical form moved to `v2`. Every other field the digest covers changes what
+/// a mint *does*; this one changes what it *may* do, which is the same kind of
+/// difference and the one a record could most plausibly have been written without.
+/// The value in the file was produced by a fragment with no network; the
+/// declaration now describes one that has it, and nothing about the ciphertext
+/// distinguishes the two.
+///
+/// The flip is the only edit: same script, same tools, same outputs, same place in
+/// the order. So a digest that did not cover the grant would report nothing here,
+/// which is what makes this a drill on the coverage rather than on the report.
+#[test]
+fn a_generator_that_gains_the_network_reads_as_definition_drift() {
+    const RECORD: &str = "state/safix/definitions/ana/reaching";
+    const MINTED: &str = "CANARY-minted-without-the-network";
+    const SCRIPT: &str = "printf '%s' CANARY-minted-without-the-network > \"$out/reaching\"";
+
+    let mut fixture = Fixture::new();
+    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.seed_generator("reaching", ANA_FILE, &[], &plain(SCRIPT));
+
+    fixture
+        .run(&["generate", "ana", "reaching"])
+        .expect_success("the mint under a confined declaration");
+    assert_eq!(fixture.value(ANA_FILE, "reaching"), MINTED);
+    let recorded = fixture.read(RECORD);
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+
+    // The grant, and nothing else.
+    let granted = json!({
+        "script": SCRIPT,
+        "network": true,
+        "runtimeInputs": ["coreutils"],
+        "prompts": {}, "dependencies": [], "files": {},
+        "share": false, "validation": null, "description": null,
+    });
+    fixture.edit_generator("reaching", &granted);
+
+    let drifted = fixture
+        .run(&["check", "ana"])
+        .expect_refusal("a check over a generator that gained the network");
+    drifted.says("flake.safix.users.ana holds 'reaching', minted by the generator on 'reaching'");
+    drifted.says(RECORD);
+    drifted.says("safix generate --regenerate ana reaching");
+    drifted.silent_about(MINTED);
+
+    // A report writes nothing: the record still describes the mint that happened,
+    // and the value is still that mint's.
+    assert_eq!(
+        fixture.read(RECORD),
+        recorded,
+        "the report moved the record"
+    );
+    assert_eq!(fixture.value(ANA_FILE, "reaching"), MINTED);
+
+    // Regenerating adopts the grant, and the record moves with it.
+    fixture
+        .run(&["generate", "--regenerate", "ana", "reaching"])
+        .expect_success("regenerating under the granted declaration");
+    assert_ne!(
+        fixture.read(RECORD),
+        recorded,
+        "the record did not move when the grant was adopted"
+    );
     fixture
         .run(&["check", "ana"])
         .silent_about("minted by the generator on");

@@ -298,6 +298,16 @@
         mode "safix-generate-definition-drift" "generators"
           "a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it";
 
+      # The one field of that record whose coverage is a claim about the envelope
+      # rather than about the script: a generator that gains `network` describes a
+      # mint that may do something the recorded one could not, so the flip alone —
+      # same script, same tools, same outputs — has to read as drift. A digest that
+      # left the grant out would report nothing here, which is what makes this a
+      # drill on the coverage rather than on the report.
+      checks.safix-generate-network-drift =
+        mode "safix-generate-network-drift" "generators"
+          "a_generator_that_gains_the_network_reads_as_definition_drift";
+
       # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
       # nothing, an unchanged buffer commits nothing, and a changed one goes
       # through the same path `set` writes through. No staging root outlives any

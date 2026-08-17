@@ -332,8 +332,11 @@ state/safix/definitions/<user>/<name>
 state/safix/definitions/shared/<audience>/<name>
 ```
 
-One plaintext line each — a format tag and a digest — over everything that decides what a mint produces: the script, its `runtimeInputs`, its prompts, its dependencies, the outputs it writes with their secrecy, and the validation fragment.
+One plaintext line each — a format tag and a digest — over everything that decides what a mint produces: the script, its `runtimeInputs`, its `network` grant, its prompts, its dependencies, the outputs it writes with their secrecy, and the validation fragment.
 No value and no derivative of a value is in it, which is what lets it be committed in the clear.
+
+The grant is in there because it changes what a mint *may* do: the value in the file came from a fragment that could not reach the network, and a declaration that grants one describes a different mint even when the script is identical.
+Covering it moved the tag from `v1` to `v2`, and a record carrying the older tag is read as no record at all — the same answer an absent one gets, for the same reason.
 
 A third top-level tree, because neither existing one can hold it.
 A path named for secrets has to mean everything under it is encrypted, without qualification; `public/` means declared public outputs a nix module reads at evaluation, and a bookkeeping file there would dilute that into "plaintext things safix wrote".

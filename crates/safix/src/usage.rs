@@ -178,7 +178,9 @@ edit is reverted — so nothing here does them for you.
 The last class is answered from state/safix/definitions/, where `generate` records
 a digest of the definition it minted under, in the same commit as the value. A
 value with no record predates the record and is not a finding: no record, no
-claim.
+claim. A record whose format tag this version does not write gets the same answer,
+which is what keeps a change to what the digest covers from reporting the whole
+tree as drifted.
 
 It needs no identity for any file it examines: every question above is answered
 from the document's structure and from that plaintext record, and nothing on this

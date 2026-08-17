@@ -200,6 +200,12 @@ let
           question the declarations answer at evaluation, with no runtime
           consulted and no record to keep of who passed which flag when.
 
+          Flipping it is a change to the definition, so `safix check` reports
+          every value minted before the flip until it is regenerated or the flip
+          is reverted. A grant changes what a mint may do, and the ciphertext of
+          a value minted without one is indistinguishable from the ciphertext of
+          a value minted with it.
+
           What travels over a granted connection is outside what safix shreds or
           observes. That is the one part of a value's journey the runtime cannot
           contain, and it is why this is a declaration a reviewer sees rather

@@ -41,9 +41,16 @@
 //! cannot change what a mint does: `description`, which is a label `list` prints,
 //! and `share`, which the resolver derives from the entries rather than from the
 //! generator. What is left is everything that decides what a run produces — the
-//! script, the tools on its `PATH`, the prompts it asks, the dependencies it
-//! reads, the outputs it writes with their secrecy, and the validation that
-//! judges a candidate.
+//! script, the tools on its `PATH`, the network grant that decides what the script
+//! may reach, the prompts it asks, the dependencies it reads, the outputs it
+//! writes with their secrecy, and the validation that judges a candidate.
+//!
+//! `network` is covered because a grant is a change to what a mint may do, not
+//! only to what it happens to do. The value in the file was produced by a fragment
+//! that could not reach the network; a declaration that now grants one describes a
+//! mint that can, and the two are not the same mint. A record ignoring the grant
+//! would call them the same and the flip would be the invisible edit this whole
+//! module exists to make visible.
 //!
 //! An entry's on-disk `mode` is not covered, and cannot be: it is a registry
 //! field belonging to the entry rather than to the generator, it does not travel
@@ -71,7 +78,14 @@ pub const PREFIX: &str = "state/safix/definitions/";
 /// become unknown-version rather than mismatched, and an unknown version is no
 /// finding at all. Changing the canonical form means moving this tag in the same
 /// commit.
-pub const FORMAT: &str = "safix-definition-v1";
+///
+/// `v2` is the first exercise of that rule. `v1` covered every field of the
+/// generator record that existed when it was written; `network` arrived after it,
+/// and covering a new field changes every digest, so the tag moved with it. A `v1`
+/// record therefore reads as unknown-version and produces no finding, which is the
+/// grandfathering the mechanism was built for rather than a special case for this
+/// change.
+pub const FORMAT: &str = "safix-definition-v2";
 
 /// The digest of one generator's declaration, as this format records it.
 #[must_use]
@@ -171,6 +185,11 @@ fn canonical(record: &Generator) -> String {
         Some(validation) => field(&mut out, "validation", validation),
         None => out.push_str("validation absent\n"),
     }
+
+    // Beside the two fragments it governs rather than among the collections: the
+    // grant applies to the script and the validation alike, which is what it has
+    // in common with them and not with a list of tool names.
+    field(&mut out, "network", if record.network { "1" } else { "0" });
 
     count(&mut out, "runtimeInputs", record.runtime_inputs.len());
     for input in &record.runtime_inputs {
@@ -276,6 +295,7 @@ mod tests {
         );
         assert_ne!(base, with("runtimeInputs", json!(["coreutils"])));
         assert_ne!(base, with("runtimeInputs", json!(["openssl", "coreutils"])));
+        assert_ne!(base, with("network", json!(true)));
         assert_ne!(base, with("dependencies", json!([])));
         assert_ne!(base, with("validation", json!(null)));
         assert_ne!(base, with("validation", json!("test -n /dev/stdin")));
@@ -368,6 +388,33 @@ mod tests {
         assert!(text.contains("promptKind 6 hidden"));
         assert!(text.contains("fileSecret 1 0"));
         assert!(text.contains("runtimeInputs 2"));
+        assert!(text.contains("network 1 0"));
+    }
+
+    /// The grant, and the tag that moved with it.
+    ///
+    /// One case says the two grants digest apart, which is the coupling this
+    /// version exists for: a generator that gains the network describes a mint
+    /// that may do something the recorded one could not, so the record has to
+    /// move. The other says the tag names v2 and that a v1 record is not read,
+    /// which is what keeps every value minted before this from reading as
+    /// drifted.
+    #[test]
+    fn the_network_grant_is_covered_and_the_tag_moved_with_it() {
+        let confined = digest(&generator());
+        let granted = with("network", json!(true));
+        assert_ne!(
+            confined, granted,
+            "a generator gaining the network digests the same as one without it"
+        );
+
+        assert_eq!(FORMAT, "safix-definition-v2");
+        assert!(line(&generator()).starts_with("safix-definition-v2 "));
+        assert_eq!(
+            recorded(&format!("safix-definition-v1 {confined}\n")),
+            None,
+            "a record written before the grant was covered is read as this version's"
+        );
     }
 
     /// The record file's own line: the tag, one space, the digest, one newline.
@@ -384,10 +431,11 @@ mod tests {
     fn a_record_this_format_cannot_read_records_nothing() {
         assert_eq!(recorded(""), None);
         assert_eq!(recorded("\n"), None);
-        assert_eq!(recorded("safix-definition-v2 abc\n"), None);
+        assert_eq!(recorded("safix-definition-v1 abc\n"), None);
+        assert_eq!(recorded("safix-definition-v3 abc\n"), None);
         assert_eq!(recorded("abc\n"), None);
-        assert_eq!(recorded("safix-definition-v1 \n"), None);
-        assert_eq!(recorded("safix-definition-v1 abc"), Some("abc"));
+        assert_eq!(recorded("safix-definition-v2 \n"), None);
+        assert_eq!(recorded("safix-definition-v2 abc"), Some("abc"));
     }
 
     fn placement(file: &str, owner: &str, shared: bool) -> Placement {
