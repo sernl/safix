@@ -68,7 +68,7 @@ Landing means the file a profile reads at activation, by default the secret prov
 Everything below is a different answer to the first two questions.
 
 The distinction that does the work is placement versus custody.
-Custody is who holds a secret, and it is a property of a person: it is the same on every host they log into.
+Custody is who holds a secret, and it is a property of a subject — a person, a machine, or a group of subjects: for a person it is the same on every host they log into.
 Placement is where the decrypted value shows up, and it is a property of a configuration.
 Every refusal safix makes comes from keeping those two apart.
 
@@ -164,6 +164,89 @@ Think of it as which rooms my keys follow me into.
 The secret is still ana's everywhere; it simply does not land on that host.
 This is why a carrier of a shared entry who omits it on one host stays in the audience: omitting is about placement, and custody is about carrying.
 Reaching an entry only through a `perHost` or `perTag` `add` is refused, because a host-scoped selection puts nobody in any audience and would leave that person resolving a file they are not encrypted to.
+
+## Subjects: machines, groups, silos, ownership
+
+Everything above is a person sharing with a person.
+The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, or a group of subjects.
+Nothing in this section changes anything until you declare it, and declaring a machine, a group or a silo that no audience names generates the same policy, the same rules and the same files, byte for byte.
+
+### A machine is a subject
+
+```nix
+flake.safix.machines.deck = {
+  recipient = "age1..."; # ssh-to-age of the host's ed25519 key
+  owner = "ana";
+  tags = [ "laptop" ];
+};
+
+flake.safix.users.ana.sharedWith.deck.fleet-token = { };
+```
+
+```console
+$ safix fix
+$ sops secrets/safix/shared/ana,deck/secrets.yaml
+```
+
+Think of it as sharing with the host rather than with its owner: the machine's own service reads the value, and no person has to be logged in.
+The recipient is the key the host already decrypts with — sops-nix's NixOS module defaults `sops.age.sshKeyPaths` to the host's ed25519 keys, and `ssh-to-age` of that key is what goes here — so declaring a machine mints no identity and adds no enrollment step.
+The hardware-recipient refusal `safix adduser` applies to a person does not transfer: it exists because a card needs a PIN and a touch once per file while an activation decrypts non-interactively, and a host identity decrypts non-interactively by nature.
+
+A machine's entries arrive in the profile that names it:
+
+```nix
+safix.machine = "deck"; # instead of safix.user
+```
+
+It holds nothing of its own — there is no `carries`, no `private` and no `sharedWith` on a machine — and it needs no hostname, because it is the host.
+
+### A group is a subject whose recipients are its members'
+
+```nix
+flake.safix.groups.oncall.members = [ "ana" "bo" "deck" ];
+
+flake.safix.users.ana.sharedWith.oncall.pager-token = { };
+```
+
+```console
+$ sops secrets/safix/shared/@oncall,ana/secrets.yaml
+```
+
+Think of it as a drawer with a name on it instead of a guest list.
+Members may be people, machines, or other groups, and a cycle among them is refused at evaluation with the participants named.
+
+The `@` is what makes membership changes cheap.
+A guest-list directory moves when its list changes, which is a migration; a group-named directory does not, so adding a member is one `safix fix` that re-wraps one file, and removing one is a narrowing of the same file.
+Ad-hoc `sharedWith.bo` keeps the guest-list form — the two answer different questions and both stay derived.
+
+A member who leaves is reported by `safix check` as the revocation it is, with rotation as the remedy and `fix` as only the alignment afterwards.
+They have read what the file holds; no re-wrap unreads it.
+
+### A silo is non-overlap you can prove
+
+```nix
+flake.safix.silos.corp.groups = [ "staff" "contractors" ];
+```
+
+Think of it as two rooms with no door between them.
+Evaluation refuses any file whose audience would reach subjects of two groups in one set, naming the file, the subjects and the declaration that forbids it — so a cross-silo file is one that cannot exist rather than one a policy hopes nobody wrote.
+Sets rather than pairs is what keeps this linear, and a group named by two sets is itself refused.
+
+It is deliberately not transitive over ownership.
+One person may own machines in two silos — the operator administering both sides is the normal case — and what is refused is a single file readable from both.
+
+### Ownership is a record a grant resolves through
+
+```nix
+flake.safix.users.ana.sharedWith."ownerOf.deck".wifi-psk = { };
+```
+
+Think of it as sharing with whoever holds the host, without having to know who that is.
+The grant resolves through `flake.safix.machines.deck.owner`, and the audience directory names the reference rather than the person, so a change of owner re-wraps that one file toward the new owner instead of leaving the grant pointed at the old one.
+The old owner's loss of future access is reported with the same disclosure as any narrowing.
+
+The record confers nothing else.
+An owner does not thereby read the machine's entries or manage its users, because a record that silently granted either would be the escrowed custody safix already warns about, arrived at by accident rather than declared.
 
 ## Generators: the value writes itself
 
@@ -535,9 +618,10 @@ Both modules declare the same options, and none of them can add a secret, a reci
 |---|---|---|
 | `safix.flake` | `null` | your own flake — `inputs.self` — from which `safix.lib` is read |
 | `safix.lib` | from `safix.flake` | the resolver projection, settable directly if your flake reaches the profile some other way |
-| `safix.user` | `config.home.username`; none at system scope | which `flake.safix.users` entry this profile serves |
-| `safix.hostname` | `osConfig.networking.hostName`; `config.networking.hostName` at system scope | which host to resolve on, since `perHost` and `perTag` select by it |
-| `safix.tags` | `[ ]` | the tags this host carries, against which `perTag` selects |
+| `safix.user` | `config.home.username`; none at system scope; `null` where `safix.machine` is set | which `flake.safix.users` entry this profile serves |
+| `safix.machine` | `null` | which `flake.safix.machines` entry this profile serves instead of a person |
+| `safix.hostname` | `osConfig.networking.hostName`; `config.networking.hostName` at system scope | which host to resolve on, since `perHost` and `perTag` select by it; not needed for a machine |
+| `safix.tags` | the declared tags of `safix.machine`, else `[ ]` | the tags this host carries, against which `perTag` selects |
 | `safix.identity.keyFile` | `null`; at user scope one of these two is required | an age key file this machine decrypts with |
 | `safix.identity.sshKeyPaths` | `[ ]`; at user scope one of these two is required | ssh private keys this machine decrypts with |
 | `safix.enable` | whether anything resolved | the gate the whole module sits behind |

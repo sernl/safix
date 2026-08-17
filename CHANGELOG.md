@@ -48,6 +48,14 @@ Three deviations from clan's argument vector are recorded in `crates/safix-core/
 
 The fleet needs no declaration change: no generator declared today reaches the network or writes outside its staging root.
 
+### The audience model grows from a person to a subject
+
+Every declaration written against safix 0.2 is a valid declaration of the extended model, and a tree that declares no machines, no groups and no silos generates the same policy, the same rules and the same files as it did before — byte for byte, which is a check rather than a claim.
+
+What grows is the set of things that can hold a key and appear in an audience: a person, a machine, or a group of subjects.
+There is one audience algebra over all three rather than a second grant surface beside the first, because a parallel mechanism would double every rule in it — two audience computations, two policy renderers, two revocation reports.
+This is phase A of the program `openspec/changes/extend-custody-subjects/` shapes, and the three phases after it are proposed there and not built: `add-service-subjects`, then `add-organization-custody`, then `add-management-delegation`, in that order because each later cut changes who may act rather than only what an audience can name.
+
 ### Added
 
 - `flake.safix.keepassxc` and `safix sync`: declared safix entries converge with entries in the operator's password database, one mapping at a time, in the mode each mapping declares.
@@ -163,6 +171,30 @@ The fleet needs no declaration change: no generator declared today reaches the n
 - `clan-core` as a flake input, read by that check and by nothing else.
   clan-cli is not packaged in nixpkgs, so there is no attribute to reach for, and the input also supplies `packages.clan-core-flake` — a clan-core whose lock names store paths rather than URLs — which is what lets the throwaway clan lock in a sandbox with no network.
   Pinned to a revision rather than a branch, because the subject of the check is a specific clan's behaviour and an input that moved on every `nix flake update` would redden it for reasons unrelated to safix.
+- `flake.safix.machines.<m>`: a machine as a subject, with the age form of the host identity its system scope already decrypts with, the person who owns it, and its tags.
+  The recipient is `ssh-to-age` of the host's ed25519 key — the derivation clan uses for its own machine recipients, and the key sops-nix's NixOS module already defaults to — so declaring a machine mints no identity and adds no enrollment step.
+  A machine holds nothing of its own: there is no `carries`, no `private` and no `sharedWith` on one, and everything it holds arrives through a grant aimed at it.
+  The hardware-recipient refusal `safix adduser` applies to a person does not transfer to a machine, and the reason is the sentence that refusal rests on: a card needs a PIN and a touch once per file while an activation decrypts non-interactively, and a host identity decrypts non-interactively by nature.
+- `flake.safix.groups.<g>`: a set of subjects — people, machines, or other groups — whose recipients are its expanded membership's.
+  A group audience's file is named for the group rather than for its members, `secrets/safix/shared/@<group>/`, and that is what makes a membership change a re-wrap of one file instead of a migration to another: a hundred-member guest list in a directory name is not a name, and a directory that moves when the list changes is a migration `safix fix` cannot be the remedy for.
+  Ad-hoc person-to-person sharing keeps the guest-list form unchanged; the two answer different questions and both stay derived.
+  A cycle among group definitions is refused at evaluation with the participants named.
+- `flake.safix.silos.<s>`: named sets of groups that no one file's audience may span, refused where audiences are computed rather than where a file is read.
+  A silo enforced at read time is a policy hoping nobody misconfigured a file; enforced here it is a file that cannot exist, and the refusal names the file, the subjects and the declaration that forbids it.
+  Sets rather than pairs is what keeps the constraint linear, and a group named by two sets is itself refused.
+  Deliberately not transitive over ownership: one person may own machines in two silos, because the operator administering both sides is the normal case, and what is refused is a single file readable from both.
+- `sharedWith` may name any subject, and `sharedWith."ownerOf.<machine>"` may name the owner of one.
+  An `ownerOf` grant resolves through the machine's `owner` record and its audience directory names the reference rather than the person, so a change of owner re-wraps that one file toward the new owner instead of leaving the grant pointed at whoever held the host when it was written.
+  Ownership confers nothing else in this phase. An owner does not thereby read the machine's entries or manage its users, because a record that silently granted either would be the escrowed custody safix already warns about, arrived at by accident rather than declared.
+- `safix.machine` on both consumption modules, naming the `flake.safix.machines` entry a profile serves instead of a person.
+  It is in the shared options rather than the system scope's because selection is custody and custody has no scope: a machine resolves the same set wherever it is consumed, and the standalone home-manager shape is not a second-class consumer of it.
+  A machine needs no hostname — it is the host, and has no per-host layer to select through — and its declared tags default `safix.tags`, which is what makes a hundred hosts declarable as tags on machines rather than as a hundred `perHost` blocks.
+  `safix.user` defaults to null where a machine is named, so the two are alternatives rather than a pair to unset, and defining both is refused.
+- `safix-subjects` and `safix-portability`, two checks over the model.
+  The first holds every subject-model refusal on the message it produces and on the resolution throwing, and every resolution on the file and the recipients it derives; the recipient lists are what make a growth, a shrink and a change of owner observable as re-wraps of one file rather than as migrations.
+  The second holds design decision D6: every one of those refusals and resolutions runs over a NixOS system, a home-manager profile inside NixOS and a standalone home-manager profile, and a divergence between the three is a red check.
+  Its answers are compared to each other and to the literal they agree on, because agreement alone would be satisfied by three shapes resolving nothing.
+- `safix-audience-narrowed` and `safix-audience-orphan`, over `crates/safix/tests/subjects.rs`.
 
 ### Changed
 
@@ -175,6 +207,14 @@ The fleet needs no declaration change: no generator declared today reaches the n
 - The recorded absences stand, re-examined rather than restated. No `upload`, because activation already delivers what it would; no plaintext dump and restore, because such a tree outlives the migration that justified it and the backend count is still one.
   Both were re-examined against the custody-subjects extension directed on the same day: machines and services joining the audience model changes who may be in an audience, not how a value reaches a machine.
   The absence of clan's flake-level per-export generator placement is not recorded as a non-goal either, because that question dissolves into that extension rather than standing as an absence.
+- `safix check`'s recipient finding names whose custody the keys outside a file's declared audience are, and says what a re-wrap of them is not.
+  A member leaving a group, a grant being dropped and a machine changing hands are one state by the time a report reads them — an evaluation records the audience that is and never the audience that was — so the finding that already reported that state is the one extended rather than three new ones added.
+  It names declared subjects rather than printing age keys, because an operator reading a public key has to go and look up whose it is, which is the moment a revocation is misjudged; it keeps `safix fix` as the alignment step it is; and it offers a new value per name the file holds as the only thing that revokes.
+- The resolver's entry points take the records as one closed attrset with the three subject records defaulted to empty, rather than as two curried arguments.
+  A call that names no subjects is the tree that declares none, which is what makes the inertness property structural rather than a claim about a code path. A consumer calling `flake.safix.lib.*` is unaffected; a consumer importing `modules/flake/safix/resolve.nix` directly is not, and that surface was never one safix documented.
+- A machine's recipient earns a policy anchor when a rule needs its key and not before, where a person's recipient earns one whether or not any rule names them.
+  A person's recipient is their custody record and `safix adduser` writes one before they hold anything; a machine's is a key some rule needs. That asymmetry is what leaves a declared-but-unreferenced machine's policy byte-identical.
+- People, machines and groups share one name space, and two declarations of one name are refused rather than resolved by precedence: an audience element, a directory and an anchor are each derived from the name alone, so a precedence rule would decide who reads a file silently, at the point one of the two declarations was written.
 
 ### Fixed
 
