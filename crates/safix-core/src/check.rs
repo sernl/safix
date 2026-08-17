@@ -67,10 +67,17 @@ pub enum Finding {
         ///
         /// A key on a file that is no longer in its audience is what every
         /// narrowing looks like from here — a grant dropped, a member removed
-        /// from a group, a machine changed hands — and the declarations record
-        /// only the audience that is, never the audience that was. So the
-        /// narrowing is read off the ciphertext, and naming its holders is what
-        /// lets the report say a re-wrap is not a revocation of them.
+        /// from a group, a machine changed hands, an escrow consent withdrawn, an
+        /// organization's custody shrunk — and the declarations record only the
+        /// audience that is, never the audience that was. So the narrowing is
+        /// read off the ciphertext, and naming its holders is what lets the
+        /// report say a re-wrap is not a revocation of them.
+        ///
+        /// Which half a narrowing lands in follows from whose key it is. A
+        /// withdrawn consent leaves the organization's own custody key behind, so
+        /// the organization is named; a shrunk custody leaves a key its
+        /// declaration no longer holds, so it is orphaned and the organization is
+        /// named by the file, whose directory the audience is named for.
         narrowed: Holders,
         /// What mints a new value for each name the file holds, which is the only
         /// thing that revokes.

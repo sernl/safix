@@ -476,19 +476,23 @@ pub struct GovernedFiles {
     pub required: Vec<String>,
 }
 
-/// `user -> every age key that user can open a file with`.
+/// `subject -> every age key that subject holds of its own`.
 ///
-/// Their own and their recovery keys alike. [`Audiences`] answers the same
-/// question per file and loses which key is whose; a report that has found a
-/// stanza and wants to say who left it there needs the direction this way
-/// round.
+/// A person's own recipient and their recovery keys, a machine's host identity, an
+/// organization's custody. [`Audiences`] answers the same question per file and
+/// loses which key is whose; a report that has found a stanza and wants to say who
+/// left it there needs the direction this way round.
+///
+/// A person's escrow consent is not folded into their row, because the keys are
+/// the organization's: that is what lets a withdrawn consent be reported as the
+/// organization's access rather than as the person's own.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(transparent)]
 pub struct Recipients(pub BTreeMap<String, Vec<String>>);
 
 impl Recipients {
-    /// Which declared users hold any of these keys, and which keys answer to no
-    /// declared user at all.
+    /// Which declared subjects hold any of these keys, and which keys answer to no
+    /// declared subject at all.
     ///
     /// Both halves come back because a key on a file that no longer answers to
     /// a name is the more alarming of the two and must not be swallowed by
@@ -514,9 +518,9 @@ impl Recipients {
 /// The answer [`Recipients::holders_of`] gives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holders {
-    /// Declared users holding at least one of the keys, in name order.
+    /// Declared subjects holding at least one of the keys, in name order.
     pub named: Vec<String>,
-    /// Keys belonging to no declared user, in the order they were given.
+    /// Keys belonging to no declared subject, in the order they were given.
     pub orphaned: Vec<String>,
 }
 
@@ -1108,13 +1112,13 @@ pub const AUDIENCE_SEPARATOR: &str = ",";
 
 /// The markers the nix half writes an audience element with when the element is a
 /// reference resolved through a declaration rather than a subject named in place:
-/// a group, the owner a machine records, and a service.
+/// a group, the owner a machine records, a service, and an organization.
 ///
 /// Named here for the same reason as the separator, and load-bearing for the same
 /// claim. A directory is joined from elements, so the alphabet injectivity rests
 /// on is the marked forms as well as the bare names, and the property test below
 /// is where this crate states that rather than inheriting it.
-pub const AUDIENCE_MARKERS: [&str; 3] = ["@", "@~", "%"];
+pub const AUDIENCE_MARKERS: [&str; 4] = ["@", "@~", "%", "="];
 
 #[cfg(test)]
 mod properties {
@@ -1128,13 +1132,13 @@ mod properties {
     const NAME: &str = "[a-z0-9][a-z0-9_-]{0,7}";
 
     /// Every form an audience element takes: a subject named in place, a group,
-    /// the owner a machine records, or a service. The markers are part of the
-    /// alphabet a directory is joined from, so the property below has to be over
-    /// elements rather than over names.
+    /// the owner a machine records, a service, or an organization. The markers are
+    /// part of the alphabet a directory is joined from, so the property below has
+    /// to be over elements rather than over names.
     ///
-    /// Built by mapping the marker set rather than by naming each marker, so a
-    /// fifth subject kind is covered by the property the day the constant grows
-    /// rather than the day someone remembers this strategy.
+    /// Built by mapping the marker set rather than by naming each marker, which is
+    /// what covered the organization element the day the constant grew rather than
+    /// the day someone remembered this strategy.
     fn element() -> impl Strategy<Value = String> {
         let marked: Vec<BoxedStrategy<String>> = std::iter::once(NAME.prop_map(|n| n).boxed())
             .chain(
