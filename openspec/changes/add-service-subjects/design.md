@@ -47,6 +47,8 @@ This keeps the portability requirement honest: the standalone shape refuses what
 ### D5. Two services, one machine, one entry: the collision is a path collision
 
 Each service's entries land under the service's own path prefix, so two services granted the same entry coexist; what is refused is two resolutions onto one literal path, through the existing collision refusal rather than a service-specific rule.
+The prefix is the resolved key: an entry reached through a service resolves in its machines' sets under `<service>/<name>`, so the provisioner's own default path — already a function of the name and so unable to collide — *is* the prefix, nothing authors a path, and the only remaining way onto one literal path is a declared `path`, which the existing refusal owns.
+The composed name is admissible where a declared name carrying `/` is refused because both halves are drawn from the alphabet `wellFormedName` admits: neither can be `..`, so the file lands one level inside the directory the provisioner manages rather than walking out of it.
 
 ## Risks / Trade-offs
 

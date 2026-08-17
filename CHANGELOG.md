@@ -56,6 +56,16 @@ What grows is the set of things that can hold a key and appear in an audience: a
 There is one audience algebra over all three rather than a second grant surface beside the first, because a parallel mechanism would double every rule in it — two audience computations, two policy renderers, two revocation reports.
 This is phase A of the program `openspec/changes/extend-custody-subjects/` shapes, and the three phases after it are proposed there and not built: `add-service-subjects`, then `add-organization-custody`, then `add-management-delegation`, in that order because each later cut changes who may act rather than only what an audience can name.
 
+### A service is what a secret is actually for, and the boundary is stated rather than dressed up
+
+Phase B of the same program, `openspec/changes/add-service-subjects/`. Phase A deferred one question to it — whether a service resolves to its machines' keys or carries a minted identity of its own — and the fleet answers it: a service resolves to its machines' recipients and mints nothing.
+
+What a service grant narrows is the declaration and the placement. The audience names the service, so review reads who a secret is for, and the landed file belongs to the service's unix user and group, which the host enforces. What it does not narrow is what decrypts: the host identity remains what opens the file, so the machine is the trust boundary for everything running on it. That sentence is on the option itself rather than left to be inferred, and nothing in the tree calls a service grant an isolation mechanism.
+
+A per-service identity was considered and rejected. It would be a second key the same host must read at activation to place the service's files, so the compromise story would be unchanged, and it would add minting, custody, enrollment into every audience file, and rotation on every service move: ceremony without a boundary.
+
+Every phase-A declaration is unchanged, and a tree that declares no services generates the same policy, the same rules and the same files as before — byte for byte, which is the same check the phase-A records are held to.
+
 ### Added
 
 - `flake.safix.keepassxc` and `safix sync`: declared safix entries converge with entries in the operator's password database, one mapping at a time, in the mode each mapping declares.
@@ -175,7 +185,14 @@ This is phase A of the program `openspec/changes/extend-custody-subjects/` shape
   The recipient is `ssh-to-age` of the host's ed25519 key — the derivation clan uses for its own machine recipients, and the key sops-nix's NixOS module already defaults to — so declaring a machine mints no identity and adds no enrollment step.
   A machine holds nothing of its own: there is no `carries`, no `private` and no `sharedWith` on one, and everything it holds arrives through a grant aimed at it.
   The hardware-recipient refusal `safix adduser` applies to a person does not transfer to a machine, and the reason is the sentence that refusal rests on: a card needs a PIN and a touch once per file while an activation decrypts non-interactively, and a host identity decrypts non-interactively by nature.
-- `flake.safix.groups.<g>`: a set of subjects — people, machines, or other groups — whose recipients are its expanded membership's.
+- `flake.safix.services.<s>`: a service as a subject, with the machines it runs on, the person who owns it, and the unix user and group its landed entries belong to.
+  Its recipients are its machines', so a service introduces no identity and no enrollment step, and its audience file is named for the service, `secrets/safix/shared/%<service>/`, which is what makes a machine joining the set a re-wrap of one file rather than a migration to another. A machine leaving is reported by `safix check` as the revocation it is.
+  The unix fields live on the service once rather than on each grant, because they are properties of what the service is on its machines. A per-grant override was considered and left out: every axis added to a grant is an axis the refusals and the revocation report have to speak about.
+  Four refusals: a service naming a machine no declaration covers, a grant to a service whose machine set is empty, a name a person, machine or group already holds, and ownership declared toward a machine served by a user-scope profile.
+- A service-granted entry resolves at each of the service's machines under the composed name `<service>/<name>`.
+  The provisioner's own default path is a function of the name, so the composed one *is* the service prefix with nothing authored, two services granted one name coexist rather than one silently replacing the other, and the only remaining way onto one literal path is a declared `path`, which the existing collision refusal already owns.
+  The composed name is safe where a declared name carrying `/` is refused, and the argument is written where the name is composed: both halves are drawn from the alphabet a name is drawn from, so neither can be `..` and the file lands one level inside the directory the provisioner manages rather than walking out of it.
+- `flake.safix.groups.<g>`: a set of subjects — people, machines, services, or other groups — whose recipients are its expanded membership's.
   A group audience's file is named for the group rather than for its members, `secrets/safix/shared/@<group>/`, and that is what makes a membership change a re-wrap of one file instead of a migration to another: a hundred-member guest list in a directory name is not a name, and a directory that moves when the list changes is a migration `safix fix` cannot be the remedy for.
   Ad-hoc person-to-person sharing keeps the guest-list form unchanged; the two answer different questions and both stay derived.
   A cycle among group definitions is refused at evaluation with the participants named.
@@ -195,6 +212,9 @@ This is phase A of the program `openspec/changes/extend-custody-subjects/` shape
   The second holds design decision D6: every one of those refusals and resolutions runs over a NixOS system, a home-manager profile inside NixOS and a standalone home-manager profile, and a divergence between the three is a red check.
   Its answers are compared to each other and to the literal they agree on, because agreement alone would be satisfied by three shapes resolving nothing.
 - `safix-audience-narrowed`, `safix-audience-widened` and `safix-audience-orphan`, over `crates/safix/tests/subjects.rs`: the narrowing reported as a revocation, the widening converged by a real `sops updatekeys`, and a key on the file answering to no declared subject reported apart from the subjects that did match.
+  A fourth case joins them in the same suite: a machine leaving a service, reported through the service the audience names and the machine whose key is on the file.
+- The service element in `safix-subjects` and `safix-portability`, and one granted service in the fixture fleet the exported checks are instantiated over.
+  `safix-portability` reads the landed path off each of the three shapes rather than off safix, because the claim is what the provisioner does with the composed name it is handed, and it holds the ownership asymmetry as the pair it is: the system scope carries the service's account and group, and both home shapes refuse rather than dropping the claim.
 
 ### Changed
 
@@ -210,11 +230,13 @@ This is phase A of the program `openspec/changes/extend-custody-subjects/` shape
 - `safix check`'s recipient finding names whose custody the keys outside a file's declared audience are, and says what a re-wrap of them is not.
   A member leaving a group, a grant being dropped and a machine changing hands are one state by the time a report reads them — an evaluation records the audience that is and never the audience that was — so the finding that already reported that state is the one extended rather than three new ones added.
   It names declared subjects rather than printing age keys, because an operator reading a public key has to go and look up whose it is, which is the moment a revocation is misjudged; it keeps `safix fix` as the alignment step it is; and it offers a new value per name the file holds as the only thing that revokes.
-- The resolver's entry points take the records as one closed attrset with the three subject records defaulted to empty, rather than as two curried arguments.
+- The resolver's entry points take the records as one closed attrset with the four subject records defaulted to empty, rather than as two curried arguments.
   A call that names no subjects is the tree that declares none, which is what makes the inertness property structural rather than a claim about a code path. A consumer calling `flake.safix.lib.*` is unaffected; a consumer importing `modules/flake/safix/resolve.nix` directly is not, and that surface was never one safix documented.
 - A machine's recipient earns a policy anchor when a rule needs its key and not before, where a person's recipient earns one whether or not any rule names them.
   A person's recipient is their custody record and `safix adduser` writes one before they hold anything; a machine's is a key some rule needs. That asymmetry is what leaves a declared-but-unreferenced machine's policy byte-identical.
-- People, machines and groups share one name space, and two declarations of one name are refused rather than resolved by precedence: an audience element, a directory and an anchor are each derived from the name alone, so a precedence rule would decide who reads a file silently, at the point one of the two declarations was written.
+- People, machines, services and groups share one name space, and two declarations of one name are refused rather than resolved by precedence: an audience element, a directory and an anchor are each derived from the name alone, so a precedence rule would decide who reads a file silently, at the point one of the two declarations was written.
+- The audience alphabet gains a fourth marked element form, `%<service>` beside `@<group>` and `@~<machine>`, and the injectivity argument is stated over the marker set rather than over the pair it was first written for: every marker is outside the name alphabet, and wherever one marker extends another the remainder is outside it too.
+  The property test in `crates/safix-core/src/model.rs` builds its element strategy by mapping the marker constant, so a fifth subject kind is covered the day the constant grows rather than the day someone remembers the strategy.
 
 ### Fixed
 

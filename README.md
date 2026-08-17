@@ -165,11 +165,11 @@ The secret is still ana's everywhere; it simply does not land on that host.
 This is why a carrier of a shared entry who omits it on one host stays in the audience: omitting is about placement, and custody is about carrying.
 Reaching an entry only through a `perHost` or `perTag` `add` is refused, because a host-scoped selection puts nobody in any audience and would leave that person resolving a file they are not encrypted to.
 
-## Subjects: machines, groups, silos, ownership
+## Subjects: machines, services, groups, silos, ownership
 
 Everything above is a person sharing with a person.
-The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, or a group of subjects.
-Nothing in this section changes anything until you declare it, and declaring a machine, a group or a silo that no audience names generates the same policy, the same rules and the same files, byte for byte.
+The set of things that can hold a key and appear in an audience is wider than that, and it is one algebra rather than a second grant surface: a subject is a person, a machine, a service running on machines, or a group of subjects.
+Nothing in this section changes anything until you declare it, and declaring a machine, a service, a group or a silo that no audience names generates the same policy, the same rules and the same files, byte for byte.
 
 ### A machine is a subject
 
@@ -200,6 +200,31 @@ safix.machine = "deck"; # instead of safix.user
 
 It holds nothing of its own — there is no `carries`, no `private` and no `sharedWith` on a machine — and it needs no hostname, because it is the host.
 
+### A service is a subject whose recipients are its machines'
+
+A service grant narrows what is declared and what is placed, and not what decrypts: the audience names the service, the landed file belongs to the service's unix user and group, and the host identity remains what opens it — so the machine is the trust boundary for everything running on it.
+
+```nix
+flake.safix.services.nginx = {
+  machines = [ "deck" ];
+  owner = "ana";
+  user = "nginx";
+  group = "nginx";
+};
+
+flake.safix.users.ana.sharedWith.nginx.web-token = { };
+```
+
+```console
+$ sops secrets/safix/shared/%nginx,ana/secrets.yaml
+```
+
+The entry arrives on each machine the service runs on, keyed `nginx/web-token`, so the provisioner's own default path nests it under the service and two services granted one name never collide.
+At system scope the file lands owned by `nginx:nginx`; a user-scope profile has no ownership axis, so a service declaring one is refused there rather than having the claim dropped, and a service declaring neither resolves with the scope's ordinary placement.
+
+A machine joining the service is a re-wrap of the same file; a machine leaving is reported by `safix check` as the revocation it is, naming the machine, with rotation as the remedy.
+safix records where a service runs because audiences need it and derives it from nothing — keeping the declared set and the running unit in step is yours.
+
 ### A group is a subject whose recipients are its members'
 
 ```nix
@@ -213,7 +238,7 @@ $ sops secrets/safix/shared/@oncall,ana/secrets.yaml
 ```
 
 Think of it as a drawer with a name on it instead of a guest list.
-Members may be people, machines, or other groups, and a cycle among them is refused at evaluation with the participants named.
+Members may be people, machines, services, or other groups, and a cycle among them is refused at evaluation with the participants named.
 
 The `@` is what makes membership changes cheap.
 A guest-list directory moves when its list changes, which is a migration; a group-named directory does not, so adding a member is one `safix fix` that re-wraps one file, and removing one is a narrowing of the same file.
@@ -602,6 +627,7 @@ safix's own modules are held to that by the `safix-namespace` check: one read of
 Secrets are then declared against the projected names, and the two records stay independent — a person can exist in your registry and hold nothing here, or hold secrets here without your registry knowing.
 
 `flake.safix.machines` takes a projection on the same terms, from a host inventory rather than a user registry: safix has no host record of its own to reconcile with yours, and a machine declared by a `mapAttrs` over your inventory is indistinguishable to the resolver from one written by hand.
+`flake.safix.services` is the same again, from whatever record already says which units run where.
 
 ## Establishing secrets in a profile
 
@@ -621,7 +647,7 @@ Both modules declare the same options, and none of them can add a secret, a reci
 | `safix.flake` | `null` | your own flake — `inputs.self` — from which `safix.lib` is read |
 | `safix.lib` | from `safix.flake` | the resolver projection, settable directly if your flake reaches the profile some other way |
 | `safix.user` | `config.home.username`; none at system scope; `null` where `safix.machine` is set | which `flake.safix.users` entry this profile serves |
-| `safix.machine` | `null` | which `flake.safix.machines` entry this profile serves instead of a person |
+| `safix.machine` | `null` | which `flake.safix.machines` entry this profile serves instead of a person; its services' entries arrive with it |
 | `safix.hostname` | `osConfig.networking.hostName`; `config.networking.hostName` at system scope | which host to resolve on, since `perHost` and `perTag` select by it; not needed for a machine |
 | `safix.tags` | the declared tags of `safix.machine`, else `[ ]` | the tags this host carries, against which `perTag` selects |
 | `safix.identity.keyFile` | `null`; at user scope one of these two is required | an age key file this machine decrypts with |
