@@ -465,6 +465,17 @@ impl Fixture {
     /// person behind it declared here or the regenerated policy references an
     /// anchor it never defines.
     pub fn declare_person(&self, user: &str, recipient: &str) {
+        self.write_declaration(user, recipient);
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-q", "-m", &format!("fixture: declare {user}")]);
+    }
+
+    /// One person's declaration file, uncommitted.
+    ///
+    /// The template is here rather than at each caller because the nix stub reads
+    /// a recipient back out of it by matching `recipient = "…"`, so the shape is
+    /// part of what the stub answers rather than incidental formatting.
+    fn write_declaration(&self, user: &str, recipient: &str) {
         std::fs::create_dir_all(self.repo.join("safix/users")).unwrap();
         let declaration = format!(
             "{{\n  flake.safix.users.{user} = {{\n    recipient = \"{recipient}\";\n    carries = {{ }};\n    private = {{ }};\n  }};\n}}\n"
@@ -474,8 +485,6 @@ impl Fixture {
             declaration,
         )
         .unwrap();
-        self.git(&["add", "-A"]);
-        self.git(&["commit", "-q", "-m", &format!("fixture: declare {user}")]);
     }
 
     /// The recipient policy, committed and generated alike, over one audience.
@@ -1628,16 +1637,8 @@ impl Fixture {
     /// them and tracked, because the policy the stub renders follows what git
     /// tracks.
     pub fn seed_declarations(&self) {
-        std::fs::create_dir_all(self.repo.join("safix/users")).unwrap();
-        for (user, recipient) in [("ana", &self.ana), ("bo", &self.bo)] {
-            let declaration = format!(
-                "{{\n  flake.safix.users.{user} = {{\n    recipient = \"{recipient}\";\n    carries = {{ }};\n    private = {{ }};\n  }};\n}}\n"
-            );
-            std::fs::write(
-                self.repo.join(format!("safix/users/{user}.nix")),
-                declaration,
-            )
-            .unwrap();
+        for (user, recipient) in [("ana", self.ana.clone()), ("bo", self.bo.clone())] {
+            self.write_declaration(user, &recipient);
         }
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "fixture: two declared people"]);
