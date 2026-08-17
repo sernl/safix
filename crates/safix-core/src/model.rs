@@ -1107,14 +1107,38 @@ mod tests {
 /// assumption it is relying on rather than inheriting it silently.
 pub const AUDIENCE_SEPARATOR: &str = ",";
 
+/// The markers the nix half writes an audience element with when the element is a
+/// reference resolved through a declaration rather than a subject named in place:
+/// a group, and the owner a machine records.
+///
+/// Named here for the same reason as the separator, and load-bearing for the same
+/// claim. A directory is joined from elements, so the alphabet injectivity rests
+/// on is the marked forms as well as the bare names, and the property test below
+/// is where this crate states that rather than inheriting it.
+pub const AUDIENCE_MARKERS: [&str; 2] = ["@", "@~"];
+
 #[cfg(test)]
 mod properties {
     use proptest::prelude::*;
 
     use super::AUDIENCE_SEPARATOR;
 
+    use super::AUDIENCE_MARKERS;
+
     /// The alphabet `resolve.nix` admits a user, anchor or secret name from.
     const NAME: &str = "[a-z0-9][a-z0-9_-]{0,7}";
+
+    /// Every form an audience element takes: a subject named in place, a group,
+    /// or the owner a machine records. The markers are part of the alphabet a
+    /// directory is joined from, so the property below has to be over elements
+    /// rather than over names.
+    fn element() -> impl Strategy<Value = String> {
+        prop_oneof![
+            NAME.prop_map(|name| name),
+            NAME.prop_map(|name| format!("{}{name}", AUDIENCE_MARKERS[0])),
+            NAME.prop_map(|name| format!("{}{name}", AUDIENCE_MARKERS[1])),
+        ]
+    }
 
     /// How a shared audience's directory is named: its members, sorted, joined.
     fn directory_of(audience: &[String], separator: &str) -> String {
@@ -1133,8 +1157,8 @@ mod properties {
         /// secrets — a wider readership than either was declared with.
         #[test]
         fn distinct_audiences_reach_distinct_directories(
-            left in proptest::collection::vec(NAME, 1..4),
-            right in proptest::collection::vec(NAME, 1..4),
+            left in proptest::collection::vec(element(), 1..4),
+            right in proptest::collection::vec(element(), 1..4),
         ) {
             let mut left_set = left.clone();
             left_set.sort();
@@ -1158,6 +1182,45 @@ mod properties {
     /// can sit inside a name. That is why `resolve.nix` chooses a separator
     /// outside the alphabet rather than refusing names that contain the chosen
     /// one — no refusal restores injectivity once the character is forgeable.
+    /// A marker inside the alphabet collapses a resolved reference onto a subject
+    /// of that name.
+    ///
+    /// The same argument the separator rests on, over the other half of the
+    /// alphabet: `resolve.nix` marks a group audience and an owner reference
+    /// because the readership those name is a declaration rather than the list in
+    /// the path, and it draws the markers from outside the name alphabet because
+    /// a marker a name could carry would put the group `ops` and the person
+    /// `@ops` — or, with a marker of `x`, the group `ops` and the person `xops` —
+    /// in one directory, under one rule.
+    #[test]
+    fn a_marker_inside_the_alphabet_collapses_a_reference_onto_a_subject() {
+        let group = ["ana".to_owned(), "xops".to_owned()];
+        let person = ["ana".to_owned(), "ops".to_owned()];
+
+        let marked = |audience: &[String], marker: &str| {
+            let mut marked = audience.to_vec();
+            if let Some(last) = marked.last_mut() {
+                *last = format!("{marker}{}", last.trim_start_matches('x'));
+            }
+            directory_of(&marked, AUDIENCE_SEPARATOR)
+        };
+
+        // A marker of `x` is inside the alphabet, so marking `ops` reaches the
+        // directory `ana,xops` that a person named `xops` already has.
+        assert_eq!(
+            marked(&person, "x"),
+            directory_of(&group, AUDIENCE_SEPARATOR)
+        );
+
+        // The markers the nix half uses are outside it, so nothing does.
+        for marker in AUDIENCE_MARKERS {
+            assert_ne!(
+                marked(&person, marker),
+                directory_of(&group, AUDIENCE_SEPARATOR)
+            );
+        }
+    }
+
     #[test]
     fn a_separator_inside_the_alphabet_is_forgeable_across_an_element_boundary() {
         let pair = ["ana".to_owned(), "bo-cy".to_owned()];
