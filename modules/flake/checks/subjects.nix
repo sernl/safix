@@ -47,6 +47,23 @@
 # `nestedGroup.recipients`; removing the bound entirely does not fail anything
 # here and instead does not terminate on `groupCycle`, which is why the cycle
 # refusal is asserted on its message as well as on the throw.
+# Expanding a service to its machines in `expandGroups` rather than in
+# `leafRowsOf` loses which service reached a machine and fails
+# `twoServicesOneMachine`, which is the whole of what the composed key buys.
+# Keying a service's entries by the bare name fails `twoServicesOneMachine.keys`
+# and `serviceGrant.resolvedByTheMachine`; leaving `sopsKey` unset on a
+# service-granted entry fails `serviceGrant.sopsKeys`, which is the severe half —
+# the provisioner would look for the composed name inside the file and find
+# nothing.
+# Dropping the service marker from `elementOf` fails `serviceGrant.file` and both
+# service rows of `markedElementsAreDistinct`, and the second is the severe half
+# for the reason the group one is.
+# Naming a service audience's file for its machines rather than for the service
+# leaves `serviceGrant` green and fails `serviceGrowthIsARewrap` and
+# `serviceShrinkIsARewrap`.
+# Applying a service's ownership to the entry and then dropping it at user scope
+# rather than refusing fails `serviceOwnershipAtUserScope.refused`; refusing an
+# ownerless service there fails `ownerlessResolves`.
 # Emptying any fixture fleet fails `fixtureRosters`.
 {
   perSystem =
@@ -77,13 +94,14 @@
       # for any of them to open.
       keyOf = name: "age1fixture-${name}-0000000000000000000000000000000000";
 
-      # A fleet, as the five records the resolver reads. `machines` and `groups`
-      # go through their own submodules for the same reason `users` does.
+      # A fleet, as the six records the resolver reads. `machines`, `services` and
+      # `groups` go through their own submodules for the same reason `users` does.
       fleetOf =
         {
           users ? { },
           catalogue ? { },
           machines ? { },
+          services ? { },
           groups ? { },
           silos ? { },
         }:
@@ -91,6 +109,7 @@
           users = typed (lib.types.attrsOf types.profile) users;
           catalogue = typed (lib.types.attrsOf types.entry) catalogue;
           machines = typed (lib.types.attrsOf types.machine) machines;
+          services = typed (lib.types.attrsOf types.service) services;
           groups = typed (lib.types.attrsOf types.group) groups;
           silos = typed (lib.types.attrsOf types.silo) silos;
         };
@@ -137,20 +156,57 @@
           )
         );
 
+      # The same selection materialized into the provisioner's shape, which is
+      # where a declared path becomes a literal one and where the ownership axis
+      # exists or does not. The configuration handed to it is empty because every
+      # path a fixture declares here ignores it.
+      materializedFor =
+        fleet: args:
+        resolve.materializeFor (
+          fleet
+          // {
+            root = "";
+            hostname = "somewhere";
+            tags = [ ];
+          }
+          // args
+        ) { };
+
       violationsOf = resolve.violations;
 
       # ── inertness ──
-      # The repository's own fleet, and the same fleet with three subject records
-      # declared that nothing references. Every derived artifact has to be
-      # identical: declaring a machine, a group or a silo changes nothing until an
-      # audience names one.
-      bare = fleetOf { inherit (fixture.fleet) users catalogue; };
+      # The repository's own fleet, and the same fleet with four more subject
+      # records declared that nothing references. Every derived artifact has to be
+      # identical: declaring a machine, a service, a group or a silo changes nothing
+      # until an audience names one.
+      bare = fleetOf {
+        inherit (fixture.fleet)
+          users
+          catalogue
+          machines
+          services
+          ;
+      };
 
       declaredButUnused = bare // {
-        machines = typed (lib.types.attrsOf types.machine) {
-          deck = machine "deck" "ana";
-          rack = machine "rack" "bo";
-        };
+        machines = typed (lib.types.attrsOf types.machine) (
+          fixture.fleet.machines
+          // {
+            deck = machine "deck" "ana";
+            rack = machine "rack" "bo";
+          }
+        );
+        services = typed (lib.types.attrsOf types.service) (
+          fixture.fleet.services
+          // {
+            nginx = {
+              machines = [ "deck" ];
+              owner = "ana";
+              user = "nginx";
+              group = "nginx";
+            };
+          }
+        );
         groups = typed (lib.types.attrsOf types.group) {
           oncall.members = [
             "ana"
@@ -205,6 +261,122 @@
       unsafeMachineName = fleetOf {
         users.ana = holder "ana" { };
         machines."Deck" = machine "deck" "ana";
+      };
+
+      # ── services as subjects ──
+      # A service resolving to one machine's key. `nginx` declares ownership, which
+      # is what the system scope carries and the user scope refuses.
+      serviceOn =
+        hosts:
+        fleetOf {
+          users.ana = holder "ana" { sharedWith.nginx.token = { }; };
+          machines = {
+            deck = machine "deck" "ana";
+            rack = machine "rack" "ana";
+          };
+          services.nginx = {
+            machines = hosts;
+            owner = "ana";
+            user = "nginx";
+            group = "nginx";
+          };
+        };
+
+      serviceGrant = serviceOn [ "deck" ];
+      grownService = serviceOn [
+        "deck"
+        "rack"
+      ];
+      shrunkService = serviceOn [ "rack" ];
+      emptyService = serviceOn [ ];
+
+      # A service with no ownership fields, which is what resolves at either scope.
+      ownerlessService = fleetOf {
+        users.ana = holder "ana" { sharedWith.nginx.token = { }; };
+        machines.deck = machine "deck" "ana";
+        services.nginx = {
+          machines = [ "deck" ];
+          owner = "ana";
+        };
+      };
+
+      # A group whose member is a service, so the expansion crosses both kinds on
+      # the way to a machine's key.
+      serviceInGroup = fleetOf {
+        users.ana = holder "ana" { sharedWith.oncall.token = { }; };
+        machines.deck = machine "deck" "ana";
+        services.nginx = {
+          machines = [ "deck" ];
+          owner = "ana";
+        };
+        groups.oncall.members = [ "nginx" ];
+      };
+
+      # Two services on one machine, granted one name. Each resolves under its own
+      # key, so neither replaces the other and the provisioner's own default path —
+      # a function of the name — is what holds them apart.
+      twoServices =
+        entry:
+        fleetOf {
+          users.ana = {
+            recipient = keyOf "ana";
+            private.token = entry;
+            sharedWith = {
+              alpha.token = { };
+              beta.token = { };
+            };
+          };
+          machines.deck = machine "deck" "ana";
+          services = {
+            alpha.machines = [ "deck" ];
+            beta.machines = [ "deck" ];
+          };
+        };
+
+      twoServicesOneMachine = twoServices { };
+
+      # The same pair over an entry that declares its own path. Two keys, one
+      # literal path, refused by the collision refusal every other pair of entries
+      # meets rather than by a rule about services.
+      twoServicesOnePath = twoServices { path = _cfg: "/var/lib/fixture/token"; };
+
+      serviceOverUndeclaredMachine = fleetOf {
+        users.ana = holder "ana" { };
+        machines.deck = machine "deck" "ana";
+        services.nginx.machines = [
+          "rack"
+          "deck"
+        ];
+      };
+
+      serviceOwnedByNobody = fleetOf {
+        users.ana = holder "ana" { };
+        machines.deck = machine "deck" "ana";
+        services.nginx = {
+          machines = [ "deck" ];
+          owner = "zed";
+        };
+      };
+
+      serviceNameDeclaredTwice = fleetOf {
+        users.ana = holder "ana" { };
+        machines.nginx = machine "nginx" "ana";
+        services.nginx.machines = [ "nginx" ];
+      };
+
+      unsafeServiceName = fleetOf {
+        users.ana = holder "ana" { };
+        machines.deck = machine "deck" "ana";
+        services."Nginx".machines = [ "deck" ];
+      };
+
+      # A service whose machine records no key. The service resolves and the data
+      # key cannot be wrapped for it, reported with the service named as the
+      # declaration that put the machine in the audience.
+      serviceOnKeylessMachine = fleetOf {
+        users.ana = holder "ana" { sharedWith.nginx.token = { }; };
+        machines.deck.owner = "ana";
+        services.nginx.machines = [ "deck" ];
       };
 
       # ── groups ──
@@ -501,6 +673,28 @@
             "ana"
           ];
         }
+        {
+          label = "a service and a person of that name";
+          a = [
+            "%nginx"
+            "ana"
+          ];
+          b = [
+            "ana"
+            "nginx"
+          ];
+        }
+        {
+          label = "a service and a group of that name";
+          a = [
+            "%nginx"
+            "ana"
+          ];
+          b = [
+            "@nginx"
+            "ana"
+          ];
+        }
       ];
 
       roundTrips = fleet: refs: map (ref: resolve.refOfElement (resolve.elementOf fleet ref) == ref) refs;
@@ -556,12 +750,14 @@
               (_n: f: {
                 people = sorted (builtins.attrNames f.users);
                 machines = sorted (builtins.attrNames f.machines);
+                services = sorted (builtins.attrNames f.services);
                 groups = sorted (builtins.attrNames f.groups);
                 silos = sorted (builtins.attrNames f.silos);
               })
               {
                 inherit
                   machineGrant
+                  serviceGrant
                   groupGrant
                   crossSilo
                   ownedByBo
@@ -577,6 +773,7 @@
           inertness = {
             declaresSubjects = {
               machines = sorted (builtins.attrNames declaredButUnused.machines);
+              services = sorted (builtins.attrNames declaredButUnused.services);
               groups = sorted (builtins.attrNames declaredButUnused.groups);
               silos = sorted (builtins.attrNames declaredButUnused.silos);
             };
@@ -621,6 +818,119 @@
 
           unsafeMachineNameMessages = violationsOf unsafeMachineName;
           unsafeMachineNameFires = fires (filesFor unsafeMachineName { user = "ana"; });
+
+          # ── a service's audience is its machines ──
+          serviceGrant = {
+            audience = (audienceOfToken serviceGrant).audience;
+            file = fileOfToken serviceGrant;
+            recipients = (audienceOfToken serviceGrant).recipients;
+
+            # The machine resolves it, under the service's own key, and the key
+            # inside the encrypted file is still the entry's own name.
+            resolvedByTheMachine = filesFor serviceGrant { machine = "deck"; };
+            resolvedByTheOwner = filesFor serviceGrant { user = "ana"; };
+            sopsKeys = lib.mapAttrs (_n: s: s.sopsKey) (
+              resolve.selectFor (
+                serviceGrant
+                // {
+                  root = "";
+                  hostname = "somewhere";
+                  tags = [ ];
+                  machine = "deck";
+                }
+              )
+            );
+
+            # The service's declared account and group reach the provisioner at
+            # system scope, which is the narrowing a service grant does enforce.
+            systemPlacement = materializedFor serviceGrant {
+              machine = "deck";
+              scope = "system";
+            };
+          };
+
+          # A machine joining the service and a machine leaving it both leave the
+          # file where it was and change the recipient list, exactly as a group's
+          # membership does. That is what naming the directory for the service buys.
+          serviceGrowthIsARewrap = {
+            sameFile = fileOfToken grownService == fileOfToken serviceGrant;
+            recipients = (audienceOfToken grownService).recipients;
+            resolvedByTheNewMachine = filesFor grownService { machine = "rack"; };
+          };
+
+          serviceShrinkIsARewrap = {
+            sameFile = fileOfToken shrunkService == fileOfToken serviceGrant;
+            recipients = (audienceOfToken shrunkService).recipients;
+            departedMachineResolvesNothing = filesFor shrunkService { machine = "deck"; };
+          };
+
+          # A group may hold a service, and the expansion reaches the machine's key
+          # through both declarations.
+          serviceInGroup = {
+            audience = (audienceOfToken serviceInGroup).audience;
+            recipients = (audienceOfToken serviceInGroup).recipients;
+            resolvedByTheMachine = filesFor serviceInGroup { machine = "deck"; };
+          };
+
+          # Two services on one machine, granted one name. Two keys, so two entries
+          # and two of the provisioner's own default paths; one silently winning is
+          # what the composed key exists to prevent.
+          twoServicesOneMachine = {
+            violations = violationsOf twoServicesOneMachine;
+            resolved = filesFor twoServicesOneMachine { machine = "deck"; };
+            keys = sorted (
+              builtins.attrNames (
+                materializedFor twoServicesOneMachine {
+                  machine = "deck";
+                  scope = "system";
+                }
+              )
+            );
+          };
+
+          # The same pair over an entry that declares its own path is two
+          # resolutions onto one literal path, refused as any other collision is.
+          twoServicesOnePathRefused = fires (
+            materializedFor twoServicesOnePath {
+              machine = "deck";
+              scope = "system";
+            }
+          );
+
+          # ── the ownership asymmetry, extended ──
+          # A service declaring an account is refused where no ownership axis
+          # exists, naming the service, the machine and the field; one declaring
+          # none resolves there with the scope's ordinary placement.
+          serviceOwnershipAtUserScope = {
+            refused = fires (
+              materializedFor serviceGrant {
+                machine = "deck";
+                scope = "user";
+              }
+            );
+            ownerlessResolves = materializedFor ownerlessService {
+              machine = "deck";
+              scope = "user";
+            };
+            ownerlessAtSystemScope = materializedFor ownerlessService {
+              machine = "deck";
+              scope = "system";
+            };
+          };
+
+          emptyServiceMessages = violationsOf emptyService;
+          emptyServiceFires = fires (filesFor emptyService { user = "ana"; });
+
+          serviceOverUndeclaredMachineMessages = violationsOf serviceOverUndeclaredMachine;
+          serviceOverUndeclaredMachineFires = fires (filesFor serviceOverUndeclaredMachine { user = "ana"; });
+
+          serviceOwnedByNobodyMessages = violationsOf serviceOwnedByNobody;
+
+          serviceNameDeclaredTwiceMessages = violationsOf serviceNameDeclaredTwice;
+
+          unsafeServiceNameMessages = violationsOf unsafeServiceName;
+
+          serviceOnKeylessMachineMessages = violationsOf serviceOnKeylessMachine;
 
           # ── a group's audience is its members ──
           groupGrant = {
@@ -756,10 +1066,11 @@
           # Rendering a reference and reading it back is the identity, which is
           # what lets a file's audience be turned into the recipients it is
           # wrapped for.
-          referencesRoundTrip = roundTrips nestedGroup [
-            "bo"
+          referencesRoundTrip = roundTrips serviceInGroup [
+            "ana"
             "deck"
-            "outer"
+            "nginx"
+            "oncall"
             "ownerOf.deck"
           ];
 
@@ -787,6 +1098,8 @@
               {
                 inherit
                   machineGrant
+                  serviceGrant
+                  serviceInGroup
                   groupGrant
                   nestedGroup
                   ownedByBo
@@ -799,6 +1112,17 @@
             machineGrant = {
               people = [ "ana" ];
               machines = [ "deck" ];
+              services = [ ];
+              groups = [ ];
+              silos = [ ];
+            };
+            serviceGrant = {
+              people = [ "ana" ];
+              machines = [
+                "deck"
+                "rack"
+              ];
+              services = [ "nginx" ];
               groups = [ ];
               silos = [ ];
             };
@@ -810,6 +1134,7 @@
                 "dee"
               ];
               machines = [ ];
+              services = [ ];
               groups = [ "oncall" ];
               silos = [ ];
             };
@@ -820,6 +1145,7 @@
                 "cy"
               ];
               machines = [ ];
+              services = [ ];
               groups = [
                 "contractors"
                 "partners"
@@ -834,6 +1160,7 @@
                 "cy"
               ];
               machines = [ "deck" ];
+              services = [ ];
               groups = [ ];
               silos = [ ];
             };
@@ -847,6 +1174,7 @@
                 "deck"
                 "rack"
               ];
+              services = [ ];
               groups = [
                 "blue"
                 "red"
@@ -859,7 +1187,12 @@
             declaresSubjects = {
               machines = [
                 "deck"
+                "fixture-host"
                 "rack"
+              ];
+              services = [
+                "fixture-web"
+                "nginx"
               ];
               groups = [
                 "infra"
@@ -926,7 +1259,7 @@
           machineOwnedByNobodyFires = true;
 
           nameDeclaredTwiceMessages = [
-            "'deck' is declared as more than one kind of subject, by flake.safix.users and flake.safix.machines; people, machines and groups share one name space"
+            "'deck' is declared as more than one kind of subject, by flake.safix.users and flake.safix.machines; people, machines, services and groups share one name space"
           ];
           nameDeclaredTwiceFires = true;
 
@@ -934,6 +1267,113 @@
             "flake.safix.machines names 'Deck', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
           ];
           unsafeMachineNameFires = true;
+
+          serviceGrant = {
+            audience = [
+              "%nginx"
+              "ana"
+            ];
+            file = "secrets/safix/shared/%nginx,ana/secrets.yaml";
+            recipients = [
+              (keyOf "deck")
+              (keyOf "ana")
+            ];
+            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+            resolvedByTheOwner.token = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+            sopsKeys."nginx/token" = "token";
+            systemPlacement."nginx/token" = {
+              mode = "0400";
+              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              key = "token";
+              owner = "nginx";
+              group = "nginx";
+            };
+          };
+
+          serviceGrowthIsARewrap = {
+            sameFile = true;
+            recipients = [
+              (keyOf "deck")
+              (keyOf "rack")
+              (keyOf "ana")
+            ];
+            resolvedByTheNewMachine."nginx/token" = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+          };
+
+          serviceShrinkIsARewrap = {
+            sameFile = true;
+            recipients = [
+              (keyOf "rack")
+              (keyOf "ana")
+            ];
+            departedMachineResolvesNothing = { };
+          };
+
+          serviceInGroup = {
+            audience = [
+              "@oncall"
+              "ana"
+            ];
+            recipients = [
+              (keyOf "deck")
+              (keyOf "ana")
+            ];
+            resolvedByTheMachine."nginx/token" = "/secrets/safix/shared/@oncall,ana/secrets.yaml";
+          };
+
+          twoServicesOneMachine = {
+            violations = [ ];
+            resolved = {
+              "alpha/token" = "/secrets/safix/shared/%alpha,%beta,ana/secrets.yaml";
+              "beta/token" = "/secrets/safix/shared/%alpha,%beta,ana/secrets.yaml";
+            };
+            keys = [
+              "alpha/token"
+              "beta/token"
+            ];
+          };
+
+          twoServicesOnePathRefused = true;
+
+          serviceOwnershipAtUserScope = {
+            refused = true;
+            ownerlessResolves."nginx/token" = {
+              mode = "0400";
+              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              key = "token";
+            };
+            ownerlessAtSystemScope."nginx/token" = {
+              mode = "0400";
+              sopsFile = "/secrets/safix/shared/%nginx,ana/secrets.yaml";
+              key = "token";
+            };
+          };
+
+          emptyServiceMessages = [
+            "flake.safix.users.ana.sharedWith.nginx shares 'token' with flake.safix.services.nginx, whose machines is empty, so the file would be encrypted to nobody"
+          ];
+          emptyServiceFires = true;
+
+          serviceOverUndeclaredMachineMessages = [
+            "flake.safix.services.nginx.machines names 'rack', which is not a declared machine of flake.safix.machines"
+          ];
+          serviceOverUndeclaredMachineFires = true;
+
+          serviceOwnedByNobodyMessages = [
+            "flake.safix.services.nginx.owner names 'zed', which is not a declared user of flake.safix.users"
+          ];
+
+          serviceNameDeclaredTwiceMessages = [
+            "'nginx' is declared as more than one kind of subject, by flake.safix.machines and flake.safix.services; people, machines, services and groups share one name space"
+          ];
+
+          unsafeServiceNameMessages = [
+            "flake.safix.services names 'Nginx', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
+          ];
+
+          serviceOnKeylessMachineMessages = [
+            "flake.safix.users.ana.sharedWith.nginx shares 'token' with flake.safix.machines.deck, reached through flake.safix.services.nginx, but flake.safix.machines.deck.recipient is null, so no copy can be encrypted to them"
+          ];
 
           groupGrant = {
             audience = [
@@ -1004,7 +1444,7 @@
           emptyGroupFires = true;
 
           unknownMemberMessages = [
-            "flake.safix.groups.oncall.members names 'zed', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+            "flake.safix.groups.oncall.members names 'zed', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
           ];
           unknownMemberFires = true;
 
@@ -1107,14 +1547,28 @@
               fileA = "secrets/safix/shared/@~deck,ana/secrets.yaml";
               fileB = "secrets/safix/shared/@deck,ana/secrets.yaml";
             }
+            {
+              label = "a service and a person of that name";
+              distinct = true;
+              fileA = "secrets/safix/shared/%nginx,ana/secrets.yaml";
+              fileB = "secrets/safix/shared/ana,nginx/secrets.yaml";
+            }
+            {
+              label = "a service and a group of that name";
+              distinct = true;
+              fileA = "secrets/safix/shared/%nginx,ana/secrets.yaml";
+              fileB = "secrets/safix/shared/@nginx,ana/secrets.yaml";
+            }
           ];
 
           markersOutsideNameAlphabet = {
             group = true;
             owner = true;
+            service = true;
           };
 
           referencesRoundTrip = [
+            true
             true
             true
             true
@@ -1132,6 +1586,8 @@
             lib.genAttrs
               [
                 "machineGrant"
+                "serviceGrant"
+                "serviceInGroup"
                 "groupGrant"
                 "nestedGroup"
                 "ownedByBo"
