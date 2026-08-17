@@ -18,16 +18,16 @@
 - [x] 3.1 Add `network` to the generator submodule in `modules/flake/safix/types.nix`, default false, with a description stating what the grant re-shares and that the filesystem confinement stays
 - [x] 3.2 Carry the grant through the generator record to the runtime beside the fields that already travel
 - [x] 3.3 Rewrite the containment paragraph in the `script` option's description: the "caller's filesystem and network" sentence is withdrawn, the envelope is stated, the grant is stated beside it, and what remains the fragment author's is what moves over a granted connection
-- [ ] 3.4 Add a module-evaluation test that the grant is readable at evaluation, which is the audit surface the spec promises
+- [x] 3.4 Add a module-evaluation test that the grant is readable at evaluation, which is the audit surface the spec promises
 
 ## 4. The proof
 
-- [ ] 4.1 Add the hostile-fragment fixture: a write outside the staging root fails inside the envelope and the run refuses with that fragment's own failure, storing nothing
-- [ ] 4.2 Add the network-absence case: a fragment without the grant attempting a connection fails; platform-conditional presence per design D7
-- [ ] 4.3 Add the declared-escape case: with the grant, the connection succeeds against a local listener and a write outside the staging root still fails
+- [x] 4.1 Add the hostile-fragment fixture: a write outside the staging root fails inside the envelope and the run refuses with that fragment's own failure, storing nothing
+- [x] 4.2 Add the network-absence case: a fragment without the grant attempting a connection fails; platform-conditional presence per design D7
+- [x] 4.3 Add the declared-escape case: with the grant, the connection succeeds against a local listener and a write outside the staging root still fails
 - [ ] 4.4 Extend the strace reading in `syscall_proof.rs` to observe the envelope from outside the runtime, linux-only, with the non-linux half saying what it did not do
-- [ ] 4.5 Test the no-backend refusal by hiding the backend from the resolved toolset, and assert it precedes the first fragment
-- [ ] 4.6 Test that `--no-sandbox` and any equivalent is refused as an unknown flag, which is the spec's no-bypass scenario
+- [x] 4.5 Test the no-backend refusal by hiding the backend from the resolved toolset, and assert it precedes the first fragment
+- [x] 4.6 Test that `--no-sandbox` and any equivalent is refused as an unknown flag, which is the spec's no-bypass scenario
 
 ## 5. The record
 

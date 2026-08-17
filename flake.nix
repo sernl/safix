@@ -73,6 +73,7 @@
         ./modules/flake/checks/cli.nix
         ./modules/flake/checks/consumption.nix
         ./modules/flake/checks/custody.nix
+        ./modules/flake/checks/envelope.nix
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/generators.nix
         ./modules/flake/checks/materialization.nix

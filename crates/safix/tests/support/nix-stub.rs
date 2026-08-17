@@ -194,6 +194,12 @@ fn policy_text(root: &Path) -> String {
 /// is the check that does that. The remainder is run with this process's
 /// descriptors inherited, because the descriptors a generator's input travels
 /// down are the subject of `generate-isolation`.
+///
+/// `SAFIX_TEST_UNRESOLVABLE` names one attribute this stub refuses to resolve,
+/// which is how a drill takes the sandbox backend out of the toolset. A real
+/// `nix shell` exits non-zero for an attribute it cannot resolve and runs
+/// nothing, and that is what this reproduces — the runtime meets a resolution
+/// that failed rather than a tool that is missing from a path.
 fn shell(arguments: &[String]) -> ! {
     let mut rest = arguments;
     match rest.split_first() {
@@ -204,13 +210,19 @@ fn shell(arguments: &[String]) -> ! {
         Some((root, tail)) if *root == environment("SAFIX_REPO_ROOT") => rest = tail,
         _ => refuse("`--inputs-from` does not name the fixture repository"),
     }
+    let withheld = std::env::var("SAFIX_TEST_UNRESOLVABLE").ok();
     while let Some((first, tail)) = rest.split_first() {
         if first == "-c" {
             rest = tail;
             break;
         }
-        if !first.starts_with("nixpkgs#") {
+        let Some(attribute) = first.strip_prefix("nixpkgs#") else {
             refuse(&format!("'{first}' is not a nixpkgs#<attribute> spec"));
+        };
+        if withheld.as_deref() == Some(attribute) {
+            refuse(&format!(
+                "error: flake 'nixpkgs' does not provide attribute '{attribute}'"
+            ));
         }
         rest = tail;
     }

@@ -418,6 +418,12 @@ fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 ///
 /// Both flags are read before the positional arguments and in either order,
 /// because `--yes` answers a question `--regenerate` is what raises.
+///
+/// A flag this verb does not take is refused with the form rather than read as a
+/// secret's name, and that matters here more than it reads: `--no-sandbox` is
+/// the flag clan offers and safix does not, so an operator reaching for it gets
+/// the usage line rather than a refusal about a name nobody declared — and there
+/// is nothing it could be spelled as that would suspend the envelope.
 fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     const FORM: &str = "generate [--regenerate] [--yes] [--allow-disk-staging] [<user>] [<name>]";
     let mut options = generate::Options::default();
@@ -429,6 +435,7 @@ fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
             flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
                 options.allow_disk_staging = true;
             }
+            flag if flag.starts_with("--") => return Err(Refusal::Usage { form: FORM }),
             _ => break,
         }
         rest = tail;
