@@ -29,6 +29,8 @@ The organization's `managers` list is the other half, and both must agree for a 
 
 `safix group` edits declarations the way `enroll` edits custody records — the same insertion machinery, the same parsed-before-staged discipline, the same additive-first posture with `remove` carrying the disclosure `sharedWith` revocations already print.
 Its delegation scope: a group covered by an organization's silo declarations is that organization's to manage, which reuses the one organizational-boundary record the model already has instead of inventing a per-group owner field; a group no silo covers is unmanaged and any committer may edit it, exactly as today.
+Amended during apply with the semantics the sentence above left open, confirmed at integration: a silo set is an organization's when any of its groups' expanded membership reaches a person whose `managedBy` names it, and every group in that set is then that organization's to manage — including a group holding none of its people, because who sits on the far side of the boundary is exactly what the boundary-erecting organization must control; a per-group reading would leave the contractors list editable by anyone.
+Where several organizations cover one set, a manager of any of them is in scope, since demanding all would refuse a manager acting inside their own remit.
 
 ### D4. Refusal placement is the verb layer, deliberately
 
