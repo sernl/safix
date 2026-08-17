@@ -70,6 +70,53 @@ pub fn run(
     }
 
     let keyfile = identity_file();
+    prepare_identity_file(&keyfile, progress)?;
+
+    let public = append_identity(&keyfile)?;
+    let _ = std::fs::set_permissions(&keyfile, std::fs::Permissions::from_mode(0o600));
+
+    let public = public.ok_or_else(|| Error::KeygenNoPublicKey {
+        file: keyfile.display().to_string(),
+    })?;
+
+    progress.write(&epilogue(user, &keyfile.display().to_string(), &public));
+    Ok(())
+}
+
+/// Where sops looks for identities, or what the environment names instead.
+///
+/// Public because it is not this subcommand's answer but the package's: an
+/// identity minted here and a card's stub appended by
+/// [`enroll`](crate::enroll) are peers in one file, and two callers computing
+/// that path separately is how they stop being.
+#[must_use]
+pub fn identity_file() -> PathBuf {
+    if let Some(named) = std::env::var_os(KEY_FILE_VARIABLE)
+        && !named.is_empty()
+    {
+        return PathBuf::from(named);
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+            PathBuf::from,
+        );
+    config.join("sops").join("age").join("keys.txt")
+}
+
+/// Make the identity file's directory, at mode `0700`, and say whether the file
+/// is already there.
+///
+/// Shared with [`enroll`](crate::enroll) rather than duplicated, for the reason
+/// [`identity_file`] is public: the directory's mode and the note about
+/// appending are one behaviour, and two copies of it are two behaviours waiting
+/// to differ.
+///
+/// # Errors
+///
+/// [`Error::FileUnwritable`] when the directory cannot be made.
+pub fn prepare_identity_file(keyfile: &std::path::Path, progress: &dyn Progress) -> Result<()> {
     if let Some(directory) = keyfile.parent() {
         std::fs::create_dir_all(directory).map_err(|cause| Error::FileUnwritable {
             path: directory.display().to_string(),
@@ -87,32 +134,42 @@ pub fn run(
             ),
         );
     }
-
-    let public = append_identity(&keyfile)?;
-    let _ = std::fs::set_permissions(&keyfile, std::fs::Permissions::from_mode(0o600));
-
-    let public = public.ok_or_else(|| Error::KeygenNoPublicKey {
-        file: keyfile.display().to_string(),
-    })?;
-
-    progress.write(&epilogue(user, &keyfile.display().to_string(), &public));
     Ok(())
 }
 
-/// Where sops looks for identities, or what the environment names instead.
-fn identity_file() -> PathBuf {
-    if let Some(named) = std::env::var_os(KEY_FILE_VARIABLE)
-        && !named.is_empty()
-    {
-        return PathBuf::from(named);
-    }
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map_or_else(
-            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
-            PathBuf::from,
-        );
-    config.join("sops").join("age").join("keys.txt")
+/// Append text to the identity file, creating it at mode `0600`.
+///
+/// The whole of the file discipline this package has: opened for appending and
+/// never for writing, so nothing already in it is rewritten, and created with
+/// the mode rather than chmodded into it afterwards. `age-keygen -o <file>`
+/// refuses an existing file outright, which is the right refusal for the wrong
+/// shape here — sops tries every identity in the file, so a second identity
+/// beside a first is a working state and truncating is how someone loses the key
+/// to everything they hold.
+///
+/// # Errors
+///
+/// [`Error::FileUnwritable`] when the file cannot be opened or written.
+pub fn append_to_identity_file(keyfile: &std::path::Path, text: &str) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut sink = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(keyfile)
+        .map_err(|cause| Error::FileUnwritable {
+            path: keyfile.display().to_string(),
+            cause,
+        })?;
+    sink.write_all(text.as_bytes())
+        .and_then(|()| sink.flush())
+        .map_err(|cause| Error::FileUnwritable {
+            path: keyfile.display().to_string(),
+            cause,
+        })?;
+    let _ = std::fs::set_permissions(keyfile, std::fs::Permissions::from_mode(0o600));
+    Ok(())
 }
 
 /// Run `age-keygen`, appending the identity and returning the public half.
