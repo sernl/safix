@@ -21,8 +21,10 @@ use std::io;
 pub use code::Code;
 
 use prose::{
-    HOST_WITHOUT_HOOK, already_declared, bad_recipient, bad_user_name, bulleted, drifted,
-    generator_cycle, hardware_recipient, keygen_for_someone_else, no_generator,
+    HOST_WITHOUT_HOOK, NO_TERMINAL, OTP_REFUSED, PCSCD_UNAVAILABLE, already_declared,
+    bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous, drifted,
+    generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
+    no_file_to_prove_with, no_generator, recipients_lost,
 };
 
 /// A refusal from the safix runtime.
@@ -880,6 +882,212 @@ pub enum Error {
         whatever the hook left behind is yours to review."
     )]
     HookFailed {
+        /// What the hook exited with.
+        status: i32,
+    },
+
+    /// The kernel's entropy pool could not be read, so no credential was minted.
+    #[error("could not read {source}, so no PIN or PUK was generated")]
+    EntropyUnreadable {
+        /// The source that was being read.
+        source: &'static str,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The `ykman` binary could not be run.
+    #[error("could not run {program}, so the card's access was not touched")]
+    YkmanUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// No smartcard service answered, so no reader could be asked.
+    #[error("{PCSCD_UNAVAILABLE}")]
+    PcscdUnavailable,
+
+    /// No card is connected.
+    #[error(
+        "no card is connected. Insert the one you mean to enroll and re-run; nothing \
+        was touched."
+    )]
+    NoCardConnected,
+
+    /// More than one card is connected and none was named.
+    #[error("{}", cards_ambiguous(.serials))]
+    CardsAmbiguous {
+        /// Every serial that answered, in the order they were listed.
+        serials: Vec<String>,
+    },
+
+    /// `ykman` ran and refused, and this is what it said.
+    ///
+    /// The arguments are carried redacted of the flags that hold a credential:
+    /// the PIN reaches `ykman`'s argument vector because `ykman` has no other
+    /// interface for it, and a refusal is a string that travels further than one
+    /// process.
+    #[error("ykman {arguments} failed:\n{output}")]
+    CardCommandFailed {
+        /// What `ykman` was given, with every credential replaced.
+        arguments: String,
+        /// `ykman`'s own standard error, verbatim.
+        output: String,
+    },
+
+    /// The card refused the PIN, and one attempt is all a run makes.
+    #[error("{}", card_pin_rejected(.serial))]
+    CardPinRejected {
+        /// The card that refused it.
+        serial: String,
+    },
+
+    /// An OTP slot was asked for.
+    #[error("{OTP_REFUSED}")]
+    OtpRefused,
+
+    /// A card was asked for with no touch required.
+    #[error(
+        "touch-policy never is refused. The touch is the property a card is for, and an \
+        identity generated without it is a smartcard emulating a file.\n\
+        \n\
+        The policies safix generates with are pin-policy once and touch-policy cached, \
+        which is what this fleet's enrolled cards carry: one PIN entry per session, and \
+        one touch cached for fifteen seconds."
+    )]
+    TouchPolicyNever,
+
+    /// The run has no terminal, so nobody can be told to touch the card.
+    #[error("{NO_TERMINAL}")]
+    NoTerminal,
+
+    /// A pseudo-terminal could not be opened, read or written.
+    #[error("could not drive a pseudo-terminal, so the generator's PIN prompt was not reached")]
+    PtyUnusable {
+        /// What the kernel objected to.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The age plugin could not be run.
+    #[error("could not run {program}, so no identity was generated")]
+    PluginUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The age plugin ran and refused.
+    ///
+    /// Its own standard error crossed the terminal as it was written, so nothing
+    /// of it is repeated here: what this adds is that the run stopped and that no
+    /// identity was appended.
+    #[error(
+        "the age plugin exited {status}; nothing was appended and no recipient was added. \
+        Its own message is above."
+    )]
+    PluginFailed {
+        /// What the plugin exited with.
+        status: i32,
+    },
+
+    /// The age plugin said nothing for the idle limit and was ended.
+    #[error(
+        "the age plugin said nothing for {seconds} seconds and was ended; nothing was \
+        appended.\n\
+        \n\
+        A card that is not inserted, a reader another agent holds exclusively, or a \
+        touch nobody made all look like this."
+    )]
+    PluginStalled {
+        /// How long it was given.
+        seconds: u64,
+    },
+
+    /// The age plugin ran, succeeded, and printed no identity block.
+    #[error(
+        "the age plugin succeeded and printed no identity block, so there is nothing to \
+        append and no recipient to add"
+    )]
+    PluginNoIdentity,
+
+    /// The person's custody record is not one this can extend.
+    #[error("{}", no_declaration_file(.user, .file))]
+    NoDeclarationFile {
+        /// The person whose record was being edited.
+        user: String,
+        /// The path it was expected at.
+        file: String,
+    },
+
+    /// A re-wrap dropped a recipient a file had before the run.
+    #[error("{}", recipients_lost(.file, .lost))]
+    RecipientsLost {
+        /// The file that lost them.
+        file: String,
+        /// Every recipient that could open it before and cannot now.
+        lost: Vec<String>,
+    },
+
+    /// The person's audience covers no file the proof could use.
+    #[error("{}", no_file_to_prove_with(.user))]
+    NoFileToProveWith {
+        /// The person whose audience was searched.
+        user: String,
+    },
+
+    /// A password-store command could not be run.
+    #[error("could not run {program}, so the credentials were not mirrored")]
+    StoreUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// A store the credentials were being written to refused.
+    #[error(
+        "{transport} exited {status}, so the credentials are not there:\n{output}\n\
+        \n\
+        The card is enrolled and everything else is committed. This is a copy that \
+        was not made, not a step that failed halfway."
+    )]
+    StoreMirrorFailed {
+        /// Which store refused, in the words the report prints.
+        transport: &'static str,
+        /// What its command exited with.
+        status: i32,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// clan refused to register the recipient, both ways of asking.
+    #[error(
+        "clan would not register the card as {user}'s key:\n{output}\n\
+        \n\
+        The identity, the recipient and the re-wrap are committed on the safix side. \
+        clan owns its own store, so the registration is clan's to accept and safix \
+        writes nothing into it directly."
+    )]
+    ClanUserRegistrationFailed {
+        /// The person the key was being registered for.
+        user: String,
+        /// clan's own standard error, verbatim.
+        output: String,
+    },
+
+    /// The consumer's enrollment hook exited non-zero.
+    #[error(
+        "the enrollment hook exited {status}. The identity, the recipient and the policy \
+        are committed; whatever the hook left behind is yours to review."
+    )]
+    EnrollHookFailed {
         /// What the hook exited with.
         status: i32,
     },

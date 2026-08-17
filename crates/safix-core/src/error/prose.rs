@@ -391,3 +391,146 @@ pub(super) fn no_clan_flake() -> String {
     declared once for the consumer rather than once per mapping."
         .to_owned()
 }
+
+/// An OTP slot was asked for, and no flag will ever accept the ask.
+///
+/// The one refusal in this package whose reason is a property of the machine it
+/// runs on rather than of the declarations: the fleet's password database is
+/// opened by a challenge-response secret on OTP slot 2 of both keys, and writing
+/// that slot replaces the secret with one the database has never seen.
+pub(super) const OTP_REFUSED: &str = "\
+safix enroll does not write, reprogram or delete an OTP slot, under any flag.
+
+A programmed challenge-response slot is what opens a password database, and the
+database has no record of the secret it was built with. Writing that slot
+replaces the factor and the database stops opening — permanently, for every copy
+of it, with no recovery that does not already require what was in it.
+
+The two applets are disjoint. safix drives PIV: a PIN, a PUK, a protected
+management key and an age identity in a retired slot, none of which touches OTP.
+
+Extending a challenge-response factor to a second card is a deliberate manual
+act with the database's life at stake, and KeePassXC's own enrollment of one is
+GUI-only. It is not automated here, and that is a decision rather than an
+omission.";
+
+/// Two cards and nothing to choose between them.
+pub(super) fn cards_ambiguous(serials: &[String]) -> String {
+    format!(
+        "more than one card is connected, so there is nothing to enroll unambiguously.\n\
+        \n\
+        Connected:{}\n\
+        \n\
+        Name the one you mean:\n\
+        \n\
+        \x20   safix enroll --serial <serial> [<user>]\n\
+        \n\
+        Guessing is the one guess with a provisioning at the end of it: the card\n\
+        that was not meant would have its PIN, PUK and management key replaced.",
+        bulleted(serials)
+    )
+}
+
+/// No smartcard service, so no reader answers.
+pub(super) const PCSCD_UNAVAILABLE: &str = "\
+no smartcard service answered, so no card can be reached.
+
+A YubiKey's PIV applet is reached over PC/SC, and on this fleet that means
+pcscd. Nothing was touched.
+
+    services.pcscd.enable = true;
+
+Then re-insert the card and re-run. A card held exclusively by another agent —
+a running ssh-agent, a browser, a second enrollment — presents the same way, so
+check for one before concluding the service is absent.";
+
+/// A run with no terminal, refused before the card is touched.
+pub(super) const NO_TERMINAL: &str = "\
+enrollment needs a terminal, and there is none. Nothing was touched.
+
+The card is generated with touch-policy cached, so somebody has to touch it, and
+somebody has to be told when. Both of those need a terminal: the instruction goes
+to standard error and the generator's own PIN prompt is answered on a
+pseudo-terminal this run opens.
+
+An enrollment that could run unattended would be one whose card was generated
+with touch-policy never, which is a smartcard emulating a file. That is refused
+separately, and for the same reason.";
+
+/// A PIN this run generated, or was given, that the card refused.
+pub(super) fn card_pin_rejected(serial: &str) -> String {
+    format!(
+        "{serial} refused the PIN, and the generator asked again. Nothing further was\n\
+        attempted.\n\
+        \n\
+        One attempt, deliberately: a card allows three and a run that answered\n\
+        every prompt would spend all three on the same wrong PIN and block the\n\
+        card. The counter is at two rather than at zero.\n\
+        \n\
+        If safix provisioned this card, its PIN is in custody — safix get {serial}'s\n\
+        access entry — or in the password store beside it. If somebody else did,\n\
+        the PIN is theirs to supply.\n\
+        \n\
+        A blocked PIN is unblocked with the PUK; a blocked PUK leaves the PIV\n\
+        applet resettable and every identity on it gone."
+    )
+}
+
+/// A person with no custody record to add a recipient to.
+pub(super) fn no_declaration_file(user: &str, file: &str) -> String {
+    format!(
+        "{file} is not a custody record this can extend, so {user}'s recovery\n\
+        recipients were not touched.\n\
+        \n\
+        Enrollment adds a recipient to a record that already declares one. The\n\
+        record is written by:\n\
+        \n\
+        \x20   safix adduser {user} <age-recipient>\n\
+        \n\
+        A record living somewhere else is supported — declarations merge, so where\n\
+        one is written is not something safix knows — but the edit has to have a\n\
+        file to make, so move it to that path or add the recipient by hand and\n\
+        re-run for the rest of the ceremony."
+    )
+}
+
+/// A re-wrap that took an existing reader's stanza away.
+pub(super) fn recipients_lost(file: &str, lost: &[String]) -> String {
+    format!(
+        "{file} lost a recipient it had before this run, so nothing was committed.\n\
+        \n\
+        No longer able to open it:{}\n\
+        \n\
+        Enrollment is additive and only additive: it appends an identity, appends a\n\
+        recipient and re-wraps every governed file to the policy those imply. A\n\
+        recipient that disappeared in the re-wrap means the policy narrowed for a\n\
+        reason this run did not ask for — most often a declaration edited between\n\
+        the last `safix fix` and now.\n\
+        \n\
+        The card's identity and its recipient are written and are correct. Review\n\
+        what changed, converge deliberately, then re-run:\n\
+        \n\
+        \x20   safix check\n\
+        \x20   git diff",
+        bulleted(lost)
+    )
+}
+
+/// A person whose audience covers no file the proof could use.
+pub(super) fn no_file_to_prove_with(user: &str) -> String {
+    format!(
+        "{user}'s audience covers no file that exists, so there is nothing for the\n\
+        card to open and the proof cannot run.\n\
+        \n\
+        The card's identity and its recipient are written and are correct: the\n\
+        enrollment is additive and complete except for the one claim it exists to\n\
+        make. A canary encrypted for the occasion is deliberately not what runs\n\
+        here — it would prove that a fresh file made from a fresh rule opens, which\n\
+        is not the question.\n\
+        \n\
+        Give {user} a secret, then re-run this verb:\n\
+        \n\
+        \x20   safix set {user} <name>\n\
+        \x20   safix enroll {user}"
+    )
+}
