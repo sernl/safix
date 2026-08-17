@@ -71,7 +71,7 @@ let
     ''
       safix: the declarations this ${scopeNoun} is bound to do not resolve.
 
-      safix.user = ${cfg.user}, safix.hostname = ${cfg.hostname}, scope = ${scope}
+      safix.user = ${toString cfg.user}, safix.machine = ${toString (cfg.machine or null)}, safix.hostname = ${toString cfg.hostname}, scope = ${scope}
 
     ''
     + lib.concatMapStrings (v: "  - ${v}\n") cfg.lib.violations
@@ -94,13 +94,19 @@ let
   # configuration that names no identity usually still has one.
   noIdentityMessage =
     { cfg, resolved }:
+    let
+      # Whichever subject this profile serves, and where the profile is. A machine
+      # profile resolves without a hostname, because a machine is the host.
+      subject = if cfg.machine or null != null then cfg.machine else cfg.user;
+      where = if cfg.hostname or null == null then subject else cfg.hostname;
+    in
     ''
-      safix: ${toString (builtins.length (builtins.attrNames resolved))} secret(s) resolve for ${cfg.user} on ${cfg.hostname}, and this
+      safix: ${toString (builtins.length (builtins.attrNames resolved))} secret(s) resolve for ${subject} on ${where}, and this
       home-manager profile names no decryption identity.
 
       Name one:
 
-        safix.identity.sshKeyPaths = [ "/home/${cfg.user}/.ssh/id_ed25519" ];
+        safix.identity.sshKeyPaths = [ "/home/${subject}/.ssh/id_ed25519" ];
 
       or set safix.identity.keyFile to an age key file this machine holds.
 
@@ -213,8 +219,8 @@ in
 
       user = mkOption {
         type = types.nullOr types.str;
-        default = userDefault;
-        defaultText = userDefaultText;
+        default = if cfg.machine == null then userDefault else null;
+        defaultText = lib.literalMD "${userDefaultText.text or "null"}, or null where `safix.machine` is set";
         example = "jane";
         description = ''
           Which `flake.safix.users` entry this ${scopeNoun} serves.
@@ -223,6 +229,38 @@ in
           in the consumer's `flake.safix.users`, and everything about who may
           read what — the recipient, the recovery identities, the grants — is
           stated there, where every user is visible at once.
+
+          Defaults to null where `safix.machine` is set, so a profile that serves
+          a machine names one option rather than two. Defining both is refused: a
+          profile serves one subject, and a resolution of two would be two
+          subjects' custody in one set of files.
+        '';
+      };
+
+      machine = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "workstation";
+        description = ''
+          Which `flake.safix.machines` entry this ${scopeNoun} serves, instead of
+          a person.
+
+          A machine holds what people have granted it, and that is the whole of
+          what arrives here: a machine declares no secrets of its own. What it
+          decrypts with is the identity it already had — at system scope the
+          provisioner defaults to the host's ed25519 keys, which is the same key
+          `flake.safix.machines.<m>.recipient` is the age form of, so a machine
+          entry needs no identity named here.
+
+          It has no default. safix holds no host inventory and derives no machine
+          from a hostname, because a hostname is not an identity: two hosts can
+          share one and a declaration cannot.
+
+          Selection is custody and custody has no scope, so a machine resolves
+          the same set in a ${scopeNoun} as anywhere else. Nothing about this
+          requires NixOS: the entries are files with recipients, and a standalone
+          home-manager profile on any distribution that names the machine
+          resolves them identically.
         '';
       };
 
@@ -243,14 +281,19 @@ in
 
       tags = mkOption {
         type = types.listOf types.str;
-        default = [ ];
+        default = if cfg.machine == null then [ ] else cfg.lib.subjects.machines.${cfg.machine}.tags;
+        defaultText = lib.literalExpression "the declared tags of config.safix.machine, or [ ]";
         example = [ "laptop" ];
         description = ''
           The tags this host carries, against which
           `flake.safix.users.<u>.perTag` adds, omits and forces entries.
 
-          safix has no host registry and derives no tag from anything: a tag
-          vocabulary is the consumer's, and this is where theirs is handed over.
+          safix derives no tag from anything but a declaration: a tag vocabulary
+          is the consumer's, and this is where theirs is handed over. A profile
+          that names `safix.machine` is the one case where the declarations do
+          hold them, and they default from there — which is what makes a hundred
+          hosts declarable as tags on machines rather than as a hundred `perHost`
+          blocks.
         '';
       };
 
@@ -319,15 +362,29 @@ in
   # Empty rather than an error is what makes the assertions below reachable:
   # `enable` defaults to whether this is non-empty, so a resolution that threw
   # here would pre-empt every message that names the option actually at fault.
+  #
+  # A profile serving a machine needs no hostname. A machine holds only what was
+  # granted to it and has no per-host layer to select through — it is the host —
+  # so requiring one would make a standalone profile that names a machine resolve
+  # nothing for want of a value that decides nothing.
   resolvedFor =
     { cfg, target }:
-    if cfg.lib == null || cfg.user == null || cfg.hostname == null then
+    let
+      unbound = cfg.lib == null || (cfg.user == null && cfg.machine == null);
+      unaddressed = cfg.machine == null && cfg.hostname == null;
+    in
+    if unbound || unaddressed || (cfg.user != null && cfg.machine != null) then
       { }
     else if cfg.lib.violations != [ ] then
       throw (violationMessage cfg)
     else
       cfg.lib.materialize {
-        inherit (cfg) user hostname tags;
+        inherit (cfg)
+          user
+          machine
+          hostname
+          tags
+          ;
         inherit scope;
       } target;
 
@@ -349,21 +406,40 @@ in
         message = flakelessMessage;
       }
       {
-        assertion = cfg.lib == null || cfg.user != null;
+        assertion = cfg.lib == null || cfg.user != null || cfg.machine != null;
         message = ''
-          safix: this ${scopeNoun} is bound to a set of declarations but names no person.
+          safix: this ${scopeNoun} is bound to a set of declarations but names no subject.
 
-          Set safix.user to the flake.safix.users entry this profile serves.
+          Set safix.user to the flake.safix.users entry this profile serves, or
+          safix.machine to the flake.safix.machines entry it serves.
         '';
       }
       {
-        assertion = cfg.lib == null || cfg.hostname != null;
+        assertion = cfg.user == null || cfg.machine == null;
+        message = ''
+          safix: this ${scopeNoun} names both safix.user = ${toString cfg.user} and
+          safix.machine = ${toString cfg.machine}.
+
+          A profile serves one subject. Resolving both would put two subjects'
+          entries in one set of files, and which of the two a file belonged to
+          would be a question the declarations no longer answer.
+
+          Naming safix.machine alone is enough: safix.user then defaults to null
+          rather than to this profile's own username, so the two are alternatives
+          without a second option to unset.
+        '';
+      }
+      {
+        assertion = cfg.lib == null || cfg.machine != null || cfg.hostname != null;
         message = ''
           safix: this ${scopeNoun} is bound to a set of declarations but names no host.
 
-          Resolution is host-scoped — flake.safix.users.<u>.perHost and .perTag
-          select by host — so there is no set to resolve without one. Set
+          A person's resolution is host-scoped — flake.safix.users.<u>.perHost and
+          .perTag select by host — so there is no set to resolve without one. Set
           safix.hostname.
+
+          A profile serving safix.machine needs none: a machine holds what was
+          granted to it and has no per-host layer to select through.
         '';
       }
     ];

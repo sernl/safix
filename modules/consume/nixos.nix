@@ -67,7 +67,10 @@ in
       # the module's own default, and only a definition can.
       assertions = common.assertionsFor {
         inherit cfg;
-        configured = common.wasSet options.safix.user || common.wasSet options.safix.hostname;
+        configured =
+          common.wasSet options.safix.user
+          || common.wasSet options.safix.machine
+          || common.wasSet options.safix.hostname;
       };
     }
 

@@ -1776,7 +1776,12 @@ let
           value
         else
           throw (
-            "safix paths: ${subject} resolves two secrets onto one path on '${args.hostname}'\n"
+            "safix paths: ${subject} resolves two secrets onto one path${
+              # A machine's resolution is host-independent — it is the host — so
+              # naming one here would suggest the collision was a property of
+              # where the entries landed rather than of the declarations.
+              lib.optionalString (args.machine or null == null) " on '${args.hostname}'"
+            }\n"
             + lib.concatStrings (
               lib.mapAttrsToList (
                 path: claimants:

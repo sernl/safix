@@ -281,6 +281,7 @@ in
           ];
         };
         user = "ana";
+        machine = null;
         inherit hostname;
         tags = [ ];
       };
@@ -597,6 +598,7 @@ in
                     cfg = {
                       lib = safix;
                       user = "ana";
+                      machine = null;
                       hostname = null;
                     };
                   }
@@ -612,6 +614,7 @@ in
                   cfg = {
                     lib = safix;
                     user = null;
+                    machine = null;
                     hostname = "server";
                   };
                 }
@@ -628,6 +631,7 @@ in
                     cfg = {
                       lib = null;
                       user = null;
+                      machine = null;
                       hostname = null;
                     };
                   } == [ ];
@@ -653,6 +657,7 @@ in
                         cfg = {
                           lib = null;
                           user = "ana";
+                          machine = null;
                           hostname = null;
                         };
                       }
@@ -666,6 +671,7 @@ in
                   cfg = {
                     lib = safix;
                     user = "ana";
+                    machine = null;
                     inherit hostname;
                   };
                 } == [ ];
@@ -711,6 +717,7 @@ in
                       (homeCommon.noIdentityMessage {
                         cfg = {
                           user = "ana";
+                          machine = null;
                           inherit hostname;
                         };
                         resolved.ana-alone = { };
