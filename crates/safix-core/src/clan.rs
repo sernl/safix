@@ -218,6 +218,56 @@ impl Clan {
         })
     }
 
+    /// Register one age recipient with clan, as one person's key.
+    ///
+    /// Two commands rather than one, and the second is reached by outcome rather
+    /// than by reading clan's wording: `users add` declares a person clan does not
+    /// have, `users add-key` adds a key to one it does, and which of those applies
+    /// is a fact about clan's store that only clan knows. So the first is tried
+    /// and the second follows it when it refuses, and only both refusing is a
+    /// refusal here.
+    ///
+    /// Nothing on this path reads or writes a file clan placed. A card's
+    /// recipient is a public string and clan's own command is what puts it in
+    /// clan's store, which is this module's whole rule applied to a key instead of
+    /// to a value.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ClanUnavailable`] when the binary cannot be run, and
+    /// [`Error::ClanUserRegistrationFailed`] carrying clan's own message when both
+    /// commands refuse.
+    pub fn register_user(&self, user: &str, recipient: &str) -> Result<()> {
+        let mut said = String::new();
+        for verb in ["add", "add-key"] {
+            let finished = Command::new(&self.program)
+                .arg("secrets")
+                .arg("users")
+                .arg(verb)
+                .arg("--flake")
+                .arg(&self.flake)
+                .arg(user)
+                .arg("--age-key")
+                .arg(recipient)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .map_err(|cause| Error::ClanUnavailable {
+                    program: self.program(),
+                    cause,
+                })?;
+            if finished.status.success() {
+                return Ok(());
+            }
+            said.push_str(&String::from_utf8_lossy(&finished.stderr));
+        }
+        Err(Error::ClanUserRegistrationFailed {
+            user: user.to_owned(),
+            output: trimmed(&said),
+        })
+    }
+
     /// Whether clan considers this generator's recorded validation stale.
     ///
     /// clan records a validation hash per generator and regenerates when the
