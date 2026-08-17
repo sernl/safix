@@ -21,6 +21,12 @@ A value with no record predates the record and SHALL NOT be a finding.
 - **WHEN** the value is regenerated under the current declaration
 - **THEN** the finding is gone on the next `check`
 
+#### Scenario: A capability grant is a definition change
+
+- **WHEN** a generator's network grant flips after its value was minted
+- **THEN** `check` reports the entry as minted under a definition that no longer exists
+- **AND** the record stays put until a regeneration adopts the grant or the flip is reverted
+
 #### Scenario: What is out of scope stays quiet
 
 - **WHEN** an entry has no generator, or a generated value has no record
