@@ -383,8 +383,13 @@ impl Ceremony<'_> {
     }
 
     /// The card onto `recoveryRecipients`, or a note that it was already there.
+    ///
+    /// The anchor is the serial's, so a backup card enrolls beside the first
+    /// rather than over it, and the generated policy names each card by the
+    /// serial printed on it.
     fn add_recovery(&self, relative: &str, text: String, recipient: &str) -> Result<String> {
-        match declaration::add_recovery_recipient(&text, recipient) {
+        let anchor = format!("yubikey-{}", self.serial);
+        match declaration::add_recovery_recipient(&text, &anchor, recipient) {
             declaration::Edit::Inserted(edited) => {
                 log(
                     self.progress,
@@ -398,7 +403,7 @@ impl Ceremony<'_> {
             declaration::Edit::AlreadyPresent => {
                 note(
                     self.progress,
-                    "the card's recipient is already in that list; nothing was added to it.",
+                    "the card's recipient is already among them; nothing was added.",
                 );
                 Ok(text)
             }

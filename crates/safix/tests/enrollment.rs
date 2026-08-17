@@ -241,8 +241,9 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     // ── the wiring ──
     let declaration = fixture.read("safix/users/ana.nix");
     assert!(
-        declaration.contains(&format!("recoveryRecipients = [ \"{CARD}\" ];")),
-        "the card is not in ana's recoveryRecipients: {declaration}"
+        declaration.contains("recoveryRecipients = {")
+            && declaration.contains(&format!("\"yubikey-{SERIAL}\".key = \"{CARD}\";")),
+        "the card is not an anchor in ana's recoveryRecipients: {declaration}"
     );
     assert!(
         declaration.contains(&format!("recipient = \"{}\";", fixture.ana)),
@@ -353,11 +354,11 @@ fn a_backup_card_sits_beside_the_first_and_changes_nothing_about_it() {
     assert_eq!(
         after_second.matches("recoveryRecipients").count(),
         1,
-        "a second list was written instead of the first being extended"
+        "a second set was written instead of the first being extended"
     );
-    // Every line the first run left is still there, except the one the second run
-    // extended: a list gaining an element is the only rewrite either run makes,
-    // and it is an insertion into that line rather than a replacement of the file.
+    // Every line the first run left is still there: the second card is one
+    // inserted anchor line inside the existing set, not a rewrite of anything
+    // the first run wrote.
     assert!(
         after_first
             .lines()

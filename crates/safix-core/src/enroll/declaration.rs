@@ -34,19 +34,54 @@ pub enum Edit {
     NoAnchor,
 }
 
-/// Add one recipient to the person's `recoveryRecipients`.
+/// Add one recipient to the person's `recoveryRecipients`, keyed by its anchor.
 ///
-/// The list is created when it is absent, which is the ordinary case: the
+/// The attrset is created when it is absent, which is the ordinary case: the
 /// scaffold leaves it out deliberately, and a card is the first thing that
-/// belongs in it.
+/// belongs in it. The shape written is the option's own — an anchor naming a
+/// `key` — because this file's next reader is the module system, and a shape
+/// only a human accepts is an enrollment that fails at the next evaluation.
+/// `modules/flake/checks/fixture-fleet.nix` holds the same shape verbatim
+/// against the real option, so the two cannot drift apart silently.
 #[must_use]
-pub fn add_recovery_recipient(declaration: &str, recipient: &str) -> Edit {
+pub fn add_recovery_recipient(declaration: &str, anchor: &str, recipient: &str) -> Edit {
     if quoted_present(declaration, recipient) {
         return Edit::AlreadyPresent;
     }
-    match insert_into_list(declaration, "recoveryRecipients", recipient) {
-        Some(edited) => Edit::Inserted(edited),
-        None => create_recovery_recipients(declaration, recipient),
+    let entry = format!("\"{anchor}\".key = \"{recipient}\";");
+    match recovery_shape(declaration) {
+        Shape::Absent => create_recovery_recipients(declaration, &entry),
+        Shape::Attrset => match insert_into_attrset(declaration, "recoveryRecipients", &entry) {
+            Some(edited) => Edit::Inserted(edited),
+            None => Edit::NoAnchor,
+        },
+        Shape::Unextendable => Edit::NoAnchor,
+    }
+}
+
+/// What the file already declares `recoveryRecipients` as.
+enum Shape {
+    /// Not declared; the block is created whole.
+    Absent,
+    /// The option's own attrset form, extendable in place.
+    Attrset,
+    /// Some other value — a list, say — which the option would refuse at
+    /// evaluation anyway; extending it would compound a hand edit this editor
+    /// does not understand, so it is refused as having no anchor instead.
+    Unextendable,
+}
+
+fn recovery_shape(declaration: &str) -> Shape {
+    let Some(line) = declaration
+        .lines()
+        .find(|line| declares(line, "recoveryRecipients"))
+    else {
+        return Shape::Absent;
+    };
+    if line.contains('[') {
+        Shape::Unextendable
+    } else {
+        Shape::Attrset
     }
 }
 
@@ -60,7 +95,7 @@ pub fn add_private_entry(declaration: &str, name: &str) -> Edit {
     if attribute_present(declaration, name) {
         return Edit::AlreadyPresent;
     }
-    match insert_into_attrset(declaration, "private", name) {
+    match insert_into_attrset(declaration, "private", &format!("{name} = {{ }};")) {
         Some(edited) => Edit::Inserted(edited),
         None => Edit::NoAnchor,
     }
@@ -81,55 +116,13 @@ fn attribute_present(declaration: &str, name: &str) -> bool {
     })
 }
 
-/// Insert a quoted element into an existing list-valued attribute.
+/// Insert one rendered entry into an existing attrset-valued attribute.
 ///
 /// `None` when the attribute is not declared, which is the caller's cue to make
-/// it rather than this function's to guess at where it would go.
-fn insert_into_list(declaration: &str, attribute: &str, element: &str) -> Option<String> {
-    let lines: Vec<&str> = declaration.lines().collect();
-    let opening = lines.iter().position(|line| declares(line, attribute))?;
-    let opening_line = lines.get(opening)?;
-
-    // The one-line form: the list opens and closes on the attribute's own line,
-    // so the element goes in front of the bracket that closes it. Nix separates
-    // list elements by whitespace, so no comma is involved and nothing existing
-    // is touched.
-    if let Some(bracket) = opening_line.rfind(']')
-        && opening_line.contains('[')
-    {
-        let (before, after) = opening_line.split_at(bracket);
-        let mut rebuilt: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-        let replacement = format!("{}\"{element}\" {after}", pad(before));
-        *rebuilt.get_mut(opening)? = replacement;
-        return Some(joined(&rebuilt, declaration));
-    }
-
-    // The multi-line form: the element goes on its own line above the one that
-    // closes the list, indented like whatever is already inside it.
-    let closing = lines
-        .iter()
-        .enumerate()
-        .skip(opening)
-        .find(|(_, line)| line.trim_start().starts_with(']'))
-        .map(|(index, _)| index)?;
-    // Indented like whatever is already inside the list, and one step in from the
-    // attribute when nothing is: the line that closes it is not an element and its
-    // indentation is the list's own rather than its contents'.
-    let inner = lines
-        .get(opening.saturating_add(1)..closing)
-        .and_then(|inside| inside.iter().find(|line| !line.trim().is_empty()))
-        .map_or_else(
-            || format!("{}  ", indent_of(opening_line)),
-            |line| indent_of(line),
-        );
-
-    let mut rebuilt: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    rebuilt.insert(closing, format!("{inner}\"{element}\""));
-    Some(joined(&rebuilt, declaration))
-}
-
-/// Insert an empty entry into an existing attrset-valued attribute.
-fn insert_into_attrset(declaration: &str, attribute: &str, name: &str) -> Option<String> {
+/// it rather than this function's to guess at where it would go. The entry
+/// arrives rendered but unindented, so one inserter serves an empty private set
+/// and a recovery anchor alike.
+fn insert_into_attrset(declaration: &str, attribute: &str, entry: &str) -> Option<String> {
     let lines: Vec<&str> = declaration.lines().collect();
     let opening = lines.iter().position(|line| declares(line, attribute))?;
     let opening_line = lines.get(opening)?;
@@ -141,9 +134,12 @@ fn insert_into_attrset(declaration: &str, attribute: &str, name: &str) -> Option
     if opening_line.contains('{') && opening_line.contains('}') {
         let mut rebuilt: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
         let opened = format!("{indent}{attribute} = {{");
-        let entry = format!("{indent}  {name} = {{ }};");
+        let entry_line = format!("{indent}  {entry}");
         let closed = format!("{indent}}};");
-        rebuilt.splice(opening..opening.saturating_add(1), [opened, entry, closed]);
+        rebuilt.splice(
+            opening..opening.saturating_add(1),
+            [opened, entry_line, closed],
+        );
         return Some(joined(&rebuilt, declaration));
     }
 
@@ -154,17 +150,17 @@ fn insert_into_attrset(declaration: &str, attribute: &str, name: &str) -> Option
         .find(|(_, line)| line.trim_start().starts_with('}'))
         .map(|(index, _)| index)?;
     let mut rebuilt: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    rebuilt.insert(closing, format!("{indent}  {name} = {{ }};"));
+    rebuilt.insert(closing, format!("{indent}  {entry}"));
     Some(joined(&rebuilt, declaration))
 }
 
-/// Write a `recoveryRecipients` list where the record has none.
+/// Write a `recoveryRecipients` attrset where the record has none.
 ///
 /// Anchored under the `recipient` line, because that is the field it is the
 /// counterpart of and a reader looking for one will be looking at the other. The
 /// comment is two lines and states the one thing the field's presence does not:
 /// that adding to it is additive and removing from it revokes nothing.
-fn create_recovery_recipients(declaration: &str, recipient: &str) -> Edit {
+fn create_recovery_recipients(declaration: &str, entry: &str) -> Edit {
     let lines: Vec<&str> = declaration.lines().collect();
     let Some(anchor) = lines.iter().position(|line| declares(line, "recipient")) else {
         return Edit::NoAnchor;
@@ -181,7 +177,9 @@ fn create_recovery_recipients(declaration: &str, recipient: &str) -> Edit {
         format!("{indent}# next re-wrap, and one removed from here revokes nothing that was"),
         format!("{indent}# already readable. Cards belong here and not in `recipient`, because"),
         format!("{indent}# activation decrypts without a person present and a card needs a touch."),
-        format!("{indent}recoveryRecipients = [ \"{recipient}\" ];"),
+        format!("{indent}recoveryRecipients = {{"),
+        format!("{indent}  {entry}"),
+        format!("{indent}}};"),
     ];
 
     let mut rebuilt: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
@@ -202,15 +200,6 @@ fn declares(line: &str, attribute: &str) -> bool {
 /// The leading whitespace of a line, as a string.
 fn indent_of(line: &str) -> String {
     line.chars().take_while(|c| c.is_whitespace()).collect()
-}
-
-/// The text with one space at the end, so an inserted element does not collide
-/// with what precedes it.
-fn pad(before: &str) -> String {
-    if before.ends_with(char::is_whitespace) || before.is_empty() {
-        return before.to_owned();
-    }
-    format!("{before} ")
 }
 
 /// The lines back into one document, keeping whatever the original ended with.
@@ -240,6 +229,7 @@ mod tests {
 ";
 
     const CARD: &str = "age1yubikey1qfixture";
+    const ANCHOR: &str = "yubikey-12345678";
 
     fn inserted(edit: Edit) -> String {
         match edit {
@@ -249,15 +239,20 @@ mod tests {
     }
 
     #[test]
-    fn a_record_with_no_recovery_list_gets_one_holding_the_card() {
-        let edited = inserted(add_recovery_recipient(SCAFFOLD, CARD));
-        assert!(edited.contains(&format!("recoveryRecipients = [ \"{CARD}\" ];")));
+    fn a_record_with_no_recovery_set_gets_one_holding_the_card() {
+        let edited = inserted(add_recovery_recipient(SCAFFOLD, ANCHOR, CARD));
+        // The exact shape the option types: an anchor naming a key. The same
+        // literal shape stands in `modules/flake/checks/fixture-fleet.nix`
+        // against the real option, which is what binds this writer to it.
+        assert!(edited.contains("    recoveryRecipients = {"));
+        assert!(edited.contains(&format!("      \"{ANCHOR}\".key = \"{CARD}\";")));
+        assert!(edited.contains("    };"));
         assert!(
             edited.contains("recipient = \"age1software\";"),
             "the primary recipient was disturbed"
         );
         assert!(edited.contains("carries = { };"), "a bystander was lost");
-        // The list is anchored below the field it is the counterpart of.
+        // The set is anchored below the field it is the counterpart of.
         let recipient_at = edited.find("recipient = \"age1software\"").unwrap();
         let recovery_at = edited.find("recoveryRecipients").unwrap();
         assert!(recovery_at > recipient_at);
@@ -265,59 +260,74 @@ mod tests {
 
     #[test]
     fn a_second_card_joins_the_first_and_the_first_stays() {
-        let first = inserted(add_recovery_recipient(SCAFFOLD, CARD));
-        let second = inserted(add_recovery_recipient(&first, "age1yubikey1qbackup"));
-        assert!(second.contains(&format!("\"{CARD}\"")));
-        assert!(second.contains("\"age1yubikey1qbackup\""));
+        let first = inserted(add_recovery_recipient(SCAFFOLD, ANCHOR, CARD));
+        let second = inserted(add_recovery_recipient(
+            &first,
+            "yubikey-87654321",
+            "age1yubikey1qbackup",
+        ));
+        assert!(second.contains(&format!("\"{ANCHOR}\".key = \"{CARD}\";")));
+        assert!(second.contains("\"yubikey-87654321\".key = \"age1yubikey1qbackup\";"));
         assert_eq!(
             second.matches("recoveryRecipients").count(),
             1,
-            "a second list was written instead of the first being extended"
+            "a second set was written instead of the first being extended"
         );
     }
 
     #[test]
     fn the_same_card_twice_writes_nothing() {
-        let first = inserted(add_recovery_recipient(SCAFFOLD, CARD));
-        assert_eq!(add_recovery_recipient(&first, CARD), Edit::AlreadyPresent);
+        let first = inserted(add_recovery_recipient(SCAFFOLD, ANCHOR, CARD));
+        assert_eq!(
+            add_recovery_recipient(&first, ANCHOR, CARD),
+            Edit::AlreadyPresent
+        );
     }
 
     #[test]
-    fn a_multi_line_list_gains_a_line_and_keeps_its_indentation() {
+    fn a_hand_written_attrset_gains_an_anchor_and_keeps_its_own() {
         let record = "\
 {
   flake.safix.users.ana = {
     recipient = \"age1software\";
-    recoveryRecipients = [
-      \"age1existing\"
-    ];
+    recoveryRecipients = {
+      master = {
+        key = \"age1master\";
+      };
+    };
   };
 }
 ";
-        let edited = inserted(add_recovery_recipient(record, CARD));
-        assert!(edited.contains(&format!("      \"{CARD}\"")));
-        assert!(edited.contains("      \"age1existing\""));
-        assert!(edited.contains("    ];"));
+        let edited = inserted(add_recovery_recipient(record, ANCHOR, CARD));
+        assert!(edited.contains(&format!("      \"{ANCHOR}\".key = \"{CARD}\";")));
+        assert!(
+            edited.contains("key = \"age1master\";"),
+            "a bystander was lost"
+        );
+        assert_eq!(edited.matches("recoveryRecipients").count(), 1);
     }
 
     #[test]
-    fn an_empty_multi_line_list_gains_its_first_element() {
+    fn a_list_valued_declaration_is_refused_rather_than_compounded() {
+        // Not the option's type, so evaluation would refuse it anyway; extending
+        // it would bury that error under a second one.
         let record = "\
 {
   flake.safix.users.ana = {
     recipient = \"age1software\";
-    recoveryRecipients = [
-    ];
+    recoveryRecipients = [ \"age1existing\" ];
   };
 }
 ";
-        let edited = inserted(add_recovery_recipient(record, CARD));
-        assert!(edited.contains(&format!("      \"{CARD}\"")));
+        assert_eq!(add_recovery_recipient(record, ANCHOR, CARD), Edit::NoAnchor);
     }
 
     #[test]
     fn a_record_with_no_recipient_has_nowhere_to_add_one() {
-        assert_eq!(add_recovery_recipient("{ }\n", CARD), Edit::NoAnchor);
+        assert_eq!(
+            add_recovery_recipient("{ }\n", ANCHOR, CARD),
+            Edit::NoAnchor
+        );
     }
 
     #[test]
@@ -357,7 +367,7 @@ mod tests {
 
     #[test]
     fn neither_edit_ever_shortens_the_file() {
-        let edited = inserted(add_recovery_recipient(SCAFFOLD, CARD));
+        let edited = inserted(add_recovery_recipient(SCAFFOLD, ANCHOR, CARD));
         let edited = inserted(add_private_entry(&edited, "card-1-piv-access"));
         for line in SCAFFOLD.lines().filter(|line| !line.trim().is_empty()) {
             if line.trim() == "private = { };" {

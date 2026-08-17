@@ -219,21 +219,16 @@ fn anchor(name: &str, key: &str) -> String {
 
 /// Every key a declaration's `recoveryRecipients` names.
 ///
-/// The single-line list form, which is the one `safix enroll` writes and extends.
-/// A multi-line list is valid nix and is not produced by anything under test, so
-/// it is not read here rather than half-read.
+/// The anchor-attrset form the option types and `safix enroll` writes:
+/// `"<anchor>".key = "<key>";`, one per line. Anything else is not read here
+/// rather than half-read, so a shape the writer stopped producing stops being
+/// parsed instead of being guessed at.
 fn recovery_recipients(declaration: &str) -> Vec<String> {
-    let Some(line) = declaration
+    declaration
         .lines()
         .map(str::trim)
-        .find(|line| line.starts_with("recoveryRecipients"))
-    else {
-        return Vec::new();
-    };
-    line.split('"')
-        .skip(1)
-        .step_by(2)
-        .filter(|key| !key.trim().is_empty())
+        .filter(|line| line.starts_with('"') && line.contains(".key ="))
+        .filter_map(|line| line.split('"').nth(3))
         .map(str::to_owned)
         .collect()
 }

@@ -218,6 +218,9 @@ This is phase A of the program `openspec/changes/extend-custody-subjects/` shape
 
 ### Fixed
 
+- `safix enroll` wrote `recoveryRecipients` as a list of bare strings, which the option types as an attrset of anchors, so a real enrollment produced a declaration the next evaluation refused.
+  The writer now emits the option's own shape — `"yubikey-<serial>".key = "<recipient>";` — created whole when the set is absent and inserted as one anchor line when it exists, with a list-valued declaration refused rather than compounded.
+  What let it slip was the loop never closing: the test asserted the written string and the test stub parsed the same wrong shape, so the fixture fleet now carries the dotted anchor form against the real option, and the stub reads only that form.
 - The design record's account of what invalidates a clan generator's recorded validation, corrected against the real clan.
   `validationHash` is null unless the generator declares `validation`, and a null-in-nix, null-on-disk pair counts as valid, so a change to a generator's `script` alone does not make clan call it stale — only a change to its declared `validation` does.
   A generator that declares `validation` and has never run *is* reported stale, so `safix export` refuses the first export into one, which is correct and was not a state any stub fixture would have produced.

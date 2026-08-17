@@ -53,10 +53,12 @@ in
       ana = {
         recipient = anaKey;
         recipientNote = "ana — fixture identity, decrypts nothing";
-        recoveryRecipients.ana-escrow = {
-          key = escrowKey;
-          note = "ana's escrow — a second identity she holds";
-        };
+        # The dotted anchor form below is, shape for shape, what `safix enroll`
+        # writes into a declaration (crates/safix-core/src/enroll/declaration.rs
+        # asserts the emitted text); its acceptance through the real option here
+        # is what proves an enrolled record evaluates.
+        recoveryRecipients."ana-escrow".key = escrowKey;
+        recoveryRecipients."ana-escrow".note = "ana's escrow — a second identity she holds";
 
         carries = {
           ops-tooling = { };
