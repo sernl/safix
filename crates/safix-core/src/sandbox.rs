@@ -93,6 +93,31 @@ impl Backend {
         }
     }
 
+    /// Where this backend comes from, as the refusal has to say when it is not
+    /// there.
+    ///
+    /// The two answers are different in kind rather than in wording, which is why
+    /// the refusal carries this rather than deriving it from the program's name:
+    /// one backend is resolved out of nixpkgs at spawn time and the other belongs
+    /// to the operating system, so "install it" is wrong advice for both and
+    /// wrong in two different directions.
+    #[must_use]
+    pub const fn supplied_by(self) -> &'static str {
+        match self {
+            Self::Bubblewrap => {
+                "safix resolves it out of nixpkgs at spawn time, the way it resolves a\n\
+                 generator's runtimeInputs, so this is not a package to install: it is a\n\
+                 machine that will not run it. An unprivileged user namespace being\n\
+                 disabled is what that usually is."
+            }
+            Self::SandboxExec => {
+                "It is the system's, at that path, and is what nix itself and clan run on\n\
+                 darwin, so a darwin without it is a system missing a component rather\n\
+                 than a safix that needs configuring."
+            }
+        }
+    }
+
     /// The nixpkgs attributes this backend's words are resolved from.
     ///
     /// `bash` is in both, because the fragment's shell has to come out of the
@@ -228,6 +253,7 @@ pub fn backend_of(platform: &'static str, answers: bool) -> Result<Backend> {
     } else {
         Err(Error::SandboxUnavailable {
             backend: expected.program(),
+            supplied_by: expected.supplied_by(),
         })
     }
 }
@@ -629,12 +655,12 @@ mod tests {
         assert_eq!(backend_of(LINUX, true).ok(), Some(Backend::Bubblewrap));
         assert_eq!(backend_of(DARWIN, true).ok(), Some(Backend::SandboxExec));
 
-        let Err(Error::SandboxUnavailable { backend }) = backend_of(LINUX, false) else {
+        let Err(Error::SandboxUnavailable { backend, .. }) = backend_of(LINUX, false) else {
             unreachable!("a linux without bubblewrap is refused as having no backend running");
         };
         assert_eq!(backend, BWRAP);
 
-        let Err(Error::SandboxUnavailable { backend }) = backend_of(DARWIN, false) else {
+        let Err(Error::SandboxUnavailable { backend, .. }) = backend_of(DARWIN, false) else {
             unreachable!("a darwin without sandbox-exec is refused as having no backend running");
         };
         assert_eq!(backend, SANDBOX_EXEC);
@@ -658,6 +684,19 @@ mod tests {
             Backend::SandboxExec.tools(),
             [SHELL],
             "darwin acquires a backend it is handed by the system"
+        );
+
+        // The remedy differs in kind between the two, and the refusal carries
+        // this rather than deriving it, so both halves are read here: the darwin
+        // one is otherwise unreachable from a linux check.
+        assert!(Backend::Bubblewrap.supplied_by().contains("nixpkgs"));
+        assert!(
+            Backend::SandboxExec.supplied_by().contains("the system's"),
+            "the darwin refusal does not say the backend belongs to the system"
+        );
+        assert!(
+            !Backend::SandboxExec.supplied_by().contains("nixpkgs"),
+            "the darwin refusal offers a nixpkgs remedy for a system component"
         );
     }
 

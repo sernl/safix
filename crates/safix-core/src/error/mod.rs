@@ -591,16 +591,19 @@ pub enum Error {
         \n\
         A generator's script and its validation fragments run inside a sandbox:\n\
         the staging root is the only writable path, the nix store is read-only,\n\
-        and there is no network. safix resolves {backend} out of nixpkgs the way\n\
-        it resolves a generator's runtimeInputs, so what this reports is not a\n\
-        missing package but a machine that refuses to run it — an unprivileged\n\
-        user namespace being disabled is what that usually is.\n\
+        and there is no network.\n\
+        \n\
+        {supplied_by}\n\
         \n\
         There is no flag that runs a generator outside the envelope."
     )]
     SandboxUnavailable {
         /// The backend that was looked for, as the machine names it.
         backend: &'static str,
+        /// Where that backend comes from, which is what makes the remedy
+        /// different on the two platforms — see
+        /// [`Backend::supplied_by`](crate::sandbox::Backend::supplied_by).
+        supplied_by: &'static str,
     },
 
     /// The platform has no sandbox backend to look for at all.

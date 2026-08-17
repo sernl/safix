@@ -394,6 +394,7 @@ mod tests {
             },
             Code::SandboxUnavailable => Error::SandboxUnavailable {
                 backend: safix_core::sandbox::Backend::Bubblewrap.program(),
+                supplied_by: safix_core::sandbox::Backend::Bubblewrap.supplied_by(),
             },
             Code::SandboxUnsupported => Error::SandboxUnsupported {
                 platform: "freebsd",
