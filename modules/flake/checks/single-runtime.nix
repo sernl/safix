@@ -26,63 +26,85 @@
 { ... }:
 {
   perSystem =
-    { config, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       integration = import ./integration.nix { inherit pkgs; };
 
       claim = name: target: integration.runOne config.checks.safix-integration name target "";
     in
     {
-      # An interrupted write, in each of the four windows it has: waiting for the
-      # value, waiting for the confirmation, under a signal that is not SIGINT,
-      # and waiting for sops while it holds the candidate document open. Each is
-      # held to the status the signal implies, a repository identical to the one
-      # the run found, no candidate document beside the target, and the value in
-      # no file under the repository or the temporary directory.
-      #
-      # The fourth window is a fixture rather than a race: sops signals the
-      # runtime from inside it and then finishes normally, which is what the
-      # retired mode did through a pidfile.
-      checks.safix-abort-residue = claim "safix-abort-residue" "abort_residue";
+      checks = {
+        # An interrupted write, in each of the four windows it has: waiting for
+        # the value, waiting for the confirmation, under a signal that is not
+        # SIGINT, and waiting for sops while it holds the candidate document open.
+        # Each is held to the status the signal implies, a repository identical to
+        # the one the run found, no candidate document beside the target, and the
+        # value in no file under the repository or the temporary directory.
+        #
+        # The fourth window is a fixture rather than a race: sops signals the
+        # runtime from inside it and then finishes normally, which is what the
+        # retired mode did through a pidfile.
+        safix-abort-residue = claim "safix-abort-residue" "abort_residue";
 
-      # The value's path into sops, read off the sops process itself: never argv,
-      # so never a process listing, and never the environment, so never
-      # /proc/<pid>/environ. The run has to succeed and the value has to come
-      # back out, or the silence would hold just as well over a runtime that sent
-      # sops nothing.
-      checks.safix-value-pipe = claim "safix-value-pipe" "value_pipe";
+        # The value's path into sops, read off the sops process itself: never
+        # argv, so never a process listing, and never the environment, so never
+        # /proc/<pid>/environ. The run has to succeed and the value has to come
+        # back out, or the silence would hold just as well over a runtime that
+        # sent sops nothing.
+        safix-value-pipe = claim "safix-value-pipe" "value_pipe";
 
-      # Every plaintext byte a `set` and a `generate` write, observed at the
-      # system call and held to going down a pipe. `safix-value-pipe` shows the
-      # two routes the value did not take; this shows the one it did, and carries
-      # its own drill — a runtime writing a plaintext value to a regular file has
-      # to be caught, and caught by the pipe assertion rather than incidentally
-      # by the residue sweep.
-      #
-      # The same reading covers the envelope's other half: a fragment's open of a
-      # file in the repository, refused by the kernel, observed here rather than
-      # in the runtime that would be the thing lying about it.
-      #
-      # `strace` needs ptrace, which is a linux capability and has no darwin
-      # equivalent: `dtruss` needs system integrity protection disabled, which a
-      # build sandbox cannot do. The check exists on both platforms and the
-      # suite's non-linux half says what it did not do, because a claim that
-      # quietly stops being made on a platform is a claim nobody decided to stop
-      # making.
-      checks.safix-syscall-proof = claim "safix-syscall-proof" "syscall_proof";
+        # Every plaintext byte a `set` and a `generate` write, observed at the
+        # system call and held to going down a pipe. `safix-value-pipe` shows the
+        # two routes the value did not take; this shows the one it did, and
+        # carries its own drill — a runtime writing a plaintext value to a regular
+        # file has to be caught, and caught by the pipe assertion rather than
+        # incidentally by the residue sweep.
+        #
+        # The same reading covers the envelope's other half: a fragment's open of
+        # a file in the repository, refused by the kernel, observed here rather
+        # than in the runtime that would be the thing lying about it.
+        #
+        # `strace` needs ptrace, which is a linux capability and has no darwin
+        # equivalent: `dtruss` needs system integrity protection disabled, which a
+        # build sandbox cannot do. The check exists on both platforms and the
+        # suite's non-linux half says what it did not do, because a claim that
+        # quietly stops being made on a platform is a claim nobody decided to stop
+        # making.
+        safix-syscall-proof = claim "safix-syscall-proof" "syscall_proof";
 
-      # The suite shown to fail. One mutation per channel — a line added to
-      # standard output, a line added to standard error, a changed exit status, a
-      # file left in the repository, a value left in the temporary directory —
-      # each of which must be caught, and caught by its own channel rather than
-      # incidentally by another.
-      #
-      # The exit status is the channel this form has to assert deliberately: two
-      # runtimes that exit differently differ whether or not anybody names the
-      # channel, and with one runtime there is nothing to differ from unless the
-      # status is recorded and compared.
-      checks.safix-channel-drills = claim "safix-channel-drills" "channel_drills";
+        # The suite shown to fail. One mutation per channel — a line added to
+        # standard output, a line added to standard error, a changed exit status, a
+        # file left in the repository, a value left in the temporary directory —
+        # each of which must be caught, and caught by its own channel rather than
+        # incidentally by another.
+        #
+        # The exit status is the channel this form has to assert deliberately: two
+        # runtimes that exit differently differ whether or not anybody names the
+        # channel, and with one runtime there is nothing to differ from unless the
+        # status is recorded and compared.
+        safix-channel-drills = claim "safix-channel-drills" "channel_drills";
 
+        # Both bridge directions end to end against a clan that records what it
+        # was handed: the value on a pipe and in no argument vector, the read
+        # taking raw bytes rather than a terminal rendering, a second run writing
+        # nothing, and each refusal for its own reason. The stub states why
+        # stubbing clan is permitted where stubbing sops is not.
+        safix-bridge-transfer = claim "safix-bridge-transfer" "bridge";
+
+        # The report over the same declarations, which is a separate claim from
+        # the transfer rather than more of it: a mapping whose two sides hold
+        # different values is a finding naming the mapping and neither value, one
+        # whose sides agree is not, and a mapping the caller cannot decrypt is a
+        # finding rather than a mapping quietly left out. That last one is what
+        # keeps a clean report meaning the mappings agree instead of meaning the
+        # ones this operator could open agree.
+        safix-bridge-audit = claim "safix-bridge-audit" "audit";
+      }
       # The tmpfs rule, held against the kernel's own mount table rather than
       # against the probe that enforces it. The drill that exercises the refusal
       # used to select its disk-backed directory by asking that probe which
@@ -91,22 +113,19 @@
       # skipped — a check that stopped asserting without failing. The two
       # readings are now compared mount by mount, and each direction has to be
       # present or a probe stuck at either answer would agree with the machine.
-      checks.safix-memory-backing = claim "safix-memory-backing" "memory_backing";
-
-      # Both bridge directions end to end against a clan that records what it
-      # was handed: the value on a pipe and in no argument vector, the read
-      # taking raw bytes rather than a terminal rendering, a second run writing
-      # nothing, and each refusal for its own reason. The stub states why
-      # stubbing clan is permitted where stubbing sops is not.
-      checks.safix-bridge-transfer = claim "safix-bridge-transfer" "bridge";
-
-      # The report over the same declarations, which is a separate claim from
-      # the transfer rather than more of it: a mapping whose two sides hold
-      # different values is a finding naming the mapping and neither value, one
-      # whose sides agree is not, and a mapping the caller cannot decrypt is a
-      # finding rather than a mapping quietly left out. That last one is what
-      # keeps a clean report meaning the mappings agree instead of meaning the
-      # ones this operator could open agree.
-      checks.safix-bridge-audit = claim "safix-bridge-audit" "audit";
+      #
+      # linux only, and for the reason the comparison itself gives: both
+      # directions have to be present or it proves nothing, and darwin has no
+      # memory-backed mount to supply one of them — `memory_backed` recognises
+      # linux's tmpfs and ramfs magic numbers and refuses to guess at anything
+      # else. Present there, the check could assert only the disk-backed half and
+      # would pass a probe stuck at "disk-backed", which is the exact defeat it
+      # exists to catch, so it is absent rather than half-made. What darwin
+      # guarantees instead is the refusal, and that is asserted by
+      # `staging::tests::establishment_answers_the_mounts_it_found`, which is
+      # red-capable on both platforms.
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+        safix-memory-backing = claim "safix-memory-backing" "memory_backing";
+      };
     };
 }

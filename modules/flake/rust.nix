@@ -105,6 +105,12 @@
             nativeBuildInputs = integration.backends ++ [ pkgs.jq ];
             doInstallCargoArtifacts = false;
 
+            # Empty on linux, where `/dev/shm` is the tmpfs the harness asks for.
+            # On darwin it carries the acknowledgement the platform's own contract
+            # leaves as the only way to stage anything — the reason is recorded
+            # where the value is defined, in ./checks/integration.nix.
+            env = integration.stagingEnv;
+
             buildPhaseCargoCommand = ''
               cargoWithProfile test --locked --no-run --message-format json >artifacts.json
             '';

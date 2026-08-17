@@ -45,6 +45,30 @@ let
     pkgs.strace
   ];
 
+  # The suite stages plaintext, and it verifies its scratch directory is
+  # memory-backed before it will. On darwin nothing is: `memory_backed` reads
+  # `statfs` for linux's tmpfs and ramfs magic numbers and deliberately declines to
+  # guess at anything else, because a RAM disk `hdiutil` attaches carries an
+  # ordinary apfs filesystem and is indistinguishable from a disk from there. So
+  # the platform's answer to "stage this plaintext" is a refusal naming
+  # `--allow-disk-staging`, and that refusal is the contract.
+  #
+  # This is that contract's other half rather than a way around it. The runtime
+  # documents an acknowledgement, the harness documents `SAFIX_TEST_DISK_STAGING`
+  # for the same fact, and giving it is what lets the suite run at all on the
+  # platform — which is what tests the other several hundred claims safix makes
+  # there. Withholding it would not test the refusal; it would only stop darwin
+  # being tested, and the refusal is asserted in its own right and red-capably by
+  # `staging::tests::establishment_answers_the_mounts_it_found`.
+  #
+  # What it does not touch is the tmpfs guarantee itself. That claim is
+  # `safix-memory-backing`, which is present on linux where both directions of the
+  # comparison exist and absent on darwin rather than half-made — see
+  # ./single-runtime.nix.
+  stagingEnv = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+    SAFIX_TEST_DISK_STAGING = "1";
+  };
+
   # One check that runs one test of the compiled suite, with something on `PATH`
   # that the rest of the suite has no reason to carry.
   #
@@ -73,7 +97,8 @@ let
           SAFIX_TEST_SHIM = "${suite}/libexec/safix-test-shim";
           SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
           SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
-        };
+        }
+        // stagingEnv;
       }
       ''
         export HOME="$PWD"
@@ -107,7 +132,7 @@ let
       '';
 in
 {
-  inherit backends runOneWith;
+  inherit backends runOneWith stagingEnv;
   inherit (pkgs) keepassxc;
 
   # The ordinary form, with nothing beyond the backends every check carries.
