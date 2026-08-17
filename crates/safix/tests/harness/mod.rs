@@ -264,6 +264,11 @@ pub struct Fixture {
     key_file: PathBuf,
     placements: Value,
     audiences: Value,
+    /// `subject -> every key that subject can open a file with`, which is what
+    /// names the custody behind a stanza the declared audience no longer covers.
+    /// A machine belongs here beside a person: it holds a key, so a report that
+    /// found its stanza can name it.
+    subjects: Value,
     genplan: Value,
     bridge: Value,
     keepassxc: Value,
@@ -346,6 +351,7 @@ impl Fixture {
             // this, and every test that declares no mapping drives it, so `sync`
             // has to be silent about an empty mirror rather than refuse.
             keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
+            subjects: json!({ "ana": [ana.clone()], "bo": [bo.clone()] }),
             clan_flake: None,
             genplan: json!({
                 "ana": { "order": [], "outputs": {}, "inputs": {} },
@@ -455,6 +461,18 @@ impl Fixture {
             "dir": Path::new(file).parent().unwrap().to_str().unwrap(),
             "recipients": keys,
         });
+        self.write_fixtures();
+    }
+
+    /// Declare a subject's own keys, which is what turns a stanza on a file into a
+    /// name a report can print.
+    ///
+    /// One method for a person and for a machine, because the projection this
+    /// stands for is one map over both: a group is absent from it by construction —
+    /// its recipients are its members' — and so is a service, whose recipients are
+    /// its machines'.
+    pub fn declare_subject(&mut self, subject: &str, keys: &[&str]) {
+        self.subjects[subject] = json!(keys);
         self.write_fixtures();
     }
 
@@ -911,7 +929,6 @@ impl Fixture {
         }
         managed.sort();
 
-        let recipients = json!({ "ana": [self.ana], "bo": [self.bo] });
         let governed = json!({
             "required": required,
             "extra": self.extras,
@@ -923,7 +940,7 @@ impl Fixture {
         write_json(&self.work.join("genplan.json"), &self.genplan);
         write_json(&self.work.join("bridge.json"), &self.bridge);
         write_json(&self.work.join("keepassxc.json"), &self.keepassxc);
-        write_json(&self.work.join("recipients.json"), &recipients);
+        write_json(&self.work.join("recipients.json"), &self.subjects);
         write_json(&self.work.join("governed.json"), &governed);
         if !self.work.join("hook.json").exists() {
             self.set_hook(None);
