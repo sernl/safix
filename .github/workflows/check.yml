@@ -7,13 +7,13 @@
 #
 # Two jobs, run together rather than one behind the other, because the two kinds
 # of failure cost different amounts to find. `eval` evaluates every output for
-# every system safix declares and builds almost nothing, so an evaluation error
-# on aarch64-linux — a platform this workflow rents no runner for — and a
-# formatting mistake are both red marks within a few minutes rather than at the
-# end of a build. `build` then builds the surface on the two platforms GitHub
-# does rent. Running them side by side rather than in sequence is deliberate: the
-# fast answer is worth having early, and it is not worth making the slow one wait
-# for it.
+# every system safix declares and builds only the two formatters, so an
+# evaluation error on aarch64-linux — a platform this workflow rents no runner
+# for — and a misformatted file are both red marks within a few minutes rather
+# than at the end of a build. `build` then builds the surface on the two
+# platforms GitHub does rent. Running them side by side rather than in sequence
+# is deliberate: the fast answer is worth having early and is not worth making
+# the slow one wait for.
 #
 # `build` runs nix-fast-build rather than `nix flake check`. `nix flake check`
 # stops at the first failing derivation and then names every other check as
@@ -55,27 +55,30 @@ jobs:
             keep-going = true
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      # This is as far as one platform can go towards another's check surface, and
-      # the limit is the tree's own: `safix-generators` and the checks beside it
-      # read a fixture out of a derivation, so instantiating them means building
-      # something for the target platform, and `nix flake check --all-systems`
-      # stops on the platform mismatch rather than reporting anything. What this
-      # does reach is every perSystem module evaluated for all three systems —
-      # the option types, the resolution algebra and the fixture fleet — which is
-      # where a change that only aarch64-linux notices goes wrong.
+      # `nix flake check --no-build` is not the tool for this, and the reason is
+      # the tree rather than the flag. `safix-module-collision` imports a module
+      # out of a store path `builtins.path` produced and `safix-generators` reads
+      # a fixture out of a derivation, so evaluating either demands a realised
+      # path; under `--no-build` nix computes the path and then refuses the path
+      # it computed, on this runner's own system and not only on another's. Adding
+      # `--all-systems` only moves the refusal to a platform mismatch. Either way
+      # it reports nothing about any of the ninety-eight, which is how the command
+      # was hiding the failures this workflow was written to find.
+      #
+      # Instantiation therefore belongs to the build job, whose nix-eval-jobs
+      # realises what an evaluation demands. What is reachable from here is
+      # evaluation without instantiation, for every system rather than one: each
+      # perSystem module for all three that safix declares — the option types, the
+      # resolution algebra, the fixture fleet — which is where a change only
+      # aarch64-linux notices goes wrong, and nothing here rents a runner for it.
       - name: every output evaluates, on every system safix declares
         run: nix flake show --all-systems --json > /dev/null
 
-      # And the flake's own output contract, plus the instantiation of every check
-      # for the one system this runner is.
-      - name: the flake's outputs are the shapes a flake's outputs have
-        if: ${{ !cancelled() }}
-        run: nix flake check --no-build --show-trace
-
       # Both formatters are checks of the flake and are built again by the build
-      # job. They are also the two failures a contributor is most likely to
-      # arrive with and the two cheapest to establish, and a formatting mistake
-      # answered in three minutes is worth the second build.
+      # job. They are also the two failures a contributor is most likely to arrive
+      # with and the two cheapest to establish, and a formatting mistake answered
+      # in three minutes is worth the second build. These are `nix build` rather
+      # than part of the step above because a formatter has to run to say anything.
       - name: the tree is formatted
         if: ${{ !cancelled() }}
         run: |

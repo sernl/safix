@@ -296,7 +296,9 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
   nix's own sandbox was never the obstacle: it pivot_roots rather than chroots, so the kernel's `current_chrooted` guard does not fire and the nesting works wherever that restriction is absent, which is what the envelope check's header already recorded about this fleet.
   `nix flake check` gave way to nix-fast-build for the reason the failures were invisible: it stops at the first failing derivation and then names the other ninety-seven as failed without having built them, so one red run reported one check out of ninety-eight.
   A second job evaluates every perSystem module for all three declared systems and runs both formatters, which answers in minutes what a build answers in half an hour.
-  It stops short of instantiating another platform's checks, because the tree reads fixtures out of derivations and instantiating those means building for the target platform; the limit is recorded on the job rather than left to be rediscovered.
+  It does not instantiate, and the reason is the tree rather than a preference: `safix-module-collision` imports a module out of a store path `builtins.path` produced and `safix-generators` reads a fixture out of a derivation, so `nix flake check --no-build` computes those paths and then refuses the paths it computed — on the runner's own system, not only on another's.
+  Instantiation belongs to the build job, whose evaluator realises what an evaluation demands, and the limit is recorded on the job rather than left to be rediscovered.
+  nix is given the job's own token for the six `github:` inputs it fetches, because `api.github.com` rate-limits an unauthenticated caller by source address and runs were dying on HTTP 429 before evaluating a single check.
 
 ### Fixed
 
