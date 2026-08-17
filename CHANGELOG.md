@@ -292,6 +292,8 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
 
 ### Fixed
 
+- The darwin envelope probe now applies a minimal profile instead of checking that `/usr/bin/sandbox-exec` exists.
+  A rented macOS runner ships the binary and still refuses `sandbox_apply`, so an existence answer moved the refusal from before the first fragment to inside it; the probe now asks the machine the same question the linux probe asks — by running the real thing — and the no-backend refusal arrives where the design put it.
 - `safix enroll` wrote `recoveryRecipients` as a list of bare strings, which the option types as an attrset of anchors, so a real enrollment produced a declaration the next evaluation refused.
   The writer now emits the option's own shape — `"yubikey-<serial>".key = "<recipient>";` — created whole when the set is absent and inserted as one anchor line when it exists, with a list-valued declaration refused rather than compounded.
   What let it slip was the loop never closing: the test asserted the written string and the test stub parsed the same wrong shape, so the fixture fleet now carries the dotted anchor form against the real option, and the stub reads only that form.

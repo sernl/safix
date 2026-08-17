@@ -43,7 +43,7 @@
 
 use std::ffi::OsString;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
 use crate::nix::Nix;
@@ -175,7 +175,7 @@ impl Envelope {
         let platform = std::env::consts::OS;
         let answers = match platform {
             LINUX => bubblewrap_runs(nix, root),
-            DARWIN => Path::new(SANDBOX_EXEC).exists(),
+            DARWIN => sandbox_exec_runs(),
             // A platform with no backend is not asked anything: there is nothing
             // to ask, which is what [`backend_of`] turns into its own refusal.
             _ => false,
@@ -459,6 +459,26 @@ fn push<const FLAGS: usize, const PATHS: usize>(
 /// Both streams are discarded. bubblewrap's own complaint about a kernel that
 /// refuses is not the refusal an operator needs; [`Error::SandboxUnavailable`]
 /// is, and it says what to do.
+/// Whether `sandbox-exec` can apply a profile here, asked by applying one.
+///
+/// The binary existing is not the question: a rented macOS runner ships
+/// `/usr/bin/sandbox-exec` and still refuses `sandbox_apply`, and an existence
+/// answer there moves the refusal from before the first fragment to inside it —
+/// the late arrival the probe exists to prevent. So the smallest profile there
+/// is is applied to the smallest command there is, the same question
+/// [`bubblewrap_runs`] asks of linux, with the same discarded streams.
+fn sandbox_exec_runs() -> bool {
+    Command::new(SANDBOX_EXEC)
+        .arg("-p")
+        .arg("(version 1)\n(allow default)")
+        .arg("/usr/bin/true")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn bubblewrap_runs(nix: &Nix, root: &Path) -> bool {
     let mut command = nix.shell(root, Backend::Bubblewrap.tools());
     command.arg(BWRAP);
