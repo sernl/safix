@@ -31,6 +31,12 @@
 # to that secret's base record.
 { lib }:
 let
+  # The one sentence every delegation surface carries, in these words. The two
+  # option descriptions below say it, the README section says it, and the verbs'
+  # own refusals say it, because a process guard mistaken for authorization is a
+  # guard somebody relies on for what it cannot do.
+  delegationBoundary = "Delegation binds the cooperative path and is not authorization. The tree is the authorization: anyone who can commit can edit these declarations by hand, evaluation refuses structure rather than people, and no record here places a key in any audience. What the refusals buy is that a scaffold and the identity it is attributed to cannot disagree.";
+
   promptKind = lib.types.enum [
     "hidden"
     "line"
@@ -761,10 +767,11 @@ let
     };
   };
 
-  # An organization, as a principal holding recovery custody of its own. It
-  # carries custody and nothing else: people relate to it by consenting to its
-  # escrow from their own record, groups already express every people-set an
-  # audience needs, and a `members` list here would be a second groups mechanism.
+  # An organization, as a principal holding recovery custody of its own and
+  # naming the people who scaffold for it. It carries those two and nothing else:
+  # people relate to it by consenting to its escrow and to its management from
+  # their own record, groups already express every people-set an audience needs,
+  # and a `members` list here would be a second groups mechanism.
   organization = lib.types.submodule {
     options.custody = lib.mkOption {
       type = lib.types.attrsOf recoveryRecipient;
@@ -792,6 +799,36 @@ let
         custody that nothing references changes nothing; an escrow declaration,
         a grant or an ownership resolution reaching one is refused at
         evaluation, because the file would be encrypted to nobody.
+      '';
+    };
+
+    options.managers = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "alice" ];
+      description = ''
+        The `flake.safix.users` who scaffold for this organization: `safix
+        enroll` and the record edits onboarding makes for a person whose
+        `managedBy` names it, and `safix group` over the groups this
+        organization's silo declarations cover.
+
+        Managers scaffold, never mint, and never read by virtue of managing.
+        This list places no key in any audience and adds no recipient to any
+        file: a person's key is theirs to generate, which is the custody
+        principle no phase of this model bends, and what the list decides is
+        which acting identity the verbs accept.
+
+        It is one half of a delegation, and the other half is the person's own
+        `flake.safix.users.<u>.managedBy`. Nothing declared here subjects
+        anyone to management, so a review of one person's record shows
+        everything that binds them.
+
+        ${delegationBoundary}
+
+        A person no declaration covers is refused by name. Declaring no
+        managers is not an error and is not refused at evaluation: it manages
+        nobody, every derived artifact is correct, and the verb that reaches
+        such an organization is what says so.
       '';
     };
   };
@@ -895,6 +932,40 @@ let
 
           An organization no declaration covers is refused by name, and so is one
           whose custody is empty.
+        '';
+      };
+      managedBy = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "acme";
+        description = ''
+          The `flake.safix.organizations` whose managers scaffold for this
+          person, or null.
+
+          Read in this person's own view, because it is this person's
+          declaration: the people that organization names as managers may enroll
+          a card into this record, edit the entries onboarding writes into it,
+          and add or remove this person from the groups the organization's silo
+          declarations cover. They gain no read of anything by doing so — this
+          record places no key in any audience, adds no recipient to any file,
+          and the key a person holds stays theirs to generate.
+
+          Withdrawing it takes nothing back, and needs to take nothing back:
+          unlike `escrowedTo`, which hands out data keys, this hands out no
+          access at all, so there is no not-retroactive caveat to carry here.
+          What withdrawing does is stop the verbs accepting those managers.
+
+          The consent is here rather than on the organization for the reason
+          `escrowedTo` is: nothing an organization declares may subject anyone
+          to it, so what binds this person is answered by records this person
+          holds. Both halves must name each other for a scaffold to be judged at
+          all.
+
+          ${delegationBoundary}
+
+          An organization no declaration covers is refused by name. An
+          organization whose custody is empty is not: managing is not reading,
+          so an organization that holds no key can still name managers.
         '';
       };
       carries = lib.mkOption {

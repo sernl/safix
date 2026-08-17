@@ -2,20 +2,29 @@
 # checks safix exports are instantiated here the way a consumer instantiates
 # them rather than called with arguments assembled beside them.
 #
-# Three people who do not exist, two machines, one service, and one
-# organization. alice and bob each carry a catalogue entry into their own custody
-# and share a second one between them; alice escrows to a recovery identity she
-# holds and consents to acme's escrow beside it, holds a generated secret,
-# declares a path, and grants one entry to the service, one to acme and one to
-# the owner of the machine acme owns; bob declares ownership fields, which is what
-# makes his profile the one the user-scope refusal fires on; carol records a
-# recipient and holds nothing, which earns an anchor and no rule.
+# Three people who do not exist, two machines, one service, one group, one silo
+# set, and one organization. alice and bob each carry a catalogue entry into their
+# own custody and share a second one between them; alice escrows to a recovery
+# identity she holds and consents to acme's escrow beside it, holds a generated
+# secret, declares a path, and grants one entry to the service, one to acme and
+# one to the owner of the machine acme owns; bob declares ownership fields, which
+# is what makes his profile the one the user-scope refusal fires on, and consents
+# to acme's management; carol records a recipient and holds nothing, which earns an
+# anchor and no rule.
 #
 # acme is the organization: one custody key, one consenting person, one owned
-# machine. The direct grant is what puts the fifth audience element in front of
-# every check a consumer runs — the rule shape, the catch-all probes, the
-# separator and the committed policy — and the `ownerOf` grant is what resolves
+# machine, one manager. The direct grant is what puts the fifth audience element
+# in front of every check a consumer runs — the rule shape, the catch-all probes,
+# the separator and the committed policy — and the `ownerOf` grant is what resolves
 # an ownership record through to an organization's custody.
+#
+# The delegation is here for the property it does not have. alice manages for acme
+# and bob consents to that, and `modules/flake/checks/fixture-policy.yaml` — the
+# committed policy this fleet's drift check regenerates and compares — is
+# byte-identical to what it was before either record existed, because managing
+# confers scaffolding and never a read. The group and the silo set are what give
+# the delegation a scope over groups: `fixture-corp` reaches bob, so acme manages
+# every group the set holds.
 #
 # The recipients are literals shaped like an age public key and are not keys.
 # Nothing in this repository encrypts anything, nothing here has a private half
@@ -171,6 +180,12 @@ in
         recipient = bobKey;
         recipientNote = "bob — fixture identity, decrypts nothing";
 
+        # The other half of acme's delegation, in bob's own record, where every
+        # consent in this model is written. It places no key on any of his files
+        # and adds no anchor to the policy: what it decides is which acting
+        # identity `safix enroll` and `safix group` accept for him.
+        managedBy = "acme";
+
         carries = {
           ops-tooling = { };
           team-vault = { };
@@ -214,13 +229,28 @@ in
       owner = "acme";
     };
 
-    # One organization, holding one escrow identity. alice consents to it, acme
-    # owns a machine, and one grant names it directly, so all three ways of
-    # reaching an organization are exercised by the checks a consumer runs.
-    organizations.acme.custody.acme-escrow = {
-      key = acmeKey;
-      note = "acme's escrow — a fixture identity that decrypts nothing";
+    # One organization, holding one escrow identity and naming one manager. alice
+    # consents to its escrow, acme owns a machine, and one grant names it directly,
+    # so all three ways of reaching an organization are exercised by the checks a
+    # consumer runs.
+    organizations.acme = {
+      custody.acme-escrow = {
+        key = acmeKey;
+        note = "acme's escrow — a fixture identity that decrypts nothing";
+      };
+      managers = [ "alice" ];
     };
+
+    # One group and one silo set, declared for the delegation's scope over groups
+    # and for nothing else: no audience names the group, so both are inert. The
+    # shape is the one `safix group` edits — a `members` list of subject names — held
+    # here against the real option so the writer and the option cannot drift apart.
+    groups.fixture-oncall.members = [
+      "alice"
+      "bob"
+    ];
+
+    silos.fixture-corp.groups = [ "fixture-oncall" ];
 
     # One granted service, so the exported checks are instantiated over a fleet
     # that has one. It declares no ownership, which keeps alice's own profile

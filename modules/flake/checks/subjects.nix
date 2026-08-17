@@ -87,6 +87,16 @@
 # `organizationInAGroupMessages`, and leaving organizations out of the one subject
 # name space fails `organizationNameDeclaredTwiceMessages` and
 # `unsafeOrganizationNameMessages`.
+# Letting a delegation reach an audience, a placement or the policy — a manager's
+# key added to the files of the people they manage would be the obvious way to do
+# it — fails `inertness.identical` while leaving every delegation row green, which
+# is the pair that says managing is not reading.
+# Covering a group by its own members' `managedBy` rather than by the silo set it
+# is named in fails `delegation.groups` on `contractors` and `vendors`, the two
+# groups that hold none of their organization's people; dropping the coverage
+# rule entirely fails all four covered groups and leaves `standby` green.
+# Reporting only the first bad manager fails `managersNobodyDeclaresMessages`,
+# whose two sentences are one repair an operator makes in one pass.
 # Emptying any fixture fleet fails `fixtureRosters`.
 {
   perSystem =
@@ -216,6 +226,19 @@
       };
 
       declaredButUnused = bare // {
+        # The delegation the rest of this record is judged against: acme names
+        # alice a manager and bob consents to acme's management. Nothing else about
+        # the fleet changes, so `identical` below is the whole byte-inertness
+        # claim for a delegation — a record that decides who may act and places no
+        # key anywhere.
+        users = typed (lib.types.attrsOf types.profile) (
+          fixture.fleet.users
+          // {
+            bob = fixture.fleet.users.bob // {
+              managedBy = "acme";
+            };
+          }
+        );
         machines = typed (lib.types.attrsOf types.machine) (
           fixture.fleet.machines
           // {
@@ -234,28 +257,37 @@
             };
           }
         );
-        groups = typed (lib.types.attrsOf types.group) {
-          oncall.members = [
-            "alice"
-            "bob"
-          ];
-          infra.members = [
-            "deck"
-            "rack"
-          ];
-        };
+        groups = typed (lib.types.attrsOf types.group) (
+          fixture.fleet.groups
+          // {
+            oncall.members = [
+              "alice"
+              "bob"
+            ];
+            infra.members = [
+              "deck"
+              "rack"
+            ];
+          }
+        );
         organizations = typed (lib.types.attrsOf types.organization) (
           fixture.fleet.organizations
           // {
+            acme = fixture.fleet.organizations.acme // {
+              managers = [ "alice" ];
+            };
             globex.custody.globex-escrow.key = keyOf "globex-escrow";
           }
         );
-        silos = typed (lib.types.attrsOf types.silo) {
-          corp.groups = [
-            "oncall"
-            "infra"
-          ];
-        };
+        silos = typed (lib.types.attrsOf types.silo) (
+          fixture.fleet.silos
+          // {
+            corp.groups = [
+              "oncall"
+              "infra"
+            ];
+          }
+        );
       };
 
       derivedFrom = fleet: {
@@ -792,6 +824,84 @@
         organizations.acme.custody = acmeCustody;
       };
 
+      # ── delegation ──
+      # Two organizations, five groups, two silo sets. acme manages bob, who is in
+      # `oncall`, and the `corp` set holds `oncall` and `contractors` apart — so
+      # both are acme's to manage, `contractors` included, which holds none of
+      # acme's people. globex manages carol in `partners`, so `partners` and
+      # `vendors` are globex's on the same terms. `standby` is in no silo set and
+      # is nobody's, which is what leaves a group anyone who can commit may edit.
+      #
+      # dave is in two groups held apart by two different sets, which is legal and
+      # is what makes coverage a property of the group rather than of the person.
+      delegated = fleetOf {
+        users = {
+          alice = holder "alice" { };
+          bob = keyholder "bob" // {
+            managedBy = "acme";
+          };
+          carol = keyholder "carol" // {
+            managedBy = "globex";
+          };
+          dave = keyholder "dave";
+        };
+        groups = {
+          oncall.members = [ "bob" ];
+          contractors.members = [ "dave" ];
+          partners.members = [ "carol" ];
+          vendors.members = [ "dave" ];
+          standby.members = [ "bob" ];
+        };
+        organizations = {
+          acme = {
+            custody = acmeCustody;
+            managers = [ "alice" ];
+          };
+          # No custody at all, and it manages people regardless: managing is not
+          # reading, so an organization that holds no key still names managers.
+          globex.managers = [
+            "alice"
+            "dave"
+          ];
+        };
+        silos = {
+          corp.groups = [
+            "oncall"
+            "contractors"
+          ];
+          trade.groups = [
+            "partners"
+            "vendors"
+          ];
+        };
+      };
+
+      # Two managers nobody declared, so the refusal is shown to list every
+      # violation rather than the first one it meets.
+      managersNobodyDeclares = fleetOf {
+        users.alice = holder "alice" { };
+        organizations.acme = {
+          custody = acmeCustody;
+          managers = [
+            "mallory"
+            "zed"
+          ];
+        };
+      };
+
+      managedByNobodyDeclares = fleetOf {
+        users = {
+          alice = holder "alice" { managedBy = "globex"; };
+          bob = keyholder "bob" // {
+            managedBy = "globex";
+          };
+        };
+        organizations.acme = {
+          custody = acmeCustody;
+          managers = [ "alice" ];
+        };
+      };
+
       # One fleet declaring every kind of subject, for the round trip alone.
       everyKind = fleetOf {
         users.alice = holder "alice" { };
@@ -943,14 +1053,23 @@
                   escrowed
                   organizationGrant
                   ownedByAcme
+                  delegated
                   ;
               };
 
           # ── declaration alone is inert ──
-          # Two machines, a service, two groups, an organization and a silo declared
-          # over the repository's own fleet, referenced by nothing. Every derived
-          # artifact — the policy text a consumer commits, the audiences, the
-          # placements, the public paths — has to be what it was without them.
+          # Two machines, a service, two groups, an organization, a silo and a
+          # delegation declared over the repository's own fleet, referenced by
+          # nothing. Every derived artifact — the policy text a consumer commits,
+          # the audiences, the placements, the public paths — has to be what it was
+          # without them.
+          #
+          # The delegation is the one record here that is referenced and still
+          # inert: acme names alice a manager and bob consents to acme's
+          # management, and every artifact below is byte-identical because a
+          # delegation decides who may act and places no key in any audience. The
+          # projection is read beside the claim so that an emptied delegation
+          # cannot make the claim pass by having nothing to be inert about.
           inertness = {
             declaresSubjects = {
               machines = sorted (builtins.attrNames declaredButUnused.machines);
@@ -959,9 +1078,27 @@
               organizations = sorted (builtins.attrNames declaredButUnused.organizations);
               silos = sorted (builtins.attrNames declaredButUnused.silos);
             };
+            declaresDelegation = {
+              inherit (resolve.delegationOf declaredButUnused) managers managedBy;
+            };
             identical = derivedFrom declaredButUnused == derivedFrom bare;
             noViolations = violationsOf declaredButUnused;
           };
+
+          # ── delegation is recorded on both sides ──
+          # The projection the scaffolding verbs read, over a fleet whose silo sets
+          # are what decide which groups each organization manages. `contractors`
+          # and `vendors` hold none of their organization's people and are covered
+          # regardless, because a silo set is administered as one boundary;
+          # `standby` is in no set and is covered by nobody.
+          delegation = resolve.delegationOf delegated;
+          delegationResolves = violationsOf delegated;
+
+          managersNobodyDeclaresMessages = violationsOf managersNobodyDeclares;
+          managersNobodyDeclaresFires = fires (filesFor managersNobodyDeclares { user = "alice"; });
+
+          managedByNobodyDeclaresMessages = violationsOf managedByNobodyDeclares;
+          managedByNobodyDeclaresFires = fires (filesFor managedByNobodyDeclares { user = "alice"; });
 
           # ── a person shares with a machine ──
           machineGrant = {
@@ -1237,11 +1374,11 @@
           # for, so there is no element and no migration.
           #
           # The two structural fields are design decision D1 and D3 read off the
-          # records rather than described. The consent is a list on alice; the
-          # organization's whole record is its custody, so nothing it declares could
-          # name her; and her `recoveryRecipients` stays empty while acme's key is on
-          # her file, which is the expansion happening beside that record rather than
-          # through it.
+          # records rather than described. The consent is a list on alice; what the
+          # organization declares is custody and managers, neither of which can
+          # name her as escrowed to it; and her `recoveryRecipients` stays empty
+          # while acme's key is on her file, which is the expansion happening beside
+          # that record rather than through it.
           escrowedConsent = {
             file = fileOfToken escrowed;
             audience = (audienceOfToken escrowed).audience;
@@ -1487,6 +1624,31 @@
               organizations = [ "acme" ];
               silos = [ ];
             };
+            delegated = {
+              people = [
+                "alice"
+                "bob"
+                "carol"
+                "dave"
+              ];
+              machines = [ ];
+              services = [ ];
+              groups = [
+                "contractors"
+                "oncall"
+                "partners"
+                "standby"
+                "vendors"
+              ];
+              organizations = [
+                "acme"
+                "globex"
+              ];
+              silos = [
+                "corp"
+                "trade"
+              ];
+            };
           };
 
           inertness = {
@@ -1502,6 +1664,7 @@
                 "nginx"
               ];
               groups = [
+                "fixture-oncall"
                 "infra"
                 "oncall"
               ];
@@ -1509,11 +1672,83 @@
                 "acme"
                 "globex"
               ];
-              silos = [ "corp" ];
+              silos = [
+                "corp"
+                "fixture-corp"
+              ];
+            };
+            declaresDelegation = {
+              managers = {
+                acme = [ "alice" ];
+                globex = [ ];
+              };
+              managedBy.bob = "acme";
             };
             identical = true;
             noViolations = [ ];
           };
+
+          delegation = {
+            managers = {
+              acme = [ "alice" ];
+              globex = [
+                "alice"
+                "dave"
+              ];
+            };
+            managedBy = {
+              bob = "acme";
+              carol = "globex";
+            };
+            groups = {
+              contractors = {
+                members = [ "dave" ];
+                organizations = [ "acme" ];
+              };
+              oncall = {
+                members = [ "bob" ];
+                organizations = [ "acme" ];
+              };
+              partners = {
+                members = [ "carol" ];
+                organizations = [ "globex" ];
+              };
+              standby = {
+                members = [ "bob" ];
+                organizations = [ ];
+              };
+              vendors = {
+                members = [ "dave" ];
+                organizations = [ "globex" ];
+              };
+            };
+            subjects = [
+              "acme"
+              "alice"
+              "bob"
+              "carol"
+              "contractors"
+              "dave"
+              "globex"
+              "oncall"
+              "partners"
+              "standby"
+              "vendors"
+            ];
+          };
+          delegationResolves = [ ];
+
+          managersNobodyDeclaresMessages = [
+            "flake.safix.organizations.acme.managers names 'mallory', which is not a declared user of flake.safix.users"
+            "flake.safix.organizations.acme.managers names 'zed', which is not a declared user of flake.safix.users"
+          ];
+          managersNobodyDeclaresFires = true;
+
+          managedByNobodyDeclaresMessages = [
+            "flake.safix.users.alice.managedBy names 'globex', which is not a declared organization of flake.safix.organizations"
+            "flake.safix.users.bob.managedBy names 'globex', which is not a declared organization of flake.safix.organizations"
+          ];
+          managedByNobodyDeclaresFires = true;
 
           machineGrant = {
             audience = [
@@ -1853,7 +2088,10 @@
               (keyOf "acme-escrow")
             ];
             personDeclares = [ "acme" ];
-            organizationDeclares = [ "custody" ];
+            organizationDeclares = [
+              "custody"
+              "managers"
+            ];
             recoveryRecipientsUntouched = { };
             anchors = [
               "alice-safix"

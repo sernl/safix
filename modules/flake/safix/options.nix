@@ -56,7 +56,8 @@ in
         Who holds what. This is safix's own user record and carries only custody:
         a recipient, further recipients of the same person's custody, the
         catalogue entries they carry, the secrets they declare alone, the secrets
-        they grant outward, and their per-host and per-tag adjustments.
+        they grant outward, the organizations they consent to the escrow and the
+        management of, and their per-host and per-tag adjustments.
 
         It is deliberately not a consumer's user registry and never reads one. A
         consumer with its own users writes a projection from theirs into this one;
@@ -156,23 +157,28 @@ in
       type = lib.types.attrsOf types.organization;
       example = lib.literalExpression ''
         {
-          acme.custody.acme-escrow = {
-            key = "age1...";
-            note = "acme's escrow — held offline by the operator";
+          acme = {
+            custody.acme-escrow = {
+              key = "age1...";
+              note = "acme's escrow — held offline by the operator";
+            };
+            managers = [ "alice" ];
           };
         }
       '';
       description = ''
         The organizations an audience may name: each one's recovery custody, and
-        nothing else in this phase.
+        the people who scaffold for it.
 
         An organization is a principal rather than a people-set. It holds escrow
-        identities, it may own machines and services, and a grant may name it —
-        and it has no membership, because a person relates to an organization
-        here in exactly one way: by declaring
-        `flake.safix.users.<u>.escrowedTo`, which is that person's own consent
-        in that person's own record. Nothing an organization declares widens
-        anyone's audience.
+        identities, it names managers, it may own machines and services, and a
+        grant may name it — and it has no membership, because a person relates to
+        an organization here in exactly two ways, both declared in that person's
+        own record: `flake.safix.users.<u>.escrowedTo` consents to its escrow and
+        `flake.safix.users.<u>.managedBy` consents to its management. Nothing an
+        organization declares widens anyone's audience, and naming a manager
+        widens nothing at all — a manager scaffolds and never reads by virtue of
+        managing.
 
         The keys live here so that rotation does. An organization rotates a
         custody key in this declaration and every consenting person's files
@@ -183,7 +189,10 @@ in
         same terms as `machines`, `services` and `groups`: a tree with
         organizations declared that no escrow, grant or ownership record names
         generates the same policy, the same rules and the same files, byte for
-        byte.
+        byte. A delegation is inert in the stronger sense that it stays inert
+        once it is referenced — `managers` and `managedBy` decide which acting
+        identity a verb accepts and place no key anywhere, so a fleet that
+        declares both generates the byte-identical tree.
       '';
     };
 

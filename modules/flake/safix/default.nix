@@ -223,6 +223,18 @@ in
       // lib.mapAttrs (_: m: lib.optional (m.recipient != null) m.recipient) cfg.machines
       // lib.mapAttrs (_: resolve.custodyOf) cfg.organizations;
 
+    # What the scaffolding verbs read to know whose act they are performing: the
+    # managers each organization declares, the organization each consenting person
+    # names, every group's membership with the organizations whose silo
+    # declarations cover it, and the subject name space a group edit is checked
+    # against.
+    #
+    # Read by `safix enroll` and `safix group` and by nothing else here. It is not
+    # part of the resolution algebra: no value in it reaches an audience, a
+    # placement or the generated policy, so a fleet that declares a delegation
+    # derives the byte-identical tree.
+    delegation = resolve.delegationOf registry;
+
     # The subject records themselves, as the consumption modules read them: a
     # machine's tags default a profile that names it, and nothing else here is
     # read outside this namespace.

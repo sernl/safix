@@ -83,6 +83,14 @@
 # what the audience computes and outside what the recipient policy generates a
 # rule for.
 #
+# ── delegation is not part of the algebra ──
+# `managers` and `managedBy` are read here and reach no audience, no placement and
+# no policy: `delegationIn` projects them for the verbs and `violationsIn` refuses
+# either side naming what the fleet does not declare, and that is the whole of
+# their effect on resolution. A fleet that declares a delegation therefore derives
+# the byte-identical tree, which is the property the change adding them rests on
+# and the reason they are a projection rather than a term in `audienceOf`.
+#
 # ── revocation, and what a rebuild cannot do ──
 # Revocation is not retroactive. Removing a grant narrows the audience, so the
 # secret moves back to a narrower file and future encryptions stop reaching the
@@ -1184,6 +1192,65 @@ let
       ) r.silos
     );
 
+  # ── delegation, which decides who may act and never who may read ──
+  # Which organizations' silo declarations cover one group.
+  #
+  # A silo set is the one organizational boundary over groups this model has, and
+  # it names groups rather than an owner, so the organization a set answers to is
+  # the one whose managed people its groups reach. Every group in such a set is
+  # that organization's to manage, including a group holding none of its people —
+  # which is what a silo is for: the two sides of a boundary are administered
+  # together and held apart.
+  #
+  # A group no silo set names is covered by nobody and is editable by anyone who
+  # can commit, exactly as it was before delegation was recorded. That default is
+  # deliberate and takes the safe direction: a delegation nobody declared cannot
+  # refuse an edit that was always allowed.
+  coveringOrganizations =
+    r: group:
+    let
+      reaches =
+        organization: g:
+        lib.any (leaf: isPerson r leaf && r.users.${leaf}.managedBy == organization) (leavesOf r g);
+      claims =
+        organization: silo: lib.any (g: isGroup r g && reaches organization g) r.silos.${silo}.groups;
+      sets = lib.filter (silo: builtins.elem group r.silos.${silo}.groups) (builtins.attrNames r.silos);
+    in
+    sortNames (
+      lib.unique (
+        lib.concatMap (silo: lib.filter (o: claims o silo) (builtins.attrNames r.organizations)) sets
+      )
+    );
+
+  # What the scaffolding verbs read to know whose act they are performing.
+  #
+  # One record rather than three attributes, because one evaluation of one set of
+  # declarations answers all of it and a second attribute would be a second answer
+  # to the same question: which organization manages this person, whom that
+  # organization declares as a manager, and which organizations' silo declarations
+  # cover this group. A group's membership and the subject name space ride along
+  # because the verb that asks the third question is the verb that edits that
+  # membership, and it has to refuse a group or a subject the fleet does not
+  # declare before it edits anything.
+  #
+  # `managedBy` carries only the people who declare one, so a fleet that declares
+  # no delegation evaluates to three empty records and a name space — which is
+  # what makes "the verbs consult nothing for an unmanaged target" a property of
+  # the data rather than of a code path.
+  delegationIn =
+    r:
+    guard r {
+      managers = lib.mapAttrs (_o: declared: sortNames declared.managers) r.organizations;
+      managedBy = lib.filterAttrs (_u: organization: organization != null) (
+        lib.mapAttrs (_u: profile: profile.managedBy) r.users
+      );
+      groups = lib.mapAttrs (group: declared: {
+        inherit (declared) members;
+        organizations = coveringOrganizations r group;
+      }) r.groups;
+      subjects = sortNames (lib.concatMap (field: builtins.attrNames r.${field}) subjectKinds);
+    };
+
   # Every way a set of custody declarations can be wrong, as messages rather than
   # as a throw, so that the same list can be asserted against a literal and
   # thrown from. Ordered, and deterministic: attribute iteration is sorted.
@@ -1489,6 +1556,28 @@ let
         lib.optional (emptyCustody g.leaf) "${grantPath g} shares '${g.name}'${reachClause r g}, but flake.safix.organizations.${g.leaf}.custody is empty, so the file would be encrypted to nobody"
       ) reaches;
 
+      # ── delegation's two dangling references ──
+      # Both sides are refused where they are written, and neither is refused for
+      # anything else: a delegation adds no recipient to any file, so there is no
+      # empty-custody sentence to say about one and an organization that holds no
+      # key can still name managers.
+      undeclaredManager = lib.concatMap (
+        organization:
+        map (
+          person:
+          "flake.safix.organizations.${organization}.managers names '${person}', which is not a declared user of flake.safix.users"
+        ) (lib.filter (person: !(isPerson r person)) r.organizations.${organization}.managers)
+      ) (builtins.attrNames r.organizations);
+
+      undeclaredManagedBy = lib.concatMap (
+        user:
+        let
+          organization = r.users.${user}.managedBy;
+        in
+        lib.optional (organization != null && !(isOrganization r organization))
+          "flake.safix.users.${user}.managedBy names '${organization}', which is not a declared organization of flake.safix.organizations"
+      ) names;
+
       # A principal is not a member. What an organization holds is custody of its
       # own, so a group containing one would be a people-set with a key in it, and
       # an audience wanting that key names the organization.
@@ -1704,6 +1793,8 @@ let
     ++ undeclaredEscrow
     ++ escrowToEmptyCustody
     ++ emptyCustodyReach
+    ++ undeclaredManager
+    ++ undeclaredManagedBy
     ++ noRecipientKey
     ++ ownerWithoutRecipient
     ++ keylessCarrier
@@ -2184,6 +2275,7 @@ in
     ;
 
   violations = entryPoint violationsIn;
+  delegationOf = entryPoint delegationIn;
   generatorViolations = entryPoint generatorViolationsIn;
   generatorPlanOf = entryPoint generatorPlanIn;
   audiencesOf = entryPoint audiencesIn;
