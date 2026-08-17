@@ -30,12 +30,18 @@
 //!
 //! # Why some runs go through `setsid`
 //!
-//! The command reads a value from `/dev/tty` when it opens and from standard
-//! input when it does not. A build sandbox has no controlling terminal, so the
-//! stdin branch is what the checks exercise; a developer's terminal has one, so
-//! a run whose value arrives on standard input is detached into its own session
-//! first. Runs that are meant to block — the interrupted ones — are not
-//! detached, because the signal has to reach the process itself.
+//! A generator's prompt and a confirmation are read from `/dev/tty` when it opens
+//! and from standard input when it does not. A build sandbox has no controlling
+//! terminal, so the stdin branch is what the checks exercise; a developer's
+//! terminal has one, so a run whose answers arrive on standard input is detached
+//! into its own session first. Runs that are meant to block — the interrupted
+//! ones — are not detached, because the signal has to reach the process itself.
+//!
+//! `set` is no longer among them and is worth stating separately: it chooses its
+//! source by asking whether *standard input* is a terminal, so a run fed by a pipe
+//! takes the stream source whatever terminal the machine has. Reaching its prompt
+//! path therefore takes a real terminal on standard input, which is
+//! [`Fixture::set_on_a_terminal`].
 
 // A test's failure is the point, so the panicking constructions the workspace
 // denies are what an assertion here is made of. This is `clippy.toml`'s
@@ -64,6 +70,14 @@ use serde_json::{Value, json};
 /// ana's own file: the audience is one person, and the creation rule grants her
 /// alone.
 pub const ANA_FILE: &str = "secrets/safix/users/ana/secrets.yaml";
+
+/// `^D`, the character a terminal in canonical mode reads as the end of input.
+///
+/// The default `VEOF`, which is what a person presses and therefore what a
+/// pseudoterminal-driven run sends. Not a value this suite chose: it is the
+/// terminal discipline's own, and a run reading past the lines it was given has to
+/// see the end rather than block.
+const END_OF_INPUT: u8 = 0x04;
 
 /// The file the pair shares, in the audience directory named for both in sorted
 /// order.
@@ -768,14 +782,70 @@ impl Fixture {
         self.work.join(name)
     }
 
-    /// `set`, with the value typed twice as the prompt asks for it.
+    /// `set`, with the value piped.
+    ///
+    /// Standard input is a pipe here and never a terminal, so this is the stream
+    /// source: the bytes given are the bytes stored, and nothing prompts. It used
+    /// to write the value twice, because a pipe took the prompt path and read two
+    /// lines from it; a caller wanting that path now says so with
+    /// [`Fixture::set_on_a_terminal`].
     pub fn set(&self, user: &str, name: &str, value: &str) -> Run {
-        self.run_with(&["set", user, name], &format!("{value}\n{value}\n"))
+        self.run_with(&["set", user, name], value)
     }
 
-    /// `set`, with a confirmation that differs from the value.
-    pub fn set_confirming(&self, user: &str, name: &str, value: &str, again: &str) -> Run {
-        self.run_with(&["set", user, name], &format!("{value}\n{again}\n"))
+    /// `set` with a real terminal on standard input, and the two lines typed into
+    /// it.
+    ///
+    /// A pseudoterminal rather than a pipe, because the fork under test is the
+    /// terminal test on standard input: a pipe now takes the stream source, and
+    /// there is no other way left to reach the prompt path. The pair the command
+    /// reads is written as two lines, which is what a person typing does.
+    ///
+    /// `setsid` sits above the command where this process has a controlling
+    /// terminal, for the reason [`detached`] gives and one more of its own: the
+    /// prompt prefers `/dev/tty` over standard input, so a run that kept this
+    /// process's terminal would read the two lines from the developer's keyboard
+    /// rather than from the pseudoterminal. Detached, the command has no
+    /// controlling terminal, `/dev/tty` does not open, and the reads land on the
+    /// pseudoterminal that standard input is.
+    pub fn set_on_a_terminal(&self, arguments: &[&str], typed: &str) -> Run {
+        let terminal = Pty::open();
+        let mut command = match detached() {
+            Some(setsid) => {
+                let mut command = Command::new(setsid);
+                command.arg("-w").arg(safix());
+                command
+            }
+            None => Command::new(safix()),
+        };
+        command.args(arguments);
+        self.environment(&mut command, Reporter::Plain);
+        command.stdin(Stdio::from(terminal.slave));
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        let child = command.spawn().expect("could not spawn the command");
+
+        // The typed lines, then the end-of-input character. A pipe signals the end
+        // of its input by being closed; a pseudoterminal has no writer to close —
+        // closing the master leaves the slave's reads failing with EIO rather than
+        // reporting the end — so the end is signalled the way a person signals it,
+        // with the terminal's own EOF at the start of a line. Without it a run that
+        // is given fewer lines than it reads waits forever instead of being
+        // refused.
+        let mut master = std::fs::File::from(terminal.master);
+        master.write_all(typed.as_bytes()).unwrap();
+        master.write_all(&[END_OF_INPUT]).unwrap();
+        master.flush().unwrap();
+
+        let output = child
+            .wait_with_output()
+            .expect("the command did not finish");
+        drop(master);
+        Run {
+            code: output.status.code(),
+            stdout: output.stdout,
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
     }
 
     /// The command's own environment, ready for a caller that needs to spawn it
@@ -1171,6 +1241,41 @@ impl Drop for Fixture {
     }
 }
 
+/// A freshly allocated pseudoterminal pair.
+///
+/// The master is what a test types into and the slave is what the command's
+/// standard input is. Opened here rather than by standing a program such as
+/// `script` in front of the command, so the suite's dependency set does not grow
+/// and the environment reaches the command the way every other run's does.
+struct Pty {
+    master: std::os::fd::OwnedFd,
+    slave: std::os::fd::OwnedFd,
+}
+
+impl Pty {
+    fn open() -> Self {
+        use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)
+            .expect("this platform has no pseudoterminals");
+        grantpt(&master).expect("the pseudoterminal could not be granted");
+        unlockpt(&master).expect("the pseudoterminal could not be unlocked");
+        let name = ptsname(&master, Vec::new()).expect("the pseudoterminal has no name");
+        let path = PathBuf::from(String::from_utf8_lossy(name.as_bytes()).into_owned());
+
+        let slave = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap_or_else(|cause| panic!("{} could not be opened: {cause}", path.display()));
+
+        Self {
+            master,
+            slave: slave.into(),
+        }
+    }
+}
+
 /// Which reporter a run is made under.
 #[derive(Clone, Copy)]
 enum Reporter {
@@ -1431,9 +1536,11 @@ pub fn real_sops() -> String {
 /// to the command.
 ///
 /// A build sandbox has none and this is `None` there, which is the branch the
-/// checks exercise. On a developer's terminal the command would read its value
-/// from `/dev/tty` rather than from the standard input the test wrote, so the
-/// run is detached into its own session first.
+/// checks exercise. On a developer's terminal the command would read a prompt or a
+/// confirmation from `/dev/tty` rather than from the standard input the test
+/// wrote, so the run is detached into its own session first — including the
+/// pseudoterminal runs, where a `/dev/tty` that opened would be the developer's
+/// keyboard and not the terminal the test allocated.
 fn detached() -> Option<PathBuf> {
     if std::fs::OpenOptions::new()
         .write(true)

@@ -39,6 +39,7 @@ mod abort;
 mod prompt;
 mod render;
 mod reporter;
+mod stream;
 mod table;
 mod usage;
 
@@ -304,7 +305,7 @@ fn get(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(abort::exit_code(decrypted.status))
 }
 
-/// One value, typed twice, written and committed.
+/// One value, typed twice or piped once, written and committed.
 fn set_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let workspace = Workspace::discover()?;
     let (user, name) = match arguments {
@@ -317,8 +318,26 @@ fn set_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         }
     };
 
-    let status = set::run(&workspace, &Terminal, &mut prompt::Prompted, &user, &name)?;
+    let mut source = value_source();
+    let status = set::run(&workspace, &Terminal, source.as_mut(), &user, &name)?;
     Ok(abort::exit_code(status))
+}
+
+/// Where `set` reads its value from: the person when one is typing, the stream
+/// when one is not.
+///
+/// The fork is the terminal test on standard input and nothing else, which is the
+/// branch `clan vars set` takes, so one piece of calling code scripts both
+/// commands. Neither side changes the other: a terminal still gets the hidden
+/// double prompt, and a pipe gets the bytes it sent with no prompt and no
+/// confirmation — see [`stream`] for why dropping the confirmation there is the
+/// point rather than a concession.
+fn value_source() -> Box<dyn set::ValueSource> {
+    if stream::stdin_is_a_terminal() {
+        Box::new(prompt::Prompted)
+    } else {
+        Box::new(stream::Piped)
+    }
 }
 
 /// One value, opened in the operator's editor, written and committed.

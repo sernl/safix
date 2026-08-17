@@ -22,6 +22,19 @@ script produces, newlines and all.
 
 This is the hand-typed case, and it stays separate from `generate` on purpose: a
 credential some server already knows cannot be minted, only transcribed.
+
+\u{2500}\u{2500} scripted writes \u{2500}\u{2500}
+When standard input is not a terminal the value is read from it instead, whole,
+and stored exactly as sent — `echo` pipes a trailing newline and `printf` does
+not, and nothing here removes one:
+
+  printf '%s' \"$TOKEN\" | safix set ana grafana-token
+
+This replaces nothing. A terminal still gets the prompt above, unchanged. What
+the piped form drops is the confirmation, and that is the point rather than a
+concession: the second prompt exists to catch a value mistyped invisibly, and a
+piped value has no typist. An empty pipe takes the same refusal an empty prompt
+takes, because it is what a failed upstream command leaves behind.
 ";
 
 /// `safix fix -h`.

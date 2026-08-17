@@ -198,6 +198,16 @@
         mode "safix-abort" "write_path"
           "an_aborted_run_leaves_no_file_no_scratch_and_no_value";
 
+      # Where `set` reads its value from. A pipe is stored as its own bytes,
+      # trailing newline included, with nothing prompted and nothing confirmed; an
+      # empty pipe takes the empty-value refusal; and a real pseudoterminal on
+      # standard input still gets the hidden double prompt, with the second read
+      # shown to happen by a run given one line and refused for want of a
+      # confirmation. Three tests rather than one, because the fork is what is
+      # under test and each side has to be reachable on its own.
+      checks.safix-value-source =
+        mode "safix-value-source" "value_source" "";
+
       # `get` round-trips a value by digest, for a secret of the user's own and
       # for one shared from another owner, and resolves the same file for both
       # parties. A value set and read back is byte-identical, trailing newline

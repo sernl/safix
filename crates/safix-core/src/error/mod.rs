@@ -429,11 +429,14 @@ pub enum Error {
     #[error("no confirmation read")]
     NoConfirmationRead,
 
-    /// The operator entered nothing.
+    /// The operator entered nothing, or the stream carried nothing.
     ///
     /// Refused rather than stored, because a key holding the empty string is
     /// indistinguishable from the placeholder `set` creates a file with, and
-    /// `check` reads that placeholder as "declared, no value yet".
+    /// `check` reads that placeholder as "declared, no value yet". The refusal
+    /// covers both sources deliberately: an empty pipe is the state a failed
+    /// upstream command leaves behind, which is the mistake a script makes where
+    /// an empty entry is the one a person makes.
     #[error("the value is empty; refusing to store it")]
     EmptyValue,
 

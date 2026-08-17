@@ -14,9 +14,9 @@
 
 ## 3. The stream source for set
 
-- [ ] 3.1 Implement the stdin `ValueSource` at the CLI layer: read when standard input is not a terminal, bytes exactly as received, no prompt, no confirmation
-- [ ] 3.2 Keep the refusals: empty input takes the empty-value refusal; the terminal path is byte-for-byte today's behaviour
-- [ ] 3.3 Verify: piped bytes round-trip exactly (trailing newline included), the value reaches no argv and no environment, and an empty pipe refuses — extending the existing value-pipe observations to the new source
+- [x] 3.1 Implement the stdin `ValueSource` at the CLI layer: read when standard input is not a terminal, bytes exactly as received, no prompt, no confirmation. `crates/safix/src/stream.rs` holds the source and `main.rs`'s `value_source` the fork
+- [x] 3.2 Keep the refusals: empty input takes the empty-value refusal; the terminal path is byte-for-byte today's behaviour. Reaching the terminal path now takes a real terminal on standard input, so the suite allocates a pseudoterminal (`Fixture::set_on_a_terminal`); the prompt path's own code is untouched
+- [x] 3.3 Verify: piped bytes round-trip exactly (trailing newline included), the value reaches no argv and no environment, and an empty pipe refuses — extending the existing value-pipe observations to the new source. `safix-value-source` is the new check; `safix-value-pipe` and `safix-syscall-proof` now drive the stream source, which is what extends both observations to it. Two drills observed red: forcing the prompt path fails the two piped tests, forcing the stream path fails the terminal one
 
 ## 4. The recorded absences
 

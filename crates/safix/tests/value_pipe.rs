@@ -32,6 +32,11 @@ use harness::{ANA_FILE, Fixture, real_sops, shim};
 
 /// A `set` observed at the sops process: the value is stored, and it was in
 /// neither of the two channels a bystander can read.
+///
+/// The value arrives on standard input, which since `settle-clan-vars-parity` is
+/// the stream source rather than the prompt reading two lines from a pipe. That
+/// makes this observation the new source's as well as the old one's: the bytes a
+/// program piped still travel to sops down a pipe, and reach neither channel.
 #[test]
 fn the_value_reaches_sops_in_neither_argv_nor_the_environment() {
     let fixture = Fixture::new();
@@ -41,7 +46,7 @@ fn the_value_reaches_sops_in_neither_argv_nor_the_environment() {
     fixture
         .run_env(
             &["set", "ana", "api-token"],
-            Some("CANARY-piped-value\nCANARY-piped-value\n"),
+            Some("CANARY-piped-value"),
             &observed(&spool, &sops),
         )
         .expect_success("the set through the observed sops");

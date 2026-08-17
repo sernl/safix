@@ -76,7 +76,8 @@ mod linux {
         fixture
     }
 
-    /// A typed value goes into sops down a pipe and into nothing else.
+    /// A value arriving on standard input goes into sops down a pipe and into
+    /// nothing else.
     #[test]
     fn every_plaintext_write_of_a_typed_value_goes_to_a_pipe() {
         let fixture = Fixture::new();
@@ -85,7 +86,7 @@ mod linux {
             &fixture,
             safix(),
             &["set", "ana", "api-token"],
-            Some(&format!("{TYPED}\n{TYPED}\n")),
+            Some(TYPED),
             &[],
             &[TYPED],
         )
@@ -214,7 +215,7 @@ mod linux {
             &fixture,
             shim(),
             &["set", "ana", "api-token"],
-            Some(&format!("{TYPED}\n{TYPED}\n")),
+            Some(TYPED),
             &[
                 ("SAFIX_SHIM_ROLE", "mutate"),
                 ("SAFIX_SHIM_TARGET", safix()),

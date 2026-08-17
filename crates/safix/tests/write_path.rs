@@ -165,10 +165,15 @@ fn set_existing_moves_one_key_and_leaves_the_others_byte_identical() {
         "an entry with a sopsKey also wrote a key named after the secret"
     );
 
-    // A mistyped confirmation writes nothing at all.
+    // A mistyped confirmation writes nothing at all. Typed at a terminal, which
+    // is the only place a confirmation is asked for: a piped value has no typist
+    // and is read once.
     let snapshot = fixture.read(ANA_FILE);
     fixture
-        .set_confirming("ana", "api-token", "CANARY-typo-a", "CANARY-typo-b")
+        .set_on_a_terminal(
+            &["set", "ana", "api-token"],
+            "CANARY-typo-a\nCANARY-typo-b\n",
+        )
         .expect_refusal("a mismatched confirmation");
     assert_eq!(
         fixture.read(ANA_FILE),
@@ -200,10 +205,7 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     assert_eq!(fixture.status(), "", "the refused name touched the tree");
     codes.push(
         fixture
-            .run_graphical_with(
-                &["set", "ana", "not-declared-anywhere"],
-                "CANARY-unknown\nCANARY-unknown\n",
-            )
+            .run_graphical_with(&["set", "ana", "not-declared-anywhere"], "CANARY-unknown")
             .refusal_code(),
     );
 
@@ -224,10 +226,7 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     assert_eq!(fixture.status(), "", "the no-rule refusal left something");
     codes.push(
         fixture
-            .run_graphical_with(
-                &["set", "ana", "no-rule-secret"],
-                "CANARY-norule\nCANARY-norule\n",
-            )
+            .run_graphical_with(&["set", "ana", "no-rule-secret"], "CANARY-norule")
             .refusal_code(),
     );
 
@@ -243,18 +242,23 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     );
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "not-yaml"], "x\nx\n")
+            .run_graphical_with(&["set", "ana", "not-yaml"], "x")
             .refusal_code(),
     );
 
     // An empty value is the written-but-empty state a truncated write leaves,
-    // and a probe matching the key name alone would call it converged.
+    // and a probe matching the key name alone would call it converged. Refused
+    // from both sources: an empty pipe is what a failed upstream command leaves,
+    // and an empty first line is what a person who pressed return twice typed.
     fixture
-        .run_with(&["set", "ana", "api-token"], "\n\n")
-        .expect_refusal("an empty value");
+        .run_with(&["set", "ana", "api-token"], "")
+        .expect_refusal("an empty pipe");
+    fixture
+        .set_on_a_terminal(&["set", "ana", "api-token"], "\n\n")
+        .expect_refusal("an empty typed value");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "\n\n")
+            .run_graphical_with(&["set", "ana", "api-token"], "")
             .refusal_code(),
     );
 
@@ -265,7 +269,7 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     refused.says("not a declared user");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "cy", "api-token"], "x\nx\n")
+            .run_graphical_with(&["set", "cy", "api-token"], "x")
             .refusal_code(),
     );
 
@@ -280,7 +284,7 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     refused.says("uncommitted changes");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "x\nx\n")
+            .run_graphical_with(&["set", "ana", "api-token"], "x")
             .refusal_code(),
     );
     fixture.git(&["checkout", "--", ANA_FILE]);
@@ -294,7 +298,7 @@ fn refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     refused.says("mid-MERGE_HEAD");
     codes.push(
         fixture
-            .run_graphical_with(&["set", "ana", "api-token"], "x\nx\n")
+            .run_graphical_with(&["set", "ana", "api-token"], "x")
             .refusal_code(),
     );
     std::fs::remove_file(format!("{git_dir}/MERGE_HEAD")).unwrap();
