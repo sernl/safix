@@ -6,14 +6,13 @@
 # nothing about them.
 #
 # Two jobs, run together rather than one behind the other, because the two kinds
-# of failure cost different amounts to find. `eval` evaluates every output for
-# every system safix declares and builds only the two formatters, so an
-# evaluation error on aarch64-linux — a platform this workflow rents no runner
-# for — and a misformatted file are both red marks within a few minutes rather
-# than at the end of a build. `build` then builds the surface on the two
-# platforms GitHub does rent. Running them side by side rather than in sequence
-# is deliberate: the fast answer is worth having early and is not worth making
-# the slow one wait for.
+# of failure cost different amounts to find. `eval` evaluates the flake for every
+# system safix declares and builds only the two formatters, so an output that
+# stopped existing on aarch64-linux — a platform this workflow rents no runner for
+# — and a misformatted file are both red marks in half a minute rather than at
+# the end of a build. `build` then builds the surface on the two platforms GitHub
+# does rent. Running them side by side rather than in sequence is deliberate: the
+# fast answer is worth having early and is not worth making the slow one wait for.
 #
 # `build` runs nix-fast-build rather than `nix flake check`. `nix flake check`
 # stops at the first failing derivation and then names every other check as
@@ -68,11 +67,15 @@ jobs:
       #
       # Instantiation therefore belongs to the build job, whose nix-eval-jobs
       # realises what an evaluation demands. What is reachable from here is
-      # evaluation without instantiation, for every system rather than one: each
-      # perSystem module for all three that safix declares — the option types, the
-      # resolution algebra, the fixture fleet — which is where a change only
-      # aarch64-linux notices goes wrong, and nothing here rents a runner for it.
-      - name: every output evaluates, on every system safix declares
+      # narrower, and worth being exact about: `nix flake show --all-systems`
+      # evaluates the flake's module system once per declared system and forces
+      # the attribute set each one produces, down to every derivation's name. It
+      # does not force any check's body — a `runCommand`'s name is a literal, and
+      # its inputs stay unevaluated — so this is not a check of the checks. It is
+      # a check that all three systems still produce the surface they are supposed
+      # to, which is the failure aarch64-linux would otherwise report to nobody,
+      # and it costs ten seconds to ask.
+      - name: every declared system still produces its surface
         run: nix flake show --all-systems --json > /dev/null
 
       # Both formatters are checks of the flake and are built again by the build
