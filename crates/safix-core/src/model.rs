@@ -1109,13 +1109,13 @@ pub const AUDIENCE_SEPARATOR: &str = ",";
 
 /// The markers the nix half writes an audience element with when the element is a
 /// reference resolved through a declaration rather than a subject named in place:
-/// a group, and the owner a machine records.
+/// a group, the owner a machine records, and a service.
 ///
 /// Named here for the same reason as the separator, and load-bearing for the same
 /// claim. A directory is joined from elements, so the alphabet injectivity rests
 /// on is the marked forms as well as the bare names, and the property test below
 /// is where this crate states that rather than inheriting it.
-pub const AUDIENCE_MARKERS: [&str; 2] = ["@", "@~"];
+pub const AUDIENCE_MARKERS: [&str; 3] = ["@", "@~", "%"];
 
 #[cfg(test)]
 mod properties {
@@ -1129,15 +1129,22 @@ mod properties {
     const NAME: &str = "[a-z0-9][a-z0-9_-]{0,7}";
 
     /// Every form an audience element takes: a subject named in place, a group,
-    /// or the owner a machine records. The markers are part of the alphabet a
-    /// directory is joined from, so the property below has to be over elements
-    /// rather than over names.
+    /// the owner a machine records, or a service. The markers are part of the
+    /// alphabet a directory is joined from, so the property below has to be over
+    /// elements rather than over names.
+    ///
+    /// Built by mapping the marker set rather than by naming each marker, so a
+    /// fifth subject kind is covered by the property the day the constant grows
+    /// rather than the day someone remembers this strategy.
     fn element() -> impl Strategy<Value = String> {
-        prop_oneof![
-            NAME.prop_map(|name| name),
-            NAME.prop_map(|name| format!("{}{name}", AUDIENCE_MARKERS[0])),
-            NAME.prop_map(|name| format!("{}{name}", AUDIENCE_MARKERS[1])),
-        ]
+        let marked: Vec<BoxedStrategy<String>> = std::iter::once(NAME.prop_map(|n| n).boxed())
+            .chain(
+                AUDIENCE_MARKERS
+                    .into_iter()
+                    .map(|marker| NAME.prop_map(move |name| format!("{marker}{name}")).boxed()),
+            )
+            .collect();
+        proptest::strategy::Union::new(marked)
     }
 
     /// How a shared audience's directory is named: its members, sorted, joined.
