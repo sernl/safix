@@ -21,6 +21,25 @@ A change to it is a breaking change whether or not any rust changed.
 
 ### Added
 
+- A third top-level tree, `state/safix/definitions/`, holding one plaintext line per generated value: a digest of the generator declaration that minted it, written by `safix generate` in the same commit as the value and refreshed by every regeneration.
+  Neither existing tree could hold it. A path named for secrets has to mean that everything under it is encrypted without qualification, and `public/` means declared public outputs a nix module reads at evaluation; a bookkeeping file there would dilute that into "plaintext things safix wrote".
+  The digest covers everything that decides what a mint produces — the script, `runtimeInputs`, prompts, dependencies, the outputs with their secrecy, and the validation fragment — and neither of the two fields that cannot: `description` is a label and `share` is derived by the resolver from the entries.
+  No value and no derivative of a value is in the record, which is what lets it be committed in the clear. It carries a leading format tag, so changing the canonical form reads as unknown-version rather than as universal drift.
+  `safix-core` gains `definition` for the record and computes the digest itself rather than taking a dependency for it; `openspec/changes/settle-clan-vars-parity/design.md` records the two rejected locations, a reserved key inside the sops document and a derivation from git history.
+- `safix check` gains a fifth finding class over that record: a generated value whose recorded definition is not the one the declarations carry now.
+  It names the entry, the generator, the record, and both remedies — regenerate to adopt the declaration, revert the edit to adopt the value — and recommends neither, because the tree holds two things that disagree and nothing here knows which was meant.
+  It carries no value and needs no identity: the question is answered from a digest of a declaration, and `check` still decrypts nothing.
+  A value with no record predates the record and is not a finding, which is how everything minted before this change is grandfathered; a record whose format tag this version does not write is not a finding either.
+  The producing generator is read off the placements through `Placements::producer_of` rather than off `flake.safix.lib.generatorPlan`, because the plan is guarded — a cycle or two producers for one output throws instead of returning an order — and a report that evaluated it would fall silent on exactly the trees whose declarations are wrong. A test binds the two readings to the one relation `resolve.nix` projects.
+  This is what clan reports as `invalid_generators`; measured against the real clan, safix's record is the broader of the two, because clan's `validationHash` is null unless the generator declares `validation`.
+- `safix set` reads the value from standard input when standard input is not a terminal, which makes it scriptable — the contract safix's own bridge already relies on when it writes into clan, and a dependency of the planned hardware-custody and KeePassXC work.
+  The bytes are stored exactly as sent: `echo` pipes a trailing newline and `printf` does not, and nothing removes one. An empty pipe takes the empty-value refusal, because it is what a failed upstream command leaves behind.
+  The terminal path is unchanged. What the piped form drops is the confirmation, and that is the point rather than a concession: the second prompt exists to catch a value mistyped invisibly, and a piped value has no typist.
+  The fork is the terminal test on standard input and nothing else, which is `clan vars set`'s own branch, so one piece of calling code scripts both commands.
+- `safix-generate-definition-drift` and `safix-value-source`, two more checks over the integration suite.
+  The first drives the record and the four states the finding tells apart; the second drives both sides of `set`'s source fork, the piped one over a pipe and the typed one over a pseudoterminal the suite allocates — which is the only way left to reach the prompt path, since a pipe now selects the stream source.
+  Four drills were observed red: never reporting drift fails the drift assertion, always reporting it fails the four silences, forcing the prompt path fails the two piped tests, and forcing the stream path fails the terminal one.
+  `crates/safix/tests/abort_residue.rs` gains a fifth thing every interrupted run is held to — no definition record for a value it did not commit — and the window where that claim is not vacuous: a mint interrupted while sops holds its candidate open. Writing the record in place instead reddens exactly that test.
 - `safix audit`: the report over the clan bridge.
   It compares both sides of every declared mapping, or the one named in either direction, and changes nothing on either side of the boundary.
   A mapping agrees when both sides hold the same bytes and when neither side holds a value yet; it is a finding when the two hold different values, when one side holds a value the other does not, or when the comparison could not be made at all.
@@ -51,6 +70,13 @@ A change to it is a breaking change whether or not any rust changed.
 
 - `README.md` opens by stating who the project is for: its operator's own fleet and use case.
   The status section's subcommand count now includes the bridge pair and `audit`, the stale no-remote sentence is gone, and the port history is condensed to what the changelog and the openspec records do not already hold.
+- Piping a value into `safix set` is no longer the prompt path reading two lines from a pipe.
+  A caller that wrote the value twice into standard input now stores both lines and the newline between them, because that is exactly what it sent. The scripted form is one value: `printf '%s' "$TOKEN" | safix set ana grafana-token`.
+  This is the one consumer-visible behaviour change in this release, and it is the deliberate half of the feature rather than a side effect of it.
+- The catch-all policy check's probes gain the definition-record tree's two shapes, beside the public store's, so a generated creation rule that reached either fails a check rather than encrypting a plaintext record the next time anyone ran sops against that path.
+- The recorded absences stand, re-examined rather than restated. No `upload`, because activation already delivers what it would; no plaintext dump and restore, because such a tree outlives the migration that justified it and the backend count is still one.
+  Both were re-examined against the custody-subjects extension directed on the same day: machines and services joining the audience model changes who may be in an audience, not how a value reaches a machine.
+  The absence of clan's flake-level per-export generator placement is not recorded as a non-goal either, because that question dissolves into that extension rather than standing as an absence.
 
 ### Fixed
 

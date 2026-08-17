@@ -22,11 +22,11 @@
 
 - [x] 4.1 USER-RUN (answered): decide whether the recorded refusals of `upload` and of the plaintext dump-and-restore stand, with the committed reasoning in view (design's first open question). If either is overturned, that is a new change with its own spec delta, not an edit here. Decided: both refusals stand, re-examined against the custody-subjects extension the operator directed on the same day — machines and services joining the audience model changes who may be in an audience, not how values reach a machine, which stays activation reading the committed file; and the backend count stays one, so the migration scenario the dump serves still does not exist
 - [x] 4.2 USER-RUN (answered): confirm or reject the per-export placement non-goal (design's second open question); on confirmation, add the recording to this change's safix-cli delta. Decided: rejected as a non-goal, and not adopted as clan's shape either — the operator extended safix's axis instead. Machines, services, groups and organizational custody become first-class subjects in `extend-custody-subjects`, which supersedes this question; no recording lands in this change's delta
-- [ ] 4.3 Record in the help and README that scripted writes exist, replacing nothing: the prompt path is unchanged
+- [x] 4.3 Record in the help and README that scripted writes exist, replacing nothing: the prompt path is unchanged. `safix set -h` gains a "scripted writes" section and the README's daily-commands section the piped form, both saying what the piped form drops and why
 
 ## 5. The record
 
-- [ ] 5.1 CHANGELOG entries under Unreleased: the state tree, the finding class, the stream source
-- [ ] 5.2 README: the daily-commands section gains the piped `set` form; the checks narrative gains the drift finding
+- [x] 5.1 CHANGELOG entries under Unreleased: the state tree, the finding class, the stream source. Also the two new checks, and under Changed the one consumer-visible behaviour change — a caller that piped the value twice now stores both lines
+- [x] 5.2 README: the daily-commands section gains the piped `set` form; the checks narrative gains the drift finding. A "The definition a value was minted under" subsection carries the third tree's path narrative, and the pieces-live table gains rows for `public/safix/` and `state/safix/definitions/`
 - [ ] 5.3 Verify: `openspec validate settle-clan-vars-parity --strict` passes
 - [ ] 5.4 Verify before archive: `clan-generator-contract` and `adopt-generator-sandbox` archived first (shared `secret-generators` history)

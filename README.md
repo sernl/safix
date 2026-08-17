@@ -268,7 +268,7 @@ public/safix/shared/<audience>/<name>/value
 ```
 
 A path named for secrets has to mean everything under it is encrypted, without qualification, because that is what every backup rule, sync exclusion and reviewer assumes about it.
-Two checks hold the trees apart: `safix-public-no-rule` matches every generated creation rule against every public path, and the catch-all check carries the public shape among its probes.
+Two checks hold the trees apart: `safix-public-no-rule` matches every generated creation rule against every public path, and the catch-all check carries the public shape among its probes — together with the definition-record shape described below, for the same reason.
 
 The default is `secret = true`, not clan's `false`.
 A mistyped field that leaves a value encrypted is recoverable by fixing the typo; one that publishes a value is not.
@@ -290,6 +290,28 @@ Overwriting a page of a memory-backed filesystem does not reach a copy already w
 A mode-`0700` directory is readable by every process running as you for the length of the run, where the pipe this replaced was readable by neither a third process nor a shell — that is a real reduction, and the two are not equivalent.
 And it is not a sandbox: a script that copies `$in/dep/name` elsewhere, or writes an output outside `$out`, has put plaintext where safix does not look.
 Write generators the way you would write any code that holds a credential.
+
+### The definition a value was minted under
+
+A generated value carries nothing saying which declaration produced it, so editing that declaration afterwards is invisible: the value in the file is a function of a generator that no longer exists, and reads exactly like one the current generator would produce.
+
+`safix generate` therefore writes a digest of the declaration it ran, in the same commit as the value:
+
+```
+state/safix/definitions/<user>/<name>
+state/safix/definitions/shared/<audience>/<name>
+```
+
+One plaintext line each — a format tag and a digest — over everything that decides what a mint produces: the script, its `runtimeInputs`, its prompts, its dependencies, the outputs it writes with their secrecy, and the validation fragment.
+No value and no derivative of a value is in it, which is what lets it be committed in the clear.
+
+A third top-level tree, because neither existing one can hold it.
+A path named for secrets has to mean everything under it is encrypted, without qualification; `public/` means declared public outputs a nix module reads at evaluation, and a bookkeeping file there would dilute that into "plaintext things safix wrote".
+`state/` says what it is: recorded state about the tree, neither a secret nor an output.
+
+`safix check` reads it back, and reports a value whose declaration has changed since it was minted — naming regeneration and reverting the edit as the two remedies and recommending neither, because the tree holds a value and a declaration that disagree and nothing but you knows which was meant.
+A value with no record predates the record and is not a finding: no record, no claim.
+A record in a format the running safix does not write is not a finding either, which is what keeps a change to the digest's canonical form from reporting every value in the tree as drifted.
 
 ## Editing a value: `safix edit`
 
@@ -333,6 +355,7 @@ $ safix list       # everything a person holds: origin, file, generator, shared 
 $ safix check      # report drift, change nothing; each finding prints its remedy
 $ safix fix        # regenerate .sops.yaml and re-wrap files to match declarations
 $ safix set NAME   # write one value (hidden prompt, confirmed, committed)
+$ printf '%s' "$TOKEN" | safix set NAME   # the same write, scripted
 $ safix get NAME   # read one value to stdout
 $ safix generate   # mint whatever has a recipe
 $ safix import     # pull declared clan vars into safix
@@ -344,6 +367,11 @@ $ safix adduser    # run by the operator: scaffold a person
 
 Think of `check` and `fix` as `git status` and `git add` for secret policy.
 The nix declarations are intent, the encrypted files are reality, `check` diffs the two, and `fix` reconciles what is reconcilable and names what needs a human.
+Its fifth finding class is the generator one: a value minted under a declaration that has changed since — see "The definition a value was minted under" above.
+
+`safix set` reads the value from standard input when standard input is not a terminal, which is what makes the second form above work.
+It replaces nothing: a terminal still gets the hidden prompt and the confirmation, unchanged.
+What the piped form drops is the confirmation, and only where there is nobody to confirm — a piped value has no typist for the second prompt to catch out — while the empty-value refusal and the store-exactly-these-bytes rule both hold.
 
 `upload` does not exist here, and `safix --help` records why: activation already delivers what an upload would.
 
@@ -595,7 +623,7 @@ So the verb that needs them carries them, `check` keeps both of its properties, 
 }
 ```
 
-Called with no arguments it returns six checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all, the non-interaction between the rules and the public store, and the audience separator.
+Called with no arguments it returns six checks over your declarations: the custody refusals, the generator runtime tools, the shape of every generated rule, the absence of a catch-all — whose probes carry the public store's shape and the definition record's, so a rule reaching either fails — the non-interaction between the rules and the public store, and the audience separator.
 `committedPolicy` adds the drift check, which fails while the committed `.sops.yaml` and the generated one differ and whose failure names `safix fix`.
 `materializations` adds the path-collision check, which forces the materializations you hand it so that the refusal reaches the hosts nobody has built this week.
 
@@ -645,6 +673,8 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the integration suite the command is held to | `crates/safix/tests/` |
 | recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand |
 | encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/` |
+| public outputs, in a consumer's tree | `public/safix/` — plaintext, no creation rule, readable at evaluation |
+| the definition each generated value was minted under | `state/safix/definitions/` — plaintext, one digest per value |
 
 The option reference lives on the types themselves; this document is the narrative companion.
 
