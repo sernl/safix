@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::sandbox_unsupported
+
+  × freebsd has no sandbox backend, so no generator ran.
+  │ 
+  │ The envelope a generator's fragments run inside is bubblewrap on linux
+  │ and /usr/bin/sandbox-exec on darwin, which is the pair clan's own
+  │ executor uses and the pair a fragment written for either system meets.
+  │ This platform has neither, and there is no flag that runs a generator
+  │ outside the envelope.

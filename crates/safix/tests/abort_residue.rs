@@ -216,6 +216,7 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
             &serde_json::json!({
                 "dependencies": [], "description": null,
                 "files": {}, "prompts": {}, "share": false,
+                "network": false,
                 "runtimeInputs": [],
                 "script": "printf 'CANARY-mid-generation' > \"$out/slow\"; sleep 30",
                 "validation": null,
@@ -267,14 +268,19 @@ fn a_signal_during_a_generator_leaves_no_staging_root() {
 /// sweep until the script has been waited on; without it the handler sweeps
 /// immediately and takes the staging root out from under a script that is still
 /// writing into it. So the script asks, after the signal has landed, whether its
-/// own output directory is still there, and records the answer where the test
-/// can read it.
+/// own output directory is still there, and says the answer on its own standard
+/// error.
+///
+/// The answer travels on stderr rather than in a file the test reads afterwards,
+/// and that is the envelope rather than a preference: a fragment's only writable
+/// path is its staging root, which is the very directory under test, so a witness
+/// file outside it cannot be written. What the contract does promise a fragment is
+/// that anything it prints reaches the operator, and this rides that.
 ///
 /// Observed red before the fix: the witness reads `swept`.
 #[test]
 fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
     let mut fixture = Fixture::new();
-    let witness = fixture.scratch("out-after-the-signal");
     let before = fixture.head();
 
     fixture.seed_generator(
@@ -284,6 +290,7 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
         &serde_json::json!({
             "dependencies": [], "description": null,
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             // Writes its output, waits long enough for the signal to be
             // delivered and acted on, then reports whether `$out` survived. The
@@ -293,9 +300,9 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
             "script": "printf 'CANARY-mid-generation' > \"$out/slow\"\n\
                        sleep 3\n\
                        if [ -d \"$out\" ]; then\n\
-                         printf present > \"$SAFIX_TEST_WITNESS\"\n\
+                         printf 'out-after-the-signal=present\\n' >&2\n\
                        else\n\
-                         printf swept > \"$SAFIX_TEST_WITNESS\"\n\
+                         printf 'out-after-the-signal=swept\\n' >&2\n\
                        fi\n\
                        exit 3",
             "validation": null,
@@ -306,15 +313,11 @@ fn a_signal_during_a_generator_does_not_sweep_the_root_the_script_is_using() {
         std::time::Duration::from_millis(700),
         rustix::process::Signal::INT,
         &["generate", "ana", "slow"],
-        &[("SAFIX_TEST_WITNESS", &witness.to_string_lossy())],
+        &[],
     );
 
-    assert_eq!(
-        std::fs::read_to_string(&witness).unwrap_or_default(),
-        "present",
-        "the staging root was swept while the generator was still writing into it\n{}",
-        run.combined()
-    );
+    run.says("out-after-the-signal=present");
+    run.silent_about("out-after-the-signal=swept");
     assert_eq!(
         run.code,
         Some(130),
@@ -357,6 +360,7 @@ fn a_generator_interrupted_during_encryption_leaves_no_definition_record() {
         &serde_json::json!({
             "dependencies": [], "description": null,
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             "script": "printf 'CANARY-minted-not-committed' > \"$out/recorded\"",
             "validation": null,
@@ -409,6 +413,7 @@ fn a_signal_during_a_validation_is_not_reported_as_a_rejection() {
         &serde_json::json!({
             "dependencies": [], "description": null,
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             "script": "printf 'CANARY-judged' > \"$out/judged\"",
             "validation": "sleep 3; exit 1",

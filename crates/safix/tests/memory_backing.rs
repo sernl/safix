@@ -133,6 +133,7 @@ fn a_run_pointed_at_a_disk_backed_directory_refuses() {
         &serde_json::json!({
             "dependencies": [], "description": null,
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             "script": "printf 'CANARY-never-staged' > \"$out/staged\"",
             "validation": null,
@@ -188,6 +189,7 @@ fn the_acknowledgement_is_the_only_way_past_the_refusal() {
         &serde_json::json!({
             "dependencies": [], "description": null,
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             "script": "printf 'CANARY-acknowledged' > \"$out/staged\"",
             "validation": null,

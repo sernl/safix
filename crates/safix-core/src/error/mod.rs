@@ -579,6 +579,45 @@ pub enum Error {
         file: String,
     },
 
+    /// The platform's sandbox backend is the one it should have and does not run.
+    ///
+    /// Raised by the probe, before the first fragment. There is deliberately no
+    /// flag that converts this into an unsandboxed run: a generator holding
+    /// plaintext with the caller's filesystem and network is the state the
+    /// envelope exists to remove, and a switch that restores it is that state
+    /// with a record of somebody having asked for it.
+    #[error(
+        "{backend} is not available, so no generator ran.\n\
+        \n\
+        A generator's script and its validation fragments run inside a sandbox:\n\
+        the staging root is the only writable path, the nix store is read-only,\n\
+        and there is no network. safix resolves {backend} out of nixpkgs the way\n\
+        it resolves a generator's runtimeInputs, so what this reports is not a\n\
+        missing package but a machine that refuses to run it — an unprivileged\n\
+        user namespace being disabled is what that usually is.\n\
+        \n\
+        There is no flag that runs a generator outside the envelope."
+    )]
+    SandboxUnavailable {
+        /// The backend that was looked for, as the machine names it.
+        backend: &'static str,
+    },
+
+    /// The platform has no sandbox backend to look for at all.
+    #[error(
+        "{platform} has no sandbox backend, so no generator ran.\n\
+        \n\
+        The envelope a generator's fragments run inside is bubblewrap on linux\n\
+        and /usr/bin/sandbox-exec on darwin, which is the pair clan's own\n\
+        executor uses and the pair a fragment written for either system meets.\n\
+        This platform has neither, and there is no flag that runs a generator\n\
+        outside the envelope."
+    )]
+    SandboxUnsupported {
+        /// The platform that has none, as the compiler names it.
+        platform: &'static str,
+    },
+
     /// No memory-backed filesystem could be found to stage plaintext on.
     ///
     /// Raised before anything is produced. There is deliberately no fallback to

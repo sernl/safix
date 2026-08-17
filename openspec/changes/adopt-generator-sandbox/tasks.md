@@ -1,23 +1,23 @@
 ## 1. The envelope command
 
-- [ ] 1.1 Add the sandbox module to `safix-core`: a pure construction that takes the staging root, the store path set, and the network grant and returns the bubblewrap argv — clan's argv at the pinned rev, minus the uid pair per design D3
-- [ ] 1.2 Add the darwin half: the `sandbox-exec` profile construction from the same inputs, adopting clan's deny-default profile with the staging paths granted and outbound network only under the grant
-- [ ] 1.3 Add the availability probe, run once per generation run before the first fragment: bubblewrap answers on linux, `/usr/bin/sandbox-exec` existence answers on darwin, any other platform is refused as having no envelope
-- [ ] 1.4 Unit-test the constructions unconditionally: default argv and profile, the network variant of each, and the probe's three answers
+- [x] 1.1 Add the sandbox module to `safix-core`: a pure construction that takes the staging root, the store path set, and the network grant and returns the bubblewrap argv — clan's argv at the pinned rev, minus the uid pair per design D3
+- [x] 1.2 Add the darwin half: the `sandbox-exec` profile construction from the same inputs, adopting clan's deny-default profile with the staging paths granted and outbound network only under the grant
+- [x] 1.3 Add the availability probe, run once per generation run before the first fragment: bubblewrap answers on linux, `/usr/bin/sandbox-exec` existence answers on darwin, any other platform is refused as having no envelope
+- [x] 1.4 Unit-test the constructions unconditionally: default argv and profile, the network variant of each, and the probe's three answers
 
 ## 2. The wiring
 
-- [ ] 2.1 Resolve bubblewrap through the same mechanism `runtimeInputs` resolve, so no preinstalled tool is assumed (design D2)
-- [ ] 2.2 Wrap the mint spawn in `generate.rs` with the envelope command
-- [ ] 2.3 Wrap the validation spawn with the same envelope under the same generator's grant, and confirm the candidate still arrives on standard input through it
-- [ ] 2.4 Add the no-backend refusal to `error.rs`, naming the backend looked for and what supplies it, raised before any fragment runs
-- [ ] 2.5 Verify: the existing generator and validation suites pass unchanged inside the envelope, which is the claim that the envelope changed what a fragment may reach and nothing about what it receives
+- [x] 2.1 Resolve bubblewrap through the same mechanism `runtimeInputs` resolve, so no preinstalled tool is assumed (design D2)
+- [x] 2.2 Wrap the mint spawn in `generate.rs` with the envelope command
+- [x] 2.3 Wrap the validation spawn with the same envelope under the same generator's grant, and confirm the candidate still arrives on standard input through it
+- [x] 2.4 Add the no-backend refusal to `error.rs`, naming the backend looked for and what supplies it, raised before any fragment runs
+- [x] 2.5 Verify: the existing generator and validation suites pass unchanged inside the envelope, which is the claim that the envelope changed what a fragment may reach and nothing about what it receives
 
 ## 3. The declaration
 
-- [ ] 3.1 Add `network` to the generator submodule in `modules/flake/safix/types.nix`, default false, with a description stating what the grant re-shares and that the filesystem confinement stays
-- [ ] 3.2 Carry the grant through the generator record to the runtime beside the fields that already travel
-- [ ] 3.3 Rewrite the containment paragraph in the `script` option's description: the "caller's filesystem and network" sentence is withdrawn, the envelope is stated, the grant is stated beside it, and what remains the fragment author's is what moves over a granted connection
+- [x] 3.1 Add `network` to the generator submodule in `modules/flake/safix/types.nix`, default false, with a description stating what the grant re-shares and that the filesystem confinement stays
+- [x] 3.2 Carry the grant through the generator record to the runtime beside the fields that already travel
+- [x] 3.3 Rewrite the containment paragraph in the `script` option's description: the "caller's filesystem and network" sentence is withdrawn, the envelope is stated, the grant is stated beside it, and what remains the fragment author's is what moves over a granted connection
 - [ ] 3.4 Add a module-evaluation test that the grant is readable at evaluation, which is the audit surface the spec promises
 
 ## 4. The proof

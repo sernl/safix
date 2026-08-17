@@ -19,6 +19,7 @@ use serde_json::json;
 fn plain(script: &str) -> serde_json::Value {
     json!({
         "script": script,
+        "network": false,
         "runtimeInputs": ["coreutils"],
         "prompts": {}, "dependencies": [], "files": {},
         "share": false, "validation": null, "description": null,
@@ -49,6 +50,7 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
         &[],
         &json!({
             "script": "printf 'from-%s' \"$(cat \"$in/seeded/seeded\")\" > \"$out/derived\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": ["seeded"], "files": {},
             "share": false, "validation": null, "description": null,
@@ -62,6 +64,7 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
         &json!({
             "script": "printf 'derived-%s%s' \"$(cat \"$prompts/pass-phrase\")\" \
                        \"$(cat \"$prompts/pass-phrase\" | wc -c)\" > \"$out/prompted\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": { "pass-phrase": { "type": "hidden", "description": "the fixture passphrase" } },
             "dependencies": [], "files": {},
@@ -76,6 +79,7 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
         &["paired-pub"],
         &json!({
             "script": "printf priv > \"$out/paired\"; printf pub > \"$out/paired-pub\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": [], "files": { "paired-pub": { "secret": true } },
             "share": false, "validation": null, "description": null,
@@ -220,6 +224,7 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
         &[],
         &json!({
             "script": "printf '%s' bad-value > \"$out/unvalidated\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": [], "files": {},
             "share": false, "validation": "grep -q ^good-", "description": null,
@@ -245,6 +250,7 @@ fn generate_refusals_each_have_their_own_code_and_write_nothing() {
         &["halfpair-pub"],
         &json!({
             "script": "printf only > \"$out/halfpair\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": [], "files": { "halfpair-pub": { "secret": true } },
             "share": false, "validation": null, "description": null,
@@ -406,6 +412,7 @@ fn a_run_order_carrying_a_cycle_is_refused_before_anything_runs() {
             &[],
             &json!({
                 "script": format!("cat \"$in/{reads}/{reads}\" > \"$out/{name}\""),
+                "network": false,
                 "runtimeInputs": ["coreutils"],
                 "prompts": {}, "dependencies": [reads], "files": {},
                 "share": false, "validation": null, "description": null,
@@ -500,6 +507,7 @@ fn one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another() {
                        cat \"$in/api-token/api-token\" >/dev/null; \
                        cat \"$prompts/secret\" >/dev/null; \
                        printf '%s' many-ok > \"$out/mmm-many\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": { "secret": { "type": "hidden", "description": "the fixture passphrase" } },
             "dependencies": ["aaa-greedy", "api-token"], "files": {},
@@ -514,6 +522,7 @@ fn one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another() {
             "script": "cat \"$in/mmm-many/mmm-many\" >/dev/null; \
                        cat \"$in/bbb-probe-first/bbb-probe-first\" >/dev/null; \
                        printf '%s' more-ok > \"$out/nnn-more\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": ["mmm-many", "bbb-probe-first"], "files": {},
             "share": false, "validation": null, "description": null,
@@ -579,6 +588,7 @@ fn a_rotation_carries_its_downstream_set_and_nothing_else() {
         &[],
         &json!({
             "script": "printf 'mid-%s' \"$(cat \"$in/base/base\")\" > \"$out/middle\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": ["base"], "files": {},
             "share": false, "validation": null, "description": null,
@@ -590,6 +600,7 @@ fn a_rotation_carries_its_downstream_set_and_nothing_else() {
         &[],
         &json!({
             "script": "printf 'leaf-%s' \"$(cat \"$in/middle/middle\")\" > \"$out/leaf\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": ["middle"], "files": {},
             "share": false, "validation": null, "description": null,
@@ -869,6 +880,7 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
         &json!({
             "script": "head -c 32 /dev/urandom | base64 | tr -d '\\n' > \"$out/wg-private\"\n\
                        tr 'a-z' 'A-Z' < \"$out/wg-private\" > \"$out/wg-public\"",
+            "network": false,
             "runtimeInputs": ["coreutils"],
             "prompts": {}, "dependencies": [], "files": { "wg-public": { "secret": false } },
             "share": false, "validation": null, "description": null,

@@ -16,7 +16,13 @@
           # and absent elsewhere rather than present and unusable.
           pkgs.git
         ]
-        ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.strace
+        ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          # The envelope a generator fragment runs inside, which a local
+          # `cargo test` needs on `PATH` for the same reason the checks do: the
+          # stubbed `nix` asserts the resolution rather than performing it.
+          pkgs.bubblewrap
+          pkgs.strace
+        ]
         ++ [
 
           # The rust toolchain, taken from the same pinned nixpkgs the flake's

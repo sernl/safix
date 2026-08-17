@@ -114,6 +114,7 @@ mod linux {
             &serde_json::json!({
                 "dependencies": [], "description": "a value minted from nothing",
                 "files": {}, "prompts": {}, "share": false,
+                "network": false,
                 "runtimeInputs": [],
                 "script": format!("printf '{MINTED}' > \"$out/api-token\""),
                 "validation": null,

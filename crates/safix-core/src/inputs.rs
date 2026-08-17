@@ -121,6 +121,13 @@ impl Tree {
         self.staging.root().join(OUTPUT)
     }
 
+    /// The root the three directories sit in, which the envelope makes the one
+    /// writable path — see [`crate::sandbox`].
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        self.staging.root()
+    }
+
     /// One answered prompt, at `$prompts/<key>`.
     ///
     /// Written with nothing added and nothing removed, which is clan's

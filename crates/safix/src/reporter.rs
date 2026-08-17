@@ -392,6 +392,12 @@ mod tests {
                 producer: "base".into(),
                 file: "secrets/safix/users/ana/secrets.yaml".into(),
             },
+            Code::SandboxUnavailable => Error::SandboxUnavailable {
+                backend: safix_core::sandbox::Backend::Bubblewrap.program(),
+            },
+            Code::SandboxUnsupported => Error::SandboxUnsupported {
+                platform: "freebsd",
+            },
             Code::StagingNotMemoryBacked => Error::StagingNotMemoryBacked {
                 candidates: vec!["/dev/shm".into(), "/run/user/1000".into()],
                 disk_backed: vec!["/dev/shm".into()],

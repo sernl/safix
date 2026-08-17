@@ -26,6 +26,12 @@ let
     pkgs.age
     pkgs.coreutils
     pkgs.git
+    # The envelope every generator fragment runs inside. The runtime resolves it
+    # out of nixpkgs at spawn time the way it resolves `runtimeInputs`, and the
+    # stubbed `nix` asserts that resolution's shape rather than performing it, so
+    # a suite driving a generator needs the backend on `PATH` for the stub to
+    # find. bubblewrap is linux-only in nixpkgs; darwin's backend is the system's
+    # `/usr/bin/sandbox-exec` and is acquired from nowhere.
     # For `nix-instantiate --parse` alone, which is what holds the declaration
     # `adduser` generates to being nix. Parsing needs no store and no daemon, so
     # it is available where an evaluation is not; the `nix` the runtime evaluates
@@ -34,7 +40,10 @@ let
     pkgs.nix
     pkgs.sops
   ]
-  ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.strace;
+  ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+    pkgs.bubblewrap
+    pkgs.strace
+  ];
 in
 {
   inherit backends;

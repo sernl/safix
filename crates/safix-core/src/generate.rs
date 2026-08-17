@@ -53,6 +53,7 @@ use crate::error::{Error, Result};
 use crate::inputs::Tree;
 use crate::model::{Generator, PromptKind, UserPlan};
 use crate::progress::{Progress, log, note};
+use crate::sandbox::Envelope;
 use crate::secret::Secret;
 use crate::sops::document;
 use crate::workspace::Workspace;
@@ -205,9 +206,23 @@ pub fn run(
         return Ok(0);
     }
 
+    // Once, and before the first fragment. Availability does not change mid-run,
+    // and a refusal after generator three has committed is worse than the same
+    // refusal before generator one. A user who declares no generator never
+    // reaches here, because there is no fragment to confine.
+    let envelope = Envelope::probe(workspace.nix(), workspace.root())?;
+
     let mut ran = 0_usize;
     for generator in &order {
-        match run_one(workspace, progress, interaction, user, generator, options)? {
+        match run_one(
+            workspace,
+            progress,
+            interaction,
+            user,
+            generator,
+            envelope,
+            options,
+        )? {
             Outcome::Ran => ran = ran.saturating_add(1),
             Outcome::Skipped => {}
             Outcome::Refused(status) => return Ok(status),
@@ -319,6 +334,7 @@ fn run_one(
     interaction: &mut dyn Interaction,
     user: &str,
     generator: &str,
+    envelope: Envelope,
     options: Options,
 ) -> Result<Outcome> {
     let plan = workspace.generator_plan()?;
@@ -395,6 +411,7 @@ fn run_one(
         generator,
         record,
         &outputs,
+        envelope,
         options,
     )? {
         Step::Done(values) => values,
@@ -412,8 +429,9 @@ fn run_one(
             });
         }
         if let Some(validation) = record.validation.as_deref().filter(|text| !text.is_empty())
-            && let Step::Stopped(status) =
-                validate(workspace, record, validation, generator, output, value)?
+            && let Step::Stopped(status) = validate(
+                workspace, record, validation, generator, output, value, envelope,
+            )?
         {
             return Ok(Outcome::Refused(status));
         }
@@ -458,6 +476,12 @@ fn holds_a_value(workspace: &Workspace, target: &Target) -> Result<bool> {
 /// answers a prompt has already had the refusal a disk-backed host would raise.
 /// It is dropped when this returns, however it returns, which is what shreds the
 /// answers and the outputs once they are values in memory.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one run's whole context, and every argument is read here rather \
+              than passed on: bundling them into a record would name the same \
+              fields one indirection away"
+)]
 fn mint(
     workspace: &Workspace,
     interaction: &mut dyn Interaction,
@@ -465,6 +489,7 @@ fn mint(
     generator: &str,
     record: &Generator,
     outputs: &[String],
+    envelope: Envelope,
     options: Options,
 ) -> Result<Step<Vec<Secret>>> {
     let plan = workspace.generator_plan()?;
@@ -540,10 +565,17 @@ fn mint(
     // Standard output is inherited rather than captured, because it is no longer
     // where a value travels: a script's output is diagnostic now, and capturing
     // it would hide a `set -x` trace the operator asked for.
-    let mut command =
-        workspace
-            .nix()
-            .generator_shell(workspace.root(), &record.runtime_inputs, &record.script);
+    // The staging root is bound read-write inside the envelope at the path it
+    // has outside it, so the three directories `tree.apply` names are reachable
+    // by the names the fragment was written against and nothing else on the host
+    // is reachable at all.
+    let confinement = envelope.confine(Some(tree.root()), record.network);
+    let mut command = workspace.nix().generator_shell(
+        workspace.root(),
+        &record.runtime_inputs,
+        &record.script,
+        &confinement,
+    );
     command
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -637,7 +669,13 @@ fn stopped(finished: std::process::ExitStatus) -> Option<i32> {
 /// `$out_name` names which output is being judged, so one fragment can cover a
 /// generator that writes several. The same shell and the same `runtimeInputs` as
 /// the script, because a validation that could not run the tool that produced the
-/// value could check almost nothing about it.
+/// value could check almost nothing about it. The same envelope too, under the
+/// same generator's grant — a validation verifying a minted token against the
+/// API that issued it has the same need its script had — with one difference it
+/// does not choose: the staging root has already been shredded by the time a
+/// candidate is judged, so this fragment has no writable path on the host at
+/// all. The candidate itself arrives on standard input, which is a pipe and
+/// crosses the envelope as one.
 fn validate(
     workspace: &Workspace,
     record: &Generator,
@@ -645,11 +683,15 @@ fn validate(
     generator: &str,
     output: &str,
     value: &Secret,
+    envelope: Envelope,
 ) -> Result<Step<()>> {
-    let mut command =
-        workspace
-            .nix()
-            .generator_shell(workspace.root(), &record.runtime_inputs, validation);
+    let confinement = envelope.confine(None, record.network);
+    let mut command = workspace.nix().generator_shell(
+        workspace.root(),
+        &record.runtime_inputs,
+        validation,
+        &confinement,
+    );
     command
         .env("out_name", output)
         .stdin(Stdio::piped())

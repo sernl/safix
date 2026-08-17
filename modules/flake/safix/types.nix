@@ -145,13 +145,22 @@ let
           Anything the fragment prints reaches the operator rather than a value,
           so diagnostics are free.
 
-          The staging root is a mode-0700 directory on a filesystem verified to
-          be memory-backed, and it is shredded however the run ends. That is
-          bounded containment and not a sandbox: the fragment runs with the
-          caller's filesystem and network, so one that copies `$in/dep/name`
-          elsewhere, or writes an output outside `$out`, has put plaintext
-          somewhere safix does not look and cannot shred. What the fragment does
-          with a value it has been handed is the fragment author's to get right.
+          The fragment runs inside a sandbox. The staging root — a mode-0700
+          directory on a filesystem verified to be memory-backed, shredded
+          however the run ends — is the only writable path, nixpkgs is readable
+          because that is where `runtimeInputs` resolve to, and there is no
+          network. A write outside `$out` fails rather than putting plaintext
+          somewhere safix does not look and cannot shred. The envelope is
+          bubblewrap on linux and `sandbox-exec` on darwin, which is clan's own,
+          so a fragment meets the same confinement under either system's default
+          executor; generation refuses rather than running unsandboxed where
+          neither is available, and no flag suspends it.
+
+          `network = true` re-shares the network and nothing else: the
+          filesystem confinement stays in force. What remains the fragment
+          author's to get right is what a granted connection carries — a value
+          moved over it is outside what safix shreds or observes, and no
+          declaration reopens the filesystem.
         '';
       };
       runtimeInputs = lib.mkOption {
@@ -166,6 +175,35 @@ let
           rather than packages because the generator reaches the command as JSON.
           Dotted paths resolve as written, so `python3Packages.pyyaml` is one
           name. Each is resolved against nixpkgs by the generator check.
+        '';
+      };
+      network = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        example = true;
+        description = ''
+          Whether this generator's fragments reach the network.
+
+          false, the default, is a sandbox with no network at all: on linux the
+          fragment gets a network namespace holding nothing but its own
+          loopback, and on darwin the profile allows localhost alone.
+
+          true re-shares the network and nothing else. The filesystem
+          confinement is unchanged — the staging root stays the only writable
+          path — so this grants an ACME client or a token generator the one
+          capability it cannot work without and no others. It governs `script`
+          and `validation` alike, because a validation that verifies a minted
+          token against the API that issued it has the same need the script had.
+
+          Declaring it here rather than passing it at the invocation is what
+          makes it auditable: which generators may reach the network is a
+          question the declarations answer at evaluation, with no runtime
+          consulted and no record to keep of who passed which flag when.
+
+          What travels over a granted connection is outside what safix shreds or
+          observes. That is the one part of a value's journey the runtime cannot
+          contain, and it is why this is a declaration a reviewer sees rather
+          than a default.
         '';
       };
       prompts = lib.mkOption {
@@ -294,6 +332,12 @@ let
           value could check almost nothing about it. A non-zero exit refuses the
           whole run: at that point the values are still only in the command's
           memory, so nothing has to be undone.
+
+          It runs inside the same envelope as the script, under the same
+          `network` grant. The one difference is not a choice: the staging root
+          has already been shredded by the time a candidate is judged, so this
+          fragment has no writable path outside the envelope's own temporary
+          filesystem. The candidate is a pipe either way.
         '';
       };
       description = lib.mkOption {

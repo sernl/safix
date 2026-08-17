@@ -29,9 +29,10 @@
 //! value, [`fix`] converges the policy and the ciphertext onto the
 //! declarations, [`generate`] walks the generator graph, [`keygen`] mints an
 //! identity, and [`adduser`] declares a person. [`inputs`] is how a generator's
-//! values reach its script, and [`scratch`] is what an aborted write must not
-//! leave behind. [`definition`] is the record a mint leaves of the declaration it
-//! minted under, which is what lets [`check`] report a value whose generator has
+//! values reach its script, [`sandbox`] is the envelope that script runs inside,
+//! and [`scratch`] is what an aborted write must not leave behind.
+//! [`definition`] is the record a mint leaves of the declaration it minted
+//! under, which is what lets [`check`] report a value whose generator has
 //! changed since.
 //!
 //! Every one of them was compared against a shell runtime by the differential
@@ -61,6 +62,7 @@ pub mod nix;
 mod probe;
 pub mod progress;
 pub mod public;
+pub mod sandbox;
 pub mod scratch;
 mod secret;
 pub mod set;

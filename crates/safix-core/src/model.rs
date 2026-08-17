@@ -97,6 +97,17 @@ pub struct Generator {
     /// The further outputs the script writes beyond the entry carrying it,
     /// each with its own secrecy.
     pub files: BTreeMap<String, GeneratorFile>,
+    /// Whether this generator's fragments reach the network.
+    ///
+    /// The grant travels with the rest of the declaration because it is part of
+    /// what running the generator means, and it is read at evaluation because
+    /// that is the audit: which generators may reach the network is a question
+    /// the declarations answer with no runtime consulted. It re-shares the
+    /// network and nothing else — see [`crate::sandbox`] — and governs the
+    /// script and the validation fragments alike, because a validation that
+    /// verifies a minted token against the API that issued it has the same need
+    /// its script had.
+    pub network: bool,
     /// What the operator is asked for, by the name the script addresses.
     pub prompts: BTreeMap<String, Prompt>,
     /// nixpkgs attribute names put on `PATH` while the script runs.
@@ -643,6 +654,7 @@ mod tests {
           "generator": {
             "dependencies": [], "description": null,
             "files": { "api-token-pub": { "secret": false } },
+            "network": false,
             "prompts": {}, "runtimeInputs": ["coreutils"],
             "script": "printf '%s' fixture > $out/api-token",
             "share": false, "validation": null

@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result};
+use crate::sandbox::{self, Confinement};
 
 /// An attribute of `flake.safix.lib` the runtime reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,30 +184,56 @@ impl Nix {
         }
     }
 
-    /// The command that runs one shell fragment with a generator's declared
-    /// tools on `PATH`.
+    /// The command that runs one program with nixpkgs attributes on `PATH`, up
+    /// to and including the `-c` the program follows.
     ///
     /// `--inputs-from` resolves each `nixpkgs#<attribute>` against this flake's
     /// own locked nixpkgs, which is what makes a generator mint the same value
-    /// from the same declaration on every machine. The tools are *prepended* to
-    /// the caller's `PATH` rather than replacing it, so a script reaching a tool
-    /// it did not declare works for whoever wrote it and fails for everyone
-    /// else — which is why `runtimeInputs` has to name every tool the script
-    /// runs.
+    /// from the same declaration on every machine.
+    pub(crate) fn shell(&self, root: &Path, attributes: &[&str]) -> Command {
+        let mut command = Command::new(&self.program);
+        command.arg("shell").arg("--inputs-from").arg(root);
+        for attribute in attributes {
+            command.arg(format!("nixpkgs#{attribute}"));
+        }
+        command.arg("-c");
+        command
+    }
+
+    /// The command that runs one shell fragment inside the envelope, with a
+    /// generator's declared tools on `PATH`.
+    ///
+    /// The tools are *prepended* to the caller's `PATH` rather than replacing
+    /// it, which is why `runtimeInputs` has to name every tool the fragment
+    /// runs: what the envelope leaves reachable is the store, so a tool the
+    /// caller's `PATH` names through anything else — `/usr/bin`, a profile's
+    /// symlink tree — is not there. The envelope's own words come first and the
+    /// fragment's shell is the one they resolve, so the confinement is
+    /// established before the fragment's first byte runs.
     ///
     /// Handed back rather than run, because how the three streams are connected
     /// differs between minting a value and judging one, and neither belongs to
     /// this driver.
     #[must_use]
-    pub fn generator_shell(&self, root: &Path, runtime_inputs: &[String], script: &str) -> Command {
-        let mut command = Command::new(&self.program);
-        command.arg("shell").arg("--inputs-from").arg(root);
-        for attribute in runtime_inputs {
-            command.arg(format!("nixpkgs#{attribute}"));
+    pub fn generator_shell(
+        &self,
+        root: &Path,
+        runtime_inputs: &[String],
+        script: &str,
+        confinement: &Confinement,
+    ) -> Command {
+        let attributes: Vec<&str> = confinement
+            .tools
+            .iter()
+            .copied()
+            .chain(runtime_inputs.iter().map(String::as_str))
+            .collect();
+        let mut command = self.shell(root, &attributes);
+        for word in &confinement.words {
+            command.arg(word);
         }
         command
-            .arg("-c")
-            .arg("bash")
+            .arg(sandbox::SHELL)
             .arg("-euo")
             .arg("pipefail")
             .arg("-c")

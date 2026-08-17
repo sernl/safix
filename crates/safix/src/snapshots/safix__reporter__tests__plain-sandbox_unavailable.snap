@@ -1,0 +1,14 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: bwrap is not available, so no generator ran.
+
+A generator's script and its validation fragments run inside a sandbox:
+the staging root is the only writable path, the nix store is read-only,
+and there is no network. safix resolves bwrap out of nixpkgs the way
+it resolves a generator's runtimeInputs, so what this reports is not a
+missing package but a machine that refuses to run it — an unprivileged
+user namespace being disabled is what that usually is.
+
+There is no flag that runs a generator outside the envelope.

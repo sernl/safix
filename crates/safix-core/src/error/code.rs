@@ -121,6 +121,8 @@ refusal_codes! {
     GeneratorCycle => "safix::generator_cycle",
     NoGenerator => "safix::no_generator",
     DependencyHasNoValue => "safix::dependency_has_no_value",
+    SandboxUnavailable => "safix::sandbox_unavailable",
+    SandboxUnsupported => "safix::sandbox_unsupported",
     StagingNotMemoryBacked => "safix::staging_not_memory_backed",
     StagingUnusable => "safix::staging_unusable",
     GeneratorOutputMissing => "safix::generator_output_missing",

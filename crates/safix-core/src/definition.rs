@@ -236,6 +236,7 @@ mod tests {
             "description": "a token",
             "files": { "api-token-pub": { "secret": false } },
             "prompts": { "seed": { "type": "hidden", "description": "the seed" } },
+            "network": false,
             "runtimeInputs": ["coreutils", "openssl"],
             "script": "printf '%s' fixture > \"$out/api-token\"",
             "share": false,

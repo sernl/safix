@@ -102,6 +102,7 @@ fn a_generated_value_reaches_sops_the_same_way() {
         &serde_json::json!({
             "dependencies": [], "description": "a value minted from nothing",
             "files": {}, "prompts": {}, "share": false,
+            "network": false,
             "runtimeInputs": [],
             "script": "printf 'CANARY-minted-value' > \"$out/api-token\"",
             "validation": null,
