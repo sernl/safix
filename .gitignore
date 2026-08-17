@@ -5,3 +5,4 @@ result-*
 *.bak
 logs/
 /target
+.claude/
