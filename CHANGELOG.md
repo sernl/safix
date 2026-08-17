@@ -66,6 +66,26 @@ A per-service identity was considered and rejected. It would be a second key the
 
 Every phase-A declaration is unchanged, and a tree that declares no services generates the same policy, the same rules and the same files as before — byte for byte, which is the same check the phase-A records are held to.
 
+### Escrow stops being a warning and becomes a declaration
+
+Phase C of the same program, `openspec/changes/add-organization-custody/`.
+
+safix has always printed the corporate case as a caveat: listing an operator-held identity in a person's `recoveryRecipients` buys recoverability at the price of that operator reading everything that person holds. That sentence is unchanged, and what changes is that it is now something a person declares rather than something an operator assembles out of raw keys.
+
+An organization is declarable — `flake.safix.organizations.<o>` — and carries its recovery custody and nothing else. It has no membership, because a person relates to an organization in exactly one way and groups already express every people-set an audience needs.
+
+The consent lives on the person, structurally. `flake.safix.users.<u>.escrowedTo` names the organization, every file that person's audience covers gains its custody keys at the next re-wrap, and the option's own documentation carries the trade-off in that person's view. The alternative — a `covers` list on the organization — would put the widening of someone's audience in a file they may never review, so nothing an organization declares can widen anyone's audience and the refusal families make the asymmetry structural.
+
+What that buys is rotation in one place, which raw-key escrow never had. The organization rotates a custody key in its own declaration, one `safix fix` re-wraps every consenting person's files, and no person's declaration changes. The keys are therefore expanded at resolution time and never written into anyone's `recoveryRecipients`: the person holds the consent and the organization holds the keys.
+
+Two more reaches come with the principal. A machine's or service's `owner` may name an organization, with `ownerOf` grants resolving to its custody keys, and a grant may name an organization directly as its own audience element, `=<organization>` — the fifth element form, on the marker set the injectivity argument and the property test already read. A group may not contain one: a principal is not a member, and an audience wanting an organization's custody names it.
+
+Withdrawal and a shrunk custody are narrowings, reported as the revocations they are with the not-retroactive disclosure every other narrowing carries. Which half of the report each lands in follows from whose key is left behind: a withdrawn consent leaves the organization's own custody key, so `check` names the organization, and a retired custody key answers to no declaration, so it is reported as the key it is on the files it opened.
+
+An organization whose custody is empty is refused everywhere it is reached — by an `escrowedTo`, by a grant, by an ownership resolution — each evaluation listing every violation at once. Organizations share the one subject name space, with collisions refused. And a declared organization nothing references generates the same policy, the same rules and the same files as a tree without it, byte for byte, which is the same check the phase-A and phase-B records are held to.
+
+The marker question phase A raised is now answered for this program: the alphabet is complete at five element forms, because phase D adds no subject kind.
+
 ### Added
 
 - `flake.safix.keepassxc` and `safix sync`: declared safix entries converge with entries in the operator's password database, one mapping at a time, in the mode each mapping declares.
