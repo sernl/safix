@@ -686,7 +686,8 @@ fn a_rotation_carries_its_downstream_set_and_nothing_else() {
 ///
 /// The record is the whole of what makes the drift detectable, so this test reads
 /// it directly rather than only through the report: one line, a format tag and a
-/// digest, and none of the minted value anywhere in it.
+/// digest, none of the minted value anywhere in it, and unmoved by a rotation that
+/// changes the value and not the declaration.
 ///
 /// Then the four states the finding has to tell apart. A declaration edited after
 /// the mint is reported, naming both remedies and no value. Regenerating clears
@@ -734,6 +735,36 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
         recorded.lines().count(),
         1,
         "the record is more than one line: {recorded:?}"
+    );
+
+    // Two mints of different values under one declaration produce one record. A
+    // value cannot reach the digest — it is computed from the generator record and
+    // nothing else — and this is what says so from outside: `rolling` mints
+    // something different every run, so a record carrying any function of the
+    // value would move here while the declaration stood still.
+    fixture.seed_generator(
+        "rolling",
+        ANA_FILE,
+        &[],
+        &plain("head -c 16 /dev/urandom | base64 | tr -d '\\n' > \"$out/rolling\""),
+    );
+    fixture
+        .run(&["generate", "ana", "rolling"])
+        .expect_success("the first mint of a rolling value");
+    let first_value = fixture.value(ANA_FILE, "rolling");
+    let first_record = fixture.read("state/safix/definitions/ana/rolling");
+    fixture
+        .run(&["generate", "--regenerate", "ana", "rolling"])
+        .expect_success("rotating it under the same declaration");
+    assert_ne!(
+        fixture.value(ANA_FILE, "rolling"),
+        first_value,
+        "the rolling generator minted the same value twice, so the claim below is vacuous"
+    );
+    assert_eq!(
+        fixture.read("state/safix/definitions/ana/rolling"),
+        first_record,
+        "the record moved when only the value did"
     );
 
     // Nothing has drifted yet, which is what makes the finding below a

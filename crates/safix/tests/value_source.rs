@@ -13,6 +13,12 @@
 //!
 //! Every expectation here is a literal written in the test, and the bytes stored
 //! are read back through `get` rather than through the writer that put them there.
+//!
+//! One claim about the piped source is not here and is not missing: that the value
+//! reaches neither an argument vector nor an environment variable. `value_pipe.rs`
+//! observes it at the sops process, and since a pipe now selects this source that
+//! observation is this source's — asserting it a second time here would be a second
+//! answer to a question already answered.
 
 // A test's failure is the point; see the note at the head of `harness/mod.rs`.
 #![allow(
