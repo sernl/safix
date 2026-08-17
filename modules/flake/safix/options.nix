@@ -151,6 +151,42 @@ in
       '';
     };
 
+    organizations = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.organization;
+      example = lib.literalExpression ''
+        {
+          acme.custody.acme-escrow = {
+            key = "age1...";
+            note = "acme's escrow — held offline by the operator";
+          };
+        }
+      '';
+      description = ''
+        The organizations an audience may name: each one's recovery custody, and
+        nothing else in this phase.
+
+        An organization is a principal rather than a people-set. It holds escrow
+        identities, it may own machines and services, and a grant may name it —
+        and it has no membership, because a person relates to an organization
+        here in exactly one way: by declaring
+        `flake.safix.users.<u>.escrowedTo`, which is that person's own consent
+        in that person's own record. Nothing an organization declares widens
+        anyone's audience.
+
+        The keys live here so that rotation does. An organization rotates a
+        custody key in this declaration and every consenting person's files
+        re-wrap in one `safix fix`, which is the property the raw-key
+        arrangement this replaces never had.
+
+        Declaring an organization is inert until something references it, on the
+        same terms as `machines`, `services` and `groups`: a tree with
+        organizations declared that no escrow, grant or ownership record names
+        generates the same policy, the same rules and the same files, byte for
+        byte.
+      '';
+    };
+
     silos = lib.mkOption {
       default = { };
       type = lib.types.attrsOf types.silo;

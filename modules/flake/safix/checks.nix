@@ -396,6 +396,7 @@ let
       machines ? { },
       services ? { },
       groups ? { },
+      organizations ? { },
       silos ? { },
       committedPolicy ? null,
       materializations ? { },
@@ -417,6 +418,7 @@ let
           machines
           services
           groups
+          organizations
           silos
           ;
       };

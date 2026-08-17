@@ -39,9 +39,11 @@ let
     policy-drift check fails while the committed file and the generated one
     differ, and its failure names that command. Its whole input is
     flake.safix.users — each person's `recipient`, their `recoveryRecipients`,
-    and the secrets they own and share under `carries`, `private` and
-    `sharedWith` — together with flake.safix.catalogue, and with
-    flake.safix.machines and flake.safix.groups where an audience names one.
+    the organizations their `escrowedTo` consents to, and the secrets they own
+    and share under `carries`, `private` and `sharedWith` — together with
+    flake.safix.catalogue, and with flake.safix.machines, flake.safix.services,
+    flake.safix.groups and flake.safix.organizations where a declaration reaches
+    one.
 
     ── one rule per audience ──
     A sops file has a single data key, wrapped once per recipient, so anyone who
@@ -58,11 +60,17 @@ let
     directory and so one rule.
 
     An audience member is a subject: a person, a machine whose recipient is the
-    age form of the host identity it already decrypts with, or a group. A group
-    appears as @<group> and the owner of a machine as @~<machine>, both marks the
+    age form of the host identity it already decrypts with, a service running on
+    machines, a group, or an organization holding recovery custody. A group
+    appears as @<group>, a service as %<service>, an organization as
+    =<organization> and the owner of a machine as @~<machine>, each a mark the
     name alphabet excludes. A marked member is a readership its own declaration
     decides, so adding a member or changing an owner re-wraps this file's rule
     rather than moving the secret to another directory.
+
+    A person's own directory carries the custody of every organization their
+    `escrowedTo` names, with no element of its own: consent widens who can open
+    that person's files and never who the files are for.
 
     ── anchoring is load-bearing ──
     Anchoring survives every edit to the generator, in two independent ways:
@@ -104,18 +112,21 @@ let
 
   # Registry-wide anchor order: recovery identities first, sorted by anchor, then
   # one `<user>-safix` per person that records a recipient, sorted by user, then
-  # one `<machine>-safix` per machine a rule needs the key of. Rule bodies are
-  # emitted in this order too, so a rule's recipient list reads the same way the
-  # keys block does.
+  # one `<machine>-safix` per machine a rule needs the key of, then each custody
+  # anchor of an organization a rule needs a key of. Rule bodies are emitted in
+  # this order too, so a rule's recipient list reads the same way the keys block
+  # does.
   #
   # A person who records a recipient earns an anchor whether or not any rule names
   # them: their recipient is their custody record, and `safix adduser` writes one
   # before they hold anything. A machine's is not a custody record but a key some
   # rule needs, so it earns an anchor when a rule needs it and not before — which
   # is what makes declaring a machine nobody has granted anything to leave this
-  # file byte-identical.
+  # file byte-identical. An organization's custody is judged the same way and for
+  # the same property: a declared organization no escrow, grant or ownership record
+  # reaches contributes nothing here.
   anchorsOf =
-    users: machines: keysInUse:
+    users: machines: organizations: keysInUse:
     let
       recovery = lib.concatMap (
         user:
@@ -149,8 +160,24 @@ let
               )
             )
           );
+      custody = lib.concatMap (
+        organization:
+        lib.mapAttrsToList
+          (anchor: escrow: {
+            inherit anchor;
+            inherit (escrow) key note;
+          })
+          (
+            lib.filterAttrs (
+              _a: escrow: builtins.elem escrow.key keysInUse
+            ) organizations.${organization}.custody
+          )
+      ) (sortNames (builtins.attrNames organizations));
     in
-    lib.sort (a: b: a.anchor < b.anchor) deduped ++ primary ++ hosts;
+    lib.sort (a: b: a.anchor < b.anchor) deduped
+    ++ primary
+    ++ hosts
+    ++ lib.sort (a: b: a.anchor < b.anchor) custody;
 
   audienceNote =
     audience:
@@ -168,7 +195,7 @@ let
     let
       audiences = resolve.audiencesOf registry;
 
-      anchors = anchorsOf registry.users (registry.machines or { }) (
+      anchors = anchorsOf registry.users (registry.machines or { }) (registry.organizations or { }) (
         lib.unique (lib.concatMap (a: a.recipients) (lib.attrValues audiences))
       );
       anchorOfKey = lib.listToAttrs (map (a: lib.nameValuePair a.key a.anchor) anchors);

@@ -33,6 +33,7 @@ let
       machines
       services
       groups
+      organizations
       silos
       ;
   };
@@ -179,10 +180,12 @@ in
     # under it.
     #
     # `audience` holds subjects rather than only people: a group appears as
-    # `@<group>`, a service as `%<service>` and the owner of a machine as
-    # `@~<machine>`, which is what names the directory and so what keeps a
-    # membership change a re-wrap of one file. `recipients` is the expansion of
-    # that, which is what a data key is wrapped for.
+    # `@<group>`, a service as `%<service>`, an organization as
+    # `=<organization>` and the owner of a machine as `@~<machine>`, which is
+    # what names the directory and so what keeps a membership change a re-wrap of
+    # one file. `recipients` is the expansion of that, which is what a data key is
+    # wrapped for, and it carries the custody of every organization the audience's
+    # people consent to the escrow of.
     inherit audiences;
 
     # user -> name -> { file; key; origin; owner; shared; generator; }: the
@@ -199,19 +202,26 @@ in
     # under no second key.
     placements = resolve.placementsOf registry;
 
-    # subject -> [ recipient ]: every key a declared subject can open a file with
-    # — a person's own and their recovery keys, a machine's host identity.
-    # `audiences` answers the same question per file and unions the members' keys
-    # into one list, which loses which key is whose; a check that has found a
-    # stanza on a file and wants to say who left it there needs the direction this
-    # way round.
+    # subject -> [ recipient ]: every key a declared subject holds of its own — a
+    # person's own and their recovery keys, a machine's host identity, an
+    # organization's custody. `audiences` answers the same question per file and
+    # unions the members' keys into one list, which loses which key is whose; a
+    # check that has found a stanza on a file and wants to say who left it there
+    # needs the direction this way round.
     #
-    # Groups are absent by construction. A group holds no key of its own — its
-    # recipients are its members' — so a row for one would attribute a member's
-    # key to two subjects and a report naming who can open a file would name both.
+    # A person's escrow consent is deliberately not folded into their row. The
+    # keys are the organization's custody, so they answer to the organization here,
+    # which is what lets a withdrawn consent be reported as the organization's
+    # access rather than as the person's own.
+    #
+    # Groups and services are absent by construction. Neither holds a key of its
+    # own — a group's recipients are its members' and a service's are its machines'
+    # — so a row for one would attribute another subject's key to two subjects and
+    # a report naming who can open a file would name both.
     recipients =
       lib.mapAttrs (_: resolve.recipientsOf) cfg.users
-      // lib.mapAttrs (_: m: lib.optional (m.recipient != null) m.recipient) cfg.machines;
+      // lib.mapAttrs (_: m: lib.optional (m.recipient != null) m.recipient) cfg.machines
+      // lib.mapAttrs (_: resolve.custodyOf) cfg.organizations;
 
     # The subject records themselves, as the consumption modules read them: a
     # machine's tags default a profile that names it, and nothing else here is

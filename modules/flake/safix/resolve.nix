@@ -1,23 +1,25 @@
 # The resolution algebra, as pure functions of the records it reads — `users`,
-# `catalogue`, `machines`, `services`, `groups` and `silos` — rather than of the
-# flake config. ./default.nix binds them to `flake.safix.*`; the checks bind them
-# to synthetic fleets, which is the only way an error path in here can be shown to
-# fire.
+# `catalogue`, `machines`, `services`, `groups`, `organizations` and `silos` —
+# rather than of the flake config. ./default.nix binds them to `flake.safix.*`;
+# the checks bind them to synthetic fleets, which is the only way an error path in
+# here can be shown to fire.
 #
-# Every entry point takes those records as one attrset with the four subject
+# Every entry point takes those records as one attrset with the five subject
 # records defaulted to empty, so a call that names none of them is exactly the
 # tree that declares none. That is what makes the inertness property structural
 # rather than a claim about a code path: there is one algebra, and a fleet with no
-# machines, services, groups or silos travels the same one.
+# machines, services, groups, organizations or silos travels the same one.
 #
 # ── one audience algebra over subjects ──
 # A subject is what can hold a key and appear in an audience: a person, a
-# machine, a service running on machines, or a group of subjects. A machine's
-# recipient is the age form of the host identity its system scope already
-# decrypts with, so a machine subject introduces no identity and no enrollment
-# step; a group's recipients are its expanded membership's; a service's are its
-# machines', so a service mints nothing either and the machine stays the trust
-# boundary for everything running on it.
+# machine, a service running on machines, a group of subjects, or an organization
+# holding recovery custody of its own. A machine's recipient is the age form of
+# the host identity its system scope already decrypts with, so a machine subject
+# introduces no identity and no enrollment step; a group's recipients are its
+# expanded membership's; a service's are its machines', so a service mints nothing
+# either and the machine stays the trust boundary for everything running on it; an
+# organization's are the custody keys it declares, which is the one place they are
+# written and so the one place a rotation of them happens.
 #
 # A grant names a subject by reference, and a reference is either a subject's own
 # name or `ownerOf.<machine>`, which resolves through that machine's `owner`. An
@@ -97,7 +99,7 @@ let
 
   applyOverride = base: override: base // lib.filterAttrs (_: v: v != null) override;
 
-  # The records the resolver reads, as one value. The four subject records
+  # The records the resolver reads, as one value. The five subject records
   # default to empty and the pattern is closed, so a misspelled record name is an
   # error rather than a silent fall-back to the empty one.
   registryOf =
@@ -107,6 +109,7 @@ let
       machines ? { },
       services ? { },
       groups ? { },
+      organizations ? { },
       silos ? { },
     }:
     {
@@ -116,6 +119,7 @@ let
         machines
         services
         groups
+        organizations
         silos
         ;
     };
@@ -125,15 +129,19 @@ let
   ownedNames =
     userRec: sortNames (builtins.attrNames userRec.carries ++ builtins.attrNames userRec.private);
 
-  # Every recipient one person's custody consists of: the key their activation
-  # decrypts as, plus any recovery identities they hold. A file's recipient list
-  # is the union of this over its audience, which is what makes escrowed and
-  # independent custody a property of the person rather than of a hand-written
-  # rule.
+  # Every recipient one person's own custody consists of: the key their
+  # activation decrypts as, plus any recovery identities they hold. This is what
+  # makes escrowed and independent custody a property of the person rather than
+  # of a hand-written rule, and it is the person's own record alone — the keys an
+  # `escrowedTo` consent adds belong to the organization and are expanded at
+  # resolution time by `audienceKeysOf`.
   recipientsOf =
     userRec:
     map (r: r.key) (lib.attrValues userRec.recoveryRecipients)
     ++ lib.optional (userRec.recipient != null) userRec.recipient;
+
+  # Every recipient one organization's custody consists of.
+  custodyOf = organizationRec: map (c: c.key) (lib.attrValues organizationRec.custody);
 
   # Three name spaces are interpolated into generated text: a user name and an
   # anchor name into a `path_regex` and a path under the secrets directory, and a
@@ -174,7 +182,7 @@ let
     sep;
 
   # ── the subject name space ──
-  # One name space over all four kinds. Two kinds of declaration sharing a name
+  # One name space over all five kinds. Two kinds of declaration sharing a name
   # is refused rather than resolved by precedence, because every audience element,
   # every path and every anchor is derived from the name alone: a precedence rule
   # would decide who reads a file, silently, at the point one of the two
@@ -183,7 +191,10 @@ let
   isMachine = r: name: r.machines ? ${name};
   isService = r: name: r.services ? ${name};
   isGroup = r: name: r.groups ? ${name};
-  isSubject = r: name: isPerson r name || isMachine r name || isService r name || isGroup r name;
+  isOrganization = r: name: r.organizations ? ${name};
+  isSubject =
+    r: name:
+    isPerson r name || isMachine r name || isService r name || isGroup r name || isOrganization r name;
 
   # The subject kinds, as the record each is declared in paired with the option
   # path a refusal about one names. Named once so that a kind added to the model
@@ -194,10 +205,12 @@ let
     "machines"
     "services"
     "groups"
+    "organizations"
   ];
 
-  # "flake.safix.users, flake.safix.machines, flake.safix.services or
-  # flake.safix.groups", as every refusal about an undeclared subject says it.
+  # "flake.safix.users, flake.safix.machines, flake.safix.services,
+  # flake.safix.groups or flake.safix.organizations", as every refusal about an
+  # undeclared subject says it.
   declaredSubjectPaths =
     let
       paths = map (field: "flake.safix.${field}") subjectKinds;
@@ -222,15 +235,15 @@ let
   # re-wraps of one file rather than migrations to another.
   #
   # Every marker is drawn from outside the alphabet `wellFormedName` admits and
-  # from outside the separator, so no name can carry one and the four element
+  # from outside the separator, so no name can carry one and the five element
   # forms partition by their leading characters. Two of them nest deliberately:
   # the owner marker extends the group marker with a character a group name cannot
   # start with, which is what keeps `@<group>` and `@~<machine>` distinct. The
-  # service marker shares no prefix with either, so it needs no such argument, and
-  # the assertion states the general rule rather than the pair it was first
-  # written for: wherever one marker is a prefix of another, the remainder has to
-  # be outside the alphabet too, or a name could forge the longer form under the
-  # shorter one.
+  # service and organization markers share no prefix with either or with each
+  # other, so they need no such argument, and the assertion states the general
+  # rule rather than the pair it was first written for: wherever one marker is a
+  # prefix of another, the remainder has to be outside the alphabet too, or a name
+  # could forge the longer form under the shorter one.
   #
   # It is the same argument `audienceSeparator` makes: an ambiguous element form is
   # two audiences reaching one directory, so one recipient rule over both
@@ -241,6 +254,7 @@ let
         group = "@";
         owner = "@~";
         service = "%";
+        organization = "=";
       };
       outsideAlphabet = m: builtins.match "[a-z0-9_-]*" m == null;
       values = lib.attrValues markers;
@@ -269,6 +283,8 @@ let
       "${audienceMarkers.owner}${ownerRefMachine ref}"
     else if isService r ref then
       "${audienceMarkers.service}${ref}"
+    else if isOrganization r ref then
+      "${audienceMarkers.organization}${ref}"
     else if isGroup r ref then
       "${audienceMarkers.group}${ref}"
     else
@@ -276,14 +292,16 @@ let
 
   # The inverse, which is what turns a file's audience back into the references
   # its recipients are computed from. The owner form is tested before the group
-  # form because it extends it; the service form shares a prefix with neither, so
-  # its position among them is free.
+  # form because it extends it; the service and organization forms share a prefix
+  # with neither, so their position among them is free.
   refOfElement =
     element:
     if lib.hasPrefix audienceMarkers.owner element then
       "${ownerRefPrefix}${lib.removePrefix audienceMarkers.owner element}"
     else if lib.hasPrefix audienceMarkers.service element then
       lib.removePrefix audienceMarkers.service element
+    else if lib.hasPrefix audienceMarkers.organization element then
+      lib.removePrefix audienceMarkers.organization element
     else if lib.hasPrefix audienceMarkers.group element then
       lib.removePrefix audienceMarkers.group element
     else
@@ -312,9 +330,10 @@ let
   # was reached through or null where it was reached directly.
   #
   # A group expands to its members and theirs, a service to the machines it runs
-  # on, an `ownerOf` reference to the one person the machine's record names, and
+  # on, an `ownerOf` reference to the one subject the machine's record names, and
   # anything else to itself. A service closes no cycle of its own — it names
-  # machines, which are leaves — so it needs no bound of its own.
+  # machines, which are leaves — so it needs no bound of its own, and neither does
+  # an organization, which names keys.
   #
   # The attribution is what a service grant costs and buys. Two services on one
   # machine granted the same name are two entries rather than one silently won, and
@@ -335,7 +354,7 @@ let
       direct = map (leaf: {
         inherit leaf;
         service = null;
-      }) (lib.filter (n: isPerson r n || isMachine r n) expanded);
+      }) (lib.filter (n: isPerson r n || isMachine r n || isOrganization r n) expanded);
       viaService = lib.concatMap (
         service:
         map (leaf: { inherit leaf service; }) (lib.filter (isMachine r) r.services.${service}.machines)
@@ -347,19 +366,49 @@ let
   # file's data key is wrapped for.
   leavesOf = r: ref: sortNames (lib.unique (map (row: row.leaf) (leafRowsOf r ref)));
 
-  # Every key one leaf subject can open a file with. A person's is their custody —
+  # Every key one leaf subject holds of its own. A person's is their custody —
   # their own recipient and their recovery identities; a machine's is the one host
   # identity it already decrypts with, and it has no recovery axis because the
   # grant that reached it always names its owner too, whose custody is the one
-  # that has a recovery story.
+  # that has a recovery story; an organization's is the custody it declares.
+  #
+  # A person's escrow consent is deliberately absent. This is what a subject holds,
+  # which is what every refusal about a subject with no key asks; what a file gains
+  # from having that subject in its audience is `audienceKeysOf`.
   subjectRecipientsOf =
     r: name:
     if isMachine r name then
       lib.optional (r.machines.${name}.recipient != null) r.machines.${name}.recipient
     else if isPerson r name then
       recipientsOf r.users.${name}
+    else if isOrganization r name then
+      custodyOf r.organizations.${name}
     else
       [ ];
+
+  # The custody keys one person's `escrowedTo` adds to every file their audience
+  # covers, expanded here rather than written into their `recoveryRecipients`.
+  #
+  # That is the whole of design decision D3. The person's record holds the consent
+  # and the organization's holds the keys, so rotating one re-wraps every
+  # consenting person's files and no person's declaration changes; writing the keys
+  # into each person's record instead would put the rotation in as many places as
+  # there are consenting people and leave nothing to say whose custody a key is.
+  #
+  # An organization no declaration covers contributes nothing here and is refused
+  # by name in `violations`, so this is never the report of that mistake.
+  escrowedKeysOf =
+    r: userRec:
+    lib.concatMap (o: custodyOf r.organizations.${o}) (
+      lib.filter (o: isOrganization r o) userRec.escrowedTo
+    );
+
+  # Every key one leaf subject can open an audience's file with: what it holds,
+  # plus — for a person — the custody of every organization they consent to the
+  # escrow of.
+  audienceKeysOf =
+    r: name:
+    subjectRecipientsOf r name ++ lib.optionals (isPerson r name) (escrowedKeysOf r r.users.${name});
 
   # Every key an audience's file has to be wrapped for, expanded from the elements
   # the directory is named after. Marked elements expand; unmarked ones are
@@ -368,7 +417,7 @@ let
     r: audience:
     lib.unique (
       lib.concatMap (
-        element: lib.concatMap (leaf: subjectRecipientsOf r leaf) (leavesOf r (refOfElement element))
+        element: lib.concatMap (leaf: audienceKeysOf r leaf) (leavesOf r (refOfElement element))
       ) audience
     );
 
@@ -1048,6 +1097,8 @@ let
       "flake.safix.services.${name}"
     else if isGroup r name then
       "flake.safix.groups.${name}"
+    else if isOrganization r name then
+      "flake.safix.organizations.${name}"
     else
       "flake.safix.users.${name}";
 
@@ -1171,6 +1222,17 @@ let
         ) (builtins.attrNames r.users.${user}.recoveryRecipients)
       ) names;
 
+      # An organization's custody keys are anchored the way a person's recovery
+      # identities are, so the anchor they are defined as is judged the same way.
+      unsafeCustodyAnchorName = lib.concatMap (
+        organization:
+        lib.concatMap (
+          anchor:
+          lib.optional (!(wellFormedName anchor))
+            "flake.safix.organizations.${organization}.custody names '${anchor}', which is not [a-z0-9][a-z0-9_-]* and so cannot be a recipient policy anchor"
+        ) (builtins.attrNames r.organizations.${organization}.custody)
+      ) (builtins.attrNames r.organizations);
+
       # One name space over the four kinds of subject. Two declarations of one
       # name is refused rather than resolved by precedence, because a precedence
       # rule would decide who reads a file — an audience element, a directory and
@@ -1186,7 +1248,7 @@ let
           lib.optional (builtins.length declared > 1) (
             "'${name}' is declared as more than one kind of subject, by "
             + lib.concatMapStringsSep " and " (d: "flake.safix.${d.field}") declared
-            + "; people, machines, services and groups share one name space"
+            + "; people, machines, services, groups and organizations share one name space"
           )
         ) (lib.groupBy (d: d.name) subjectDeclarations)
       );
@@ -1232,28 +1294,41 @@ let
           "flake.safix.users.${s.user}.${s.where} names '${s.name}', which is not [a-z0-9][a-z0-9_-]* and so cannot be the last component of the path the provisioner parks it at"
       ) secretNameSites;
 
-      # Anchors are registry-wide: two people naming one anchor for two different
-      # keys would have the generated file define it twice and every rule
-      # referencing it resolve to whichever definition YAML kept.
-      anchorDefinitions = lib.concatMap (
-        user:
-        lib.mapAttrsToList (anchor: recovery: {
-          inherit anchor user;
-          inherit (recovery) key;
-        }) r.users.${user}.recoveryRecipients
-        ++ lib.optional (r.users.${user}.recipient != null) {
-          anchor = "${user}-safix";
-          inherit user;
-          key = r.users.${user}.recipient;
-        }
-      ) names;
+      # Anchors are registry-wide: two declarations naming one anchor for two
+      # different keys would have the generated file define it twice and every rule
+      # referencing it resolve to whichever definition YAML kept. Each definition
+      # carries the declaration it came from, because an organization's custody
+      # anchors share the space a person's recovery anchors live in and a refusal
+      # naming only the anchor would send the reader to the wrong record.
+      anchorDefinitions =
+        lib.concatMap (
+          user:
+          lib.mapAttrsToList (anchor: recovery: {
+            inherit anchor;
+            inherit (recovery) key;
+            where = "flake.safix.users.${user}";
+          }) r.users.${user}.recoveryRecipients
+          ++ lib.optional (r.users.${user}.recipient != null) {
+            anchor = "${user}-safix";
+            key = r.users.${user}.recipient;
+            where = "flake.safix.users.${user}";
+          }
+        ) names
+        ++ lib.concatMap (
+          organization:
+          lib.mapAttrsToList (anchor: escrow: {
+            inherit anchor;
+            inherit (escrow) key;
+            where = "flake.safix.organizations.${organization}";
+          }) r.organizations.${organization}.custody
+        ) (builtins.attrNames r.organizations);
 
       anchorConflict = lib.concatLists (
         lib.mapAttrsToList (
           anchor: defs:
           lib.optional (builtins.length (lib.unique (map (d: d.key) defs)) > 1) (
-            "flake.safix.users gives the recipient policy anchor '${anchor}' more than one key, declared by "
-            + lib.concatMapStringsSep " and " (d: "flake.safix.users.${d.user}") defs
+            "the declarations give the recipient policy anchor '${anchor}' more than one key, declared by "
+            + lib.concatMapStringsSep " and " (d: d.where) defs
           )
         ) (lib.groupBy (d: d.anchor) anchorDefinitions)
       );
@@ -1348,27 +1423,74 @@ let
         )
       ) references;
 
-      # A machine's owner is a person here. Organizations owning machines is a
-      # later change, and a record naming one now would resolve a grant to
-      # something holding no recipient and no custody.
+      # An owner is a person or an organization: the two kinds of subject that hold
+      # custody of their own, so the two an `ownerOf` grant can resolve through to
+      # a key. Anything else would resolve the grant to something holding no
+      # recipient at all.
+      holdsCustody = owner: isPerson r owner || isOrganization r owner;
+
+      ownerPaths = "flake.safix.users or an organization of flake.safix.organizations";
+
       machineOwner = lib.concatMap (
         machine:
         let
           owner = r.machines.${machine}.owner;
         in
-        lib.optional (owner != null && !(isPerson r owner))
-          "flake.safix.machines.${machine}.owner names '${owner}', which is not a declared user of flake.safix.users"
+        lib.optional (owner != null && !(holdsCustody owner))
+          "flake.safix.machines.${machine}.owner names '${owner}', which is not a declared user of ${ownerPaths}"
       ) (builtins.attrNames r.machines);
 
-      # A service's owner is a person, on the same ground a machine's is.
+      # A service's owner is judged on the same ground a machine's is.
       serviceOwner = lib.concatMap (
         service:
         let
           owner = r.services.${service}.owner;
         in
-        lib.optional (owner != null && !(isPerson r owner))
-          "flake.safix.services.${service}.owner names '${owner}', which is not a declared user of flake.safix.users"
+        lib.optional (owner != null && !(holdsCustody owner))
+          "flake.safix.services.${service}.owner names '${owner}', which is not a declared user of ${ownerPaths}"
       ) (builtins.attrNames r.services);
+
+      # ── escrow, and what an organization with no custody cannot do ──
+      # Consent is the person's declaration, so both refusals about it name the
+      # person's own record: an organization nobody declared, and one whose custody
+      # would encrypt their files to nobody.
+      undeclaredEscrow = lib.concatMap (
+        user:
+        map (
+          organization:
+          "flake.safix.users.${user}.escrowedTo names '${organization}', which is not a declared organization of flake.safix.organizations"
+        ) (lib.filter (organization: !(isOrganization r organization)) r.users.${user}.escrowedTo)
+      ) names;
+
+      emptyCustody =
+        organization: isOrganization r organization && r.organizations.${organization}.custody == { };
+
+      escrowToEmptyCustody = lib.concatMap (
+        user:
+        map (
+          organization:
+          "flake.safix.users.${user}.escrowedTo names flake.safix.organizations.${organization}, whose custody is empty, so the escrow would add no recipient to any file they hold"
+        ) (lib.filter emptyCustody r.users.${user}.escrowedTo)
+      ) names;
+
+      # The other two ways an organization is reached: a grant naming it, and a
+      # grant resolving through a machine or service it owns. One rule over both,
+      # because `reachClause` already says which of the two it was.
+      emptyCustodyReach = lib.concatMap (
+        g:
+        lib.optional (emptyCustody g.leaf) "${grantPath g} shares '${g.name}'${reachClause r g}, but flake.safix.organizations.${g.leaf}.custody is empty, so the file would be encrypted to nobody"
+      ) reaches;
+
+      # A principal is not a member. What an organization holds is custody of its
+      # own, so a group containing one would be a people-set with a key in it, and
+      # an audience wanting that key names the organization.
+      organizationInGroup = lib.concatMap (
+        group:
+        map (
+          member:
+          "flake.safix.groups.${group}.members names flake.safix.organizations.${member}, which is a principal rather than a member; an audience wanting its custody names the organization"
+        ) (lib.filter (isOrganization r) r.groups.${group}.members)
+      ) (builtins.attrNames r.groups);
 
       # A service names machines the fleet declares. Refused rather than dropped:
       # the machine set is the whole of a service's audience, so a name nobody
@@ -1476,9 +1598,12 @@ let
         ) resolvable
       );
 
+      # An organization is excluded because the sentence is not true of one: it has
+      # no `recipient` field to be null, and `emptyCustodyReach` says what is wrong
+      # in the words its own declaration uses.
       noRecipientKey = lib.concatMap (
         g:
-        lib.optional (subjectRecipientsOf r g.leaf == [ ])
+        lib.optional (!(isOrganization r g.leaf) && subjectRecipientsOf r g.leaf == [ ])
           "${grantPath g} shares '${g.name}'${reachClause r g}, but ${subjectPath r g.leaf}.recipient is null, so no copy can be encrypted to them"
       ) reaches;
 
@@ -1551,6 +1676,7 @@ let
     unsafeUserName
     ++ unsafeSubjectName
     ++ unsafeAnchorName
+    ++ unsafeCustodyAnchorName
     ++ unsafeSecretName
     ++ subjectNameCollision
     ++ anchorConflict
@@ -1559,6 +1685,7 @@ let
     ++ serviceOwner
     ++ serviceMachine
     ++ unknownGroupMember
+    ++ organizationInGroup
     ++ groupCycle
     ++ unknownSiloGroup
     ++ groupInTwoSilos
@@ -1566,6 +1693,9 @@ let
     ++ notHeld
     ++ emptyServiceGrant
     ++ emptyReach
+    ++ undeclaredEscrow
+    ++ escrowToEmptyCustody
+    ++ emptyCustodyReach
     ++ noRecipientKey
     ++ ownerWithoutRecipient
     ++ keylessCarrier
@@ -1748,6 +1878,7 @@ let
       machines ? { },
       services ? { },
       groups ? { },
+      organizations ? { },
       silos ? { },
       root,
       user ? null,
@@ -1763,6 +1894,7 @@ let
           machines
           services
           groups
+          organizations
           silos
           ;
       };
@@ -2036,6 +2168,7 @@ in
     refOfElement
     publicFileOf
     recipientsOf
+    custodyOf
     selectFor
     materializeFor
     unknownUserMessage
@@ -2058,6 +2191,7 @@ in
       machines ? { },
       services ? { },
       groups ? { },
+      organizations ? { },
       silos ? { },
       user,
     }:
@@ -2068,6 +2202,7 @@ in
         machines
         services
         groups
+        organizations
         silos
         ;
     }) user;

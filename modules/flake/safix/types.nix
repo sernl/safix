@@ -10,12 +10,13 @@
 # name they hold reaches another. `profile` is the whole of what one person's
 # custody is.
 #
-# `machine`, `service`, `group` and `silo` are the rest of the subject
-# vocabulary. A subject is what can hold a key and appear in an audience: a
-# person, a machine, a service running on machines, or a group of subjects. They
-# are four records rather than four grant surfaces, because one audience algebra
-# over subjects is what keeps a second audience computation, a second policy
-# renderer and a second revocation report from existing at all.
+# `machine`, `service`, `group`, `silo` and `organization` are the rest of the
+# subject vocabulary. A subject is what can hold a key and appear in an audience:
+# a person, a machine, a service running on machines, a group of subjects, or an
+# organization holding recovery custody of its own. They are five records rather
+# than five grant surfaces, because one audience algebra over subjects is what
+# keeps a second audience computation, a second policy renderer and a second
+# revocation report from existing at all.
 #
 # `entry` is one type rather than a function of registry-wide defaults, so
 # `flake.safix.catalogue.<n>` and `flake.safix.users.<u>.private.<n>` are the
@@ -584,19 +585,21 @@ let
         default = null;
         example = "alice";
         description = ''
-          The `flake.safix.users` entry this machine belongs to, or null.
+          The `flake.safix.users` or `flake.safix.organizations` entry this
+          machine belongs to, or null.
 
           A record, and in this model nothing more. It confers no powers: an
           owner does not thereby read the machine's entries or manage its users,
-          because a record that silently granted either would be the escrowed
-          custody safix already prints a warning about, arrived at by accident
-          rather than declared.
+          because a record that silently granted either would be escrowed custody
+          arrived at by accident rather than declared, which is what
+          `flake.safix.users.<u>.escrowedTo` is the declared form of.
 
           What it does is give a grant somewhere to resolve through. An owner
           named here is what makes `sharedWith."ownerOf.<machine>"` mean
           something, and a change of owner then re-wraps the grant toward the new
           one rather than leaving it pointed at whoever held the host when it was
-          written.
+          written. What that grant resolves to is what the name denotes: a
+          person's own custody, or an organization's custody keys.
         '';
       };
 
@@ -657,7 +660,8 @@ let
         default = null;
         example = "alice";
         description = ''
-          The `flake.safix.users` entry this service belongs to, or null.
+          The `flake.safix.users` or `flake.safix.organizations` entry this
+          service belongs to, or null.
 
           A record, on the same terms as a machine's: it confers no powers, and
           an owner does not thereby read what the service reads.
@@ -715,6 +719,11 @@ let
         rotation named as the remedy, because a member who has held a file's data
         key has read what it holds and no re-wrap unreads it.
 
+        An organization is refused here, naming the group and the organization. A
+        principal is not a member: what an organization holds is custody of its
+        own, so a group containing one would be a people-set with a key in it,
+        and an audience wanting that key names the organization.
+
         A group naming itself, directly or through other groups, is refused at
         evaluation with the participants named: a membership that cannot be
         expanded is not a membership.
@@ -748,6 +757,41 @@ let
         two silos, because the operator administering both sides is the normal
         case; what is refused is one file readable from both, never a person's
         existence in both worlds.
+      '';
+    };
+  };
+
+  # An organization, as a principal holding recovery custody of its own. It
+  # carries custody and nothing else: people relate to it by consenting to its
+  # escrow from their own record, groups already express every people-set an
+  # audience needs, and a `members` list here would be a second groups mechanism.
+  organization = lib.types.submodule {
+    options.custody = lib.mkOption {
+      type = lib.types.attrsOf recoveryRecipient;
+      default = { };
+      example = lib.literalExpression ''{ acme-escrow = { key = "age1..."; }; }'';
+      description = ''
+        The escrow identities this organization holds, keyed by the anchor the
+        generated recipient policy defines each as.
+
+        Recipients, never identities. Nothing here decrypts anything, and no
+        private half is named, escrowed or deployed by this field. What these
+        keys open is every file whose audience reaches this organization: the
+        files of each person whose `escrowedTo` names it, the files a grant
+        aims at it, and the files a grant aims at the owner of a machine or
+        service it owns.
+
+        This is the one place those keys are written, and that is the property
+        the declaration exists for. Rotating one here re-wraps every consenting
+        person's files at the next `safix fix` with no person's declaration
+        changing, where the raw-key arrangement it replaces — an operator-held
+        identity listed in each person's `recoveryRecipients` — has to be edited
+        once per person and leaves nothing to say whose custody the key is.
+
+        Empty is inert and is refused where it acts. An organization with no
+        custody that nothing references changes nothing; an escrow declaration,
+        a grant or an ownership resolution reaching one is refused at
+        evaluation, because the file would be encrypted to nobody.
       '';
     };
   };
@@ -822,6 +866,37 @@ let
           independence is a second recipient the person themselves holds.
         '';
       };
+      escrowedTo = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "acme" ];
+        description = ''
+          The `flake.safix.organizations` this person consents to the escrow of.
+          Every file this person's audience covers gains those organizations'
+          custody keys at the next re-wrap.
+
+          Read in this person's own view: acme's custody can open everything
+          this person holds — every value in every file their audience reaches,
+          whether they chose it, carry it or were granted it, and every value
+          written into one of those files afterwards. Withdrawing the
+          declaration narrows those files and revokes nothing already readable:
+          the organization has held the data keys, and only minting new values
+          takes that back.
+
+          The keys arrive beside `recoveryRecipients` rather than through it,
+          and this declaration names the organization rather than the keys. That
+          is what keeps rotation in one place: the organization rotates a
+          custody key in its own declaration and every consenting person's files
+          re-wrap in one `safix fix`, with no person's declaration changing.
+
+          The consent is here rather than on the organization because nothing an
+          organization declares may widen anyone's audience. Who can open this
+          person's files is therefore answered by records this person holds.
+
+          An organization no declaration covers is refused by name, and so is one
+          whose custody is empty.
+        '';
+      };
       carries = lib.mkOption {
         type = lib.types.attrsOf override;
         default = { };
@@ -848,15 +923,16 @@ let
           subject's own path and with this user's declared mode unless a
           recipient adjusts it through their own perHost/perTag.
 
-          A subject is a person, a machine, a service, a group of subjects, or the
-          owner of a machine written `ownerOf.<machine>` — one grant surface over
-          all five, because a second one would be a second audience computation to
-          keep in step with this one. A group grant reaches every expanded
-          member's set and follows the membership; a service grant reaches its
-          machines and follows the declared set; an `ownerOf` grant reaches
-          whoever the machine's `owner` names and follows that record. `.` is
-          outside the name alphabet, so `ownerOf.<machine>` can never collide with
-          a declared subject's name.
+          A subject is a person, a machine, a service, a group of subjects, an
+          organization, or the owner of a machine written `ownerOf.<machine>` —
+          one grant surface over all six, because a second one would be a second
+          audience computation to keep in step with this one. A group grant
+          reaches every expanded member's set and follows the membership; a
+          service grant reaches its machines and follows the declared set; an
+          organization grant reaches its custody keys and follows that
+          declaration; an `ownerOf` grant reaches whoever the machine's `owner`
+          names and follows that record. `.` is outside the name alphabet, so
+          `ownerOf.<machine>` can never collide with a declared subject's name.
 
           A grant widens the secret's audience, and the audience picks the file.
           An encrypted file has one data key wrapped once per recipient, so
@@ -906,5 +982,6 @@ in
     service
     group
     silo
+    organization
     ;
 }
