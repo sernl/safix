@@ -54,6 +54,8 @@
     let
       resolve = import ../safix/resolve.nix { inherit lib; };
       safixChecks = import ../safix/checks.nix { inherit lib; };
+      keepassxcLib = import ../safix/keepassxc.nix { inherit lib; };
+      bridgeLib = import ../safix/bridge.nix { inherit lib; };
       policy = import ../safix/policy.nix { inherit lib; };
       types = import ../safix/types.nix { inherit lib; };
       fixture = import ./fixture-fleet.nix;
@@ -502,6 +504,46 @@
       ];
 
       roundTrips = fleet: refs: map (ref: resolve.refOfElement (resolve.elementOf fleet ref) == ref) refs;
+
+      # ── the two relationship families, over a fleet the subject model refuses ──
+      # Both read the registry to decide whether custody resolved at all, and both
+      # say nothing while it has not: one fault producing two unrelated sentences
+      # is worse than the second sentence is worth. A subject violation is a
+      # custody violation, so a mapping that would otherwise be reported has to go
+      # quiet over one — and has to be reported over a fleet that resolves, or the
+      # silence is a mapping nobody was judging.
+      #
+      # Each mapping names a person nobody declares, which is the one rule both
+      # families state in the same words, so what differs between the two answers
+      # is the fleet and nothing else.
+      mirrorNamingNobody = {
+        database = "/nonexistent/master.kdbx";
+        group = "safix";
+        mappings.token = typed keepassxcLib.mapping {
+          mode = "safix-to-keepassxc";
+          safix = {
+            user = "zed";
+            name = "token";
+          };
+          kdbx.path = "zed/token";
+        };
+      };
+
+      bridgeNamingNobody = {
+        clanFlake = "/nonexistent";
+        mappings.token = typed bridgeLib.mapping {
+          direction = "clan-to-safix";
+          clan = {
+            machine = "meridian";
+            generator = "g";
+            file = "f";
+          };
+          safix = {
+            user = "zed";
+            name = "token";
+          };
+        };
+      };
     in
     {
       checks.safix-subjects = mkStructuralCheck {
@@ -720,6 +762,15 @@
             "outer"
             "ownerOf.deck"
           ];
+
+          # Neither relationship family reports over a fleet the subject model
+          # refuses, and both report the same mapping over one it accepts.
+          relationsWaitForCustody = {
+            keepassxcQuietWhileRefused = safixChecks.keepassxcMessages crossSilo mirrorNamingNobody;
+            keepassxcSpeaksWhenResolved = safixChecks.keepassxcMessages withinSilo mirrorNamingNobody != [ ];
+            bridgeQuietWhileRefused = safixChecks.bridgeMessages crossSilo bridgeNamingNobody;
+            bridgeSpeaksWhenResolved = safixChecks.bridgeMessages withinSilo bridgeNamingNobody != [ ];
+          };
 
           # The generated rules over a subject-bearing fleet are still exactly one
           # directory each, still terminate on the extension, and still reach
@@ -1069,6 +1120,13 @@
             true
             true
           ];
+
+          relationsWaitForCustody = {
+            keepassxcQuietWhileRefused = [ ];
+            keepassxcSpeaksWhenResolved = true;
+            bridgeQuietWhileRefused = [ ];
+            bridgeSpeaksWhenResolved = true;
+          };
 
           generatedRulesOverSubjects =
             lib.genAttrs
