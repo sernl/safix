@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::ykman_unavailable
+
+  × could not run ykman, so the card's access was not touched
+  ╰─▶ entity not found

@@ -2,4 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: unknown subcommand 'rotate' (expected set, edit, get, list, generate, check, fix, import, export, audit, keygen or adduser)
+safix: unknown subcommand 'rotate' (expected set, edit, get, list, generate, check, fix, import, export, audit, keygen, adduser or enroll)

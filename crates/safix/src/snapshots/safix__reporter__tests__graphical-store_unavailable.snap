@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::store_unavailable
+
+  × could not run secret-tool, so the credentials were not mirrored
+  ╰─▶ entity not found

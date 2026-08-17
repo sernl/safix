@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the age plugin exited 1; nothing was appended and no recipient was added. Its own message is above.

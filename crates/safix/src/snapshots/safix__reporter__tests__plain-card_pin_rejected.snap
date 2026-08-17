@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 11111111 refused the PIN, and the generator asked again. Nothing further was
+attempted.
+
+One attempt, deliberately: a card allows three and a run that answered
+every prompt would spend all three on the same wrong PIN and block the
+card. The counter is at two rather than at zero.
+
+If safix provisioned this card, its PIN is in custody — safix get 11111111's
+access entry — or in the password store beside it. If somebody else did,
+the PIN is theirs to supply.
+
+A blocked PIN is unblocked with the PUK; a blocked PUK leaves the PIV
+applet resettable and every identity on it gone.

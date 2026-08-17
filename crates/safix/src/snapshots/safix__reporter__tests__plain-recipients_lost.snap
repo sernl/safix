@@ -1,0 +1,20 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: secrets/safix/users/ana/secrets.yaml lost a recipient it had before this run, so nothing was committed.
+
+No longer able to open it:
+  - age1bo
+
+Enrollment is additive and only additive: it appends an identity, appends a
+recipient and re-wraps every governed file to the policy those imply. A
+recipient that disappeared in the re-wrap means the policy narrowed for a
+reason this run did not ask for — most often a declaration edited between
+the last `safix fix` and now.
+
+The card's identity and its recipient are written and are correct. Review
+what changed, converge deliberately, then re-run:
+
+    safix check
+    git diff

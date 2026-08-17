@@ -47,7 +47,8 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use safix_core::{
-    Error, Progress, Workspace, adduser, audit, bridge, check, edit, fix, generate, keygen, set,
+    Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, keygen,
+    set,
 };
 
 use reporter::Refusal;
@@ -167,6 +168,11 @@ const VERBS: &[Verb] = &[
         name: "adduser",
         help: usage::ADDUSER,
         run: adduser_command,
+    },
+    Verb {
+        name: "enroll",
+        help: usage::ENROLL,
+        run: enroll_command,
     },
 ];
 
@@ -621,6 +627,113 @@ fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         },
     )?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// One hardware key, from a blank card to a proven recovery identity.
+///
+/// The flags are read in any order and around the one positional, which is what
+/// `adduser` does and for the same reason: a run that has to remember where the
+/// person's name sits among six options is a run an operator gets wrong.
+///
+/// Anything naming an OTP slot is refused by name here rather than as an unknown
+/// option, because the operator asking has a hazard to be told about — see
+/// [`Error::OtpRefused`]. The list is the spellings somebody would plausibly
+/// reach for, and it is a refusal rather than a silent ignore.
+fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "enroll [<user>] [--serial <n>] [--slot <n>] [--no-store-pin] \
+                        [--mirror-to-store] [--store-database <path>] [--pin-policy <p>] \
+                        [--touch-policy <p>] [--allow-disk-staging]";
+    const OTP_SPELLINGS: [&str; 5] = [
+        "--otp",
+        "--otp-slot",
+        "--challenge-response",
+        "--program-otp",
+        "--hmac-sha1",
+    ];
+
+    let mut options = enroll::Options::default();
+    let mut positional: Vec<String> = Vec::new();
+    let mut rest = arguments;
+
+    while let Some((first, tail)) = rest.split_first() {
+        let mut valued = |sink: &mut String| match tail.split_first() {
+            Some((value, after)) => {
+                sink.clone_from(value);
+                Ok(after)
+            }
+            None => Err(Refusal::OptionNeedsValue {
+                option: first.clone(),
+            }),
+        };
+        match first.as_str() {
+            otp if OTP_SPELLINGS.contains(&otp) => return Err(Error::OtpRefused.into()),
+            "--serial" => {
+                let mut held = String::new();
+                rest = valued(&mut held)?;
+                options.serial = Some(held);
+            }
+            "--slot" => {
+                let mut held = String::new();
+                rest = valued(&mut held)?;
+                options.slot = Some(held);
+            }
+            "--pin-policy" => rest = valued(&mut options.pin_policy)?,
+            "--touch-policy" => rest = valued(&mut options.touch_policy)?,
+            "--store-database" => {
+                let mut held = String::new();
+                rest = valued(&mut held)?;
+                options.mirror.database = Some(std::path::PathBuf::from(held));
+            }
+            "--no-store-pin" => {
+                options.store_pin = false;
+                rest = tail;
+            }
+            "--mirror-to-store" => {
+                options.mirror.mirror = true;
+                rest = tail;
+            }
+            flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
+                options.allow_disk_staging = true;
+                rest = tail;
+            }
+            "--" => {
+                positional.extend(tail.iter().cloned());
+                rest = &[];
+            }
+            option if option.starts_with('-') => {
+                return Err(Refusal::UnknownOption {
+                    option: option.to_owned(),
+                });
+            }
+            _ => {
+                positional.push(first.clone());
+                rest = tail;
+            }
+        }
+    }
+
+    let workspace = Workspace::discover()?;
+    let user = match positional.as_slice() {
+        [] => workspace.default_user()?,
+        [user] => user.clone(),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    let outcome = enroll::run(
+        &workspace,
+        &Terminal,
+        &mut prompt::Prompted,
+        &user,
+        &options,
+    )?;
+    // Non-zero for an enrollment that did not end, which is what an outstanding
+    // proof is. Nothing was undone and the report says so, so this is a status a
+    // script can act on rather than a failure to clean up after.
+    Ok(if outcome.proven {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
 #[cfg(test)]

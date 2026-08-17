@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: no card is connected. Insert the one you mean to enroll and re-run; nothing was touched.

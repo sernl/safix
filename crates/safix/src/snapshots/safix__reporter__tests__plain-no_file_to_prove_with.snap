@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: cy's audience covers no file that exists, so there is nothing for the
+card to open and the proof cannot run.
+
+The card's identity and its recipient are written and are correct: the
+enrollment is additive and complete except for the one claim it exists to
+make. A canary encrypted for the occasion is deliberately not what runs
+here — it would prove that a fresh file made from a fresh rule opens, which
+is not the question.
+
+Give cy a secret, then re-run this verb:
+
+    safix set cy <name>
+    safix enroll cy

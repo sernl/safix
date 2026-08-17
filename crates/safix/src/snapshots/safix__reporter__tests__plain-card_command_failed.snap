@@ -1,0 +1,6 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: ykman --device 11111111 piv access change-pin -P <redacted> -n <redacted> failed:
+Error: Wrong PIN. 2 tries left.

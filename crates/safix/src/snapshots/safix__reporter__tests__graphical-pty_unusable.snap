@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::pty_unusable
+
+  × could not drive a pseudo-terminal, so the generator's PIN prompt was not
+  │ reached
+  ╰─▶ permission denied

@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: touch-policy never is refused. The touch is the property a card is for, and an identity generated without it is a smartcard emulating a file.
+
+The policies safix generates with are pin-policy once and touch-policy cached, which is what this fleet's enrolled cards carry: one PIN entry per session, and one touch cached for fifteen seconds.

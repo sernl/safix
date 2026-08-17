@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::enroll_hook_failed
+
+  × the enrollment hook exited 2. The identity, the recipient and the policy
+  │ are committed; whatever the hook left behind is yours to review.

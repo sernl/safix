@@ -1,0 +1,20 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_terminal
+
+  × enrollment needs a terminal, and there is none. Nothing was touched.
+  │ 
+  │ The card is generated with touch-policy cached, so somebody has to touch
+  │ it, and
+  │ somebody has to be told when. Both of those need a terminal: the
+  │ instruction goes
+  │ to standard error and the generator's own PIN prompt is answered on a
+  │ pseudo-terminal this run opens.
+  │ 
+  │ An enrollment that could run unattended would be one whose card was
+  │ generated
+  │ with touch-policy never, which is a smartcard emulating a file. That is
+  │ refused
+  │ separately, and for the same reason.

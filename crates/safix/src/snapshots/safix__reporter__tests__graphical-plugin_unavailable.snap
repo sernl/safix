@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::plugin_unavailable
+
+  × could not run age-plugin-yubikey, so no identity was generated
+  ╰─▶ entity not found

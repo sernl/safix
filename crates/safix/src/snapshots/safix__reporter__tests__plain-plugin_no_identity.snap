@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the age plugin succeeded and printed no identity block, so there is nothing to append and no recipient to add

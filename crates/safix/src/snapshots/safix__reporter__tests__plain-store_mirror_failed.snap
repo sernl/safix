@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the password store's own command exited 1, so the credentials are not there:
+Invalid credentials.
+
+The card is enrolled and everything else is committed. This is a copy that was not made, not a step that failed halfway.

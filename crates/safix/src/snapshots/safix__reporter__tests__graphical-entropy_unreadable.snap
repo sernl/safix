@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::entropy_unreadable
+
+  × could not read /dev/urandom, so no PIN or PUK was generated
+  ╰─▶ permission denied

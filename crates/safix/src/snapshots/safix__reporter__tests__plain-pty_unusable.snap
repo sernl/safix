@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: could not drive a pseudo-terminal, so the generator's PIN prompt was not reached

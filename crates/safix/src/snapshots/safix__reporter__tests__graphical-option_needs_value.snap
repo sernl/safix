@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::option_needs_value
+
+  × --serial takes a value
+  help: `safix <subcommand> -h` explains one of them.

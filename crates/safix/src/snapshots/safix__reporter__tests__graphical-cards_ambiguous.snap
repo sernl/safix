@@ -1,0 +1,19 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::cards_ambiguous
+
+  × more than one card is connected, so there is nothing to enroll
+  │ unambiguously.
+  │ 
+  │ Connected:
+  │   - 11111111
+  │   - 22222222
+  │ 
+  │ Name the one you mean:
+  │ 
+  │     safix enroll --serial <serial> [<user>]
+  │ 
+  │ Guessing is the one guess with a provisioning at the end of it: the card
+  │ that was not meant would have its PIN, PUK and management key replaced.

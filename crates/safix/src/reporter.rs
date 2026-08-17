@@ -77,6 +77,13 @@ pub enum Refusal {
         /// What was asked for.
         option: String,
     },
+
+    /// An option that takes a value was the last argument.
+    #[error("{option} takes a value")]
+    OptionNeedsValue {
+        /// The option that was left without one.
+        option: String,
+    },
 }
 
 impl Diagnostic for Refusal {
@@ -87,6 +94,7 @@ impl Diagnostic for Refusal {
             Self::UnknownSubcommand { .. } => Box::new("safix::unknown_subcommand"),
             Self::HostNeedsHostname => Box::new("safix::host_needs_hostname"),
             Self::UnknownOption { .. } => Box::new("safix::unknown_option"),
+            Self::OptionNeedsValue { .. } => Box::new("safix::option_needs_value"),
         })
     }
 
@@ -96,7 +104,8 @@ impl Diagnostic for Refusal {
             Self::Usage { .. }
             | Self::UnknownSubcommand { .. }
             | Self::HostNeedsHostname
-            | Self::UnknownOption { .. } => "`safix <subcommand> -h` explains one of them.",
+            | Self::UnknownOption { .. }
+            | Self::OptionNeedsValue { .. } => "`safix <subcommand> -h` explains one of them.",
         };
         Some(Box::new(help))
     }
@@ -465,6 +474,63 @@ mod tests {
                 root: "/srv/fleet".into(),
             },
             Code::HookFailed => Error::HookFailed { status: 2 },
+            Code::EntropyUnreadable => Error::EntropyUnreadable {
+                source: "/dev/urandom",
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::YkmanUnavailable => Error::YkmanUnavailable {
+                program: "ykman".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::PcscdUnavailable => Error::PcscdUnavailable,
+            Code::NoCardConnected => Error::NoCardConnected,
+            Code::CardsAmbiguous => Error::CardsAmbiguous {
+                serials: vec!["11111111".into(), "22222222".into()],
+            },
+            Code::CardCommandFailed => Error::CardCommandFailed {
+                arguments: "--device 11111111 piv access change-pin -P <redacted> -n <redacted>"
+                    .into(),
+                output: "Error: Wrong PIN. 2 tries left.".into(),
+            },
+            Code::CardPinRejected => Error::CardPinRejected {
+                serial: "11111111".into(),
+            },
+            Code::OtpRefused => Error::OtpRefused,
+            Code::TouchPolicyNever => Error::TouchPolicyNever,
+            Code::NoTerminal => Error::NoTerminal,
+            Code::PtyUnusable => Error::PtyUnusable {
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::PluginUnavailable => Error::PluginUnavailable {
+                program: "age-plugin-yubikey".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::PluginFailed => Error::PluginFailed { status: 1 },
+            Code::PluginStalled => Error::PluginStalled { seconds: 90 },
+            Code::PluginNoIdentity => Error::PluginNoIdentity,
+            Code::NoDeclarationFile => Error::NoDeclarationFile {
+                user: "cy".into(),
+                file: "safix/users/cy.nix".into(),
+            },
+            Code::RecipientsLost => Error::RecipientsLost {
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                lost: vec!["age1bo".into()],
+            },
+            Code::NoFileToProveWith => Error::NoFileToProveWith { user: "cy".into() },
+            Code::StoreUnavailable => Error::StoreUnavailable {
+                program: "secret-tool".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::StoreMirrorFailed => Error::StoreMirrorFailed {
+                transport: "the password store's own command",
+                status: 1,
+                output: "Invalid credentials.".into(),
+            },
+            Code::ClanUserRegistrationFailed => Error::ClanUserRegistrationFailed {
+                user: "ana".into(),
+                output: "Error: user ana already exists".into(),
+            },
+            Code::EnrollHookFailed => Error::EnrollHookFailed { status: 2 },
         }
     }
 
@@ -523,6 +589,12 @@ mod tests {
                 "unknown_option",
                 Refusal::UnknownOption {
                     option: "--force".into(),
+                },
+            ),
+            (
+                "option_needs_value",
+                Refusal::OptionNeedsValue {
+                    option: "--serial".into(),
                 },
             ),
         ]

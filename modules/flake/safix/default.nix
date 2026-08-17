@@ -102,6 +102,42 @@ in
       '';
     };
 
+    enrollHook = lib.mkOption {
+      type = lib.types.nullOr lib.types.lines;
+      default = null;
+      example = ''
+        user="$1"
+        serial="$2"
+        recipient="$3"
+        printf 'wire %s (%s) into the vars lists\n' "$recipient" "$serial"
+      '';
+      description = ''
+        A shell fragment `safix enroll` runs after the card's identity, its
+        recipient and the regenerated policy are committed, receiving the
+        person's name as `$1`, the card's serial as `$2` and its age recipient
+        as `$3`. It runs with the repository root as its working directory.
+
+        Everything enrollment does beyond safix's own declarations is here.
+        Where a consumer wires recipients into lists of its own — a clan's
+        `vars.nix`, a host's module tree, a registry — is a property of that
+        consumer's tree, and safix has no way to know its shape, so it passes
+        the three facts it does know and makes no assumption about what happens
+        next.
+
+        Registration with clan is not this: when `flake.safix.bridge.clanFlake`
+        is set, the recipient is registered through clan's own
+        `clan secrets users` command, which is what keeps safix from writing
+        into clan's store. The hook is for what that command cannot know.
+
+        Whatever the hook writes is left uncommitted, so safix's own commit
+        names only what safix did. A non-zero exit is reported and not
+        interpreted.
+
+        Unset is a supported configuration: `enroll` succeeds without it,
+        having done less, and says so.
+      '';
+    };
+
     lib = lib.mkOption {
       type = lib.types.attrs;
       readOnly = true;

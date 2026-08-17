@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: safix/users/cy.nix is not a custody record this can extend, so cy's recovery
+recipients were not touched.
+
+Enrollment adds a recipient to a record that already declares one. The
+record is written by:
+
+    safix adduser cy <age-recipient>
+
+A record living somewhere else is supported — declarations merge, so where
+one is written is not something safix knows — but the edit has to have a
+file to make, so move it to that path or add the recipient by hand and
+re-run for the rest of the ceremony.

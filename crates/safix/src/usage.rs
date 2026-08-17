@@ -341,6 +341,87 @@ is its own to stage. Its absence is a supported configuration: onboarding
 without a hook succeeds, having done less.
 ";
 
+/// `safix enroll -h`.
+pub const ENROLL: &str = "\
+safix enroll [<user>] [--serial <n>] [--slot <n>] [--no-store-pin]
+             [--mirror-to-store] [--store-database <path>]
+             [--pin-policy <p>] [--touch-policy <p>] [--allow-disk-staging]
+
+Take one hardware key from a blank card to a proven recovery identity for
+<user>, in one verb. A touch is the only thing you do.
+
+What it does, in order:
+
+  1. select the card. One connected is taken; two are refused naming both
+     serials and --serial.
+  2. provision PIV access when the card is factory-fresh: a generated PIN, a
+     generated and distinct PUK, and a random management key put on the card
+     under the PIN. The management key is stored nowhere, because PIN
+     possession is management possession. A card already provisioned is not
+     re-provisioned and its PIN is asked for once, unechoed.
+  3. generate an age identity in the first empty retired slot, named for the
+     person and the serial, under a pseudo-terminal that supplies the PIN.
+     THIS is where you touch the card.
+  4. append the identity block to the same identity file `safix keygen`
+     appends to. It holds no private key: the key is on the card.
+  5. add the card's recipient to <user>'s recoveryRecipients, regenerate
+     .sops.yaml, re-wrap every governed file, and commit the three together.
+  6. register the recipient with clan, through clan's own command, when
+     flake.safix.bridge.clanFlake is set; then run flake.safix.enrollHook.
+  7. store the generated PIN and PUK as <user>'s own safix secret, named for
+     the serial. --no-store-pin skips this.
+  8. prove it: open one governed file in <user>'s audience with the card's
+     stub as the only identity reachable. An enrollment without this has no
+     evidence beyond a public string having been copied correctly.
+
+\u{2500}\u{2500} the flags \u{2500}\u{2500}
+  --serial <n>          which card, required when two are connected
+  --slot <n>            a retired slot to use instead of the first empty one
+  --no-store-pin        do not store the generated PIN and PUK in safix
+  --mirror-to-store     also write them to the password store: the session's
+                        secret service when it answers, with no prompt at all
+  --store-database <p>  the kdbx to add the entry to when the service does not
+                        answer, through keepassxc-cli with one password prompt
+  --pin-policy <p>      default once
+  --touch-policy <p>    default cached; never is refused
+  --allow-disk-staging  accept a disk-backed filesystem for the proof's
+                        identity source, where no memory-backed one is found
+
+\u{2500}\u{2500} everything here is additive \u{2500}\u{2500}
+A recipient is appended, an identity block is appended, a name is declared.
+Nothing is removed and nothing is replaced, on any path. A backup key is this
+same verb run again: each card gets its own identity and its own recipient,
+and neither run knows about the other. A re-wrap that dropped a recipient a
+file had before the run is refused rather than committed.
+
+\u{2500}\u{2500} what is refused, and why \u{2500}\u{2500}
+No OTP slot is written, under any flag. A programmed challenge-response slot
+is what opens a password database, and the database has no record of the
+secret it was built with, so writing that slot ends it permanently. Asking is
+refused with that named.
+
+touch-policy never is refused. The touch is the property a card is for.
+
+A run with no terminal is refused before the card is touched: somebody has to
+touch it and somebody has to be told when.
+
+The primary `recipient` stays software-only. Activation decrypts with nobody
+present, so a card belongs in recoveryRecipients and `safix adduser` refuses
+one for the other field.
+
+\u{2500}\u{2500} where the PIN ends up, and what that is worth \u{2500}\u{2500}
+In <user>'s own custody by default, encrypted to the recipients they already
+hold. The honest caveat: a PIN readable by the software identity adds
+protection only once that identity is retired or absent. The default is there
+to make starting easy, not to claim a property it does not have, and
+--no-store-pin turns it off.
+
+The password store is the optional second home and the reason it exists is
+that a credential living only inside the thing it unlocks has a cycle in it.
+The database opens by challenge-response with no PIV PIN involved, so the
+card's PIN is reachable with the card in hand and no self-reference.
+";
+
 /// What a bare invocation says, and what `safix -h` prints.
 ///
 /// The shell runtime's own general usage, word for word: this binary implements
@@ -401,6 +482,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix audit    [<mapping>]                        report bridge drift, change nothing
   safix keygen   [--for-someone-else] [<user>]      an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
+  safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
 
 <user> defaults to $USER when flake.safix.users declares them, and otherwise to
 the sole declared holder when there is exactly one.

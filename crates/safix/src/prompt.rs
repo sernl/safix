@@ -27,6 +27,8 @@ use std::io::{self, Write as _};
 
 use rustix::termios::{LocalModes, OptionalActions, Termios, tcgetattr, tcsetattr};
 use safix_core::adduser::Confirm;
+use safix_core::enroll::Operator;
+use safix_core::enroll::custody::DatabasePassword;
 use safix_core::generate::Interaction;
 use safix_core::model::PromptKind;
 use safix_core::set::ValueSource;
@@ -119,6 +121,51 @@ impl Confirm for Prompted {
     fn scaffold(&mut self) -> Result<bool> {
         let mut source = Source::Stdin;
         Ok(affirmative(plain_line(&mut source, "").as_deref()))
+    }
+}
+
+impl Operator for Prompted {
+    /// The PIN of a card safix did not provision, read once and unechoed.
+    ///
+    /// Once rather than twice, which is the one place this differs from `set`'s
+    /// two entries, and the difference is what the value is: `set` reads a value
+    /// nothing can check, so the confirmation is the only guard against a typo,
+    /// where a PIN the card refuses is caught by the card — at the cost of one of
+    /// its three retries, which the refusal names.
+    fn card_pin(&mut self, serial: &str) -> Result<Secret> {
+        let mut source = open_source(
+            "safix: no terminal; reading the card's PIN from stdin (it will not be echoed anyway).",
+        );
+        eprintln!("safix: {serial} is already provisioned. Its PIN is not echoed.");
+        let pin = one_line(&mut source, "  PIN: ")?.ok_or(Error::NoValueRead)?;
+        if pin.is_empty() {
+            return Err(Error::EmptyValue);
+        }
+        Ok(pin)
+    }
+}
+
+impl DatabasePassword for Prompted {
+    /// The one password prompt the store's own command path has.
+    ///
+    /// It is asked here rather than left to `keepassxc-cli` because that command
+    /// reads the database password and then the entry password from the same
+    /// standard input, and safix has to write the second one — a stream cannot be
+    /// both a pipe and a keyboard.
+    fn database_password(&mut self, database: &std::path::Path) -> Result<Secret> {
+        let mut source = open_source(
+            "safix: no terminal; reading the database password from stdin (it will not be \
+             echoed anyway).",
+        );
+        eprintln!(
+            "safix: unlocking {} to add the card's access. The password is not echoed.",
+            database.display()
+        );
+        let password = one_line(&mut source, "  password: ")?.ok_or(Error::NoValueRead)?;
+        if password.is_empty() {
+            return Err(Error::EmptyValue);
+        }
+        Ok(password)
     }
 }
 

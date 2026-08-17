@@ -1,0 +1,18 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::pcscd_unavailable
+
+  × no smartcard service answered, so no card can be reached.
+  │ 
+  │ A YubiKey's PIV applet is reached over PC/SC, and on this fleet that means
+  │ pcscd. Nothing was touched.
+  │ 
+  │     services.pcscd.enable = true;
+  │ 
+  │ Then re-insert the card and re-run. A card held exclusively by another
+  │ agent —
+  │ a running ssh-agent, a browser, a second enrollment — presents the same
+  │ way, so
+  │ check for one before concluding the service is absent.

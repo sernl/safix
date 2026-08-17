@@ -1,0 +1,18 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: safix enroll does not write, reprogram or delete an OTP slot, under any flag.
+
+A programmed challenge-response slot is what opens a password database, and the
+database has no record of the secret it was built with. Writing that slot
+replaces the factor and the database stops opening — permanently, for every copy
+of it, with no recovery that does not already require what was in it.
+
+The two applets are disjoint. safix drives PIV: a PIN, a PUK, a protected
+management key and an age identity in a retired slot, none of which touches OTP.
+
+Extending a challenge-response factor to a second card is a deliberate manual
+act with the database's life at stake, and KeePassXC's own enrollment of one is
+GUI-only. It is not automated here, and that is a decision rather than an
+omission.
