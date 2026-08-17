@@ -76,8 +76,21 @@ keys:
   - &bo-safix age1fixturebbb00000000000000000000000000000000000000000000000
   # cy — fixture identity, decrypts nothing
   - &cy-safix age1fixtureccc00000000000000000000000000000000000000000000000
+  # fixture-host — the age form of a host identity that does not exist
+  - &fixture-host-safix age1fixturehost00000000000000000000000000000000000000000000000
 
 creation_rules:
+  # Audience: %fixture-web, ana.
+  # One data key, wrapped once per recipient, so every member of this audience
+  # opens every value in this directory. That is why sharing lands here rather
+  # than adding a recipient to one of their personal files.
+  - path_regex: ^secrets/safix/shared/%fixture-web,ana/[^/]*\.yaml$
+    key_groups:
+      - age:
+          - *ana-escrow
+          - *ana-safix
+          - *fixture-host-safix
+
   # Audience: ana, bo.
   # One data key, wrapped once per recipient, so every member of this audience
   # opens every value in this directory. That is why sharing lands here rather

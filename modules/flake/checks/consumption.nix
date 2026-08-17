@@ -548,6 +548,7 @@ in
                 "ops-handover"
                 "ops-tooling"
                 "team-vault"
+                "web-token"
                 "wg-private"
               ];
               selectionIsScopeFree = true;
@@ -794,6 +795,7 @@ in
                   "ops-handover"
                   "ops-tooling"
                   "team-vault"
+                  "web-token"
                   "wg-private"
                 ];
               };

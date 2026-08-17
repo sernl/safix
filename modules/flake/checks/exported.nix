@@ -46,6 +46,8 @@ let
   fleetOf = raw: {
     users = typed (lib.types.attrsOf types.profile) raw.users;
     catalogue = typed (lib.types.attrsOf types.entry) raw.catalogue;
+    machines = typed (lib.types.attrsOf types.machine) raw.machines;
+    services = typed (lib.types.attrsOf types.service) raw.services;
   };
 
   perturbed = update: fleetOf (lib.recursiveUpdate fixture.fleet update);
@@ -58,7 +60,12 @@ let
 in
 {
   flake.safix = {
-    inherit (fixture.fleet) users catalogue;
+    inherit (fixture.fleet)
+      users
+      catalogue
+      machines
+      services
+      ;
   };
 
   perSystem =
@@ -67,15 +74,16 @@ in
       safix = config.flake.safix.lib;
       users = config.flake.safix.users;
 
-      # The records as the binding a consumer gets holds them. The subject records
-      # are empty on this fleet, which is what these claims are about: the
-      # exported builders read the whole registry, and a fleet declaring no
-      # subjects is the same algebra with three empty records in it.
+      # The records as the binding a consumer gets holds them. This fleet declares
+      # one machine and one granted service and no groups or silos, so the
+      # exported builders are instantiated over a registry with some subject
+      # records populated and some empty — which is the shape a consumer's is.
       registry = {
         inherit (config.flake.safix)
           users
           catalogue
           machines
+          services
           groups
           silos
           ;
@@ -261,6 +269,7 @@ in
               "cy"
             ];
             files = [
+              "secrets/safix/shared/%fixture-web,ana/secrets.yaml"
               "secrets/safix/shared/ana,bo/secrets.yaml"
               "secrets/safix/users/ana/secrets.yaml"
               "secrets/safix/users/bo/secrets.yaml"

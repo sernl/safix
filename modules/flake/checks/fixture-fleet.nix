@@ -2,12 +2,12 @@
 # checks safix exports are instantiated here the way a consumer instantiates
 # them rather than called with arguments assembled beside them.
 #
-# Three people who do not exist. ana and bo each carry a catalogue entry into
-# their own custody and share a second one between them; ana escrows to a
-# recovery identity, holds a generated secret, and declares a path; bo declares
-# ownership fields, which is what makes his profile the one the user-scope
-# refusal fires on; cy records a recipient and holds nothing, which earns an
-# anchor and no rule.
+# Three people who do not exist, one machine, and one service on it. ana and bo
+# each carry a catalogue entry into their own custody and share a second one
+# between them; ana escrows to a recovery identity, holds a generated secret,
+# declares a path, and grants one entry to the service; bo declares ownership
+# fields, which is what makes his profile the one the user-scope refusal fires on;
+# cy records a recipient and holds nothing, which earns an anchor and no rule.
 #
 # The recipients are literals shaped like an age public key and are not keys.
 # Nothing in this repository encrypts anything, nothing here has a private half
@@ -23,6 +23,7 @@ let
   boKey = "age1fixturebbb00000000000000000000000000000000000000000000000";
   cyKey = "age1fixtureccc00000000000000000000000000000000000000000000000";
   escrowKey = "age1fixturevault0000000000000000000000000000000000000000000000";
+  hostKey = "age1fixturehost00000000000000000000000000000000000000000000000";
 in
 {
   inherit
@@ -30,6 +31,7 @@ in
     boKey
     cyKey
     escrowKey
+    hostKey
     ;
 
   fleet = {
@@ -118,9 +120,19 @@ in
           wg-public = {
             mode = "0444";
           };
+
+          # Granted to a service rather than to a person, so the fixture fleet
+          # exercises the fourth audience element and the composed key every
+          # custody check reads.
+          web-token = {
+            mode = "0400";
+          };
         };
 
-        sharedWith.bo.ops-handover = { };
+        sharedWith = {
+          bo.ops-handover = { };
+          fixture-web.web-token = { };
+        };
       };
 
       bo = {
@@ -152,6 +164,20 @@ in
         recipient = cyKey;
         recipientNote = "cy — fixture identity, decrypts nothing";
       };
+    };
+
+    machines.fixture-host = {
+      recipient = hostKey;
+      recipientNote = "fixture-host — the age form of a host identity that does not exist";
+      owner = "ana";
+    };
+
+    # One granted service, so the exported checks are instantiated over a fleet
+    # that has one. It declares no ownership, which keeps ana's own profile
+    # materializable at either scope: the ownership asymmetry is bo's to carry.
+    services.fixture-web = {
+      machines = [ "fixture-host" ];
+      owner = "ana";
     };
   };
 }

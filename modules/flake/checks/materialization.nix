@@ -169,6 +169,7 @@
               "ops-handover"
               "ops-tooling"
               "team-vault"
+              "web-token"
               "wg-private"
             ];
             system = [
@@ -177,6 +178,7 @@
               "ops-handover"
               "ops-tooling"
               "team-vault"
+              "web-token"
               "wg-private"
             ];
           };
