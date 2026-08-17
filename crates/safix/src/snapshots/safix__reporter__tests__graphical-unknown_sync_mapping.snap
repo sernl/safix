@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::unknown_sync_mapping
+
+  × 'grafana-typo' is not a declared mapping.
+  │ 
+  │ Declared: grafana, router

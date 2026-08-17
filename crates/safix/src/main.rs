@@ -48,7 +48,7 @@ use std::process::ExitCode;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, keygen,
-    set,
+    set, sync,
 };
 
 use reporter::Refusal;
@@ -158,6 +158,11 @@ const VERBS: &[Verb] = &[
         name: "audit",
         help: usage::AUDIT,
         run: audit_command,
+    },
+    Verb {
+        name: "sync",
+        help: usage::SYNC,
+        run: sync_command,
     },
     Verb {
         name: "keygen",
@@ -542,6 +547,43 @@ fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let workspace = Workspace::discover()?;
     let report = audit::run(&workspace, only.as_deref())?;
     eprint!("{}", render::audit(&report));
+
+    Ok(if report.is_clean() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
+/// The mirror, converged per mapping.
+///
+/// The narrowing argument is the bridge verbs' own, and the exit codes are
+/// `audit`'s: zero when every declared mapping converged, one when any mapping
+/// conflicts, is refused, or could not be judged.
+fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    let only = match arguments {
+        [] => None,
+        [option] if option.starts_with('-') => {
+            return Err(Refusal::UnknownOption {
+                option: option.clone(),
+            });
+        }
+        [mapping] => Some(mapping.clone()),
+        _ => {
+            return Err(Refusal::Usage {
+                form: "sync [<mapping>]",
+            });
+        }
+    };
+
+    let workspace = Workspace::discover()?;
+    let report = sync::run(
+        &workspace,
+        &Terminal,
+        &mut prompt::Prompted,
+        only.as_deref(),
+    )?;
+    eprint!("{}", render::sync(&report));
 
     Ok(if report.is_clean() {
         ExitCode::SUCCESS

@@ -1,21 +1,31 @@
-//! SHA-256, over bytes that are never a value.
+//! SHA-256, and what each of its two callers may do with the result.
 //!
-//! The one hash this crate computes, and the whole of what it is for is
-//! [`crate::definition`]: a generator's declaration is reduced to one line so
-//! that a later edit to it is detectable from the tree alone. No value and no
-//! derivative of a value is ever passed here — the callers are the definition
-//! record's writer and its reader, and both hand over declarations.
+//! The one hash this crate computes, and it has two callers with different
+//! constraints.
+//!
+//! [`crate::definition`] hands over a declaration: a generator's definition is
+//! reduced to one line so that a later edit to it is detectable from the tree
+//! alone. Nothing about a value is in it, which is what lets that record be
+//! committed in the clear.
+//!
+//! [`crate::sync`] hands over a value, through
+//! [`Secret::fingerprint`](crate::Secret) — the record of the last agreement
+//! between a safix entry and a database entry. That result is a
+//! guess-confirmation oracle for anyone who holds it, so the one place it may
+//! land is inside the encrypted database, and `crate::sync`'s own note is where
+//! that constraint is stated and enforced. It must never reach this repository.
 //!
 //! # Why it is written out rather than depended on
 //!
 //! The locked dependency graph is reviewed offline for licence, provenance and
 //! duplication, and `rust-supply-chain` states that adding to it is a decision
 //! rather than a lock update. A digest of a declaration is not a cryptographic
-//! boundary here — the record and the declaration are committed side by side in
-//! one repository, so anybody who can edit one can edit the other — but naming
+//! boundary — the record and the declaration are committed side by side in one
+//! repository, so anybody who can edit one can edit the other — but naming
 //! something a digest and computing a weak one invites the reader to assume the
 //! stronger property. So the standard function is written out, held to the
-//! published test vectors below, and costs the graph nothing.
+//! published test vectors below, and costs the graph nothing. The value-derived
+//! caller above is what makes the strength load-bearing rather than decorative.
 //!
 //! # What is deliberate about the shape of the code
 //!

@@ -136,6 +136,94 @@ Nothing here writes, in either repository. No value, and no digest of one,
 reaches the report.
 ";
 
+/// `safix sync -h`.
+pub const SYNC: &str = "\
+safix sync [<mapping>]
+
+Converge every mapping declared in flake.safix.keepassxc.mappings, or the one
+named, between a safix entry and an entry in your password database. With no
+mapping named it acts on all of them.
+
+\u{2500}\u{2500} the four modes \u{2500}\u{2500}
+The mode is declared per mapping, not passed here: a remembered flag on a verb is
+exactly the drifting operational knowledge a declaration exists to end.
+
+  safix-to-keepassxc   the database converges to safix's value. A database-side
+                       edit to a mapped entry is overwritten, and reported.
+  keepassxc-to-safix   safix converges to the database's value, through the same
+                       path `safix set` writes through: the same empty-value
+                       refusal, the same recipient-drift refusal, the same staged
+                       write and rename, and a commit naming the mapping.
+  two-way              whichever side changed since the last agreement wins.
+                       Both changed is a conflict.
+  backup               safix's value is written where the database has none, and
+                       a database value that differs is never overwritten \u{2014} the
+                       divergence is reported instead.
+
+\u{2500}\u{2500} nothing is ever deleted \u{2500}\u{2500}
+No mode deletes an entry, on either side, under any circumstances. Remove a
+mapping and its last database value stays where it is until a person removes it;
+the report says the entry is there and that no mapping declares it. Filen's
+mirror modes do propagate deletions and that is the one part of the model
+deliberately not taken: an accidental deletion of a secret is not a state a sync
+should be able to reach.
+
+\u{2500}\u{2500} what a conflict is, and is not \u{2500}\u{2500}
+A two-way mapping remembers the last state both sides agreed on. When exactly one
+side has moved since, the other converges to it. When both have, nothing is
+written and the finding names the two one-way modes that each resolve it \u{2014} it
+is never resolved by a heuristic, because last-writer-wins over secrets rewards
+whichever clock lied best.
+
+That memory is a digest of the agreed value, and it lives in a companion entry
+beside the mapped one, inside the encrypted database. It is never in the
+repository, and that is a security decision rather than a filing one: a committed
+digest of a secret is an oracle for confirming a guessed value offline. The
+companion's name is the entry's plus `.safix-sync-state`, which no mapping may
+declare \u{2014} evaluation refuses one that tries.
+
+Deleting the companion is safe and converts the mapping to bootstrap semantics:
+the next run writes only where one side is empty and reports everything else. The
+memory is written only as part of a converging write, so a two-way mapping whose
+sides already agreed before safix ever ran has none, and its first divergence is
+a conflict rather than a guess.
+
+\u{2500}\u{2500} the database, and the one prompt \u{2500}\u{2500}
+flake.safix.keepassxc.database names it, as a string rather than a nix path \u{2014}
+a path would be copied into the world-readable store on every evaluation. The
+password is asked for once per run and travels standard input; the value of every
+entry travels standard input in and a pipe out. No value reaches an argument
+vector or an environment variable on any leg.
+
+Without a terminal to ask on, this refuses before reading anything. The session's
+secret service is not a second way in: the collection it publishes is KeePassXC's
+own exposed group, so it cannot address the group and path a mapping declares,
+and a transport that silently landed a secret somewhere else is not one this verb
+has.
+
+\u{2500}\u{2500} it manages no keyring \u{2500}\u{2500}
+No database is created, no database key is changed or added, and no hardware slot
+is touched, under any flag. The store is a store being written, not a keyring
+being managed. Writing a challenge-response slot is what would end a database
+permanently, and there is nothing here that can.
+
+\u{2500}\u{2500} convergence, and why it is load-bearing \u{2500}\u{2500}
+A kdbx save rewrites and re-uploads the whole file. So both sides of every
+mapping are read and compared first, every database write of a run is issued
+consecutively, and a run over mappings that agree writes nothing anywhere.
+
+A value carrying a newline is refused rather than written: the store's own
+command reads an entry's password as one line, so what would land is the bytes
+before the first newline. Nothing here strips the byte for you \u{2014} a mirror that
+silently trims a value lies about what it holds. `printf` where `echo` minted it.
+
+Each mapping is reported as unchanged, updated, pulled, conflict, refused, or not
+judged, and every declared mapping appears whatever happened to it. A mapping
+whose safix side did not decrypt is reported rather than skipped, because a report
+that dropped those would be a report about who ran it. The run exits non-zero
+when any mapping conflicts, is refused, or could not be judged.
+";
+
 /// `safix get -h`.
 pub const GET: &str = "\
 safix get [<user>] <name>
@@ -480,6 +568,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix import   [<mapping>]                        clan-to-safix declared mappings
   safix export   [<mapping>]                        safix-to-clan declared mappings
   safix audit    [<mapping>]                        report bridge drift, change nothing
+  safix sync     [<mapping>]                        converge declared keepassxc mappings
   safix keygen   [--for-someone-else] [<user>]      an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
@@ -510,6 +599,17 @@ is nothing here that writes one.
 `safix audit` is the report over the same declarations: it compares both sides
 of each mapping and writes nothing. It is separate from `check` because it needs
 what `check` refuses \u{2014} a decryption of the safix side, and a clan.
+
+\u{2500}\u{2500} what sync is, and how it differs from those two \u{2500}\u{2500}
+`safix sync` converges declared safix entries with entries in your password
+database, which is where a credential a person types goes. Each mapping declares
+its own mode \u{2014} one-way in either direction, two-way, or backup \u{2014} so one run
+can push some entries and pull others. No mode deletes anything on either side.
+
+It is not a second bridge with a different far end. The clan verbs move values
+between two tools that both hold them for programs; this one ends the drift
+between a value a program reads and the same value a person reads, and its report
+is its own rather than more rows in `check`.
 
 \u{2500}\u{2500} one verb that does not exist here, and why \u{2500}\u{2500}
   upload   a tool that pushes generated values to a machine over ssh exists

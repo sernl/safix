@@ -1,0 +1,15 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_store_database
+
+  × flake.safix.keepassxc declares 3 mapping(s) and no database, so there
+  │ is nothing for them to converge against.
+  │ 
+  │ There is no default and there cannot be one: which database holds a
+  │ person's credentials is a fact about their machine. Name it as a string
+  │ rather than a nix path — a path is copied into the store when it is
+  │ interpolated, and the store is world-readable:
+  │ 
+  │     flake.safix.keepassxc.database = "/home/<you>/.keys/master.kdbx";

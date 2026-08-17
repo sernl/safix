@@ -152,13 +152,23 @@ impl DatabasePassword for Prompted {
     /// reads the database password and then the entry password from the same
     /// standard input, and safix has to write the second one — a stream cannot be
     /// both a pipe and a keyboard.
+    ///
+    /// Asked once per run and not once per entry, which is what `safix sync`
+    /// needs: every mapping of a run is read and written through invocations of
+    /// that one command, and prompting per invocation would ask a person for the
+    /// same password a dozen times.
+    ///
+    /// The sentence names the database and nothing about why, because two verbs
+    /// reach it now — enrollment mirroring a card's credentials, and sync
+    /// converging declared mappings — and a prompt that named one of them would
+    /// be wrong under the other.
     fn database_password(&mut self, database: &std::path::Path) -> Result<Secret> {
         let mut source = open_source(
             "safix: no terminal; reading the database password from stdin (it will not be \
              echoed anyway).",
         );
         eprintln!(
-            "safix: unlocking {} to add the card's access. The password is not echoed.",
+            "safix: unlocking {}. The password is not echoed.",
             database.display()
         );
         let password = one_line(&mut source, "  password: ")?.ok_or(Error::NoValueRead)?;

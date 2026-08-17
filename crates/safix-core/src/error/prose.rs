@@ -278,6 +278,27 @@ pub(super) fn unknown_mapping(mapping: &str, declared: &str) -> String {
     )
 }
 
+/// A mirror mapping name nothing declares.
+///
+/// Separate from [`unknown_mapping`] rather than sharing it, because the empty
+/// case has to name the option the operator would declare one under and the two
+/// surfaces have different ones.
+pub(super) fn unknown_sync_mapping(mapping: &str, declared: &str) -> String {
+    if declared.is_empty() {
+        return format!(
+            "'{mapping}' is not a declared mapping, and no mapping is declared.\n\
+            \n\
+            A mapping is a declaration rather than an argument. Declare one under\n\
+            flake.safix.keepassxc.mappings, naming both endpoints and a mode."
+        );
+    }
+    format!(
+        "'{mapping}' is not a declared mapping.\n\
+        \n\
+        Declared: {declared}"
+    )
+}
+
 /// A mapping named to the verb that does not act on it.
 pub(super) fn mapping_wrong_direction(
     mapping: &str,
@@ -513,6 +534,136 @@ pub(super) fn recipients_lost(file: &str, lost: &[String]) -> String {
         \x20   safix check\n\
         \x20   git diff",
         bulleted(lost)
+    )
+}
+
+/// A mirror mapping whose safix side holds nothing to mirror.
+///
+/// Separate from [`source_has_no_value`] rather than sharing it: that one says
+/// the mapping exports the entry, and this mapping does not export anything.
+pub(super) fn sync_source_empty(
+    mapping: &str,
+    user: &str,
+    name: &str,
+    file: &str,
+    generated: bool,
+) -> String {
+    let remedy = if generated {
+        format!("\x20   safix generate {user} {name}")
+    } else {
+        format!("\x20   safix set {user} {name}")
+    };
+    format!(
+        "the mapping '{mapping}' mirrors {name} for {user} into the database, and it holds\n\
+        no value yet. Nothing was written.\n\
+        \n\
+        {file} does not carry the key. Evaluation could not have caught this: an\n\
+        entry declares where a value lives, not that one is there.\n\
+        \n\
+        Give it a value, then re-run:\n\
+        \n\
+        {remedy}"
+    )
+}
+
+/// A mirror mapping whose database side holds no entry to read.
+pub(super) fn store_entry_absent(mapping: &str, entry: &str, mode: &str) -> String {
+    format!(
+        "the mapping '{mapping}' is {mode}, so the database is where its value comes\n\
+        from, and the database holds no entry at '{entry}'. Nothing was written.\n\
+        \n\
+        safix does not author that entry, and this is the one place the asymmetry\n\
+        shows: a value the operator types into their own database is theirs to\n\
+        create, where a value safix mints is safix's. Create it, and the next run\n\
+        converges safix onto it.\n\
+        \n\
+        If safix is the producer after all, the mapping is declared the wrong way\n\
+        round: mode = \"safix-to-keepassxc\" makes the database follow safix."
+    )
+}
+
+/// Mappings declared and no database for them to reach.
+pub(super) fn no_store_database(mappings: usize) -> String {
+    format!(
+        "flake.safix.keepassxc declares {mappings} mapping(s) and no database, so there\n\
+        is nothing for them to converge against.\n\
+        \n\
+        There is no default and there cannot be one: which database holds a\n\
+        person's credentials is a fact about their machine. Name it as a string\n\
+        rather than a nix path — a path is copied into the store when it is\n\
+        interpolated, and the store is world-readable:\n\
+        \n\
+        \x20   flake.safix.keepassxc.database = \"/home/<you>/.keys/master.kdbx\";"
+    )
+}
+
+/// A run with no terminal to ask for the database's password on.
+pub(super) fn store_locked(database: &str) -> String {
+    format!(
+        "{database} needs its password and there is no terminal to ask on. Nothing\n\
+        was read.\n\
+        \n\
+        The refusal is here rather than after the first mapping deliberately: a run\n\
+        that prompted into the void would have decrypted safix's side of every\n\
+        mapping first, and a run that treated the database as empty would report\n\
+        every mapping as one-sided and, in backup mode, write.\n\
+        \n\
+        There is one way to provide the database, and it is the declared path plus\n\
+        the password on a terminal. The session's secret service is not a second\n\
+        way: the collection it publishes is KeePassXC's exposed group, so it cannot\n\
+        address the group and path a mapping declares.\n\
+        \n\
+        Run this where you can type, or leave the mapping to a run that can."
+    )
+}
+
+/// The store's own command would not open the database.
+pub(super) fn database_unreadable(database: &str, output: &str) -> String {
+    format!(
+        "{database} did not open, so no mapping was judged and nothing was written.\n\
+        \n\
+        A wrong password and an unreadable file present the same way here, and the\n\
+        store's own message below is what tells them apart.\n\
+        \n\
+        {output}"
+    )
+}
+
+/// The store's own command refused over one entry.
+pub(super) fn store_command_failed(entry: &str, arguments: &str, output: &str) -> String {
+    format!(
+        "the store's own command refused over the entry '{entry}'.\n\
+        \n\
+        It was run as:\n\
+        \n\
+        \x20   keepassxc-cli {arguments}\n\
+        \n\
+        No value is in that line: the database's password and the entry's both\n\
+        travel standard input. The command said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// A value the store's own command cannot carry whole.
+pub(super) fn value_spans_lines(entry: &str) -> String {
+    format!(
+        "the value for '{entry}' carries a newline, and the store's own command reads\n\
+        an entry's password as one line. Nothing was written.\n\
+        \n\
+        What would land is the bytes before the first newline, which is a mirror\n\
+        that lies about what it holds — and the comparison that decides whether a\n\
+        run has anything to do is byte-exact, so a value ending in a newline would\n\
+        differ from the stored one on every run and rewrite the whole database each\n\
+        time, forever.\n\
+        \n\
+        Nothing here strips the byte for you. `echo` appends a newline and `printf`\n\
+        does not, so a value minted or typed with one is re-established without:\n\
+        \n\
+        \x20   printf '%s' \"$VALUE\" | safix set <user> <name>\n\
+        \n\
+        or, where a generator minted it, change the generator's last write to\n\
+        `printf` and re-run `safix generate --regenerate <user> <name>`."
     )
 }
 

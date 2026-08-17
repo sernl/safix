@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'grafana-typo' is not a declared mapping.
+
+Declared: grafana, router

@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::store_command_failed
+
+  × the store's own command refused over the entry 'safix/ana/grafana'.
+  │ 
+  │ It was run as:
+  │ 
+  │     keepassxc-cli add --quiet --password-prompt /home/ana/.keys/
+  │ master.kdbx safix/ana/grafana
+  │ 
+  │ No value is in that line: the database's password and the entry's both
+  │ travel standard input. The command said:
+  │ 
+  │ Could not create entry with path safix/ana/grafana.

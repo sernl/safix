@@ -1,0 +1,25 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::value_spans_lines
+
+  × the value for 'safix/ana/grafana' carries a newline, and the store's own
+  │ command reads
+  │ an entry's password as one line. Nothing was written.
+  │ 
+  │ What would land is the bytes before the first newline, which is a mirror
+  │ that lies about what it holds — and the comparison that decides whether a
+  │ run has anything to do is byte-exact, so a value ending in a newline would
+  │ differ from the stored one on every run and rewrite the whole database
+  │ each
+  │ time, forever.
+  │ 
+  │ Nothing here strips the byte for you. `echo` appends a newline and
+  │ `printf`
+  │ does not, so a value minted or typed with one is re-established without:
+  │ 
+  │     printf '%s' "$VALUE" | safix set <user> <name>
+  │ 
+  │ or, where a generator minted it, change the generator's last write to
+  │ `printf` and re-run `safix generate --regenerate <user> <name>`.

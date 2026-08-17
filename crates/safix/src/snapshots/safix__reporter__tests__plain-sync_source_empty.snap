@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the mapping 'grafana' mirrors grafana-password for ana into the database, and it holds
+no value yet. Nothing was written.
+
+secrets/safix/users/ana/secrets.yaml does not carry the key. Evaluation could not have caught this: an
+entry declares where a value lives, not that one is there.
+
+Give it a value, then re-run:
+
+    safix set ana grafana-password

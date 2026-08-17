@@ -283,7 +283,7 @@ fn one_import(
         Reading::AbsentAtSource => return Ok(Outcome::AbsentAtSource),
     };
 
-    if let Some(held) = held_by_safix(workspace, mapping)?
+    if let Some(held) = held_for(workspace, mapping)?
         && held.equals(&incoming)
     {
         return Ok(Outcome::Unchanged);
@@ -339,7 +339,7 @@ fn one_export(
     let file = placement.file.clone();
     let generated = placement.generator.is_some();
 
-    let Some(outgoing) = held_by_safix(workspace, mapping)? else {
+    let Some(outgoing) = held_for(workspace, mapping)? else {
         return Ok(Outcome::Refused(Error::SourceHasNoValue {
             mapping: mapping.id.clone(),
             user: mapping.safix.user.clone(),
@@ -424,8 +424,18 @@ pub(crate) fn endpoints(mapping: &Mapping) -> (String, String) {
 /// with an empty value before it asks for one, so "the file exists and the key
 /// decrypts to nothing" is a state a value has never been written into and is
 /// not distinguishable from a value that is legitimately empty by decrypting.
-pub(crate) fn held_by_safix(workspace: &Workspace, mapping: &Mapping) -> Result<Option<Secret>> {
-    let placement = workspace.resolve(&mapping.safix.user, &mapping.safix.name)?;
+///
+/// Addressed by the three names rather than by a [`Mapping`] because
+/// [`crate::sync`] asks the same question about a mapping of its own: what safix
+/// holds for one entry is one question, and two readers of it would be two
+/// answers a report could disagree with a transfer over.
+pub(crate) fn held_by_safix(
+    workspace: &Workspace,
+    mapping: &str,
+    user: &str,
+    name: &str,
+) -> Result<Option<Secret>> {
+    let placement = workspace.resolve(user, name)?;
     let key = placement.key.clone();
     let relative = placement.file.clone();
     let absolute = workspace.absolute(&relative);
@@ -442,13 +452,23 @@ pub(crate) fn held_by_safix(workspace: &Workspace, mapping: &Mapping) -> Result<
     let decrypted = workspace.sops().decrypt_key(&absolute, &key)?;
     if decrypted.status != 0 {
         return Err(Error::SourceUnreadable {
-            mapping: mapping.id.clone(),
-            user: mapping.safix.user.clone(),
-            name: mapping.safix.name.clone(),
+            mapping: mapping.to_owned(),
+            user: user.to_owned(),
+            name: name.to_owned(),
             file: relative,
         });
     }
     Ok(Some(decrypted.value))
+}
+
+/// The same read, addressed by a clan mapping.
+pub(crate) fn held_for(workspace: &Workspace, mapping: &Mapping) -> Result<Option<Secret>> {
+    held_by_safix(
+        workspace,
+        &mapping.id,
+        &mapping.safix.user,
+        &mapping.safix.name,
+    )
 }
 
 /// The commit subject an imported mapping lands under, for a caller that wants

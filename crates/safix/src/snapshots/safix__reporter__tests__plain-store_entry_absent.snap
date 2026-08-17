@@ -1,0 +1,14 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the mapping 'router' is keepassxc-to-safix, so the database is where its value comes
+from, and the database holds no entry at 'safix/bo/router'. Nothing was written.
+
+safix does not author that entry, and this is the one place the asymmetry
+shows: a value the operator types into their own database is theirs to
+create, where a value safix mints is safix's. Create it, and the next run
+converges safix onto it.
+
+If safix is the producer after all, the mapping is declared the wrong way
+round: mode = "safix-to-keepassxc" makes the database follow safix.

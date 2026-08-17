@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'grafana' is not a declared mapping, and no mapping is declared.
+
+A mapping is a declaration rather than an argument. Declare one under
+flake.safix.keepassxc.mappings, naming both endpoints and a mode.

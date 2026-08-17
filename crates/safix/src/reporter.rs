@@ -526,6 +526,41 @@ mod tests {
                 status: 1,
                 output: "Invalid credentials.".into(),
             },
+            Code::NoStoreDatabase => Error::NoStoreDatabase { mappings: 3 },
+            Code::UnknownSyncMapping => Error::UnknownSyncMapping {
+                mapping: "grafana-typo".into(),
+                declared: vec!["grafana".into(), "router".into()],
+            },
+            Code::StoreLocked => Error::StoreLocked {
+                database: "/home/ana/.keys/master.kdbx".into(),
+            },
+            Code::DatabaseUnreadable => Error::DatabaseUnreadable {
+                database: "/home/ana/.keys/master.kdbx".into(),
+                output: "Invalid credentials were provided, please try again.".into(),
+            },
+            Code::StorePipeMissing => Error::StorePipeMissing,
+            Code::StoreCommandFailed => Error::StoreCommandFailed {
+                entry: "safix/ana/grafana".into(),
+                arguments: "add --quiet --password-prompt /home/ana/.keys/master.kdbx \
+                    safix/ana/grafana"
+                    .into(),
+                output: "Could not create entry with path safix/ana/grafana.".into(),
+            },
+            Code::ValueSpansLines => Error::ValueSpansLines {
+                entry: "safix/ana/grafana".into(),
+            },
+            Code::SyncSourceEmpty => Error::SyncSourceEmpty {
+                mapping: "grafana".into(),
+                user: "ana".into(),
+                name: "grafana-password".into(),
+                file: "secrets/safix/users/ana/secrets.yaml".into(),
+                generated: false,
+            },
+            Code::StoreEntryAbsent => Error::StoreEntryAbsent {
+                mapping: "router".into(),
+                entry: "safix/bo/router".into(),
+                mode: "keepassxc-to-safix",
+            },
             Code::ClanUserRegistrationFailed => Error::ClanUserRegistrationFailed {
                 user: "ana".into(),
                 output: "Error: user ana already exists".into(),
@@ -558,6 +593,23 @@ mod tests {
                     name: "wg-private".into(),
                     file: "secrets/safix/users/ana/secrets.yaml".into(),
                     generated: true,
+                }),
+            ),
+            (
+                "sync_source_empty_generated",
+                Refusal::Runtime(Error::SyncSourceEmpty {
+                    mapping: "wg-key".into(),
+                    user: "ana".into(),
+                    name: "wg-private".into(),
+                    file: "secrets/safix/users/ana/secrets.yaml".into(),
+                    generated: true,
+                }),
+            ),
+            (
+                "unknown_sync_mapping_none_declared",
+                Refusal::Runtime(Error::UnknownSyncMapping {
+                    mapping: "grafana".into(),
+                    declared: Vec::new(),
                 }),
             ),
         ]

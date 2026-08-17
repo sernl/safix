@@ -643,6 +643,136 @@ impl Bridge {
     }
 }
 
+/// How one mapping between a safix entry and a database entry converges.
+///
+/// Named by its endpoints where a direction is what it is, and by the
+/// relationship where it is not: `two-way` and `backup` are not directions. The
+/// vocabulary is the one the fleet's own sync declaration already uses for
+/// pairs, minus deletion propagation in every mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Mode {
+    /// The database converges to safix's value. `sync` overwrites a
+    /// database-side edit and reports that it did.
+    #[serde(rename = "safix-to-keepassxc")]
+    SafixToKeepassxc,
+    /// safix converges to the database's value, through the write path a
+    /// hand-set value takes.
+    #[serde(rename = "keepassxc-to-safix")]
+    KeepassxcToSafix,
+    /// Whichever side changed since the last agreement wins; both changed is a
+    /// conflict that writes nothing.
+    #[serde(rename = "two-way")]
+    TwoWay,
+    /// safix's value is written where the database holds none, and a differing
+    /// database value is reported rather than overwritten.
+    #[serde(rename = "backup")]
+    Backup,
+}
+
+impl Mode {
+    /// The mode as it is declared and as every report of it names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SafixToKeepassxc => "safix-to-keepassxc",
+            Self::KeepassxcToSafix => "keepassxc-to-safix",
+            Self::TwoWay => "two-way",
+            Self::Backup => "backup",
+        }
+    }
+
+    /// Whether this mode can write safix's side, which is what makes a
+    /// generator on that side a second producer.
+    ///
+    /// The same predicate `modules/flake/safix/keepassxc.nix` refuses on, and
+    /// the reason it is here as well is that the two answer different questions
+    /// about it: evaluation refuses the declaration, and the runtime decides
+    /// which half of a converging run may write.
+    #[must_use]
+    pub const fn pulls(self) -> bool {
+        matches!(self, Self::KeepassxcToSafix | Self::TwoWay)
+    }
+
+    /// Whether this mode can write the database's side.
+    #[must_use]
+    pub const fn pushes(self) -> bool {
+        matches!(self, Self::SafixToKeepassxc | Self::TwoWay | Self::Backup)
+    }
+}
+
+impl std::fmt::Display for Mode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The database half of a mapping: where the entry sits, and what to call its
+/// user.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KdbxSide {
+    /// The entry's path under the declared group, as the store's own command
+    /// line spells one.
+    pub path: String,
+    /// The username to set on the entry, or none to leave the field alone.
+    pub username: Option<String>,
+}
+
+/// One declared relationship between a safix entry and a database entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncMapping {
+    /// The attribute name the mapping was declared under, for the reason
+    /// [`Mapping::id`] carries one.
+    pub id: String,
+    /// How it converges.
+    pub mode: Mode,
+    /// The safix endpoint, which evaluation did verify.
+    pub safix: SafixSide,
+    /// The database endpoint. Nothing at evaluation verified any of it.
+    pub kdbx: KdbxSide,
+}
+
+/// The declared mirror: the database, the group, and every mapping under it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Keepassxc {
+    /// The database `sync` converges against, or none when the consumer named
+    /// no database.
+    pub database: Option<String>,
+    /// The group every mapping's entry path is relative to.
+    pub group: String,
+    /// Every mapping, in the order the attribute names sort.
+    pub mappings: Vec<SyncMapping>,
+}
+
+impl Keepassxc {
+    /// One mapping by its declared name.
+    #[must_use]
+    pub fn named(&self, id: &str) -> Option<&SyncMapping> {
+        self.mappings.iter().find(|mapping| mapping.id == id)
+    }
+
+    /// Every declared mapping's name, for a refusal that has to list them.
+    #[must_use]
+    pub fn declared(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect()
+    }
+
+    /// The entry path this mapping names, under the declared group.
+    ///
+    /// One function rather than a `format!` at each caller: the report, the
+    /// refusals and the two reads all name the same entry, and a difference
+    /// between them would be a difference with nothing behind it.
+    #[must_use]
+    pub fn entry_of(&self, mapping: &SyncMapping) -> String {
+        format!("{}/{}", self.group, mapping.kdbx.path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,6 +1002,87 @@ mod tests {
         );
 
         assert_eq!(plan.cycle(), None);
+    }
+
+    const MIRROR: &str = r#"{
+      "database": "/keys/master.kdbx",
+      "group": "safix",
+      "mappings": [
+        {
+          "id": "grafana",
+          "mode": "safix-to-keepassxc",
+          "safix": { "user": "ana", "name": "grafana-password" },
+          "kdbx": { "path": "ana/grafana", "username": "ana@example.invalid" }
+        },
+        {
+          "id": "router",
+          "mode": "two-way",
+          "safix": { "user": "bo", "name": "router" },
+          "kdbx": { "path": "bo/router", "username": null }
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn the_mirror_deserializes_from_the_shape_nix_emits() {
+        let mirror: Keepassxc = serde_json::from_str(MIRROR).unwrap();
+        assert_eq!(mirror.database.as_deref(), Some("/keys/master.kdbx"));
+        assert_eq!(mirror.declared(), ["grafana", "router"]);
+
+        let grafana = mirror.named("grafana").unwrap();
+        assert_eq!(grafana.mode, Mode::SafixToKeepassxc);
+        assert_eq!(mirror.entry_of(grafana), "safix/ana/grafana");
+        assert_eq!(
+            grafana.kdbx.username.as_deref(),
+            Some("ana@example.invalid")
+        );
+
+        let router = mirror.named("router").unwrap();
+        assert_eq!(router.mode, Mode::TwoWay);
+        assert!(router.kdbx.username.is_none());
+        assert!(mirror.named("absent").is_none());
+    }
+
+    /// A consumer who has never heard of this evaluates exactly this.
+    #[test]
+    fn a_mirror_with_no_database_and_no_mapping_is_a_shape_this_reads() {
+        let mirror: Keepassxc =
+            serde_json::from_str(r#"{"database": null, "group": "safix", "mappings": []}"#)
+                .unwrap();
+        assert!(mirror.database.is_none());
+        assert!(mirror.mappings.is_empty());
+        assert!(mirror.declared().is_empty());
+    }
+
+    #[test]
+    fn an_unknown_mode_is_refused_rather_than_read_as_another() {
+        let with_mode = MIRROR.replace(r#""mode": "two-way""#, r#""mode": "push""#);
+        assert!(serde_json::from_str::<Keepassxc>(&with_mode).is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_on_a_mapping_is_refused_rather_than_dropped() {
+        let with_extra = MIRROR.replace(
+            r#""path": "bo/router""#,
+            r#""path": "bo/router", "url": "x""#,
+        );
+        assert!(serde_json::from_str::<Keepassxc>(&with_extra).is_err());
+    }
+
+    /// Which side each mode may write, asserted over every mode rather than over
+    /// the ones a test happened to name.
+    #[test]
+    fn each_mode_writes_the_sides_its_name_says() {
+        let modes = [
+            (Mode::SafixToKeepassxc, false, true),
+            (Mode::KeepassxcToSafix, true, false),
+            (Mode::TwoWay, true, true),
+            (Mode::Backup, false, true),
+        ];
+        for (mode, pulls, pushes) in modes {
+            assert_eq!(mode.pulls(), pulls, "{mode} pulls");
+            assert_eq!(mode.pushes(), pushes, "{mode} pushes");
+        }
     }
 
     #[test]

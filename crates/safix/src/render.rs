@@ -627,6 +627,149 @@ fn push_one_sided(out: &mut String, finding: &audit::Finding, side: Side) {
     remedy(out, &format!("    {}", converging(finding)));
 }
 
+/// What a sync run did, one line per declared mapping and a closing count.
+///
+/// The shape [`transfer`] has, because it is the same kind of report over a
+/// different relationship: each line names the mapping, its mode, both endpoints
+/// and the outcome, the arrow points the way the value moved, and none of them
+/// names a value. A mapping that needs a person — a conflict, a refusal, a side
+/// that could not be judged — gets its paragraph under its line, because a run
+/// that says "conflict" and not what to do about it is a run the operator has to
+/// reproduce one mapping at a time to understand.
+#[must_use]
+pub fn sync(report: &safix_core::sync::Report) -> String {
+    let mut out = String::new();
+    if report.converged.is_empty() {
+        let empty = format!("{PROGRAM}: no mapping is declared.\n");
+        out.push_str(&empty);
+        return out;
+    }
+
+    for entry in &report.converged {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {flow}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            flow = sync_flow(entry),
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        push_sync_detail(&mut out, entry);
+    }
+
+    for entry in &report.lingering {
+        out.push('\n');
+        detail(
+            &mut out,
+            &format!("{entry} is in the group and no mapping declares it."),
+        );
+        detail(
+            &mut out,
+            "No mode deletes an entry, so this is what a mapping that was removed",
+        );
+        detail(
+            &mut out,
+            "leaves behind. Nothing here will remove it; a person does that.",
+        );
+    }
+
+    let tally = report.tally();
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {database}: {} updated, {} pulled, {} unchanged, \
+         {} conflict, {} refused, {} not judged.\n",
+        tally.updated,
+        tally.pulled,
+        tally.unchanged,
+        tally.conflict,
+        tally.refused,
+        tally.not_judged,
+        total = report.converged.len(),
+        database = report.database,
+    );
+    out.push_str(&closing);
+    out
+}
+
+/// One mapping's endpoints, in the order the value moved between them.
+///
+/// A mapping that wrote nothing has no direction to show, so its endpoints are
+/// joined by a two-headed arrow: the line is about a relationship rather than
+/// about a transfer.
+fn sync_flow(entry: &safix_core::sync::Converged) -> String {
+    use safix_core::sync::Outcome;
+    match entry.outcome {
+        Outcome::Updated => format!("{} -> {}", entry.safix, entry.kdbx),
+        Outcome::Pulled => format!("{} -> {}", entry.kdbx, entry.safix),
+        _ => format!("{} <-> {}", entry.safix, entry.kdbx),
+    }
+}
+
+/// The paragraph under a mapping that needs a person.
+fn push_sync_detail(out: &mut String, entry: &safix_core::sync::Converged) {
+    use safix_core::model::Mode;
+    use safix_core::sync::Outcome;
+
+    match &entry.outcome {
+        Outcome::Conflict if entry.mode == Mode::Backup => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} holds a value that is not {}'s, and backup never overwrites one.",
+                    entry.kdbx, entry.safix
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written. Either accept the database's value, or declare",
+            );
+            remedy(out, "mode = \"safix-to-keepassxc\";");
+            detail(
+                out,
+                "on that mapping, which makes the database follow safix.",
+            );
+        }
+
+        Outcome::Conflict => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} have both changed since the last agreement.",
+                    entry.safix, entry.kdbx
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written, and nothing here decides which of the two was meant:",
+            );
+            detail(
+                out,
+                "last-writer-wins over secrets rewards whichever clock lied best.",
+            );
+            remedy(out, "to keep safix's value, declare on this mapping:");
+            remedy(out, "    mode = \"safix-to-keepassxc\";");
+            remedy(out, "to keep the database's, declare instead:");
+            remedy(out, "    mode = \"keepassxc-to-safix\";");
+            remedy(
+                out,
+                &format!("then:  {PROGRAM} sync {mapping}", mapping = entry.mapping),
+            );
+            remedy(out, "and put the mode back to two-way afterwards.");
+        }
+
+        Outcome::Refused(reason) | Outcome::NotJudged(reason) => {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+            out.push('\n');
+        }
+
+        Outcome::Unchanged | Outcome::Updated | Outcome::Pulled => {}
+    }
+}
+
 /// A mapping's two endpoints in the order its value moves between them.
 fn flow(finding: &audit::Finding) -> (&String, &String) {
     match finding.direction {

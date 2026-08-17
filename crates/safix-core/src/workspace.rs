@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use crate::error::{Error, Result};
 use crate::git::Git;
 use crate::model::{
-    Audiences, Bridge, GeneratorPlan, GovernedFiles, Placement, Placements, Recipients,
+    Audiences, Bridge, GeneratorPlan, GovernedFiles, Keepassxc, Placement, Placements, Recipients,
 };
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
@@ -37,6 +37,7 @@ pub struct Workspace {
     recipients: OnceLock<Recipients>,
     generator_plan: OnceLock<GeneratorPlan>,
     bridge: OnceLock<Bridge>,
+    keepassxc: OnceLock<Keepassxc>,
 }
 
 impl Workspace {
@@ -71,6 +72,7 @@ impl Workspace {
             recipients: OnceLock::new(),
             generator_plan: OnceLock::new(),
             bridge: OnceLock::new(),
+            keepassxc: OnceLock::new(),
         }
     }
 
@@ -167,6 +169,18 @@ impl Workspace {
     pub fn bridge(&self) -> Result<&Bridge> {
         cached(&self.bridge, || {
             self.nix.eval_json(&self.root, Attribute::Bridge)
+        })
+    }
+
+    /// The password database this consumer mirrors into, and every mapping
+    /// declared for it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn keepassxc(&self) -> Result<&Keepassxc> {
+        cached(&self.keepassxc, || {
+            self.nix.eval_json(&self.root, Attribute::Keepassxc)
         })
     }
 

@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::store_pipe_missing
+
+  × the store's own command was started without the pipe its value travels

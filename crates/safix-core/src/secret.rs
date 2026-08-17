@@ -199,6 +199,57 @@ impl Secret {
         serde_json::to_writer(sink, text.as_str()).map_err(io::Error::other)
     }
 
+    /// The same value with one trailing newline removed, when there is one.
+    ///
+    /// For the one reader that needs it: `keepassxc-cli show` prints an entry's
+    /// password followed by a newline of its own, so what arrives on that pipe is
+    /// the value plus one byte nobody stored. Removing exactly one is exact
+    /// rather than approximate, whatever the entry holds — a value stored without
+    /// a trailing newline comes back as `value\n` and loses the added byte, and
+    /// one stored with it comes back as `value\n\n` and keeps its own.
+    ///
+    /// `pub(crate)`, and a method rather than a caller slicing the bytes, because
+    /// the type's discipline is that the plaintext does not leave it: a reader
+    /// that trimmed the byte itself would need the slice.
+    #[must_use]
+    pub(crate) fn without_one_trailing_newline(&self) -> Self {
+        let bytes = self.0.expose_secret();
+        match bytes.split_last() {
+            Some((b'\n', rest)) => Self::from_slice(rest),
+            _ => Self::from_slice(bytes),
+        }
+    }
+
+    /// A SHA-256 of the value, as hex.
+    ///
+    /// The one derivative of a value this type produces, and it exists for one
+    /// caller: [`crate::sync`]'s record of the last agreement between a safix
+    /// entry and a database entry, which is written into the encrypted database
+    /// and nowhere else. A digest of a secret is a guess-confirmation oracle for
+    /// anyone holding it, so where it may land is the caller's constraint and it
+    /// is stated there; what this promises is only that the value itself does not
+    /// leave the type to be hashed.
+    ///
+    /// `pub(crate)`, and it stays that way: an embedder holding a value can hash
+    /// it themselves, and offering the operation here would invite committing the
+    /// result.
+    #[must_use]
+    pub(crate) fn fingerprint(&self) -> String {
+        crate::digest::sha256_hex(self.0.expose_secret())
+    }
+
+    /// Whether the value holds a byte the store's own command cannot carry.
+    ///
+    /// `keepassxc-cli add --password-prompt` reads one line, so a value carrying
+    /// a newline cannot be written through it: what would land is the bytes
+    /// before the first newline. The caller refuses rather than writing, and this
+    /// is the question it asks — here rather than at the caller, because the
+    /// answer needs the bytes.
+    #[must_use]
+    pub(crate) fn spans_lines(&self) -> bool {
+        self.0.expose_secret().contains(&b'\n')
+    }
+
     /// Whether two values are the same, without branching on where they differ.
     ///
     /// The length is compared first and is therefore leaked, which is what

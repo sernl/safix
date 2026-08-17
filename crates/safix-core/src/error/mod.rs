@@ -1067,6 +1067,86 @@ pub enum Error {
         output: String,
     },
 
+    /// The mirror declares mappings and no database for them to reach.
+    #[error("{}", prose::no_store_database(*.mappings))]
+    NoStoreDatabase {
+        /// How many mappings are declared.
+        mappings: usize,
+    },
+
+    /// A mirror mapping name the declarations do not carry.
+    #[error("{}", prose::unknown_sync_mapping(mapping, &declared.join(", ")))]
+    UnknownSyncMapping {
+        /// The name that was asked for.
+        mapping: String,
+        /// Every mapping that is declared.
+        declared: Vec<String>,
+    },
+
+    /// The database needs a password and there is no terminal to ask on.
+    #[error("{}", prose::store_locked(database))]
+    StoreLocked {
+        /// The database that was not opened.
+        database: String,
+    },
+
+    /// The store's own command would not open the database.
+    #[error("{}", prose::database_unreadable(database, output))]
+    DatabaseUnreadable {
+        /// The database that did not open.
+        database: String,
+        /// The command's own standard error, verbatim.
+        output: String,
+    },
+
+    /// The store's own command was started with a pipe that was not there.
+    #[error("the store's own command was started without the pipe its value travels")]
+    StorePipeMissing,
+
+    /// The store's own command refused over one entry.
+    #[error("{}", prose::store_command_failed(entry, arguments, output))]
+    StoreCommandFailed {
+        /// The entry, or the group, it refused over.
+        entry: String,
+        /// The argument vector it was run with, which carries no value.
+        arguments: String,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// A value the store's own command cannot carry whole.
+    #[error("{}", prose::value_spans_lines(entry))]
+    ValueSpansLines {
+        /// The entry it would have been written to.
+        entry: String,
+    },
+
+    /// A mirror mapping whose safix side holds nothing to mirror.
+    #[error("{}", prose::sync_source_empty(mapping, user, name, file, *.generated))]
+    SyncSourceEmpty {
+        /// The mapping being converged.
+        mapping: String,
+        /// The person whose entry it names.
+        user: String,
+        /// The entry, as they hold it.
+        name: String,
+        /// The file that does not carry the key.
+        file: String,
+        /// Whether a generator would mint it, which decides the remedy.
+        generated: bool,
+    },
+
+    /// A mirror mapping whose database side holds no entry to read.
+    #[error("{}", prose::store_entry_absent(mapping, entry, mode))]
+    StoreEntryAbsent {
+        /// The mapping being converged.
+        mapping: String,
+        /// The entry path the database holds nothing at.
+        entry: String,
+        /// The mapping's mode, which is what makes the database the source.
+        mode: &'static str,
+    },
+
     /// clan refused to register the recipient, both ways of asking.
     #[error(
         "clan would not register the card as {user}'s key:\n{output}\n\

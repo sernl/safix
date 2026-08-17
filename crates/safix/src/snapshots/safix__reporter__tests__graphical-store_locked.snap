@@ -1,0 +1,23 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::store_locked
+
+  × /home/ana/.keys/master.kdbx needs its password and there is no terminal to
+  │ ask on. Nothing
+  │ was read.
+  │ 
+  │ The refusal is here rather than after the first mapping deliberately: a
+  │ run
+  │ that prompted into the void would have decrypted safix's side of every
+  │ mapping first, and a run that treated the database as empty would report
+  │ every mapping as one-sided and, in backup mode, write.
+  │ 
+  │ There is one way to provide the database, and it is the declared path plus
+  │ the password on a terminal. The session's secret service is not a second
+  │ way: the collection it publishes is KeePassXC's exposed group, so it
+  │ cannot
+  │ address the group and path a mapping declares.
+  │ 
+  │ Run this where you can type, or leave the mapping to a run that can.
