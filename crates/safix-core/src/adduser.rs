@@ -16,6 +16,18 @@
 //! safix passes the name and the recipient to `flake.safix.onboardingHook` and
 //! makes no assumption about what it does. No hook configured is a supported
 //! configuration; onboarding simply does less.
+//!
+//! # Why no delegation check
+//!
+//! Because there is nothing here for one to read. A delegation over a person is
+//! that person's own [`managedBy`](crate::delegation) consent, and this verb's
+//! target is by construction a name the declarations do not carry: a name they do
+//! carry is refused as already declared before anything else happens, and
+//! `flake.safix.lib.placements` carries a row for every declared person whether
+//! they hold a secret or not. So a `managedBy` for this target cannot exist, and a
+//! check here would be a branch no input reaches. Once the person is declared,
+//! every later edit to their record goes through [`enroll`](crate::enroll), which
+//! is where the check lives.
 
 use std::process::{Command, Stdio};
 

@@ -137,7 +137,7 @@ pub fn add_private_entry(declaration: &str, name: &str) -> Edit {
 /// form if it was not one already, so that this edit and every later one is a
 /// single inserted line and every name that was there survives verbatim — a
 /// formatter may collapse a one-name list back onto its line, and meeting that
-/// again is the [`List::Inline`] case rather than a state this cannot edit.
+/// again is a list to expand rather than a state this cannot edit.
 #[must_use]
 pub fn add_group_member(declaration: &str, group: &str, subject: &str) -> Edit {
     let lines: Vec<&str> = declaration.lines().collect();

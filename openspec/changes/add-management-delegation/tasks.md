@@ -11,9 +11,9 @@
 
 ## 3. The group verb
 
-- [ ] 3.1 `safix group add|remove <group> <subject>` over the declaration editor: one inserted or removed line, parsed before staging, committed naming the act; undeclared groups and subjects refused
-- [ ] 3.2 `remove` prints the not-retroactive disclosure naming the revocation report; delegation scope over silo-covered groups per design D3, unmanaged groups editable as today
-- [ ] 3.3 Verify: the addition lands as one line and the policy re-derives; the removal's next `check` carries the revocation finding; the silo-covered refusal fires for mallory and not for alice; usage scaffold and verb table extended with the tests that hold them
+- [x] 3.1 `safix group add|remove <group> <subject>` over the declaration editor: one inserted or removed line, parsed before staging, committed naming the act; undeclared groups and subjects refused
+- [x] 3.2 `remove` prints the not-retroactive disclosure naming the revocation report; delegation scope over silo-covered groups per design D3, unmanaged groups editable as today
+- [x] 3.3 Verify: the addition lands as one line and the policy re-derives; the removal's next `check` carries the revocation finding; the silo-covered refusal fires for mallory and not for alice; usage scaffold and verb table extended with the tests that hold them
 
 ## 4. The record
 
