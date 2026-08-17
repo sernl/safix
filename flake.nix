@@ -38,6 +38,23 @@
     # evaluation rather than the module evaluated on its own.
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Read only by `safix-bridge-real-clan`, and the reason that check needs an
+    # input at all: clan-cli is not packaged in nixpkgs, so there is no
+    # attribute to reach for. It supplies two things — the command the check
+    # drives, and `packages.clan-core-flake`, a copy of clan-core whose lock
+    # names store paths instead of URLs, which is what lets the throwaway clan
+    # lock offline in a sandbox with no network.
+    #
+    # Pinned to a revision rather than to a branch. The subject of this check is
+    # a specific clan's behaviour at a specific version, and an input that moved
+    # on every `nix flake update` would redden it for reasons that have nothing
+    # to do with safix. Moving the pin is a deliberate act with its own commit.
+    #
+    # nixpkgs is deliberately not made to follow this flake's: clan-cli pins its
+    # own nix version and its own runtime dependency set, and the throwaway clan
+    # is evaluated by clan against clan's nixpkgs.
+    clan-core.url = "https://git.clan.lol/api/v1/repos/clan/clan-core/archive/56e35624d94e4f1ac55d36575ebab97cbd9b9cdd.tar.gz";
   };
 
   outputs =
@@ -61,6 +78,7 @@
         ./modules/flake/checks/materialization.nix
         ./modules/flake/checks/namespace.nix
         ./modules/flake/checks/policy.nix
+        ./modules/flake/checks/real-clan.nix
         ./modules/flake/checks/single-runtime.nix
         ./modules/flake/devshell.nix
         ./modules/flake/rust.nix
