@@ -30,7 +30,9 @@
 //! declarations, [`generate`] walks the generator graph, [`keygen`] mints an
 //! identity, and [`adduser`] declares a person. [`inputs`] is how a generator's
 //! values reach its script, and [`scratch`] is what an aborted write must not
-//! leave behind.
+//! leave behind. [`definition`] is the record a mint leaves of the declaration it
+//! minted under, which is what lets [`check`] report a value whose generator has
+//! changed since.
 //!
 //! Every one of them was compared against a shell runtime by the differential
 //! harness before it shipped — standard output, standard error, exit code and
@@ -45,6 +47,8 @@ pub mod audit;
 pub mod bridge;
 pub mod check;
 pub mod clan;
+pub mod definition;
+mod digest;
 pub mod edit;
 mod error;
 pub mod fix;
