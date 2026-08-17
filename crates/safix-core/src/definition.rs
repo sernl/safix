@@ -51,8 +51,8 @@
 //! what the mint produces.
 //!
 //! No value and no derivative of a value enters the record. That is what lets it
-//! be committed in the clear, and it is the property [`canonical`] is written to
-//! make evident: everything it reads comes off the declaration.
+//! be committed in the clear, and the canonical form is written to make that
+//! evident: everything it reads comes off the declaration.
 
 use std::fmt::Write as _;
 
@@ -67,7 +67,7 @@ pub const PREFIX: &str = "state/safix/definitions/";
 /// was computed over.
 ///
 /// A record is read only when this tag is the one it carries. That is what keeps
-/// a change to [`canonical`] from reading as universal drift: the old records
+/// a change to the canonical form from reading as universal drift: the old records
 /// become unknown-version rather than mismatched, and an unknown version is no
 /// finding at all. Changing the canonical form means moving this tag in the same
 /// commit.
