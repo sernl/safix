@@ -1,5 +1,7 @@
 # safix
 
+safix is built for its operator's own fleet; that use case, not general adoption, decides its opinions.
+
 safix is a custody-first secrets manager for nix.
 Secrets are declared as flake-parts module options, the encrypted file each secret lives in is derived from the audience that can read it rather than authored by hand, and the `.sops.yaml` recipient policy is generated from those same declarations.
 It is tied to no framework and serves NixOS and home-manager alike through sops-nix.
@@ -643,22 +645,15 @@ The option reference lives on the types themselves; this document is the narrati
 ## Status
 
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are here and green under `nix flake check`.
-The repository has no remote yet, so the GitHub Actions workflow in `.github/workflows/` has never run; it activates on the first push.
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.
-It implements all nine subcommands: the read paths `list`, `get` and `check`, the three write paths `set`, `edit` and `fix`, the generator graph behind `generate`, and the two that touch custody itself, `keygen` and `adduser`.
-The nix half was never in scope and did not move; what was replaced is a shell runtime and two python helpers, and all three are now deleted rather than kept.
+It implements all twelve subcommands: the read paths `list`, `get`, `check` and `audit`, the write paths `set`, `edit` and `fix`, the generator graph behind `generate`, the bridge pair `import` and `export`, and the two that touch custody itself, `keygen` and `adduser`.
+The nix half was never in scope and did not move; what was replaced is a shell runtime and two python helpers, all three now deleted.
 
-Each subcommand transferred only after a differential harness had compared it against that shell runtime on standard output, standard error, exit code and effect on the repository, over one fixture fleet and nineteen modes.
-The harness found five places where the two differ, each pinned where it was found rather than reconciled: an interactive `fix` whose confirmation was answered by its own file list, a `SIGINT` the shell runtime never acted on during a `set`, a double entry that stopped checking anything over a seekable standard input, a `--version` it had no answer for, and a schema mismatch this runtime refuses where its `jq` expressions ignored it.
-The changelog's "Known differences" records all five as decisions about what this runtime does, and names what holds each today.
-
-With the port complete, the gate was spent: a comparison's result is a fact about a state of the tree, which version control holds, and a retained oracle only produces new facts about a pair of runtimes only one of which anyone runs.
-So the shell runtime, the comparative harness, the behavioural suite that drove it and the two python readers were deleted — 6205 lines — and the claims they carried were rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
-The eighteen behavioural checks keep their names and change their subject; four modes that were never comparisons keep their claims as `safix-abort-residue`, `safix-value-pipe`, `safix-syscall-proof` and `safix-channel-drills`.
-`safix-syscall-proof` is linux-only: it observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe, which needs `ptrace`.
-`safix-channel-drills` is what keeps the rest honest — it damages the runtime once per channel and fails unless each damage is caught by the channel that exists to catch it.
+The port ran behind a differential harness comparing every subcommand against the shell runtime; the five places the two differ are recorded as decisions in the changelog's "Known differences".
+With the port complete the harness was deleted with the runtime it compared against — 6205 lines — and its claims rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
+`safix-syscall-proof` (linux-only) observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe; `safix-channel-drills` damages the runtime once per channel and fails unless each damage is caught by the channel that exists to catch it.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/` for the port and `openspec/changes/rust-only-runtime/` for the retirement.
 
 ## License

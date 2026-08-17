@@ -33,6 +33,11 @@ A change to it is a breaking change whether or not any rust changed.
 - `safix-bridge-audit`, one more single-runtime check, running `crates/safix/tests/audit.rs`.
   Its two drills were observed red: making two present values compare equal fails the diverged-mapping test and the one that transfers between two audits, and skipping the mapping that will not decrypt fails only the test written for it and leaves the rest of the target green.
 
+### Changed
+
+- `README.md` opens by stating who the project is for: its operator's own fleet and use case.
+  The status section's subcommand count now includes the bridge pair and `audit`, the stale no-remote sentence is gone, and the port history is condensed to what the changelog and the openspec records do not already hold.
+
 ## [0.2.0] — 2026-08-16
 
 `Cargo.toml` still reads `0.1.0`.
