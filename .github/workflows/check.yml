@@ -157,6 +157,16 @@ jobs:
       # Actions: successful logs folded, every failure unfolded with its last
       # hundred lines. That is the report a reader wants, and the junit file
       # below is the same result for anything that reads results rather than logs.
+      #
+      # There is no store cache, and that is a measurement rather than an
+      # omission. cache.nixos.org supplies most of the closure and `--skip-cached`
+      # takes it from there; what no public cache has is crane's dependency
+      # artifact and clan-cli. Holding those in the Actions cache means holding
+      # the 8.5 GiB store they sit in, per platform, against a repository budget
+      # of ten gigabytes — most of the budget, evicted often, to save under four
+      # minutes of a fifteen-minute run. The lever worth pulling is a binary cache
+      # with a token, which nix-fast-build takes as `--cachix-cache`, and which
+      # needs a secret a workflow file cannot create for itself.
       - name: build every check, and report every failure rather than the first
         run: |
           nix run --inputs-from . --option flake-registry '' nixpkgs#nix-fast-build -- \
