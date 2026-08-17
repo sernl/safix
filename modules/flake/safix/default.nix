@@ -17,6 +17,7 @@ let
   policy = import ./policy.nix { inherit lib; };
   checks = import ./checks.nix { inherit lib; };
   bridgeLib = import ./bridge.nix { inherit lib; };
+  keepassxcLib = import ./keepassxc.nix { inherit lib; };
 
   cfg = config.flake.safix;
 
@@ -220,6 +221,18 @@ in
     bridge = {
       clanFlake = if cfg.bridge.clanFlake == null then null else toString cfg.bridge.clanFlake;
       mappings = bridgeLib.mappingsOf cfg.bridge;
+    };
+
+    # The declared mirror, flattened into what `safix sync` reads: the database,
+    # the group every entry path is relative to, and one record per mapping
+    # carrying the attribute name it was declared under.
+    #
+    # `database` is not stringified the way `clanFlake` is, because the option is
+    # already a string: a nix path here would put a copy of the whole encrypted
+    # database in the store on every evaluation, which ./options.nix records.
+    keepassxc = {
+      inherit (cfg.keepassxc) database group;
+      mappings = keepassxcLib.mappingsOf cfg.keepassxc;
     };
 
     # The alphabet a user, anchor or secret name must be drawn from, as the

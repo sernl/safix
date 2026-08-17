@@ -15,6 +15,7 @@
 let
   types = import ./types.nix { inherit lib; };
   bridge = import ./bridge.nix { inherit lib; };
+  keepassxc = import ./keepassxc.nix { inherit lib; };
 
   # One consumer bridges one clan. Two definitions of a scalar cannot both
   # survive into a list for `violationsOf` to count, so this refusal is a merge
@@ -111,6 +112,83 @@ in
           another flake, and a clan side that does not resolve is refused when a
           transfer reaches the mapping, naming the machine, the generator and
           the file.
+        '';
+      };
+    };
+
+    keepassxc = {
+      database = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr lib.types.str;
+        example = "/home/ana/.keys/master.kdbx";
+        description = ''
+          The password database `safix sync` converges against, as an absolute
+          path on the machine the verb runs on.
+
+          A string rather than a nix path, and that is not a style choice: a nix
+          path is copied into the store when it is interpolated, so declaring
+          the database as one would put a copy of the whole encrypted file — 292
+          MB on the fleet this was written for — in a world-readable store, on
+          every evaluation.
+
+          There is no default, because there is no database safix could name
+          that would be the right one. Unset with no mapping declared is the
+          configuration of a consumer who does not use this at all; unset with
+          mappings declared is refused when `safix sync` runs, naming this
+          option.
+        '';
+      };
+
+      group = lib.mkOption {
+        default = "safix";
+        type = lib.types.str;
+        example = "credentials/fleet";
+        description = ''
+          The group every mapped entry's path is relative to.
+
+          A group has to exist for a path to be under, so this carries a default
+          where `database` cannot: the default names safix rather than inventing
+          a taxonomy for somebody's database, and a consumer with an existing
+          layout names their own group here.
+
+          `safix sync` creates the group, and the groups a mapping's path names
+          under it, where they are absent. It removes none of them, ever.
+        '';
+      };
+
+      mappings = lib.mkOption {
+        default = { };
+        type = lib.types.attrsOf keepassxc.mapping;
+        example = lib.literalExpression ''
+          {
+            grafana = {
+              mode = "safix-to-keepassxc";
+              safix = {
+                user = "ana";
+                name = "grafana-password";
+              };
+              kdbx = {
+                path = "ana/grafana";
+                username = "ana@example.invalid";
+              };
+            };
+          }
+        '';
+        description = ''
+          Every standing relationship between a safix entry and an entry in the
+          database.
+
+          The attribute name is the mapping's own identifier, for the reason
+          `flake.safix.bridge.mappings` gives: it appears in reports and in
+          refusals, and a name taken from one side reads wrongly in a sentence
+          about the other.
+
+          Evaluation refuses a mapping whose safix side does not resolve, a
+          pull-capable mapping onto an entry a generator also produces, two
+          mappings naming one entry, and an entry path carrying the suffix safix
+          reserves for a two-way mapping's recorded agreement. It refuses
+          nothing about the database: the group and the entry are content of an
+          encrypted file, and answering whether they are there needs a key.
         '';
       };
     };

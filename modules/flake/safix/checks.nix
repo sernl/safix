@@ -21,6 +21,7 @@ let
   resolve = import ./resolve.nix { inherit lib; };
   policy = import ./policy.nix { inherit lib; };
   bridge = import ./bridge.nix { inherit lib; };
+  keepassxc = import ./keepassxc.nix { inherit lib; };
 
   # The one shell every message-bearing check runs: it fails while the file it
   # is handed has any line in it. Exposed so a drill runs these bytes rather
@@ -136,6 +137,23 @@ let
       name = "safix-bridge-refusals";
       subject = "safix bridge: these mappings break rules evaluation refuses on.";
       messages = bridgeMessages users catalogue bridgeRecord;
+    };
+
+  # ── the keepassxc mirror ──
+  # Only the half of each mapping that lives in the consumer's own declarations.
+  # The database's half is not checked here and cannot be: the group and the
+  # entry are content of an encrypted file, and answering whether they are there
+  # needs a key.
+  keepassxcMessages =
+    users: catalogue: keepassxcRecord:
+    keepassxc.violationsOf users catalogue keepassxcRecord;
+
+  mkKeepassxcCheck =
+    pkgs: users: catalogue: keepassxcRecord:
+    mkMessageCheck pkgs {
+      name = "safix-keepassxc-refusals";
+      subject = "safix keepassxc: these mappings break rules evaluation refuses on.";
+      messages = keepassxcMessages users catalogue keepassxcRecord;
     };
 
   # ── the shape of a generated rule ──
@@ -385,9 +403,15 @@ let
         clanFlake = null;
         mappings = { };
       },
+      keepassxc ? {
+        database = null;
+        group = "safix";
+        mappings = { };
+      },
     }:
     {
       safix-bridge-refusals = mkBridgeCheck pkgs users catalogue bridge;
+      safix-keepassxc-refusals = mkKeepassxcCheck pkgs users catalogue keepassxc;
       safix-custody-refusals = mkCustodyCheck pkgs users catalogue;
       safix-generator-tools = mkGeneratorToolCheck pkgs users catalogue;
       safix-rule-shape = mkRuleShapeCheck pkgs users catalogue;
@@ -412,6 +436,8 @@ in
     custodyMessages
     bridgeMessages
     mkBridgeCheck
+    keepassxcMessages
+    mkKeepassxcCheck
     generatorsDeclaredIn
     generatorToolMessages
     ruleShapeMessages

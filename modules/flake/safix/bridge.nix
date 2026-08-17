@@ -54,6 +54,10 @@ let
     };
   };
 
+  # One submodule for "a user and a name that user holds", exported because
+  # ./keepassxc.nix declares the same half of its own mappings and the runtime
+  # deserializes both through one `SafixSide`. Two option types would be two
+  # documentations of one pair, free to drift.
   safixSide = lib.types.submodule {
     options = {
       user = lib.mkOption {
@@ -212,6 +216,7 @@ in
   inherit
     directions
     mapping
+    safixSide
     mappingsOf
     endpointsOf
     violationsOf
