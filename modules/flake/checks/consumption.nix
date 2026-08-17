@@ -829,10 +829,9 @@ in
               provisionerAfterCheckLinkTargets = before aliceOrder "checkLinkTargets" "sops-nix";
 
               # The stronger fact home.nix's non-atomicity prose rests on: the
-              # provisioner runs after the generation is linked and after the
-              # systemd daemon reload, so a failure there is loud but late.
+              # provisioner runs after the generation is linked, so a failure
+              # there is loud but late.
               provisionerAfterLinkGeneration = before aliceOrder "linkGeneration" "sops-nix";
-              provisionerAfterReloadSystemd = before aliceOrder "reloadSystemd" "sops-nix";
 
               # Read, do not decrypt: the script names each configured identity and
               # exits non-zero, and it invokes no decryptor. `runsTheDecryptor`
@@ -850,6 +849,20 @@ in
                   runsTheDecryptor = lib.hasInfix "bin/sops-install-secrets" text;
                   statesItsLimit = lib.hasInfix "readability" text && lib.hasInfix "not a recipient" text;
                 };
+            }
+            # The same claim about the systemd daemon reload is linux's alone.
+            # home-manager registers `reloadSystemd` from its `systemd.user`
+            # module, and the DAG this check reads on aarch64-darwin is
+            # `checkFilesChanged checkLinkTargets writeBoundary installPackages
+            # linkGeneration onFilesChange setupLaunchAgents` — read off the
+            # pinned home-manager on that platform — and carries no such entry.
+            # `before` answers false for a name it cannot find, so asserting the
+            # ordering there is asserting a step's absence rather than its
+            # position. darwin's analogue is `setupLaunchAgents`, and the claim is
+            # not moved onto it, because where sops-nix's entry sorts against that
+            # one has not been established.
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              provisionerAfterReloadSystemd = before aliceOrder "reloadSystemd" "sops-nix";
             };
 
             expected = {
@@ -857,13 +870,15 @@ in
               safixBeforeCheckLinkTargets = true;
               provisionerAfterCheckLinkTargets = true;
               provisionerAfterLinkGeneration = true;
-              provisionerAfterReloadSystemd = true;
               script = {
                 namesTheIdentity = true;
                 refuses = true;
                 runsTheDecryptor = false;
                 statesItsLimit = true;
               };
+            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              provisionerAfterReloadSystemd = true;
             };
           };
         };
