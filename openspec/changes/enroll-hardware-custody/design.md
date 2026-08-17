@@ -34,11 +34,12 @@ The management key is deliberately unsaved: protected mode means PIN possession 
 One PTY wrapper, in safix-core, that runs one command, writes one line when prompted, and surfaces everything else to the operator's real terminal — used for `--generate` and for the proof's PIN entry.
 `expect` as a runtime dependency was rejected: the interaction is two prompts, not a protocol, and a dependency that scripts arbitrary TTYs is a bigger surface than the twenty lines that answer these two.
 
-### D3. PIN custody goes to the root of trust first, safix second
+### D3. The PIN and PUK are auto-registered in safix, and mirrored to the password store when the operator wishes
 
-The KeePassXC database is the fleet's accepted root of trust and opens by challenge-response — no PIV PIN involved — so the card's PIN stored there is reachable exactly when the card is in hand, with no self-reference.
-Written through the session's secret service when the database is unlocked (no prompt at all); through `keepassxc-cli` with one password prompt when it is not.
-The optional safix copy (`--store-pin`, encrypted to the person's audience) exists for the operator who wants the PIN to survive the database; it is off by default because a secret readable by the software key adds nothing while the software key exists, and the design does not pretend otherwise.
+The operator's direction is that credential custody is safix's job first, so the generated PIN and PUK land as a safix secret in the person's own custody by default — named for the serial, encrypted to the person's audience like anything else they hold — and `--no-store-pin` opts out.
+The honest caveat is stated rather than hidden: a PIN readable by the software identity adds protection only once that identity is retired or absent; the default exists to make starting easy — the focus on secrets rather than on operational process — not to claim a property it does not have.
+The password-store mirror is the optional second home: written through the session's secret service when the database is unlocked, with no prompt at all; through `keepassxc-cli` with one password prompt when it is not; skippable entirely.
+The database opens by challenge-response with no PIV PIN involved, so whichever copies exist, the card's PIN is reachable with the card in hand and no self-reference.
 
 ### D4. The proof isolates the card by construction, not by hope
 
@@ -73,4 +74,9 @@ Rollback is removing the verb.
 ## Open Questions
 
 - USER-RUN: "master key" scope. This design reads the direction as the operator's own custody — the card in the operator's `recoveryRecipients`, registered with clan — not as an escrow key listed in every user's `recoveryRecipients`, which safix's own prose warns buys recoverability at the price of the operator reading everything everyone holds. Confirm, or name the escrow variant and it becomes its own decision with that trade-off stated.
+  Answered: the operator's own custody, confirmed and sharpened.
+  The card enrolls into the same identity file the software master identities live in — the `keys.txt` that sops, agenix and clan's admin path all read — as a peer of those identities, and is capable of becoming the sole master once the plaintext identities retire.
+  That retirement stays `one-unlock-bootstrap`'s own Phase 2 act, made after the decrypt proof, not this change's.
 - USER-RUN: whether the optional safix-side PIN copy (`--store-pin`) should exist at all, given D3's argument that it adds nothing while the software key exists. It is in the design because the operator asked that safix handle PIN custody "for itself first and foremost"; it is off by default because the argument against is real.
+  Answered: it exists and is the default, with `--no-store-pin` the opt-out; the password-store mirror is the optional wish.
+  D3 is rewritten accordingly, with the caveat kept beside the default it qualifies.

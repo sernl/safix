@@ -29,14 +29,14 @@
 
 ## 5. The PIN's custody
 
-- [ ] 5.1 Write PIN and PUK through the session secret service when the database is unlocked, labelled for the serial; fall back to `keepassxc-cli` with one password prompt
+- [ ] 5.1 Register the generated PIN and PUK as a safix secret in the person's own custody by default, named for the serial, through the ordinary write path; `--no-store-pin` opts out (decision: design's second open question, answered default-on)
 - [ ] 5.2 Values travel pipes and DBus only: assert no argument vector and no environment variable carries them
-- [ ] 5.3 USER-RUN: decide design's second open question — whether the optional `--store-pin` safix copy exists; build it only if confirmed
-- [ ] 5.4 Verify: the stored entry round-trips (written, then read back through the same path), and nothing reached stdout unbidden
+- [ ] 5.3 Mirror the credentials to the password store when the operator wishes: the session secret service when the database is unlocked, `keepassxc-cli` with one password prompt otherwise, and skippable entirely
+- [ ] 5.4 Verify: each stored copy round-trips (written, then read back through the same path), and nothing reached stdout unbidden
 
 ## 6. The record
 
-- [ ] 6.1 USER-RUN: confirm design's first open question — operator-custody scope, not per-user escrow — before the verb's prose is written
+- [x] 6.1 USER-RUN (answered): confirm design's first open question — operator-custody scope, not per-user escrow — before the verb's prose is written. Confirmed: the operator's own custody, with the card a peer of the software master identities in the same identity file and capable of becoming the sole master after the plaintext retirement; recorded under design's open questions
 - [ ] 6.2 Usage text: the verb's contract, the touch ceiling, the refusals, in the scaffold order
 - [ ] 6.3 README: the enrollment story, one section, concise; CHANGELOG under Unreleased
 - [ ] 6.4 Verify: `openspec validate enroll-hardware-custody --strict` passes
