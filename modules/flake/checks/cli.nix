@@ -642,5 +642,21 @@
       checks.safix-shared-flip =
         mode "safix-shared-flip" "shared_entries"
           "a_flip_to_shared_over_existing_values_is_reported_as_a_migration";
+
+      # A narrowed audience — a member left a group, a grant was dropped, a
+      # machine changed hands, all one state by the time a report reads it — is
+      # reported as the revocation it is: the key's holder named rather than
+      # printed, `fix` offered as the alignment, and a new value as the only thing
+      # that revokes.
+      checks.safix-audience-narrowed =
+        mode "safix-audience-narrowed" "subjects"
+          "a_narrowed_audience_is_reported_as_the_revocation_it_is";
+
+      # A key on the narrowed file answering to no declared subject is the more
+      # alarming half of the same finding, and is reported apart from the subjects
+      # that did match rather than swallowed by them.
+      checks.safix-audience-orphan =
+        mode "safix-audience-orphan" "subjects"
+          "a_key_answering_to_nobody_is_reported_apart_from_the_named_subjects";
     };
 }

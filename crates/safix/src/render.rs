@@ -14,7 +14,7 @@
 
 use safix_core::audit::{self, Disagreement, Side};
 use safix_core::check::{Finding, Mint};
-use safix_core::model::Direction;
+use safix_core::model::{Direction, Holders};
 
 use crate::reporter::PROGRAM;
 
@@ -143,6 +143,8 @@ fn push_recipients(out: &mut String, finding: &Finding) {
         file,
         extra,
         missing,
+        narrowed,
+        mints,
     } = finding
     {
         headline(
@@ -161,9 +163,60 @@ fn push_recipients(out: &mut String, finding: &Finding) {
                 item(out, key);
             }
         }
+        push_narrowing(out, narrowed);
         remedy(out, &format!("{PROGRAM} fix"));
         remedy(out, &format!("git diff -- {file}"));
+        if !extra.is_empty() && !mints.is_empty() {
+            remedy(out, "then, to revoke rather than align, mint new values:");
+            for mint in mints {
+                remedy(out, &mint_command(mint));
+            }
+        }
     }
+}
+
+/// Whose custody the keys outside the audience are, and what a re-wrap of them
+/// is not.
+///
+/// A key on a governed file that its declared audience does not name is what
+/// every narrowing looks like from here — a grant dropped, a member removed from
+/// a group, a machine changed hands — and `fix` is the right way to align the
+/// ciphertext with the policy afterwards. It is not the remedy for the narrowing
+/// itself, and saying so here is the whole point: whoever held that data key has
+/// read what the file holds, and no re-wrap unreads it.
+fn push_narrowing(out: &mut String, narrowed: &Holders) {
+    let Holders { named, orphaned } = narrowed;
+    if named.is_empty() && orphaned.is_empty() {
+        return;
+    }
+    if !named.is_empty() {
+        detail(out, "those keys are the custody of:");
+        for subject in named {
+            item(out, subject);
+        }
+    }
+    if !orphaned.is_empty() {
+        detail(out, "and of no declared subject:");
+        for key in orphaned {
+            item(out, key);
+        }
+    }
+    detail(
+        out,
+        "A key the declared audience does not name is a narrowing — a grant dropped, a",
+    );
+    detail(
+        out,
+        "member removed from a group, a machine changed hands — so this is a revocation.",
+    );
+    detail(
+        out,
+        "Re-wrapping is not how one happens: whoever held that data key has read every",
+    );
+    detail(
+        out,
+        "value in the file, and no re-wrap unreads it. Only a new value revokes.",
+    );
 }
 
 /// A shared name with a copy outside the file its audience reads.

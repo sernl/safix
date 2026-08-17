@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::definition;
 use crate::error::{Error, Result};
-use crate::model::Holders;
+use crate::model::{Holders, Placements};
 use crate::sops::document::{self, KeyState};
 use crate::workspace::Workspace;
 
@@ -62,6 +62,19 @@ pub enum Finding {
         extra: Vec<String>,
         /// Is in its audience and cannot open it.
         missing: Vec<String>,
+        /// Whose custody the extra keys are: declared subjects the audience no
+        /// longer names, and keys answering to no declared subject at all.
+        ///
+        /// A key on a file that is no longer in its audience is what every
+        /// narrowing looks like from here — a grant dropped, a member removed
+        /// from a group, a machine changed hands — and the declarations record
+        /// only the audience that is, never the audience that was. So the
+        /// narrowing is read off the ciphertext, and naming its holders is what
+        /// lets the report say a re-wrap is not a revocation of them.
+        narrowed: Holders,
+        /// What mints a new value for each name the file holds, which is the only
+        /// thing that revokes.
+        mints: Vec<Mint>,
     },
 
     /// A shared name has a copy outside the file its audience reads, and every
@@ -199,6 +212,8 @@ fn recipients(
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
     let audiences = workspace.audiences()?;
+    let holders = workspace.recipients()?;
+    let placements = workspace.placements()?;
     for file in &workspace.governed_files()?.managed {
         let Some(text) = documents.text(workspace, file)? else {
             continue;
@@ -221,12 +236,36 @@ fn recipients(
         if !drift.is_empty() {
             findings.push(Finding::RecipientDrift {
                 file: file.clone(),
+                narrowed: holders.holders_of(&drift.extra),
+                mints: mints_in(placements, file),
                 extra: drift.extra,
                 missing: drift.missing,
             });
         }
     }
     Ok(())
+}
+
+/// What mints a new value for each name one file holds, in name order.
+///
+/// One per name rather than one per placement: a shared name is one value in one
+/// file, and any of its carriers mints it, so a second command naming a second
+/// carrier would be the same value minted twice.
+fn mints_in(placements: &Placements, file: &str) -> Vec<Mint> {
+    let mut mints: BTreeMap<&str, Mint> = BTreeMap::new();
+    for user in placements.users() {
+        for (name, placement) in placements.held_by(user).into_iter().flatten() {
+            if placement.file != file || placement.public.is_some() {
+                continue;
+            }
+            mints.entry(name).or_insert_with(|| Mint {
+                carrier: user.to_owned(),
+                name: name.clone(),
+                generated: placement.generator.is_some(),
+            });
+        }
+    }
+    mints.into_values().collect()
 }
 
 /// A shared entry is one value, so a copy of its key anywhere but the file its

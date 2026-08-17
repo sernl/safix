@@ -439,6 +439,23 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Narrow one file's declared audience, leaving the ciphertext exactly where
+    /// it was.
+    ///
+    /// This is what every narrowing looks like to `check`: a member removed from
+    /// a group, a grant dropped, a machine's owner changed. The declarations
+    /// record only the audience that is, so which of the three it was is not
+    /// knowable from here — what is knowable is that a key on the file answers to
+    /// a subject the audience no longer names.
+    pub fn narrow_audience(&mut self, file: &str, remaining: &[&str], keys: &[&str]) {
+        self.audiences[file] = json!({
+            "audience": remaining,
+            "dir": Path::new(file).parent().unwrap().to_str().unwrap(),
+            "recipients": keys,
+        });
+        self.write_fixtures();
+    }
+
     /// Declare a generator and derive its run-plan entry from the same record
     /// the command reads.
     ///
