@@ -330,6 +330,35 @@
 
       crossSilo = siloFleet { sharedWith.contractors.token = { }; };
 
+      # Two entries, each spanning the silo. Every violating grant is reported in
+      # one evaluation rather than the first one found: an operator repairing a
+      # corporate boundary one refusal per rebuild is an operator who does not know
+      # how many are left.
+      crossSiloTwice = fleetOf {
+        users = {
+          ana = {
+            recipient = keyOf "ana";
+            private = {
+              token = { };
+              other = { };
+            };
+            sharedWith.contractors = {
+              token = { };
+              other = { };
+            };
+          };
+          bo = keyholder "bo";
+        };
+        groups = {
+          staff.members = [ "ana" ];
+          contractors.members = [ "bo" ];
+        };
+        silos.corp.groups = [
+          "staff"
+          "contractors"
+        ];
+      };
+
       withinSilo = siloFleet { sharedWith.partners.token = { }; };
 
       groupInTwoSilos = fleetOf {
@@ -607,6 +636,7 @@
           # ── silos ──
           crossSiloMessages = violationsOf crossSilo;
           crossSiloFires = fires (filesFor crossSilo { user = "ana"; });
+          crossSiloListsEveryGrant = violationsOf crossSiloTwice;
 
           # No rule and no file is generated for a refused audience, which is the
           # claim a message alone does not make: the refusal is where audiences
@@ -942,6 +972,10 @@
           ];
           crossSiloFires = true;
           crossSiloGeneratesNoRule = true;
+          crossSiloListsEveryGrant = [
+            "flake.safix.users.ana's 'other' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bo and flake.safix.groups.staff reaches ana. secrets/safix/shared/@contractors,ana/secrets.yaml is one file with one data key, so it would be readable from both."
+            "flake.safix.users.ana's 'token' resolves an audience spanning silo set flake.safix.silos.corp: flake.safix.groups.contractors reaches bo and flake.safix.groups.staff reaches ana. secrets/safix/shared/@contractors,ana/secrets.yaml is one file with one data key, so it would be readable from both."
+          ];
 
           withinSiloResolves = {
             violations = [ ];

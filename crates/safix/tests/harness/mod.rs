@@ -439,21 +439,54 @@ impl Fixture {
         self.write_fixtures();
     }
 
-    /// Narrow one file's declared audience, leaving the ciphertext exactly where
-    /// it was.
+    /// Declare one file's audience, leaving the ciphertext exactly where it was.
     ///
-    /// This is what every narrowing looks like to `check`: a member removed from
-    /// a group, a grant dropped, a machine's owner changed. The declarations
-    /// record only the audience that is, so which of the three it was is not
-    /// knowable from here — what is knowable is that a key on the file answers to
-    /// a subject the audience no longer names.
-    pub fn narrow_audience(&mut self, file: &str, remaining: &[&str], keys: &[&str]) {
+    /// Narrowed, this is what every narrowing looks like to the runtime: a member
+    /// removed from a group, a grant dropped, a machine's owner changed. The
+    /// declarations record only the audience that is, so which of the three it
+    /// was is not knowable from here — what is knowable is that a key on the file
+    /// answers to a subject the audience no longer names.
+    ///
+    /// Widened, it is the other half of the same fact: the file does not move, so
+    /// the convergence is a re-wrap of the file that is there.
+    pub fn set_audience(&mut self, file: &str, audience: &[&str], keys: &[&str]) {
         self.audiences[file] = json!({
-            "audience": remaining,
+            "audience": audience,
             "dir": Path::new(file).parent().unwrap().to_str().unwrap(),
             "recipients": keys,
         });
         self.write_fixtures();
+    }
+
+    /// Declare one more person in the tree the evaluation reads, with a recipient.
+    ///
+    /// The recipient policy's keys block is derived from the tracked declarations
+    /// rather than from the fixture, so a rule that grants a new anchor needs the
+    /// person behind it declared here or the regenerated policy references an
+    /// anchor it never defines.
+    pub fn declare_person(&self, user: &str, recipient: &str) {
+        std::fs::create_dir_all(self.repo.join("safix/users")).unwrap();
+        let declaration = format!(
+            "{{\n  flake.safix.users.{user} = {{\n    recipient = \"{recipient}\";\n    carries = {{ }};\n    private = {{ }};\n  }};\n}}\n"
+        );
+        std::fs::write(
+            self.repo.join(format!("safix/users/{user}.nix")),
+            declaration,
+        )
+        .unwrap();
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-q", "-m", &format!("fixture: declare {user}")]);
+    }
+
+    /// The recipient policy, committed and generated alike, over one audience.
+    ///
+    /// [`Fixture::write_policy`] deliberately leaves the generated half naming
+    /// ana and bo whatever the committed half names, which is how a stale
+    /// artifact is fixtured. A test about a re-wrap needs the two to agree, or
+    /// what `fix` writes and what it re-wraps to disagree by construction.
+    pub fn write_policy_agreeing(&self, shared_anchors: &[&str]) {
+        self.write_policy(shared_anchors);
+        std::fs::write(self.work.join("rules.txt"), rules_block(shared_anchors)).unwrap();
     }
 
     /// Declare a generator and derive its run-plan entry from the same record

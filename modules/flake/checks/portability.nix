@@ -211,6 +211,15 @@ in
               nixpkgs.hostPlatform = system;
               networking.hostName = hostname;
               system.stateVersion = "24.05";
+
+              # A machine subject's recipient is `ssh-to-age` of a host key, so a
+              # host that has one is the case this shape stands for. It is also
+              # what makes sops-nix's own identity default non-empty:
+              # `sops.age.sshKeyPaths` takes the ed25519 host keys of a host
+              # running sshd and nothing otherwise, which is the difference
+              # between a machine that opens its entries with the identity it
+              # already had and one that has no identity at all.
+              services.openssh.enable = true;
               safix = {
                 lib = safix;
               }
@@ -375,6 +384,26 @@ in
             # mode its owner declared.
             machineEntry = lib.mapAttrs (_n: v: v.machine.fleet-token) shapes;
 
+            # The identity a machine's system scope opens those entries with is
+            # the one it already had. safix names none — the profile sets no
+            # `safix.identity.*` — and sops-nix's own default stands: the host's
+            # ed25519 keys, whose age form is what
+            # `flake.safix.machines.<m>.recipient` is. That is the whole of why
+            # declaring a machine needs no enrollment step, and it is a claim
+            # about the system scope alone, which is the one scope whose
+            # provisioner has a host identity to default to.
+            systemIdentity =
+              let
+                system = nixosFor { machine = "deck"; } projection;
+              in
+              {
+                keyFile = system.sops.age.keyFile;
+                sshKeyPaths = system.sops.age.sshKeyPaths;
+                hostKeys = map (key: key.path) (
+                  lib.filter (key: key.type == "ed25519") system.services.openssh.hostKeys
+                );
+              };
+
             # Every subject-model refusal, over every shape. A refusal that lived
             # in a module rather than in the algebra would fire on one shape and
             # not the others.
@@ -436,6 +465,12 @@ in
               name = "fleet-token";
               sopsFile = "/secrets/safix/shared/ana,deck/secrets.yaml";
             });
+
+            systemIdentity = {
+              keyFile = null;
+              sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+              hostKeys = [ "/etc/ssh/ssh_host_ed25519_key" ];
+            };
 
             refusals = lib.genAttrs (builtins.attrNames broken) (_: lib.genAttrs allShapes (_: true));
 

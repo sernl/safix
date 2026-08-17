@@ -20,11 +20,15 @@ Phase A, this change:
 - Ownership as a record with consequences: `sharedWith` gains the ability to name "the owner of machine m", resolving through the declaration, so the grant survives the host changing hands by re-wrapping rather than by silently pointing at the old owner.
 - The portability guarantee stated as a requirement rather than an accident: every subject-model feature works identically for a standalone home-manager profile on a non-NixOS distro.
 
-Phases B-D, each its own future change, shaped here and not built here:
+Phases B-D, each its own future change, proposed here and not built here.
+None of the three is implemented by this change, and no code in the tree anticipates one; what this section is, is the record that they exist as proposals and the order they are proposed in, which is design D5's: each later cut changes who may act rather than only what an audience can name, and each needs the vocabulary the one before it adds.
 
 - B, `add-service-subjects`: services as subjects — a service names the machines it runs on and resolves to their keys with service-scoped placement, so "people use services and services are rendered to them" is declarable without granting the whole machine.
+  After A because a service resolves to other subjects' keys, which is the algebra A establishes; its own change because service-scoped placement touches the consumption modules' surface.
 - C, `add-organization-custody`: organizations as owning principals with their own recovery custody, where the escrow trade-off safix's prose already states becomes a consent-visible declaration instead of a warning.
+  After A because consent needs the silo and ownership vocabulary to be sayable at all.
 - D, `add-management-delegation`: managers who scaffold, never mint — `adduser`, `enroll`, and group edits performed for others across many hosts, with key generation staying with the person it belongs to.
+  Last, because delegation without silos and ownership in place is the operator reading everything, which is the configuration safix warns about today.
 
 **BREAKING** for nothing in phase A: every existing declaration is a valid declaration of the extended model, and a tree with no machines, groups, or silos declared behaves exactly as today.
 

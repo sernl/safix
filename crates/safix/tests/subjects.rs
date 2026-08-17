@@ -37,7 +37,7 @@ fn a_narrowed_audience_is_reported_as_the_revocation_it_is() {
     // regenerated with them so that the drift under test is the ciphertext's and
     // not a stale artifact's.
     let ana = fixture.ana.clone();
-    fixture.narrow_audience(SHARED_FILE, &["ana"], &[&ana]);
+    fixture.set_audience(SHARED_FILE, &["ana"], &[&ana]);
     fixture.write_policy(&["ana"]);
 
     let report = fixture.run(&["check"]);
@@ -78,6 +78,57 @@ fn a_narrowed_audience_is_reported_as_the_revocation_it_is() {
     report.silent_about("and no declaration claims it");
 }
 
+/// A widened audience is a re-wrap, and `fix` is the whole of it.
+///
+/// Growing a group's membership adds a recipient to the audience of a file whose
+/// path does not move — that is what naming the directory for the group rather
+/// than for its members buys — so the convergence is `sops updatekeys` over a
+/// file that already exists. This drives the real one.
+#[test]
+fn a_widened_audience_is_re_wrapped_by_fix() {
+    let mut fixture = Fixture::new();
+    fixture.seed_declarations();
+    fixture.make_sops_file(SHARED_FILE, &["wifi-psk"]);
+
+    // The joining member holds a key nothing has encrypted to yet, and is
+    // declared so that the regenerated policy defines the anchor its rule grants.
+    let joined = fixture.new_recipient();
+    let ana = fixture.ana.clone();
+    let bo = fixture.bo.clone();
+    fixture.declare_person("cy", &joined);
+    assert!(
+        !fixture.read(SHARED_FILE).contains(&joined),
+        "the fixture file already names the joining member"
+    );
+
+    fixture.set_audience(SHARED_FILE, &["ana", "bo", "cy"], &[&ana, &bo, &joined]);
+    fixture.write_policy_agreeing(&["ana", "bo", "cy"]);
+
+    fixture
+        .run(&["fix", "--yes"])
+        .expect_success("fix over a widened audience");
+
+    assert!(
+        fixture.read(SHARED_FILE).contains(&joined),
+        "fix did not re-wrap the file to the widened audience:\n{}",
+        fixture.read(SHARED_FILE)
+    );
+
+    // The value is still there and still readable, which is what makes this a
+    // re-wrap rather than a rewrite.
+    assert_eq!(
+        fixture.value(SHARED_FILE, "wifi-psk"),
+        "fixture-value-for-wifi-psk"
+    );
+
+    // And the report is quiet about that file afterwards: the ciphertext and the
+    // declared audience now agree.
+    let report = fixture.run(&["check"]);
+    report.silent_about(&format!(
+        "{SHARED_FILE} is not encrypted to the audience declared for it"
+    ));
+}
+
 /// A key on the file that answers to no declared subject is the more alarming
 /// half, and must not be swallowed by naming only the subjects that matched.
 #[test]
@@ -91,7 +142,7 @@ fn a_key_answering_to_nobody_is_reported_apart_from_the_named_subjects() {
     );
 
     let ana = fixture.ana.clone();
-    fixture.narrow_audience(SHARED_FILE, &["ana"], &[&ana]);
+    fixture.set_audience(SHARED_FILE, &["ana"], &[&ana]);
     fixture.write_policy(&["ana"]);
 
     let report = fixture.run(&["check"]);

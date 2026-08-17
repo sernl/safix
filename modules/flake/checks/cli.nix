@@ -658,5 +658,12 @@
       checks.safix-audience-orphan =
         mode "safix-audience-orphan" "subjects"
           "a_key_answering_to_nobody_is_reported_apart_from_the_named_subjects";
+
+      # The other direction of the same fact: a widened audience — a member joining
+      # a group — leaves the file where it is, so `fix` converges it with a real
+      # `sops updatekeys` that adds the recipient and leaves the value readable.
+      checks.safix-audience-widened =
+        mode "safix-audience-widened" "subjects"
+          "a_widened_audience_is_re_wrapped_by_fix";
     };
 }
