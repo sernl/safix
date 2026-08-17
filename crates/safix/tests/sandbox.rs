@@ -55,7 +55,10 @@ fn no_flag_suspends_the_envelope() {
             .run(&["generate", flag, "ana"])
             .expect_refusal(&format!("generate {flag}"));
         run.says("usage: safix generate");
-        run.silent_about("no-such-secret");
+        // Not by naming the flag as something it looked for and did not find: a
+        // reader that fell through to the positional arguments would report it as
+        // an undeclared user, which is a refusal about the wrong thing.
+        run.silent_about(flag);
     }
 
     // The flags this verb does take are still taken, so the refusal above is the
@@ -159,7 +162,10 @@ mod linux {
         let staging = fixture.scratch("unconfined");
         std::fs::create_dir_all(staging.join("out")).unwrap();
 
-        let status = Command::new("bash")
+        // The status is not read. What is being asked is whether the write lands,
+        // and a fragment that goes on to reach the network fails here too — this
+        // process holds no listener for the unconfined run.
+        let _ = Command::new("bash")
             .arg("-euo")
             .arg("pipefail")
             .arg("-c")
@@ -175,10 +181,6 @@ mod linux {
         let landed = escape.exists();
         let _ = std::fs::remove_file(&escape);
         let _ = std::fs::remove_dir_all(&staging);
-        // The unconfined run is expected to write the file; whether it then went
-        // on to succeed is not the question, because a fragment reaching the
-        // network is expected to fail here too.
-        let _ = status;
         landed
     }
 
