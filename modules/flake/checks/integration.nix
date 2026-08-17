@@ -44,12 +44,9 @@ let
     pkgs.bubblewrap
     pkgs.strace
   ];
-in
-{
-  inherit backends;
-  inherit (pkgs) keepassxc;
 
-  # One check that runs one test of the compiled suite.
+  # One check that runs one test of the compiled suite, with something on `PATH`
+  # that the rest of the suite has no reason to carry.
   #
   # An empty `filter` runs every test in the target, which is what the
   # single-runtime checks want: each of those is one claim made of several
@@ -59,18 +56,12 @@ in
   # A filter naming nothing is the failure this guards against: libtest exits
   # zero having run no test, so a renamed test would turn a check green by
   # silently ceasing to assert anything. The result line is read for that.
-  runOne =
-    suite: name: target: filter:
-    runOneWith [ ] suite name target filter;
-
-  # The same, with something on `PATH` that the rest of the suite has no reason to
-  # carry.
   #
-  # One check needs the real `keepassxc-cli`, whose closure is a Qt application.
-  # Putting it in `backends` would make every check on this page carry it for the
-  # sake of one, and leaving it out entirely would make that check state an absence
-  # and pass — which is how a claim stops being made without anybody deciding to
-  # stop making it.
+  # `extra` exists for one check, which needs the real `keepassxc-cli` and whose
+  # closure is a Qt application. Putting it in `backends` would make every check
+  # on this page carry it for the sake of one, and leaving it out entirely would
+  # make that check state an absence and pass — which is how a claim stops being
+  # made without anybody deciding to stop making it.
   runOneWith =
     extra: suite: name: target: filter:
     pkgs.runCommand name
@@ -114,4 +105,11 @@ in
 
         touch "$out"
       '';
+in
+{
+  inherit backends runOneWith;
+  inherit (pkgs) keepassxc;
+
+  # The ordinary form, with nothing beyond the backends every check carries.
+  runOne = runOneWith [ ];
 }
