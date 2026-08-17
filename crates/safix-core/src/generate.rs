@@ -565,10 +565,10 @@ fn mint(
     // Standard output is inherited rather than captured, because it is no longer
     // where a value travels: a script's output is diagnostic now, and capturing
     // it would hide a `set -x` trace the operator asked for.
-    // The staging root is bound read-write inside the envelope at the path it
-    // has outside it, so the three directories `tree.apply` names are reachable
-    // by the names the fragment was written against and nothing else on the host
-    // is reachable at all.
+    // The staging root is bound read-write at the path it has outside the
+    // envelope, so the three directories `tree.apply` names resolve inside it by
+    // the names the fragment was written against. What else a fragment can reach
+    // is [`crate::sandbox`]'s to state rather than this call site's.
     let confinement = envelope.confine(Some(tree.root()), record.network);
     let mut command = workspace.nix().generator_shell(
         workspace.root(),
