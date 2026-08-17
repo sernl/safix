@@ -546,6 +546,8 @@ in
               established = [
                 "alice-alone"
                 "api-token"
+                "corp-handover"
+                "corp-token"
                 "ops-handover"
                 "ops-tooling"
                 "team-vault"
@@ -793,6 +795,8 @@ in
                 withIdentity = [
                   "alice-alone"
                   "api-token"
+                  "corp-handover"
+                  "corp-token"
                   "ops-handover"
                   "ops-tooling"
                   "team-vault"

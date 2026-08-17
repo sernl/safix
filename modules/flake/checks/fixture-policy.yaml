@@ -5,9 +5,11 @@
 # policy-drift check fails while the committed file and the generated one
 # differ, and its failure names that command. Its whole input is
 # flake.safix.users — each person's `recipient`, their `recoveryRecipients`,
-# and the secrets they own and share under `carries`, `private` and
-# `sharedWith` — together with flake.safix.catalogue, and with
-# flake.safix.machines and flake.safix.groups where an audience names one.
+# the organizations their `escrowedTo` consents to, and the secrets they own
+# and share under `carries`, `private` and `sharedWith` — together with
+# flake.safix.catalogue, and with flake.safix.machines, flake.safix.services,
+# flake.safix.groups and flake.safix.organizations where a declaration reaches
+# one.
 #
 # ── one rule per audience ──
 # A sops file has a single data key, wrapped once per recipient, so anyone who
@@ -24,11 +26,17 @@
 # directory and so one rule.
 #
 # An audience member is a subject: a person, a machine whose recipient is the
-# age form of the host identity it already decrypts with, or a group. A group
-# appears as @<group> and the owner of a machine as @~<machine>, both marks the
+# age form of the host identity it already decrypts with, a service running on
+# machines, a group, or an organization holding recovery custody. A group
+# appears as @<group>, a service as %<service>, an organization as
+# =<organization> and the owner of a machine as @~<machine>, each a mark the
 # name alphabet excludes. A marked member is a readership its own declaration
 # decides, so adding a member or changing an owner re-wraps this file's rule
 # rather than moving the secret to another directory.
+#
+# A person's own directory carries the custody of every organization their
+# `escrowedTo` names, with no element of its own: consent widens who can open
+# that person's files and never who the files are for.
 #
 # ── anchoring is load-bearing ──
 # Anchoring survives every edit to the generator, in two independent ways:
@@ -78,6 +86,8 @@ keys:
   - &carol-safix age1fixtureccc00000000000000000000000000000000000000000000000
   # fixture-host — the age form of a host identity that does not exist
   - &fixture-host-safix age1fixturehost00000000000000000000000000000000000000000000000
+  # acme's escrow — a fixture identity that decrypts nothing
+  - &acme-escrow age1fixtureacme00000000000000000000000000000000000000000000000
 
 creation_rules:
   # Audience: %fixture-web, alice.
@@ -90,6 +100,29 @@ creation_rules:
           - *alice-escrow
           - *alice-safix
           - *fixture-host-safix
+          - *acme-escrow
+
+  # Audience: =acme, alice.
+  # One data key, wrapped once per recipient, so every member of this audience
+  # opens every value in this directory. That is why sharing lands here rather
+  # than adding a recipient to one of their personal files.
+  - path_regex: ^secrets/safix/shared/=acme,alice/[^/]*\.yaml$
+    key_groups:
+      - age:
+          - *alice-escrow
+          - *alice-safix
+          - *acme-escrow
+
+  # Audience: @~acme-host, alice.
+  # One data key, wrapped once per recipient, so every member of this audience
+  # opens every value in this directory. That is why sharing lands here rather
+  # than adding a recipient to one of their personal files.
+  - path_regex: ^secrets/safix/shared/@~acme-host,alice/[^/]*\.yaml$
+    key_groups:
+      - age:
+          - *alice-escrow
+          - *alice-safix
+          - *acme-escrow
 
   # Audience: alice, bob.
   # One data key, wrapped once per recipient, so every member of this audience
@@ -101,6 +134,7 @@ creation_rules:
           - *alice-escrow
           - *alice-safix
           - *bob-safix
+          - *acme-escrow
 
   # Audience: alice alone — their own custody. The recipients
   # below are the identities that one person holds.
@@ -109,6 +143,7 @@ creation_rules:
       - age:
           - *alice-escrow
           - *alice-safix
+          - *acme-escrow
 
   # Audience: bob alone — their own custody. The recipients
   # below are the identities that one person holds.

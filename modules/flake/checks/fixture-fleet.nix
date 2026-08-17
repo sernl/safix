@@ -2,13 +2,20 @@
 # checks safix exports are instantiated here the way a consumer instantiates
 # them rather than called with arguments assembled beside them.
 #
-# Three people who do not exist, one machine, and one service on it. alice and
-# bob each carry a catalogue entry into their own custody and share a second one
-# between them; alice escrows to a recovery identity, holds a generated secret,
-# declares a path, and grants one entry to the service; bob declares ownership
-# fields, which is what makes his profile the one the user-scope refusal fires
-# on; carol records a recipient and holds nothing, which earns an anchor and no
-# rule.
+# Three people who do not exist, two machines, one service, and one
+# organization. alice and bob each carry a catalogue entry into their own custody
+# and share a second one between them; alice escrows to a recovery identity she
+# holds and consents to acme's escrow beside it, holds a generated secret,
+# declares a path, and grants one entry to the service, one to acme and one to
+# the owner of the machine acme owns; bob declares ownership fields, which is what
+# makes his profile the one the user-scope refusal fires on; carol records a
+# recipient and holds nothing, which earns an anchor and no rule.
+#
+# acme is the organization: one custody key, one consenting person, one owned
+# machine. The direct grant is what puts the fifth audience element in front of
+# every check a consumer runs — the rule shape, the catch-all probes, the
+# separator and the committed policy — and the `ownerOf` grant is what resolves
+# an ownership record through to an organization's custody.
 #
 # The recipients are literals shaped like an age public key and are not keys.
 # Nothing in this repository encrypts anything, nothing here has a private half
@@ -25,6 +32,8 @@ let
   carolKey = "age1fixtureccc00000000000000000000000000000000000000000000000";
   escrowKey = "age1fixturevault0000000000000000000000000000000000000000000000";
   hostKey = "age1fixturehost00000000000000000000000000000000000000000000000";
+  acmeKey = "age1fixtureacme00000000000000000000000000000000000000000000000";
+  acmeHostKey = "age1fixtureacmehost000000000000000000000000000000000000000000";
 in
 {
   inherit
@@ -33,6 +42,8 @@ in
     carolKey
     escrowKey
     hostKey
+    acmeKey
+    acmeHostKey
     ;
 
   fleet = {
@@ -62,6 +73,11 @@ in
         # is what proves an enrolled record evaluates.
         recoveryRecipients."alice-escrow".key = escrowKey;
         recoveryRecipients."alice-escrow".note = "alice's escrow — a second identity she holds";
+
+        # Consent to acme's escrow, beside the recovery identity above rather than
+        # inside it: the keys are acme's and arrive at resolution time, which is
+        # what keeps a rotation of them a change to one declaration.
+        escrowedTo = [ "acme" ];
 
         carries = {
           ops-tooling = { };
@@ -128,11 +144,26 @@ in
           web-token = {
             mode = "0400";
           };
+
+          # Granted to the organization itself, which is the fifth audience
+          # element: a directory named `=acme,alice`, so the marker reaches a
+          # generated `path_regex` in this repository's own policy.
+          corp-token = {
+            mode = "0400";
+          };
+
+          # Granted to whoever owns acme-host, which acme does, so the ownership
+          # record resolves through to an organization's custody keys.
+          corp-handover = {
+            mode = "0400";
+          };
         };
 
         sharedWith = {
           bob.ops-handover = { };
           fixture-web.web-token = { };
+          acme.corp-token = { };
+          "ownerOf.acme-host".corp-handover = { };
         };
       };
 
@@ -171,6 +202,24 @@ in
       recipient = hostKey;
       recipientNote = "fixture-host — the age form of a host identity that does not exist";
       owner = "alice";
+    };
+
+    # Owned by the organization rather than by a person, which is what makes the
+    # `ownerOf` grant above resolve to custody keys instead of to someone's
+    # recipient. It records a recipient of its own and no grant names the machine,
+    # so it earns no anchor: what the audience names is its owner.
+    machines.acme-host = {
+      recipient = acmeHostKey;
+      recipientNote = "acme-host — the age form of a host identity that does not exist";
+      owner = "acme";
+    };
+
+    # One organization, holding one escrow identity. alice consents to it, acme
+    # owns a machine, and one grant names it directly, so all three ways of
+    # reaching an organization are exercised by the checks a consumer runs.
+    organizations.acme.custody.acme-escrow = {
+      key = acmeKey;
+      note = "acme's escrow — a fixture identity that decrypts nothing";
     };
 
     # One granted service, so the exported checks are instantiated over a fleet

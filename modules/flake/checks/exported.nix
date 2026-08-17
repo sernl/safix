@@ -48,6 +48,7 @@ let
     catalogue = typed (lib.types.attrsOf types.entry) raw.catalogue;
     machines = typed (lib.types.attrsOf types.machine) raw.machines;
     services = typed (lib.types.attrsOf types.service) raw.services;
+    organizations = typed (lib.types.attrsOf types.organization) raw.organizations;
   };
 
   perturbed = update: fleetOf (lib.recursiveUpdate fixture.fleet update);
@@ -65,6 +66,7 @@ in
       catalogue
       machines
       services
+      organizations
       ;
   };
 
@@ -75,9 +77,10 @@ in
       users = config.flake.safix.users;
 
       # The records as the binding a consumer gets holds them. This fleet declares
-      # one machine and one granted service and no groups or silos, so the
-      # exported builders are instantiated over a registry with some subject
-      # records populated and some empty — which is the shape a consumer's is.
+      # two machines, one granted service and one organization, and no groups or
+      # silos, so the exported builders are instantiated over a registry with some
+      # subject records populated and some empty — which is the shape a consumer's
+      # is.
       registry = {
         inherit (config.flake.safix)
           users
@@ -85,6 +88,7 @@ in
           machines
           services
           groups
+          organizations
           silos
           ;
       };
@@ -271,6 +275,8 @@ in
             ];
             files = [
               "secrets/safix/shared/%fixture-web,alice/secrets.yaml"
+              "secrets/safix/shared/=acme,alice/secrets.yaml"
+              "secrets/safix/shared/@~acme-host,alice/secrets.yaml"
               "secrets/safix/shared/alice,bob/secrets.yaml"
               "secrets/safix/users/alice/secrets.yaml"
               "secrets/safix/users/bob/secrets.yaml"

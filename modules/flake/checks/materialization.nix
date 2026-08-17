@@ -166,6 +166,8 @@
             user = [
               "alice-alone"
               "api-token"
+              "corp-handover"
+              "corp-token"
               "ops-handover"
               "ops-tooling"
               "team-vault"
@@ -175,6 +177,8 @@
             system = [
               "alice-alone"
               "api-token"
+              "corp-handover"
+              "corp-token"
               "ops-handover"
               "ops-tooling"
               "team-vault"
