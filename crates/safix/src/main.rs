@@ -656,7 +656,7 @@ fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let mut rest = arguments;
 
     while let Some((first, tail)) = rest.split_first() {
-        let mut valued = |sink: &mut String| match tail.split_first() {
+        let valued = |sink: &mut String| match tail.split_first() {
             Some((value, after)) => {
                 sink.clone_from(value);
                 Ok(after)

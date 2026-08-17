@@ -198,19 +198,19 @@ impl Credentials {
 
     /// Both halves as one value, in the shape a custody entry holds them.
     ///
-    /// Two labelled lines rather than a structure, because every reader of this
-    /// is a person looking at one entry of a password store or one key of a
-    /// safix secret.
+    /// Two labelled lines rather than a structure, because every reader of this is
+    /// a person looking at one entry of a password store or one key of a safix
+    /// secret. No trailing newline, which is the convention every value this
+    /// package stores follows: a value is stored exactly as it was given.
     ///
     /// # Errors
     ///
     /// [`Error::SecretRead`] when the in-memory copy cannot be read.
     pub fn record(&self) -> Result<Secret> {
-        let mut text = Zeroizing::new(format!("PIN={}\n", self.pin.as_str()));
+        let mut text = Zeroizing::new(format!("PIN={}", self.pin.as_str()));
         if let Some(puk) = &self.puk {
-            text.push_str("PUK=");
+            text.push_str("\nPUK=");
             text.push_str(puk);
-            text.push('\n');
         }
         Secret::read_from(&mut text.as_bytes())
     }
@@ -632,7 +632,7 @@ mod tests {
             .expect("a slice can be read")
             .write_to(&mut written)
             .expect("a vec can be written");
-        assert_eq!(written, b"PIN=11111111\nPUK=22222222\n");
+        assert_eq!(written, b"PIN=11111111\nPUK=22222222");
     }
 
     #[test]

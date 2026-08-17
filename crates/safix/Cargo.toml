@@ -40,6 +40,17 @@ path = "tests/support/shim.rs"
 name = "safix-clan-stub"
 path = "tests/support/clan-stub.rs"
 
+# The card surface `safix enroll` is driven against: ykman, the age plugin, and
+# the two password stores, in one binary with a role in its environment. Stubbed
+# for the reason clan is — the claims are about the delegation and a stub can be
+# asked what it saw — and for one more that clan does not have: the real tools act
+# on hardware holding this fleet's master identities, where one wrong argument is
+# an irreversible loss. No check in this repository runs them, so the card the
+# suite knows is this file.
+[[bin]]
+name = "safix-card-stub"
+path = "tests/support/card-stubs.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true

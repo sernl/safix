@@ -59,7 +59,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
@@ -102,6 +102,22 @@ pub fn shim() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| located("SAFIX_TEST_SHIM", env!("CARGO_BIN_EXE_safix-test-shim")))
         .as_str()
+}
+
+/// The card surface the enrollment tests are driven against.
+///
+/// One binary with four roles. Nothing in this suite runs the real `ykman`, the
+/// real age plugin or a real password store, and that is a safety property rather
+/// than a convenience: see the head of `tests/support/card-stubs.rs`.
+pub fn card_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        located(
+            "SAFIX_TEST_CARD_STUB",
+            env!("CARGO_BIN_EXE_safix-card-stub"),
+        )
+    })
+    .as_str()
 }
 
 /// The clan the bridge tests delegate across.
@@ -467,6 +483,20 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare the entry an enrollment stores a card's PIN and PUK under.
+    ///
+    /// The stand-in for what an evaluation computes once `safix enroll` has added
+    /// the name to the person's `private` set: the placements this stub answers
+    /// with are documents the harness writes, and the run cannot make an
+    /// evaluation happen. The claim that the name reaches the declaration is
+    /// asserted against the declaration itself; this is what lets the write path
+    /// resolve it afterwards.
+    pub fn seed_card_custody(&mut self, serial: &str) {
+        let name = format!("card-{serial}-piv-access");
+        self.placements["ana"][&name] = placement(ANA_FILE, &name, "private", "ana");
+        self.write_fixtures();
+    }
+
     /// Name a file the consumer governs without declaring a secret in it.
     pub fn govern_extra(&mut self, path: &str) {
         self.extras = vec![path.to_owned()];
@@ -477,6 +507,12 @@ impl Fixture {
     pub fn set_hook(&self, script: Option<&str>) {
         let hook = script.map_or(Value::Null, |text| json!(text));
         std::fs::write(self.work.join("hook.json"), hook.to_string()).unwrap();
+    }
+
+    /// Configure the enrollment hook, which is the onboarding one's counterpart.
+    pub fn set_enroll_hook(&self, script: Option<&str>) {
+        let hook = script.map_or(Value::Null, |text| json!(text));
+        std::fs::write(self.work.join("enroll-hook.json"), hook.to_string()).unwrap();
     }
 
     /// Name the flake the mappings' clan side lives in.
@@ -566,6 +602,59 @@ impl Fixture {
         self.clan_recorded("writes").trim().parse().unwrap_or(0)
     }
 
+    /// Where the card stubs record what they were handed.
+    pub fn card_spool(&self) -> PathBuf {
+        self.work.join("card-spool")
+    }
+
+    /// One line of what a card stub recorded, or the empty string.
+    pub fn card_recorded(&self, name: &str) -> String {
+        std::fs::read_to_string(self.card_spool().join(name)).unwrap_or_default()
+    }
+
+    /// What a store stub holds under one name, if it holds anything.
+    pub fn card_holds(&self, name: &str) -> Option<String> {
+        from_hex(&std::fs::read_to_string(self.card_spool().join(name)).ok()?)
+    }
+
+    /// The environment an enrollment run needs: every tool pointed at the card
+    /// stub, and the spool they all record into.
+    ///
+    /// Four variables rather than one, because the runtime reaches each tool by
+    /// its own override and a single one would let a rename go unnoticed.
+    pub fn card_env(&self) -> Vec<(String, String)> {
+        let stub = card_stub().to_owned();
+        vec![
+            ("SAFIX_YKMAN".to_owned(), stub.clone()),
+            ("SAFIX_AGE_PLUGIN_YUBIKEY".to_owned(), stub.clone()),
+            ("SAFIX_SECRET_TOOL".to_owned(), stub.clone()),
+            ("SAFIX_KEEPASSXC_CLI".to_owned(), stub),
+            (
+                "SAFIX_CARD_STUB_SPOOL".to_owned(),
+                self.card_spool().to_string_lossy().into_owned(),
+            ),
+            // Named rather than left to $HOME/.config, so a test can read what
+            // enrollment appended without depending on where sops looks. It is
+            // the same variable `safix keygen` honours, and enrollment appends to
+            // the same file for the same reason: the card's stub and the software
+            // identities are peers.
+            (
+                "SAFIX_AGE_KEY_FILE".to_owned(),
+                self.card_identity_file().to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
+    /// The identity file an enrollment run appends the card's stub to.
+    pub fn card_identity_file(&self) -> PathBuf {
+        self.work.join("card-keys.txt")
+    }
+
+    /// What that file holds, or the empty string when nothing wrote it.
+    pub fn card_identity(&self) -> String {
+        std::fs::read_to_string(self.card_identity_file()).unwrap_or_default()
+    }
+
     /// The environment a bridge run needs: the stubbed clan, and its spool.
     pub fn clan_env(&self) -> Vec<(String, String)> {
         vec![
@@ -616,6 +705,9 @@ impl Fixture {
         if !self.work.join("hook.json").exists() {
             self.set_hook(None);
         }
+        if !self.work.join("enroll-hook.json").exists() {
+            self.set_enroll_hook(None);
+        }
     }
 
     // ── driving the command ────────────────────────────────────────────────
@@ -645,6 +737,88 @@ impl Fixture {
     /// set — a backend that fails, a temporary directory of its own.
     pub fn run_env(&self, arguments: &[&str], stdin: Option<&str>, extra: &[(&str, &str)]) -> Run {
         self.invoke(safix(), arguments, stdin, Reporter::Plain, extra)
+    }
+
+    /// One invocation whose standard input and standard error are a terminal.
+    ///
+    /// `safix enroll` refuses without one, and that refusal is a real property
+    /// rather than a thing to be switched off for the suite: a card has to be
+    /// touched and somebody has to be told when. So the runs that are meant to
+    /// get past it are given a pseudo-terminal, and the one that is meant to be
+    /// refused goes through [`Fixture::run_env`], which gives it pipes.
+    ///
+    /// Standard output stays a pipe, which is what lets a test say that a value
+    /// did not reach it: on a terminal both streams are one and the claim could
+    /// not be made. `feed` is written to the terminal after the child is running,
+    /// which is how a prompt the run makes of the operator is answered.
+    pub fn run_on_terminal(&self, arguments: &[&str], feed: &str, extra: &[(&str, &str)]) -> Run {
+        use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("no pseudo-terminal");
+        grantpt(&master).expect("could not grant the pseudo-terminal");
+        unlockpt(&master).expect("could not unlock the pseudo-terminal");
+        let name = ptsname(&master, Vec::new()).expect("the pair has no name");
+        let slave = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(String::from_utf8_lossy(name.as_bytes()).into_owned())
+            .expect("the slave end does not open");
+
+        let mut command = Command::new(safix());
+        command.args(arguments);
+        self.environment(&mut command, Reporter::Plain);
+        for (variable, value) in extra {
+            command.env(variable, value);
+        }
+        command
+            .stdin(Stdio::from(
+                slave.try_clone().expect("the slave cannot be duplicated"),
+            ))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::from(slave));
+        let mut child = command.spawn().expect("could not spawn the command");
+
+        let mut terminal =
+            std::fs::File::from(master.try_clone().expect("the master cannot be duplicated"));
+        if !feed.is_empty() {
+            terminal
+                .write_all(feed.as_bytes())
+                .expect("the feed cannot be written");
+            terminal.flush().expect("the feed cannot be flushed");
+        }
+
+        // Drained on a thread of its own, because a run that fills the terminal's
+        // buffer while this process waits for it to exit is a deadlock rather than
+        // a failure. The read ends when the child does — `command` is dropped
+        // first so the only descriptions of the slave left are the child's.
+        drop(command);
+        let reader = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                match rustix::io::read(&master, &mut buffer) {
+                    Ok(0) | Err(rustix::io::Errno::IO) => break,
+                    Ok(read) => seen.extend_from_slice(&buffer[..read]),
+                    Err(rustix::io::Errno::INTR) => (),
+                    Err(_) => break,
+                }
+            }
+            seen
+        });
+
+        let mut stdout = Vec::new();
+        if let Some(mut pipe) = child.stdout.take() {
+            let _ = pipe.read_to_end(&mut stdout);
+        }
+        let status = child.wait().expect("the command did not finish");
+        drop(terminal);
+        let seen = reader.join().unwrap_or_default();
+
+        Run {
+            code: status.code(),
+            stdout,
+            stderr: String::from_utf8_lossy(&seen).into_owned(),
+        }
     }
 
     /// One invocation under the graphical reporter with an environment of its
@@ -977,6 +1151,10 @@ impl Fixture {
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
+            .env(
+                "SAFIX_FIXTURE_ENROLL_HOOK",
+                self.work.join("enroll-hook.json"),
+            )
             .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"))
             // The two the developer's own shell almost certainly sets. A test
             // that inherited them would open whoever is running it into their
@@ -1214,6 +1392,13 @@ impl Fixture {
         }
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "fixture: two declared people"]);
+    }
+
+    /// A scratch directory of this fixture's own, made rather than named.
+    pub fn scratch_dir(&self, name: &str) -> PathBuf {
+        let path = self.work.join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
     }
 
     /// A recipient minted here, for a person the fixture does not declare.
@@ -1455,6 +1640,23 @@ fn rules_block(shared_anchors: &[&str]) -> String {
         writeln!(rules, "          - *{anchor}").unwrap();
     }
     rules
+}
+
+/// One age identity, minted into a named file.
+///
+/// The proof's stand-in for a card: an ordinary identity, in a file of its own, so
+/// that "the isolated source is what opened this" is a claim about one identity
+/// rather than about whichever key happened to be reachable.
+pub fn mint_identity(path: &Path) {
+    run_to_success(
+        Command::new("age-keygen").arg("-o").arg(path),
+        "minting a stand-in identity",
+    );
+}
+
+/// The recipient of an identity file.
+pub fn recipient_of(path: &Path) -> String {
+    capture(Command::new("age-keygen").arg("-y").arg(path))
 }
 
 /// A mode-700 scratch directory on tmpfs, unique to one fixture.

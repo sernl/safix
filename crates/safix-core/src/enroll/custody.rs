@@ -233,8 +233,10 @@ pub fn write(
 /// Run one transport, writing each value on its own line of standard input.
 ///
 /// One line per value, in order, because both tools read line-delimited answers
-/// from standard input when it is not a terminal: the database password, then
-/// the entry's.
+/// from standard input when it is not a terminal: the database password, then the
+/// entry's. The newline separates them and does not follow the last, because the
+/// last value is a value rather than an answer and end of input is what ends it —
+/// a trailing newline would be a byte of the credential that nobody put there.
 fn feed(
     program: &Path,
     arguments: &[String],
@@ -256,10 +258,14 @@ fn feed(
 
     {
         let mut stdin = child.stdin.take().ok_or(Error::SopsPipeMissing)?;
-        for value in values {
+        for (position, value) in values.iter().enumerate() {
+            if position > 0 {
+                stdin
+                    .write_all(b"\n")
+                    .map_err(|cause| Error::SecretRead { cause })?;
+            }
             value
                 .write_to(&mut stdin)
-                .and_then(|()| stdin.write_all(b"\n"))
                 .map_err(|cause| Error::SecretRead { cause })?;
         }
         stdin.flush().map_err(|cause| Error::SecretRead { cause })?;

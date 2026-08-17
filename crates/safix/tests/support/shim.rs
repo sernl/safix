@@ -9,7 +9,10 @@
 //! - `spy` records the argument vector and environment it was handed and then
 //!   becomes the real sops. It reads them from itself rather than from `/proc`,
 //!   so the claim — that a plaintext value reached sops down neither channel —
-//!   is made the same way on every platform.
+//!   is made the same way on every platform. It also records the contents of the
+//!   identity file it was pointed at, when it was pointed at one: an identity
+//!   source built for one decrypt and swept afterwards cannot be read once the
+//!   run is over, and what it held is the whole of the isolation claim.
 //! - `interrupt` signals whoever invoked it and then does the real work, which
 //!   turns "interrupted while sops holds the candidate document open" from a
 //!   race into a fixture. It signals its parent alone rather than a process
@@ -51,6 +54,15 @@ fn spy(arguments: &[String]) -> ! {
         .map(|(name, value)| format!("{name}={value}"))
         .collect();
     append(&spool.join("environ"), &environ.join("\n"));
+
+    if let Ok(named) = std::env::var("SOPS_AGE_KEY_FILE")
+        && let Ok(identities) = std::fs::read_to_string(&named)
+    {
+        append(
+            &spool.join("identity-files"),
+            &format!("{named}\n{identities}"),
+        );
+    }
 
     become_sops(arguments)
 }

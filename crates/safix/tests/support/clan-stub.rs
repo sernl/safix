@@ -35,6 +35,9 @@
 //! - "Couldn't find var" for an id clan has nothing under, and "has not been
 //!   generated yet" for one it knows and that holds nothing
 //!   (`clan_lib/vars/get.py`, `clan_cli/vars/get.py`).
+//! - `clan secrets users add <name> --age-key <key>` declares a person clan does
+//!   not have and refuses one it does; `clan secrets users add-key` is the second
+//!   form, for a person who already exists.
 //!
 //! # What it records
 //!
@@ -96,6 +99,18 @@ fn main() -> ! {
             generator,
         ] => {
             check(machine, generator);
+        }
+        [
+            "secrets",
+            "users",
+            verb,
+            "--flake",
+            _flake,
+            user,
+            "--age-key",
+            key,
+        ] => {
+            register(verb, user, key);
         }
         other => refuse(&format!(
             "clan: unrecognized arguments: {}",
@@ -182,6 +197,25 @@ fn check(machine: &str, generator: &str) -> ! {
     }
     eprintln!("Check results for machine '{machine}': \nAll vars are present and valid.");
     std::process::exit(0);
+}
+
+/// One person's key, registered the way clan registers one.
+///
+/// `add` refuses a person clan already has, which is what makes the runtime try
+/// `add-key` after it: which of the two applies is a fact about clan's store, and
+/// the runtime reaches the second by outcome rather than by reading a message.
+/// `SAFIX_CLAN_STUB_EXISTING` is how a test says the person is already there.
+fn register(verb: &str, user: &str, key: &str) -> ! {
+    let exists = named("SAFIX_CLAN_STUB_EXISTING").as_deref() == Some(user);
+    match (verb, exists) {
+        ("add", false) | ("add-key", true) => {
+            record("registered", &format!("{verb} {user} {key}"));
+            std::process::exit(0);
+        }
+        ("add", true) => refuse(&format!("Error: user {user} already exists")),
+        ("add-key", false) => refuse(&format!("Error: no such user: {user}")),
+        (other, _) => refuse(&format!("clan: unrecognized users verb: {other}")),
+    }
 }
 
 /// The directory and file one var is stored under, in the stub's own layout.

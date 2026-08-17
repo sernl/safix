@@ -13,7 +13,7 @@
 //!
 //! It answers out of files the harness writes, named by environment:
 //! `SAFIX_FIXTURE_PLACEMENTS`, `_AUDIENCES`, `_GOVERNED`, `_RECIPIENTS`,
-//! `_GENPLAN`, `_BRIDGE`, `_HOOK` and `_RULES`. `safix.lib.policyText` is the exception and
+//! `_GENPLAN`, `_BRIDGE`, `_HOOK`, `_ENROLL_HOOK` and `_RULES`. `safix.lib.policyText` is the exception and
 //! is computed here from what git tracks, because that is the property
 //! `adduser`'s staging order turns on: an evaluation reads the files git tracks,
 //! so a command that regenerates the policy before staging its scaffold writes a
@@ -28,7 +28,7 @@ use std::process::Command;
 /// The read mode is part of the assertion: `--raw` is a string taken verbatim
 /// and `--json` is a document, and a runtime that swapped them would be reading
 /// a quoted string as a pattern.
-const ATTRIBUTES: [(&str, Mode, Source); 9] = [
+const ATTRIBUTES: [(&str, Mode, Source); 10] = [
     (
         "safix.lib.placements",
         Mode::Json,
@@ -63,6 +63,11 @@ const ATTRIBUTES: [(&str, Mode, Source); 9] = [
         "safix.onboardingHook",
         Mode::Json,
         Source::Fixture("SAFIX_FIXTURE_HOOK"),
+    ),
+    (
+        "safix.enrollHook",
+        Mode::Json,
+        Source::Fixture("SAFIX_FIXTURE_ENROLL_HOOK"),
     ),
     ("safix.lib.nameRegex", Mode::Raw, Source::NameRegex),
     ("safix.lib.policyText", Mode::Raw, Source::PolicyText),

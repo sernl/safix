@@ -356,8 +356,18 @@ impl Ceremony<'_> {
         }
         refuse_lost_recipients(&self.workspace, &before)?;
 
+        // The governed files that exist, because a governed file is a path a
+        // declaration implies rather than a file anybody has written yet, and
+        // staging one that is not there refuses the whole commit.
         let mut written = vec![relative, String::from(".sops.yaml")];
-        written.extend(self.workspace.governed_files()?.managed.iter().cloned());
+        written.extend(
+            self.workspace
+                .governed_files()?
+                .managed
+                .iter()
+                .filter(|governed| self.workspace.absolute(governed).exists())
+                .cloned(),
+        );
         git::commit_written_files(
             self.workspace.git(),
             self.workspace.root(),
