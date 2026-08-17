@@ -102,6 +102,26 @@ pub fn clan_stub() -> &'static str {
     .as_str()
 }
 
+/// The real clan command, where a check put one in the environment.
+///
+/// Nothing falls back here, and that is the point: there is no compiled-in path
+/// to a real clan, and a `None` is what `real_clan.rs` turns into a stated
+/// absence rather than into a green test.
+pub fn real_clan() -> Option<String> {
+    named_program("SAFIX_TEST_REAL_CLAN")
+}
+
+/// The throwaway clan a check built for the real command to answer out of.
+pub fn real_clan_seed() -> Option<String> {
+    named_program("SAFIX_TEST_REAL_CLAN_SEED")
+}
+
+fn named_program(variable: &str) -> Option<String> {
+    std::env::var(variable)
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
 /// Where one of the three programs the suite drives is.
 ///
 /// `CARGO_BIN_EXE_*` is an absolute path fixed when the test was compiled, and
@@ -216,6 +236,7 @@ pub struct Fixture {
     audiences: Value,
     genplan: Value,
     bridge: Value,
+    clan_flake: Option<PathBuf>,
     extras: Vec<String>,
 }
 
@@ -289,6 +310,7 @@ impl Fixture {
             // refuse, and that is asserted by every other test's fixture being
             // this one.
             bridge: json!({ "clanFlake": null, "mappings": [] }),
+            clan_flake: None,
             genplan: json!({
                 "ana": { "order": [], "outputs": {}, "inputs": {} },
                 "bo":  { "order": [], "outputs": {}, "inputs": {} },
@@ -431,6 +453,19 @@ impl Fixture {
         std::fs::write(self.work.join("hook.json"), hook.to_string()).unwrap();
     }
 
+    /// Name the flake the mappings' clan side lives in.
+    ///
+    /// Every mapping declares one `clanFlake`, and a stubbed clan does not read
+    /// it, so the fixture repository is the harmless default. A run against a
+    /// real clan needs the real thing, and `real_clan.rs` is where that matters:
+    /// clan resolves the flake, evaluates the machine, and answers out of the
+    /// store it finds there. Call this before [`Fixture::seed_mapping`].
+    pub fn clan_flake_is(&mut self, flake: &Path) {
+        self.clan_flake = Some(flake.to_owned());
+        self.bridge["clanFlake"] = json!(flake.to_string_lossy());
+        self.write_fixtures();
+    }
+
     /// Declare one bridge mapping, as `flake.safix.bridge` resolves it.
     ///
     /// The shape is the one `modules/flake/safix/default.nix` projects: the
@@ -447,7 +482,12 @@ impl Fixture {
     ) {
         let (machine, generator, file) = clan;
         let (user, name) = safix;
-        self.bridge["clanFlake"] = json!(self.repo.to_string_lossy());
+        self.bridge["clanFlake"] = json!(
+            self.clan_flake
+                .clone()
+                .unwrap_or_else(|| self.repo.clone())
+                .to_string_lossy()
+        );
         self.bridge["mappings"].as_array_mut().unwrap().push(json!({
             "id": id,
             "direction": direction,
