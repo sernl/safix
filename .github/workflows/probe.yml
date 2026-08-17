@@ -1,0 +1,195 @@
+# Temporary: measures what a GitHub runner will and will not let bubblewrap do,
+# and what each platform's check surface actually contains. Deleted once the
+# answers are recorded in check.yml.
+name: probe
+
+on:
+  push:
+    branches:
+      - ci-workflows
+  workflow_dispatch:
+
+concurrency:
+  group: probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  userns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: host facts
+        run: |
+          uname -a
+          cat /etc/os-release
+          echo "--- sysctls ---"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || echo "(absent)"
+          sysctl kernel.unprivileged_userns_clone || echo "(absent)"
+          echo "--- apparmor profiles ---"
+          ls /etc/apparmor.d/ || true
+          echo "--- disk ---"
+          df -h
+          echo "--- cpu/mem ---"
+          nproc
+          free -h
+
+      - name: host userns without nix
+        run: |
+          echo "unshare -Ur true:"
+          unshare -Ur true && echo "  ok" || echo "  refused rc=$?"
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: nix facts
+        run: |
+          nix --version
+          nix config show | grep -Ei 'sandbox|filter-syscalls|max-jobs|^cores|system-features' || true
+
+      - name: write the probe expression
+        run: |
+          cat > /tmp/bwrap-probe.nix <<'NIXEOF'
+          { attempt }:
+          let
+            pkgs = import <nixpkgs> { };
+            envelope = builtins.concatStringsSep " " [
+              "--tmpfs" "/"
+              "--ro-bind" "/nix/store" "/nix/store"
+              "--ro-bind-try" "/bin/sh" "/bin/sh"
+              "--dev" "/dev"
+              "--bind" "/proc" "/proc"
+              "--tmpfs" "/tmp"
+              "--chdir" "/"
+            ];
+          in
+          pkgs.runCommand "bwrap-probe-${attempt}"
+            { nativeBuildInputs = [ pkgs.bubblewrap pkgs.util-linux ]; }
+            ''
+              echo "=== who the builder is ==="
+              id
+              grep -E 'CapEff|CapPrm|^Uid|^Gid' /proc/self/status || true
+              echo "=== namespaces ==="
+              ls -l /proc/self/ns/ || true
+              echo "=== unshare -Ur true ==="
+              unshare -Ur true && echo "  ok" || echo "  refused rc=$?"
+              echo "=== bwrap --unshare-user ==="
+              bwrap --unshare-user ${envelope} -- /bin/sh -c 'echo inside' \
+                && echo "  ok" || echo "  refused rc=$?"
+              echo "=== bwrap --unshare-all, the envelope safix actually uses ==="
+              bwrap --unshare-all ${envelope} -- /bin/sh -c 'echo inside' \
+                && echo "  ok" || echo "  refused rc=$?"
+              echo "=== bwrap with no namespace flag ==="
+              bwrap ${envelope} -- /bin/sh -c 'echo inside' \
+                && echo "  ok" || echo "  refused rc=$?"
+              touch $out
+            ''
+          NIXEOF
+          cat /tmp/bwrap-probe.nix
+
+      - name: bwrap in a nix build, apparmor as shipped
+        continue-on-error: true
+        run: nix build --no-link -L -f /tmp/bwrap-probe.nix --argstr attempt as-shipped
+
+      - name: bwrap in a nix build, nix sandbox off
+        continue-on-error: true
+        run: nix build --no-link -L --option sandbox false -f /tmp/bwrap-probe.nix --argstr attempt no-sandbox
+
+      - name: relax the apparmor userns restriction
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+
+      - name: bwrap in a nix build, apparmor relaxed
+        continue-on-error: true
+        run: nix build --no-link -L -f /tmp/bwrap-probe.nix --argstr attempt relaxed
+
+      - name: what checks exist on this platform
+        run: |
+          nix eval --raw --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)' \
+            '.#checks.x86_64-linux'
+
+      - name: the bwrap-dependent check, apparmor relaxed
+        continue-on-error: true
+        run: nix build --no-link -L '.#checks.x86_64-linux.safix-abort-residue'
+
+      - name: the whole surface, every failure rather than the first
+        continue-on-error: true
+        run: |
+          nix run nixpkgs#nix-fast-build -- \
+            --flake '.#checks.x86_64-linux' \
+            --skip-cached --no-nom --eval-workers 4 2>&1 | tail -200
+
+      - name: disk after
+        if: always()
+        run: |
+          df -h
+          sudo du -sh /nix/store || true
+
+  darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: host facts
+        run: |
+          uname -a
+          sw_vers
+          df -h
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+          ls -l /usr/bin/sandbox-exec
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: nix facts
+        run: |
+          nix --version
+          nix config show | grep -Ei 'sandbox|max-jobs|^cores|^system' || true
+
+      - name: what checks exist on this platform
+        run: |
+          nix eval --raw --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)' \
+            '.#checks.aarch64-darwin'
+
+      - name: the home-manager activation order on this platform
+        run: |
+          nix eval --impure --raw --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              hm = flake.inputs.home-manager;
+              pkgs = flake.inputs.nixpkgs.legacyPackages.aarch64-darwin;
+              profile = hm.lib.homeManagerConfiguration {
+                inherit pkgs;
+                modules = [
+                  {
+                    home.username = "ana";
+                    home.homeDirectory = "/Users/ana";
+                    home.stateVersion = "24.11";
+                  }
+                ];
+              };
+              order = map (e: e.name) (hm.lib.hm.dag.topoSort profile.config.home.activation).result;
+            in
+            builtins.concatStringsSep "\n" order
+          '
+
+      - name: the failing structural check, alone
+        continue-on-error: true
+        run: nix build --no-link -L '.#checks.aarch64-darwin.safix-consumption-ordering'
+
+      - name: the whole surface, every failure rather than the first
+        continue-on-error: true
+        run: |
+          nix run nixpkgs#nix-fast-build -- \
+            --flake '.#checks.aarch64-darwin' \
+            --skip-cached --no-nom --eval-workers 4 2>&1 | tail -200
+
+      - name: disk after
+        if: always()
+        run: df -h
