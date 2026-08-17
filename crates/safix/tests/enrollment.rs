@@ -417,6 +417,59 @@ fn the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone() {
     );
 }
 
+/// A card already provisioned is not re-provisioned, and its PIN is asked for.
+#[test]
+fn a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once() {
+    let fixture = Fixture::new();
+    fixture.seed_declarations();
+
+    let mut environment = card_env(&fixture, SERIAL, CARD);
+    environment.push(("SAFIX_CARD_STUB_STATE".to_owned(), "provisioned".to_owned()));
+    // The PIN the operator types, which the stub is told to expect: this is the
+    // one run where safix generated nothing and the PIN comes from a person.
+    environment.push((
+        "SAFIX_CARD_STUB_EXPECTED_PIN".to_owned(),
+        "87654321".to_owned(),
+    ));
+
+    let run = fixture.run_on_terminal(
+        &["enroll", "ana", "--no-store-pin"],
+        "87654321\n",
+        &as_pairs(&environment),
+    );
+    run.says("is already provisioned, so nothing about its access is changed");
+
+    // Nothing about the card's access was touched: the three drives that would
+    // change it recorded nothing at all.
+    for untouched in ["pin", "puk", "management-key"] {
+        assert_eq!(
+            fixture.card_recorded(untouched),
+            "",
+            "a provisioned card had its {untouched} changed"
+        );
+    }
+    assert_eq!(
+        fixture.card_recorded("state-asked").trim(),
+        SERIAL,
+        "the card's state was not probed"
+    );
+
+    // The PIN the operator typed is what answered the generator, once.
+    assert_eq!(
+        fixture.card_recorded("pin-attempt").trim(),
+        "87654321",
+        "the generator was answered with something else"
+    );
+    assert!(
+        fixture.card_identity().contains("AGE-PLUGIN-YUBIKEY-1"),
+        "no identity was generated on a card that was ready for one"
+    );
+    assert!(
+        !run.stderr.contains("87654321\n87654321"),
+        "the PIN was echoed back to the terminal it was typed on"
+    );
+}
+
 /// A person whose custody record is not there to extend.
 #[test]
 fn a_person_with_no_custody_record_is_refused_before_the_recipient_is_wired() {
@@ -740,15 +793,31 @@ fn the_mirrored_credentials_travel_standard_input_and_round_trip() {
     // Scoped to the store's own invocations. `ykman` takes a PIN as a flag and has
     // no interface that reads one from a pipe, which `enroll::card` states as the
     // cost of that interface; what the custody paths owe is that neither store
-    // ever sees one in argv, and that is what this reads.
-    for line in fixture
-        .card_recorded("argv")
-        .lines()
-        .filter(|line| line.starts_with("store ") || line.starts_with("add "))
-    {
+    // ever sees one in argv or in its environment, and that is what these read.
+    let store_invocations = |recorded: String, opens: &str| -> Vec<String> {
+        recorded
+            .lines()
+            .filter(|line| line.starts_with(opens))
+            .map(str::to_owned)
+            .collect()
+    };
+    let vectors = store_invocations(fixture.card_recorded("argv"), "store ");
+    assert!(!vectors.is_empty(), "the service was never asked to store");
+    for line in vectors {
         assert!(
             !line.contains(&pin) && !line.contains(&puk),
             "a credential reached a store's argument vector: {line}"
+        );
+    }
+    let environments = store_invocations(fixture.card_recorded("environ"), "[store ");
+    assert!(
+        !environments.is_empty(),
+        "the store's environment was not recorded"
+    );
+    for line in environments {
+        assert!(
+            !line.contains(&pin) && !line.contains(&puk),
+            "a credential reached a store's environment"
         );
     }
 }

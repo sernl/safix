@@ -325,6 +325,33 @@ pub fn protect_management_key_arguments(serial: &str, pin: &str) -> Vec<String> 
     )
 }
 
+/// The serials in what `ykman list --serials` printed.
+///
+/// A pure reading of the output, so the enumeration and the refusals over it are
+/// asserted without a reader answering.
+#[must_use]
+pub fn serials_in(printed: &str) -> Vec<String> {
+    printed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The access state in what `ykman piv info` printed.
+///
+/// A pure reading, for the reason [`serials_in`] is one: the question the runtime
+/// asks a card is a question about a string, and the coupling to `ykman`'s own
+/// sentence is one line rather than a subprocess a test would have to arrange.
+#[must_use]
+pub fn state_in(reported: &str) -> State {
+    if reported.contains(MANAGEMENT_KEY_PROTECTED) {
+        return State::Provisioned;
+    }
+    State::FactoryFresh
+}
+
 /// Every argument vector this module can construct, over one fixture input.
 ///
 /// The instrument behind the OTP refusal. "No code path issues an OTP command"
@@ -379,12 +406,7 @@ impl Ykman {
         if complaint.to_lowercase().contains(NO_SMARTCARD_SERVICE) {
             return Err(Error::PcscdUnavailable);
         }
-        Ok(String::from_utf8_lossy(&finished.stdout)
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(str::to_owned)
-            .collect())
+        Ok(serials_in(&String::from_utf8_lossy(&finished.stdout)))
     }
 
     /// The one card this run acts on.
@@ -422,11 +444,7 @@ impl Ykman {
         if !finished.status.success() {
             return Err(Self::refused(&arguments, &finished));
         }
-        let reported = String::from_utf8_lossy(&finished.stdout);
-        if reported.contains(MANAGEMENT_KEY_PROTECTED) {
-            return Ok(State::Provisioned);
-        }
-        Ok(State::FactoryFresh)
+        Ok(state_in(&String::from_utf8_lossy(&finished.stdout)))
     }
 
     /// Set the PIN, the PUK and a protected random management key, in that
@@ -633,6 +651,49 @@ mod tests {
             .write_to(&mut written)
             .expect("a vec can be written");
         assert_eq!(written, b"PIN=11111111\nPUK=22222222");
+    }
+
+    /// What `ykman piv info` prints for a card nobody has provisioned.
+    const FACTORY_INFO: &str = "\
+PIV version:              5.4.3
+PIN tries remaining:      3/3
+PUK tries remaining:      3/3
+Management key algorithm: TDES
+CHUID:  no data available
+";
+
+    #[test]
+    fn a_factory_card_and_a_provisioned_one_read_apart() {
+        assert_eq!(state_in(FACTORY_INFO), State::FactoryFresh);
+
+        let provisioned = FACTORY_INFO.replace(
+            "CHUID:",
+            "Management key is stored on the YubiKey, protected by PIN.\nCHUID:",
+        );
+        assert_eq!(state_in(&provisioned), State::Provisioned);
+    }
+
+    #[test]
+    fn a_card_that_says_nothing_about_its_management_key_reads_as_factory_fresh() {
+        // The safe direction: a factory reading provisions, and provisioning a
+        // card that was already provisioned fails on the factory PIN with one
+        // retry spent. The other way round would skip provisioning on a blank
+        // card and then prompt for a PIN nobody has set.
+        assert_eq!(state_in(""), State::FactoryFresh);
+    }
+
+    #[test]
+    fn the_serials_are_the_non_empty_lines_and_nothing_else() {
+        assert_eq!(
+            serials_in("12345678\n87654321\n"),
+            vec![String::from("12345678"), String::from("87654321")]
+        );
+        assert_eq!(
+            serials_in("  12345678  \n\n"),
+            vec![String::from("12345678")]
+        );
+        assert!(serials_in("").is_empty());
+        assert!(serials_in("\n\n").is_empty());
     }
 
     #[test]

@@ -413,6 +413,15 @@
         mode "safix-enroll" "enrollment"
           "enrollment_provisions_generates_wires_and_commits_once";
 
+      # A card already provisioned keeps its access: the three drives that would
+      # change a PIN, a PUK or a management key record nothing at all, and the PIN
+      # comes from the operator instead — asked once, unechoed, and used to answer
+      # the generator. The state probe is what decides between the two paths, and
+      # it costs no PIN retry.
+      checks.safix-enroll-provisioned =
+        mode "safix-enroll-provisioned" "enrollment"
+          "a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once";
+
       # A backup card is the same verb run again: its own identity, its own
       # recipient beside the first, and neither run knowing about the other.
       checks.safix-enroll-backup =

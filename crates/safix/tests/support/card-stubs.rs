@@ -66,10 +66,13 @@
 //! # What each role records
 //!
 //! Every invocation's argument vector, so a test can assert what a credential
-//! flag was given and that no vector ever named the OTP applet. Every value that
-//! arrived on standard input, so a test can assert what reached a store and by
-//! which channel. And, for the generator, whether its three streams were
-//! terminals — which is the one thing the prompt claim cannot be made without.
+//! flag was given and that no vector ever named the OTP applet. Every
+//! invocation's environment, which is the other half of that claim: a credential
+//! that reached a store must have arrived on standard input, and neither of the
+//! two channels a process listing can read. Every value that arrived on standard
+//! input, so a test can assert what reached a store and by which channel. And,
+//! for the generator, whether its three streams were terminals — which is the one
+//! thing the prompt claim cannot be made without.
 
 use std::io::{Read as _, Write as _};
 
@@ -103,6 +106,16 @@ const EXPECTED_PIN: &str = "SAFIX_CARD_STUB_EXPECTED_PIN";
 fn main() -> ! {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     record("argv", &arguments.join(" "));
+    // Read out of this process rather than out of `/proc`, so the claim is made
+    // the same way on every platform. One line per invocation, with the
+    // separators spelled, so a test can scope a reading to one tool's own run.
+    let environ: Vec<String> = std::env::vars()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    record(
+        "environ",
+        &format!("[{}] {}", arguments.join(" "), environ.join(" ")),
+    );
 
     // Asserted here rather than in a test, because a stub that quietly performed
     // an OTP command would make every test that greps for one pass. There is no
