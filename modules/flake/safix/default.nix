@@ -31,6 +31,7 @@ let
       users
       catalogue
       machines
+      services
       groups
       silos
       ;
@@ -178,10 +179,10 @@ in
     # under it.
     #
     # `audience` holds subjects rather than only people: a group appears as
-    # `@<group>` and the owner of a machine as `@~<machine>`, which is what names
-    # the directory and so what keeps a membership change a re-wrap of one file.
-    # `recipients` is the expansion of that, which is what a data key is wrapped
-    # for.
+    # `@<group>`, a service as `%<service>` and the owner of a machine as
+    # `@~<machine>`, which is what names the directory and so what keeps a
+    # membership change a re-wrap of one file. `recipients` is the expansion of
+    # that, which is what a data key is wrapped for.
     inherit audiences;
 
     # user -> name -> { file; key; origin; owner; shared; generator; }: the
@@ -217,6 +218,14 @@ in
     # read outside this namespace.
     subjects = {
       machines = lib.mapAttrs (_: m: { inherit (m) owner tags; }) cfg.machines;
+      services = lib.mapAttrs (_: s: {
+        inherit (s)
+          machines
+          owner
+          user
+          group
+          ;
+      }) cfg.services;
       groups = lib.mapAttrs (_: g: { inherit (g) members; }) cfg.groups;
     };
 

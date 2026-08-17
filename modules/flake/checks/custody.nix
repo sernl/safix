@@ -837,7 +837,7 @@
           ];
 
           unknownRecipientMessages = [
-            "flake.safix.users.ana.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+            "flake.safix.users.ana.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
           ];
           unknownRecipientFires = true;
 
@@ -852,7 +852,7 @@
           keylessRecipientFires = true;
 
           dormantMessages = [
-            "flake.safix.users.cy.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+            "flake.safix.users.cy.sharedWith names 'nobody', which is not a declared subject of flake.safix.users, flake.safix.machines, flake.safix.services or flake.safix.groups"
           ];
           dormantFiresForOthers = true;
 

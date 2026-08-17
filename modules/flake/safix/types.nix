@@ -10,12 +10,12 @@
 # name they hold reaches another. `profile` is the whole of what one person's
 # custody is.
 #
-# `machine`, `group` and `silo` are the rest of the subject vocabulary. A subject
-# is what can hold a key and appear in an audience: a person, a machine, or a
-# group of subjects. They are three records rather than three grant surfaces,
-# because one audience algebra over subjects is what keeps a second audience
-# computation, a second policy renderer and a second revocation report from
-# existing at all.
+# `machine`, `service`, `group` and `silo` are the rest of the subject
+# vocabulary. A subject is what can hold a key and appear in an audience: a
+# person, a machine, a service running on machines, or a group of subjects. They
+# are four records rather than four grant surfaces, because one audience algebra
+# over subjects is what keeps a second audience computation, a second policy
+# renderer and a second revocation report from existing at all.
 #
 # `entry` is one type rather than a function of registry-wide defaults, so
 # `flake.safix.catalogue.<n>` and `flake.safix.users.<u>.private.<n>` are the
@@ -618,6 +618,81 @@ let
     };
   };
 
+  # A service, as a subject whose recipients are its machines'. It carries no
+  # `carries`, no `private` and no `sharedWith` for the reason a machine carries
+  # none: everything a service holds arrives through a grant aimed at it.
+  #
+  # `user` and `group` are the whole of what a service adds beyond a machine set.
+  # They live here rather than on the grant because they are properties of what
+  # the service is on its machines rather than of any one secret it reads, and a
+  # per-grant override was considered and left out: every axis added to a grant is
+  # an axis the refusals and the revocation report have to speak about.
+  service = lib.types.submodule {
+    options = {
+      machines = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "deck" ];
+        description = ''
+          The `flake.safix.machines` this service runs on.
+
+          An audience naming this service is encrypted to these machines'
+          recipients, so adding a machine is a re-wrap of every file the
+          service's audience names and removing one is the revocation it is —
+          reported as such, with rotation named as the remedy.
+
+          A machine no declaration covers is refused at evaluation, and so is a
+          grant to a service whose set is empty: a file encrypted to nobody
+          cannot be written and no key opens it.
+
+          safix records where a service runs because audiences need it, and
+          derives it from nothing. Whether the unit is actually configured on
+          these machines is the consumer's own configuration discipline: what is
+          guaranteed here is that the declared set and the audience agree.
+        '';
+      };
+
+      owner = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "ana";
+        description = ''
+          The `flake.safix.users` entry this service belongs to, or null.
+
+          A record, on the same terms as a machine's: it confers no powers, and
+          an owner does not thereby read what the service reads.
+        '';
+      };
+
+      user = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "nginx";
+        description = ''
+          The unix account this service's landed entries belong to, or null to
+          leave them to the provisioner.
+
+          This is what a service grant narrows that the declaration alone cannot:
+          the host's own access control over the landed file. Only system scope
+          has an ownership axis, so a service declaring this and granted an entry
+          that would resolve on a machine served by a user-scope profile is
+          refused at evaluation rather than having the claim dropped — a dropped
+          ownership field reads afterwards as an ownership claim that was
+          honoured. A service declaring neither this nor `group` resolves there
+          with the scope's ordinary placement.
+        '';
+      };
+
+      group = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "nginx";
+        description = "The unix group this service's landed entries belong to, or null to leave them to the provisioner. Refused at user scope on the same ground as `user`.";
+      };
+
+    };
+  };
+
   # A group, as a subject whose recipients are its members'. Membership lives in
   # one place and every audience naming the group follows it, which is the whole
   # difference between a group audience and an enumerated one.
@@ -631,7 +706,8 @@ let
         "oncall"
       ];
       description = ''
-        The subjects this group consists of: people, machines, or other groups.
+        The subjects this group consists of: people, machines, services, or other
+        groups.
 
         An audience naming this group is encrypted to the expanded membership's
         keys, so adding a member is a re-wrap of every file the group's audience
@@ -772,14 +848,15 @@ let
           subject's own path and with this user's declared mode unless a
           recipient adjusts it through their own perHost/perTag.
 
-          A subject is a person, a machine, a group of subjects, or the owner of a
-          machine written `ownerOf.<machine>` — one grant surface over all four,
-          because a second one would be a second audience computation to keep in
-          step with this one. A group grant reaches every expanded member's set
-          and follows the membership; an `ownerOf` grant reaches whoever the
-          machine's `owner` names and follows that record. `.` is outside the name
-          alphabet, so `ownerOf.<machine>` can never collide with a declared
-          subject's name.
+          A subject is a person, a machine, a service, a group of subjects, or the
+          owner of a machine written `ownerOf.<machine>` — one grant surface over
+          all five, because a second one would be a second audience computation to
+          keep in step with this one. A group grant reaches every expanded
+          member's set and follows the membership; a service grant reaches its
+          machines and follows the declared set; an `ownerOf` grant reaches
+          whoever the machine's `owner` names and follows that record. `.` is
+          outside the name alphabet, so `ownerOf.<machine>` can never collide with
+          a declared subject's name.
 
           A grant widens the secret's audience, and the audience picks the file.
           An encrypted file has one data key wrapped once per recipient, so
@@ -826,6 +903,7 @@ in
     grant
     profile
     machine
+    service
     group
     silo
     ;

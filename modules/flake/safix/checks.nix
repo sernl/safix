@@ -393,6 +393,7 @@ let
       users,
       catalogue ? { },
       machines ? { },
+      services ? { },
       groups ? { },
       silos ? { },
       committedPolicy ? null,
@@ -413,6 +414,7 @@ let
           users
           catalogue
           machines
+          services
           groups
           silos
           ;

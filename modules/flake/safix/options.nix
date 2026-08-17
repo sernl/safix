@@ -93,13 +93,53 @@ in
       '';
     };
 
+    services = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.service;
+      example = lib.literalExpression ''
+        {
+          nginx = {
+            machines = [ "deck" ];
+            owner = "ana";
+            user = "nginx";
+            group = "nginx";
+          };
+        }
+      '';
+      description = ''
+        The services an audience may name: the machines each one runs on, the
+        person who owns it, and the unix user and group its landed entries belong
+        to.
+
+        A service resolves to its machines' recipients and mints nothing, and the
+        boundary that leaves is stated rather than implied away. A service grant
+        narrows what is declared and what is placed — the audience names the
+        service, so review reads who a secret is for, and the landed file belongs
+        to the service's unix user and group, which the host enforces. It does not
+        narrow what decrypts: the host identity remains what opens the file, so
+        the machine is the trust boundary for everything running on it. Nothing in
+        safix calls a service grant an isolation mechanism.
+
+        A per-service identity would be a second key the same host must read at
+        activation to place the service's files, so it would leave that boundary
+        where it is while adding minting, custody, enrollment into every audience
+        file, and rotation on every service move.
+
+        Declaring a service is inert until something names it, on the same terms
+        as `machines` and `groups`. A service holds nothing of its own: there is
+        no `carries`, no `private` and no `sharedWith` here, because everything a
+        service holds arrives through a grant aimed at it from
+        `flake.safix.users.<u>.sharedWith.<service>`.
+      '';
+    };
+
     groups = lib.mkOption {
       default = { };
       type = lib.types.attrsOf types.group;
       example = lib.literalExpression ''{ oncall.members = [ "ana" "bo" ]; }'';
       description = ''
         The groups an audience may name, each a set of subjects — people,
-        machines, or other groups.
+        machines, services, or other groups.
 
         A group audience is encrypted to the expanded membership's keys, and the
         file it lands in is named for the group rather than for its members, so

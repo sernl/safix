@@ -1,21 +1,23 @@
 # The resolution algebra, as pure functions of the records it reads — `users`,
-# `catalogue`, `machines`, `groups` and `silos` — rather than of the flake
-# config. ./default.nix binds them to `flake.safix.*`; the checks bind them to
-# synthetic fleets, which is the only way an error path in here can be shown to
+# `catalogue`, `machines`, `services`, `groups` and `silos` — rather than of the
+# flake config. ./default.nix binds them to `flake.safix.*`; the checks bind them
+# to synthetic fleets, which is the only way an error path in here can be shown to
 # fire.
 #
-# Every entry point takes those records as one attrset with the three subject
+# Every entry point takes those records as one attrset with the four subject
 # records defaulted to empty, so a call that names none of them is exactly the
 # tree that declares none. That is what makes the inertness property structural
 # rather than a claim about a code path: there is one algebra, and a fleet with no
-# machines, groups or silos travels the same one.
+# machines, services, groups or silos travels the same one.
 #
 # ── one audience algebra over subjects ──
 # A subject is what can hold a key and appear in an audience: a person, a
-# machine, or a group of subjects. A machine's recipient is the age form of the
-# host identity its system scope already decrypts with, so a machine subject
-# introduces no identity and no enrollment step; a group's recipients are its
-# expanded membership's.
+# machine, a service running on machines, or a group of subjects. A machine's
+# recipient is the age form of the host identity its system scope already
+# decrypts with, so a machine subject introduces no identity and no enrollment
+# step; a group's recipients are its expanded membership's; a service's are its
+# machines', so a service mints nothing either and the machine stays the trust
+# boundary for everything running on it.
 #
 # A grant names a subject by reference, and a reference is either a subject's own
 # name or `ownerOf.<machine>`, which resolves through that machine's `owner`. An
@@ -95,7 +97,7 @@ let
 
   applyOverride = base: override: base // lib.filterAttrs (_: v: v != null) override;
 
-  # The records the resolver reads, as one value. The three subject records
+  # The records the resolver reads, as one value. The four subject records
   # default to empty and the pattern is closed, so a misspelled record name is an
   # error rather than a silent fall-back to the empty one.
   registryOf =
@@ -103,6 +105,7 @@ let
       users,
       catalogue ? { },
       machines ? { },
+      services ? { },
       groups ? { },
       silos ? { },
     }:
@@ -111,6 +114,7 @@ let
         users
         catalogue
         machines
+        services
         groups
         silos
         ;
@@ -170,15 +174,35 @@ let
     sep;
 
   # ── the subject name space ──
-  # One name space over all three kinds. Two kinds of declaration sharing a name
+  # One name space over all four kinds. Two kinds of declaration sharing a name
   # is refused rather than resolved by precedence, because every audience element,
   # every path and every anchor is derived from the name alone: a precedence rule
   # would decide who reads a file, silently, at the point one of the two
   # declarations was written.
   isPerson = r: name: r.users ? ${name};
   isMachine = r: name: r.machines ? ${name};
+  isService = r: name: r.services ? ${name};
   isGroup = r: name: r.groups ? ${name};
-  isSubject = r: name: isPerson r name || isMachine r name || isGroup r name;
+  isSubject = r: name: isPerson r name || isMachine r name || isService r name || isGroup r name;
+
+  # The subject kinds, as the record each is declared in paired with the option
+  # path a refusal about one names. Named once so that a kind added to the model
+  # reaches the name-space collision rule, the name-alphabet rule and every
+  # refusal's prose rather than whichever of them was remembered.
+  subjectKinds = [
+    "users"
+    "machines"
+    "services"
+    "groups"
+  ];
+
+  # "flake.safix.users, flake.safix.machines, flake.safix.services or
+  # flake.safix.groups", as every refusal about an undeclared subject says it.
+  declaredSubjectPaths =
+    let
+      paths = map (field: "flake.safix.${field}") subjectKinds;
+    in
+    "${lib.concatStringsSep ", " (lib.init paths)} or ${lib.last paths}";
 
   # The reference a grant names a subject by: the subject's own name, or the owner
   # of a machine. `.` is outside the alphabet `wellFormedName` admits, so
@@ -197,59 +221,79 @@ let
   # is the point, because that is what makes membership and ownership changes
   # re-wraps of one file rather than migrations to another.
   #
-  # Both markers are drawn from outside the alphabet `wellFormedName` admits and
-  # from outside the separator, so no name can carry one and the three element
-  # forms partition by their leading characters: the owner marker extends the
-  # group marker with a character a group name cannot start with, which is what
-  # keeps `@<group>` and `@~<machine>` distinct. The assertion is the whole of
-  # that argument, and it is the same argument `audienceSeparator` makes: an
-  # ambiguous element form is two audiences reaching one directory, so one
-  # recipient rule over both audiences' secrets.
+  # Every marker is drawn from outside the alphabet `wellFormedName` admits and
+  # from outside the separator, so no name can carry one and the four element
+  # forms partition by their leading characters. Two of them nest deliberately:
+  # the owner marker extends the group marker with a character a group name cannot
+  # start with, which is what keeps `@<group>` and `@~<machine>` distinct. The
+  # service marker shares no prefix with either, so it needs no such argument, and
+  # the assertion states the general rule rather than the pair it was first
+  # written for: wherever one marker is a prefix of another, the remainder has to
+  # be outside the alphabet too, or a name could forge the longer form under the
+  # shorter one.
+  #
+  # It is the same argument `audienceSeparator` makes: an ambiguous element form is
+  # two audiences reaching one directory, so one recipient rule over both
+  # audiences' secrets.
   audienceMarkers =
     let
       markers = {
         group = "@";
         owner = "@~";
+        service = "%";
       };
       outsideAlphabet = m: builtins.match "[a-z0-9_-]*" m == null;
-      kindTail = lib.removePrefix markers.group markers.owner;
+      values = lib.attrValues markers;
+
+      # The remainder of every marker that extends another, over ordered pairs
+      # rather than the one nesting this started with.
+      nestedTails = lib.concatMap (
+        outer:
+        map (inner: lib.removePrefix inner outer) (
+          lib.filter (inner: inner != outer && lib.hasPrefix inner outer) values
+        )
+      ) values;
     in
     assert lib.assertMsg
       (
-        lib.all outsideAlphabet (lib.attrValues markers)
-        && outsideAlphabet kindTail
-        && !(lib.any (m: lib.hasInfix audienceSeparator m) (lib.attrValues markers))
+        lib.all outsideAlphabet values
+        && lib.all outsideAlphabet nestedTails
+        && !(lib.any (m: lib.hasInfix audienceSeparator m) values)
       )
-      "safix placement: an audience marker is drawn from the alphabet wellFormedName admits or carries the audience separator, so a subject name can forge one and two distinct audiences can be joined into one directory name — one recipient rule over two audiences' secrets. Choose markers outside [a-z0-9_-] whose kinds stay distinguishable by their leading characters.";
+      "safix placement: an audience marker is drawn from the alphabet wellFormedName admits or carries the audience separator, so a subject name can forge one and two distinct audiences can be joined into one directory name — one recipient rule over two audiences' secrets. Choose markers outside [a-z0-9_-], and where one extends another keep the remainder outside it too.";
     markers;
 
   elementOf =
     r: ref:
     if isOwnerRef ref then
       "${audienceMarkers.owner}${ownerRefMachine ref}"
+    else if isService r ref then
+      "${audienceMarkers.service}${ref}"
     else if isGroup r ref then
       "${audienceMarkers.group}${ref}"
     else
       ref;
 
   # The inverse, which is what turns a file's audience back into the references
-  # its recipients are computed from. The owner form is tested first because it
-  # extends the group form.
+  # its recipients are computed from. The owner form is tested before the group
+  # form because it extends it; the service form shares a prefix with neither, so
+  # its position among them is free.
   refOfElement =
     element:
     if lib.hasPrefix audienceMarkers.owner element then
       "${ownerRefPrefix}${lib.removePrefix audienceMarkers.owner element}"
+    else if lib.hasPrefix audienceMarkers.service element then
+      lib.removePrefix audienceMarkers.service element
     else if lib.hasPrefix audienceMarkers.group element then
       lib.removePrefix audienceMarkers.group element
     else
       element;
 
-  isMarkedElement = element: lib.hasPrefix audienceMarkers.group element;
+  isMarkedElement = element: lib.any (m: lib.hasPrefix m element) (lib.attrValues audienceMarkers);
 
-  # Every leaf subject a reference reaches: the persons and machines whose keys a
-  # file's data key is wrapped for. A group expands to its members and theirs, an
-  # `ownerOf` reference to the one person the machine's record names, and anything
-  # else to itself.
+  # Every subject a reference reaches once group membership is expanded. Groups
+  # only: a service in the result is still the service it is, which is what lets
+  # `leafRowsOf` say through which service each machine was reached.
   #
   # Bounded by the number of declared groups rather than recursive, so a cycle
   # among group definitions leaves groups unexpanded here instead of failing to
@@ -264,7 +308,19 @@ let
     in
     lib.foldl' (acc: _: step acc) names (lib.range 0 (builtins.length (builtins.attrNames r.groups)));
 
-  leavesOf =
+  # One row per leaf subject a reference reaches, carrying the service the leaf
+  # was reached through or null where it was reached directly.
+  #
+  # A group expands to its members and theirs, a service to the machines it runs
+  # on, an `ownerOf` reference to the one person the machine's record names, and
+  # anything else to itself. A service closes no cycle of its own — it names
+  # machines, which are leaves — so it needs no bound of its own.
+  #
+  # The attribution is what a service grant costs and buys. Two services on one
+  # machine granted the same name are two entries rather than one silently won, and
+  # the service each was reached through is what keys them apart; without it the
+  # machine's resolved set could not tell them apart at all.
+  leafRowsOf =
     r: ref:
     let
       machine = ownerRefMachine ref;
@@ -275,8 +331,21 @@ let
           ]
         else
           [ ref ];
+      expanded = expandGroups r seed;
+      direct = map (leaf: {
+        inherit leaf;
+        service = null;
+      }) (lib.filter (n: isPerson r n || isMachine r n) expanded);
+      viaService = lib.concatMap (
+        service:
+        map (leaf: { inherit leaf service; }) (lib.filter (isMachine r) r.services.${service}.machines)
+      ) (lib.filter (isService r) expanded);
     in
-    sortNames (lib.filter (n: isPerson r n || isMachine r n) (expandGroups r seed));
+    direct ++ viaService;
+
+  # Every leaf subject a reference reaches: the persons and machines whose keys a
+  # file's data key is wrapped for.
+  leavesOf = r: ref: sortNames (lib.unique (map (row: row.leaf) (leafRowsOf r ref)));
 
   # Every key one leaf subject can open a file with. A person's is their custody —
   # their own recipient and their recovery identities; a machine's is the one host
@@ -975,15 +1044,17 @@ let
     r: name:
     if isMachine r name then
       "flake.safix.machines.${name}"
+    else if isService r name then
+      "flake.safix.services.${name}"
     else if isGroup r name then
       "flake.safix.groups.${name}"
     else
       "flake.safix.users.${name}";
 
   # The declaration a refusal about one reference points at. A reference that is
-  # not its own only leaf is a group or an owner record, which is the whole reason
-  # this exists: an operator told that some subject cannot be encrypted to has to
-  # know which declaration put them in the audience.
+  # not its own only leaf is a group, a service or an owner record, which is the
+  # whole reason this exists: an operator told that some subject cannot be
+  # encrypted to has to know which declaration put them in the audience.
   referenceNoun =
     r: ref:
     if isOwnerRef ref then
@@ -997,7 +1068,8 @@ let
       if isOwnerRef g.reference then "\"${g.reference}\"" else g.reference
     }";
 
-  # Every grant flattened to one row per leaf subject it reaches.
+  # Every grant flattened to one row per leaf subject it reaches, each carrying
+  # the service it was reached through and the key it resolves under.
   #
   # The owner is dropped from their own grant's reach. A group naming the person
   # who granted to it is the ordinary case — sharing with the team one is on — and
@@ -1006,8 +1078,25 @@ let
   reachesOf =
     r:
     lib.concatMap (
-      g: map (leaf: g // { inherit leaf; }) (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference))
+      g:
+      map (row: g // row // { key = resolvedKey row.service g.name; }) (
+        lib.filter (row: row.leaf != g.owner) (leafRowsOf r g.reference)
+      )
     ) (lib.filter (g: referenceResolves r g.reference) (allGrants r));
+
+  # The name a reached entry resolves under, which is the name the provisioner
+  # parks it at. A service's entries take its own name as a leading component, so
+  # two services on one machine granted one name land at two paths and the
+  # provisioner's own default — a function of the name — is the service prefix,
+  # with no path authored anywhere.
+  #
+  # The separator is safe here and is refused inside a declared name for a reason
+  # that does not apply: both halves are drawn from the alphabet `wellFormedName`
+  # admits, so neither can be `..` and the composed name lands one level inside the
+  # directory the provisioner manages rather than walking out of it. Widening that
+  # alphabet to admit `.` would break this, which is why the argument is written
+  # where the name is composed.
+  resolvedKey = service: name: if service == null then name else "${service}/${name}";
 
   # Named where a grant reached its subject through a declaration rather than by
   # naming them, and empty where it named them, so the sentence a direct grant
@@ -1059,29 +1148,19 @@ let
           "flake.safix.users names '${user}', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
       ) names;
 
-      # A machine's name and a group's reach the same generated text a person's
-      # does: both become audience elements, and an audience element is a
-      # directory component and part of a rule's path_regex. A silo's name is not
-      # judged here because it reaches prose alone.
-      unsafeSubjectName =
-        lib.concatMap
-          (
-            record:
-            map (
-              name:
-              "flake.safix.${record.field} names '${name}', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
-            ) (lib.filter (n: !(wellFormedName n)) (builtins.attrNames record.declared))
-          )
-          [
-            {
-              field = "machines";
-              declared = r.machines;
-            }
-            {
-              field = "groups";
-              declared = r.groups;
-            }
-          ];
+      # A machine's name, a service's and a group's reach the same generated text a
+      # person's does: each becomes an audience element, and an audience element is
+      # a directory component and part of a rule's path_regex. A service's reaches
+      # one further place — the key its granted entries resolve under, so the last
+      # directory component of the path the provisioner parks them at. A silo's
+      # name is not judged here because it reaches prose alone.
+      unsafeSubjectName = lib.concatMap (
+        field:
+        map (
+          name:
+          "flake.safix.${field} names '${name}', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"
+        ) (lib.filter (n: !(wellFormedName n)) (builtins.attrNames r.${field}))
+      ) (lib.filter (field: field != "users") subjectKinds);
 
       unsafeAnchorName = lib.concatMap (
         user:
@@ -1092,34 +1171,14 @@ let
         ) (builtins.attrNames r.users.${user}.recoveryRecipients)
       ) names;
 
-      # One name space over the three kinds of subject. Two declarations of one
+      # One name space over the four kinds of subject. Two declarations of one
       # name is refused rather than resolved by precedence, because a precedence
       # rule would decide who reads a file — an audience element, a directory and
       # an anchor are each derived from the name alone — silently, at the point one
       # of the two declarations was written.
-      subjectDeclarations =
-        lib.concatMap
-          (
-            kind:
-            map (name: {
-              inherit name;
-              inherit (kind) field;
-            }) (builtins.attrNames kind.declared)
-          )
-          [
-            {
-              field = "users";
-              declared = r.users;
-            }
-            {
-              field = "machines";
-              declared = r.machines;
-            }
-            {
-              field = "groups";
-              declared = r.groups;
-            }
-          ];
+      subjectDeclarations = lib.concatMap (
+        field: map (name: { inherit name field; }) (builtins.attrNames r.${field})
+      ) subjectKinds;
 
       subjectNameCollision = lib.concatLists (
         lib.mapAttrsToList (
@@ -1127,7 +1186,7 @@ let
           lib.optional (builtins.length declared > 1) (
             "'${name}' is declared as more than one kind of subject, by "
             + lib.concatMapStringsSep " and " (d: "flake.safix.${d.field}") declared
-            + "; people, machines and groups share one name space"
+            + "; people, machines, services and groups share one name space"
           )
         ) (lib.groupBy (d: d.name) subjectDeclarations)
       );
@@ -1281,7 +1340,7 @@ let
         in
         lib.optional (!(referenceResolves r ref.reference)) (
           if !(isOwnerRef ref.reference) then
-            "${at} names '${ref.reference}', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+            "${at} names '${ref.reference}', which is not a declared subject of ${declaredSubjectPaths}"
           else if !(r.machines ? ${machine}) then
             "${at} names the owner of '${machine}', which is not a declared machine of flake.safix.machines"
           else
@@ -1301,17 +1360,38 @@ let
           "flake.safix.machines.${machine}.owner names '${owner}', which is not a declared user of flake.safix.users"
       ) (builtins.attrNames r.machines);
 
+      # A service's owner is a person, on the same ground a machine's is.
+      serviceOwner = lib.concatMap (
+        service:
+        let
+          owner = r.services.${service}.owner;
+        in
+        lib.optional (owner != null && !(isPerson r owner))
+          "flake.safix.services.${service}.owner names '${owner}', which is not a declared user of flake.safix.users"
+      ) (builtins.attrNames r.services);
+
+      # A service names machines the fleet declares. Refused rather than dropped:
+      # the machine set is the whole of a service's audience, so a name nobody
+      # declared is a recipient silently missing from every file the service reads.
+      serviceMachine = lib.concatMap (
+        service:
+        map (
+          machine:
+          "flake.safix.services.${service}.machines names '${machine}', which is not a declared machine of flake.safix.machines"
+        ) (lib.filter (machine: !(isMachine r machine)) r.services.${service}.machines)
+      ) (builtins.attrNames r.services);
+
       unknownGroupMember = lib.concatMap (
         group:
         map (
           member:
-          "flake.safix.groups.${group}.members names '${member}', which is not a declared subject of flake.safix.users, flake.safix.machines or flake.safix.groups"
+          "flake.safix.groups.${group}.members names '${member}', which is not a declared subject of ${declaredSubjectPaths}"
         ) (lib.filter (member: !(isSubject r member)) r.groups.${group}.members)
       ) (builtins.attrNames r.groups);
 
       # A group naming itself, directly or through others. Refused by name here so
-      # that the one report anybody reads names the participants: `expandGroups` is
-      # bounded rather than recursive, so a cycle would otherwise surface as a
+      # that the one report anybody reads names the participants: `expandSubjects`
+      # is bounded rather than recursive, so a cycle would otherwise surface as a
       # group audience quietly missing members.
       groupCycle =
         let
@@ -1364,19 +1444,34 @@ let
           "${grantPath g} names '${g.name}', which flake.safix.users.${g.owner} declares in neither carries nor private"
       ) resolvable;
 
+      # A grant to a service that runs nowhere. Its own sentence rather than the
+      # empty-reach one below, because the defect and the consequence are both more
+      # specific: the machine set is the whole of a service's audience, so the file
+      # the grant places would have no recipient at all.
+      emptyServiceGrant = lib.concatMap (
+        g:
+        lib.optional (isService r g.reference && r.services.${g.reference}.machines == [ ])
+          "${grantPath g} shares '${g.name}' with flake.safix.services.${g.reference}, whose machines is empty, so the file would be encrypted to nobody"
+      ) resolvable;
+
       # A reference that resolves and reaches nobody but the person who wrote it.
       # An empty group and a group whose only member is its own grantor both widen
       # nothing, and a widening that widens nothing is a declaration that reads as
       # sharing and resolves as custody of one.
       #
-      # Silent while any group cycle stands. A group inside a cycle expands to
-      # nothing, so every grant naming one would report this as well, and one
-      # fault producing two unrelated sentences is worse than the second sentence
-      # is worth.
-      emptyReach = lib.optionals (groupCycle == [ ]) (
+      # Silent while a group cycle or an undeclared service machine stands, and
+      # silent over a service with no machines at all. Each of those already
+      # empties the expansion and is reported in its own words, and one fault
+      # producing two unrelated sentences is worse than the second sentence is
+      # worth.
+      emptyReach = lib.optionals (groupCycle == [ ] && serviceMachine == [ ]) (
         lib.concatMap (
           g:
-          lib.optional (lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference) == [ ])
+          lib.optional
+            (
+              !(isService r g.reference && r.services.${g.reference}.machines == [ ])
+              && lib.filter (leaf: leaf != g.owner) (leavesOf r g.reference) == [ ]
+            )
             "${grantPath g} shares '${g.name}' with ${referenceNoun r g.reference}, which reaches no subject beyond flake.safix.users.${g.owner}, so the grant widens nothing"
         ) resolvable
       );
@@ -1396,17 +1491,25 @@ let
           "flake.safix.users.${g.leaf} declares '${g.name}' in flake.safix.users.${g.leaf}.${field}, and ${grantPath g} shares a secret of that name${reachClause r g}"
       ) reaches;
 
+      # Two grants putting one name in one subject's resolved set, where one would
+      # silently win — the whole record replaced, its mode, path and key with it.
+      #
+      # Grouped by the key the entry resolves under rather than by its name, which
+      # is what lets two services on one machine hold the same name: they resolve
+      # under two keys, so neither is replaced and neither can win. Two grants of one
+      # name to one service still collide, and so does a service's name against a
+      # machine's own grant of the composed key, because those are one key twice.
       sharedTwice = lib.concatLists (
         lib.mapAttrsToList (
           leaf: received:
           lib.concatLists (
             lib.mapAttrsToList (
-              name: from:
+              key: from:
               lib.optional (builtins.length from > 1) (
-                "${subjectPath r leaf} receives '${name}' from more than one grant: "
+                "${subjectPath r leaf} receives '${key}' from more than one grant: "
                 + lib.concatMapStringsSep " and " grantPath from
               )
-            ) (lib.groupBy (g: g.name) received)
+            ) (lib.groupBy (g: g.key) received)
           )
         ) (lib.groupBy (g: g.leaf) reaches)
       );
@@ -1453,12 +1556,15 @@ let
     ++ anchorConflict
     ++ unknownReference
     ++ machineOwner
+    ++ serviceOwner
+    ++ serviceMachine
     ++ unknownGroupMember
     ++ groupCycle
     ++ unknownSiloGroup
     ++ groupInTwoSilos
     ++ carriedAndPrivate
     ++ notHeld
+    ++ emptyServiceGrant
     ++ emptyReach
     ++ noRecipientKey
     ++ ownerWithoutRecipient
@@ -1503,24 +1609,49 @@ let
   # function for a person and for a machine, because a grant does not know which
   # kind it reached: what differs is only where the entries land, which is the
   # consuming module's question and not this one.
+  #
+  # A row reached through a service resolves under the service's key and carries
+  # the service's ownership. Those fields are applied as an override, so a service
+  # declaring neither leaves the owner's own record standing and resolves with the
+  # scope's ordinary placement; a service declaring either replaces it, because the
+  # landed file belongs to what runs, not to who declared the secret.
   inboundFor =
     r: subject:
     lib.listToAttrs (
       map (
         g:
-        lib.nameValuePair g.name {
+        lib.nameValuePair g.key {
           origin = "shared";
-          inherit (g) owner;
-          base = ownEntry r g.owner g.name;
+          inherit (g) name owner service;
+          base = applyOverride (ownEntry r g.owner g.name) (serviceOwnership r g.service);
           override = { };
         }
       ) (lib.filter (g: g.leaf == subject) (reachesOf r))
     );
 
-  # name -> { origin; owner; base; override; } for one user, over all three
-  # sources. `base` is the unadjusted record and `override` the adjustment the
-  # base layer of the scope algebra contributes, kept apart so that a later scope
-  # layer replaces the override rather than compounding with it.
+  # What a service contributes to the entries it is granted, as a partial entry the
+  # override algebra applies: its unix account and group, under the names an entry
+  # carries them by.
+  serviceOwnership =
+    r: service:
+    if service == null then
+      { }
+    else
+      {
+        owner = r.services.${service}.user;
+        inherit (r.services.${service}) group;
+      };
+
+  # key -> { origin; name; service; owner; base; override; } for one user, over
+  # all three sources. `base` is the unadjusted record and `override` the
+  # adjustment the base layer of the scope algebra contributes, kept apart so that
+  # a later scope layer replaces the override rather than compounding with it.
+  #
+  # `name` rides beside the key because the two part company for an entry reached
+  # through a service: the key is what the provisioner parks the file under, the
+  # name is what the audience and the key inside the encrypted file are computed
+  # from. For a person the two are always equal, and nothing here branches on
+  # which subject it is.
   sourcesIn =
     r: user:
     guard r (
@@ -1529,13 +1660,17 @@ let
 
         carried = lib.mapAttrs (name: override: {
           origin = "carries";
+          inherit name;
+          service = null;
           owner = user;
           base = catalogueEntry r.catalogue user "carries" name;
           inherit override;
         }) profile.carries;
 
-        privately = lib.mapAttrs (_name: entry: {
+        privately = lib.mapAttrs (name: entry: {
           origin = "private";
+          inherit name;
+          service = null;
           owner = user;
           base = entry;
           override = { };
@@ -1544,11 +1679,12 @@ let
       carried // privately // inboundFor r user
     );
 
-  # A machine holds exactly what has been granted to it, with the owner's record
-  # unchanged. There is no `carries`, no `private` and no scope algebra here: a
-  # machine declares nothing of its own, and the per-host and per-tag layers are
-  # adjustments to one *person's* resolved set on one host rather than statements
-  # about the host.
+  # A machine holds exactly what has been granted to it — to the machine itself,
+  # and to every service declared to run on it — with the owner's record unchanged
+  # but for the ownership a service contributes. There is no `carries`, no
+  # `private` and no scope algebra here: a machine declares nothing of its own, and
+  # the per-host and per-tag layers are adjustments to one *person's* resolved set
+  # on one host rather than statements about the host.
   machineSourcesIn = r: machine: guard r (inboundFor r machine);
 
   # Named rather than inline in the `throw` below so that a check can read what a
@@ -1610,6 +1746,7 @@ let
       users,
       catalogue ? { },
       machines ? { },
+      services ? { },
       groups ? { },
       silos ? { },
       root,
@@ -1624,6 +1761,7 @@ let
           users
           catalogue
           machines
+          services
           groups
           silos
           ;
@@ -1633,27 +1771,31 @@ let
       # output is dropped from a machine's selection for the same reason it is
       # dropped from a person's: there is no ciphertext, no key and no creation
       # rule for the provisioner to decrypt.
-      publicOwned =
-        sources: name:
-        let
-          owner = sources.${name}.owner;
-        in
-        (placementsIn r).${owner}.${name}.public != null;
+      publicOwned = src: (placementsIn r).${src.owner}.${src.name}.public != null;
 
       forMachine =
         let
           sources = machineSourcesIn r machine;
         in
         lib.mapAttrs (
-          name: src:
+          key: src:
           let
             entry = src.base;
           in
           if entry.sopsFile != null then
-            throw "safix placement: flake.safix.machines.${machine} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${src.owner}.sharedWith instead"
+            throw "safix placement: flake.safix.machines.${machine} resolves '${key}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${src.owner}.sharedWith instead"
           else
-            entry // { sopsFile = root + "/${audienceFileOf (audienceOf r src.owner name)}"; }
-        ) (lib.filterAttrs (name: _: !(publicOwned sources name)) sources);
+            entry
+            // {
+              sopsFile = root + "/${audienceFileOf (audienceOf r src.owner src.name)}";
+
+              # The key inside the encrypted file is the entry's own name, which
+              # parts company with the name the file is parked under as soon as a
+              # service prefixes it. Left null the provisioner would read the
+              # prefixed name as the key and find nothing there.
+              sopsKey = if entry.sopsKey != null then entry.sopsKey else src.name;
+            }
+        ) (lib.filterAttrs (_key: src: !(publicOwned src)) sources);
 
       forUser =
         let
@@ -1799,13 +1941,58 @@ let
         "group"
       ];
 
+      # The records the selection was made from, rebuilt here so that a refusal can
+      # say which declaration put an ownership field on a resolved entry. The same
+      # closed pattern `selectFor` applies, over the same arguments.
+      registry = registryOf (
+        builtins.removeAttrs args [
+          "scope"
+          "root"
+          "user"
+          "machine"
+          "hostname"
+          "tags"
+        ]
+      );
+
+      # Resolved key -> the service it was reached through, or null. Empty for a
+      # person's resolution: a service's entries land on its machines, and a person
+      # is not one.
+      serviceOf =
+        if args.machine or null == null then
+          { }
+        else
+          lib.mapAttrs (_key: src: src.service) (machineSourcesIn registry args.machine);
+
+      # An entry's ownership field, named as the service declaration spells it. A
+      # service's account is `user` where an entry's is `owner`, and a refusal that
+      # named the entry's spelling would send the reader to a field the service
+      # record does not have.
+      serviceAxis = {
+        owner = "user";
+        group = "group";
+      };
+
+      # Where an ownership field on a resolved entry came from. A service declaring
+      # it is the case D4 extends the asymmetry to; a service declaring neither
+      # leaves the owner's own record standing, and that field is the entry's as it
+      # always was.
+      declaredBy =
+        key: field:
+        let
+          service = serviceOf.${key} or null;
+        in
+        if service != null && (serviceOwnership registry service).${field} != null then
+          "flake.safix.services.${service} declares ${serviceAxis.${field}}, which '${key}' carries onto ${subject}"
+        else
+          "'${key}' sets ${field}";
+
       refuseOwnership =
         value:
         let
           offending = lib.concatLists (
             lib.mapAttrsToList (
-              name: secret:
-              map (field: "'${name}' sets ${field}") (lib.filter (f: secret.${f} != null) ownershipFields)
+              key: secret: map (field: declaredBy key field) (lib.filter (f: secret.${f} != null) ownershipFields)
             ) resolved
           );
         in
@@ -1869,6 +2056,7 @@ in
       users,
       catalogue ? { },
       machines ? { },
+      services ? { },
       groups ? { },
       silos ? { },
       user,
@@ -1878,6 +2066,7 @@ in
         users
         catalogue
         machines
+        services
         groups
         silos
         ;
