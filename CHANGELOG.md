@@ -19,6 +19,35 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### The generator envelope is clan's, and what that costs
+
+This is a breaking change to the generator interface and to what a fragment written for safix 0.2 may assume.
+The cost is stated first because it is the change.
+
+0.2 documented, in the `script` option's own description, that "the fragment runs with the caller's filesystem and network".
+That sentence is withdrawn.
+A generator's script and its validation fragments now run inside a sandbox: the staging root is the only writable path, the nix store is read-only, and there is no network.
+A fragment that read a file of the operator's, wrote a note beside its output, curled an endpoint, or reached a tool it did not declare in `runtimeInputs` worked before this change and fails after it, at the read or write itself, with the fragment's own error.
+
+Three consequences are worth naming rather than discovering:
+
+- `runtimeInputs` is now the whole of what a fragment can run.
+  The tools are still *prepended* to the caller's `PATH`, but the paths that `PATH` otherwise names — `/usr/bin`, a NixOS profile's symlink tree — do not exist inside the envelope, so a fragment that reached an undeclared tool and worked for whoever wrote it now fails for them too.
+- A validation fragment has no writable path at all.
+  By the time a candidate is judged the staging root has been shredded, so that fragment gets the envelope's own temporary filesystem and nothing on the host.
+  The candidate still arrives on standard input, which is a pipe and crosses the envelope as one.
+- Generation refuses where no backend runs, and there is no way to proceed unsandboxed.
+  Where clan offers `--no-sandbox`, safix offers nothing: on a machine whose kernel refuses the namespaces bubblewrap is made of, `safix generate` refuses and names what it looked for.
+
+What is bought is the gap `plaintext-staging` states it cannot close on its own.
+The staging root was bounded containment, and its documented limit was that a fragment which copied the plaintext it held somewhere else had put it where safix does not look and cannot shred.
+That copy now fails.
+
+The envelope is adopted rather than invented — bubblewrap on linux, `sandbox-exec` on darwin, from clan's `clan_lib/sandbox_exec` at the revision this fleet pins — because interop is the point: a fragment meets the same confinement under either system's default executor.
+Three deviations from clan's argument vector are recorded in `crates/safix-core/src/sandbox.rs` and in `openspec/changes/adopt-generator-sandbox/design.md`.
+
+The fleet needs no declaration change: no generator declared today reaches the network or writes outside its staging root.
+
 ### Added
 
 - A third top-level tree, `state/safix/definitions/`, holding one plaintext line per generated value: a digest of the generator declaration that minted it, written by `safix generate` in the same commit as the value and refreshed by every regeneration.
@@ -62,6 +91,18 @@ A change to it is a breaking change whether or not any rust changed.
   Every other bridge check drives a stub, which can be asked what it was handed but would go on answering safix's argument vectors after clan changed its command line; this one establishes that those arguments mean to clan what safix thinks they mean.
   It asserts eleven claims through `crates/safix/tests/real_clan.rs`: the raw bytes off a real `clan vars get`, a real `clan vars set` fed on standard input and committing in clan's own repository, a second run of either verb leaving both histories where they were, the two absent-var states told apart by clan's own words, the drift refusal against a real `clan vars check`, `audit` finding a real divergence and finding none once a transfer resolves it, and clan's repository unchanged across every read safix makes.
   Absent rather than trivially green off linux, and its two drills were observed red: withholding the throwaway clan makes all eleven tests report an absence and libtest call them passed, which the result-line guard catches, and putting the stub in the real command's place fails ten of the eleven.
+- `network` on the generator submodule, default `false`: the one capability a fragment can be granted, and the only thing the grant does.
+  `true` re-shares the network and leaves the filesystem confinement in force, and it governs `script` and `validation` alike, because a validation that verifies a minted token against the API that issued it has the same need its script had.
+  It is a declaration rather than an invocation flag so that which generators may reach the network is a question the tree answers at evaluation, with no runtime consulted and no record to keep of who passed what when.
+  `safix-generators` reads both answers out of the resolved placement record, which is the audit surface itself.
+- `Error::SandboxUnavailable` and `Error::SandboxUnsupported`, raised by an availability probe that runs once before the first fragment: the first names the backend that did not run, the second says the platform has no envelope.
+  Once, because availability does not change mid-run and a refusal after generator three has committed is worse than the same refusal before generator one.
+  Neither is convertible into an unsandboxed run, and `generate` now refuses any long flag it does not take, so `--no-sandbox` gets the usage line rather than a refusal about a secret nobody declared.
+- `safix-generate-envelope` and `safix-generate-no-bypass`, over `crates/safix/tests/sandbox.rs`.
+  The first is linux-only and holds the confinement behaviourally: a fragment writing into the repository fails and the run refuses with that fragment's own failure having stored nothing; a fragment with no grant cannot reach a listener the test holds on loopback, and that listener accepts nothing; with the grant the connection reaches it carrying what the fragment sent while the same write into the repository still fails; a withheld backend refuses before the first fragment, which the refusal's code is what establishes.
+  Each escape fixture is drilled against an unconfined run of the same fragment, so an absent file is the envelope's doing rather than the fragment's, and the check reads the suite's absence sentence out of the output so a kernel that refuses the namespaces reports that rather than going green.
+  The second is every platform's, because no fragment runs for the argument reader to refuse a flag.
+- The envelope's other half in `safix-syscall-proof`: a fragment's open of a file in the repository, refused by the kernel and observed from outside the runtime, with an open inside the staging root succeeding in the same trace so the refusal is the envelope's rather than a fragment that never tried.
 - `clan-core` as a flake input, read by that check and by nothing else.
   clan-cli is not packaged in nixpkgs, so there is no attribute to reach for, and the input also supplies `packages.clan-core-flake` — a clan-core whose lock names store paths rather than URLs — which is what lets the throwaway clan lock in a sandbox with no network.
   Pinned to a revision rather than a branch, because the subject of the check is a specific clan's behaviour and an input that moved on every `nix flake update` would redden it for reasons unrelated to safix.

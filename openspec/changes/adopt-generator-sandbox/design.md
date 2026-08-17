@@ -50,6 +50,15 @@ On linux the declaration adds `--share-net` beside `--unshare-all`; on darwin th
 The declaration lives on the generator submodule, travels to the runtime inside the same generator record the rest of the declaration travels in, and governs the script and the validation fragments alike — a validation that verifies a minted token against the API that issued it has the same need its script had.
 A per-fragment split was rejected as a second axis nothing yet needs.
 
+### D4a. A validation fragment is confined with no staging root at all
+
+Found while wiring task 2.3.
+The staging root belongs to the mint that produced the candidate and is shredded when `mint` returns, which is before any candidate is judged — the ordering `plaintext-staging` requires and `abort_residue.rs` already states.
+So there is no staging root to bind for a validation fragment, and the two ways to give it one were both worse: keeping the tree alive across validation lengthens the window plaintext files exist for, and establishing a second root stages nothing in it.
+
+The fragment therefore gets the same envelope with no writable path on the host: the store read-only, the envelope's own tmpfs, and the pipe the candidate arrives on, which crosses the boundary as a descriptor and needs no mount.
+That is strictly stronger than the script's confinement rather than a gap in it, and it is stated in the `validation` option's description because a fragment that wanted a scratch file has to know.
+
 ### D5. No invocation-level bypass
 
 There is no `--no-sandbox` and no equivalent.
@@ -62,6 +71,27 @@ Whether that refusal ever needs a pressure valve is a question for evidence from
 Availability is checked once per generation run, before any fragment starts, mirroring `sandbox_works()`: bubblewrap answers on linux, `/usr/bin/sandbox-exec` existence answers on darwin, and every other platform refuses as having no envelope.
 A per-fragment probe was rejected: availability does not change mid-run, and a refusal after generator three has committed is worse than the same refusal before generator one.
 
+### D3a. Two further deviations, found while implementing
+
+Recorded beside D3 rather than folded into it, because each was discovered rather than decided in advance.
+
+*The working directory is the staging root, where clan's is `/`.*
+clan passes `--chdir /` and lets the fragment address `$in`, `$out` and `$prompts` by absolute path.
+`secret-generators` already requires that a script's working directory is the root holding those three, and a fragment written against that requirement would find itself somewhere else under clan's spelling, so the chdir names the staging root and the bind precedes it.
+This narrows nothing and widens nothing: the staging root is bound read-write either way.
+
+*The darwin profile travels as `-p <profile>` rather than as `-f <file>`.*
+clan writes the profile to a `NamedTemporaryFile` and passes the path.
+The profile is a pure function of the staging root and the store — it carries no plaintext — so a file would be one more thing to create, register for the scratch sweep, and remove on every exit path, for no property the argument does not already have.
+`sandbox-exec` reads the same profile language either way.
+
+A third thing was found and is a correction to this design rather than a deviation from clan.
+
+*Bubblewrap nests inside the nix build sandbox on this fleet.*
+The Risks section below predicted it could not, and the behavioural suite was planned as absent under `nix build` for that reason.
+It runs: `safix-bridge-real-clan` was already running `clan vars generate` — which is bubblewrap — inside a `runCommand`, and `safix-generate-envelope` runs the envelope the same way and passes.
+So the behavioural claims are made in CI rather than only in a dev shell, and the platform conditionality that remains is the honest part of D7: linux at evaluation, because the backend is bubblewrap, and a runtime gate on the kernel granting user namespaces, whose closed state each test states and the check refuses to be green over.
+
 ### D7. The proof follows the existing conditional pattern
 
 The envelope's enforcement claims are proved at three strengths.
@@ -72,7 +102,7 @@ The no-backend refusal is tested by hiding the backend from the resolved toolset
 
 ## Risks / Trade-offs
 
-- [Bubblewrap cannot nest inside the nix build sandbox, so CI's build-sandboxed checks cannot run the real envelope] → the pure construction tests always run; the behavioural suite is platform-conditional and additionally runnable as a check outside the build sandbox, the shape `clan-bridge` 5.2 already names for the same problem.
+- [Bubblewrap cannot nest inside the nix build sandbox, so CI's build-sandboxed checks cannot run the real envelope] → this did not hold; see D3a. The nesting works on this fleet, `safix-generate-envelope` runs the real envelope under `nix build`, and the fallback the risk named — construction tests always, behavioural suite outside the build sandbox — was not needed.
 - [`sandbox-exec` is undocumented and disfavoured by Apple] → it is what nix itself and clan run on darwin today; adopting their profile means migrating when they migrate rather than alone.
 - [A fragment somewhere silently depended on reading the caller's filesystem] → the fleet declares no such generator today; the first offender fails loudly at its own `generate` with the fragment's error inside the envelope, and the answer is fixing the fragment, not a filesystem escape (see Non-goals).
 - [The uid deviation (D3) could surface a fragment that assumes uid 1000] → no fragment in the fleet reads its uid; a fragment that does gets the caller's, which is what it got before this change.

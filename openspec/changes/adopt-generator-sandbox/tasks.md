@@ -31,8 +31,8 @@
 
 ## 5. The record
 
-- [ ] 5.1 Write the breaking entry in `CHANGELOG.md` for the next minor, leading with what the change costs — the withdrawn open-executor contract — before what it buys
-- [ ] 5.2 Update `README.md`'s generator section: the envelope, the grant, and the refusal
-- [ ] 5.3 Record in design.md any deviation from clan's envelope discovered during implementation, beside D3's uid deviation
-- [ ] 5.4 Verify: `openspec validate adopt-generator-sandbox --strict` passes
-- [ ] 5.5 Verify before this change archives that `clan-generator-contract` has archived, so `secret-generators` keeps a single-writer history (design's Migration ordering)
+- [x] 5.1 Write the breaking entry in `CHANGELOG.md` for the next minor, leading with what the change costs — the withdrawn open-executor contract — before what it buys
+- [x] 5.2 Update `README.md`'s generator section: the envelope, the grant, and the refusal
+- [x] 5.3 Record in design.md any deviation from clan's envelope discovered during implementation, beside D3's uid deviation
+- [x] 5.4 Verify: `openspec validate adopt-generator-sandbox --strict` passes
+- [x] 5.5 Verify before this change archives that `clan-generator-contract` has archived, so `secret-generators` keeps a single-writer history (design's Migration ordering)

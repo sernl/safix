@@ -276,6 +276,35 @@ A mistyped field that leaves a value encrypted is recoverable by fixing the typo
 `runtimeInputs` names nixpkgs attributes as strings rather than holding packages, because the whole generator travels to the command as JSON and a derivation cannot cross that boundary.
 Strings are unchecked by construction, so `safix-generator-tools` resolves each one against the package set at build time; otherwise `opensll` is discovered at a rotation, which is the worst moment to learn a declaration was never right.
 
+### The envelope a fragment runs in
+
+A generator's script and its validation fragments run inside a sandbox.
+The staging root is the only writable path, the nix store is readable because that is where `runtimeInputs` resolve to, and there is no network.
+A write outside `$out` fails, so a fragment can no longer put plaintext somewhere safix does not look and cannot shred.
+
+The envelope is clan's rather than one of ours — bubblewrap on linux, `sandbox-exec` on darwin — which is the same reason the directory layout is clan's: a fragment written against the shared interface meets the same confinement under either system's default executor.
+Two things follow that are worth knowing before you write a fragment.
+`runtimeInputs` is now the whole of what a fragment can run, because the paths your `PATH` otherwise names do not exist inside the envelope.
+And a validation fragment has no writable path at all, since the staging root has been shredded by the time a candidate is judged; the candidate still arrives on standard input.
+
+One capability can be granted, on the generator itself:
+
+```nix
+flake.safix.users.ana.private.acme-account-key.generator = {
+  network = true;
+  runtimeInputs = [ "lego" ];
+  script = ''…'';
+};
+```
+
+`network = true` re-shares the network and nothing else — the filesystem confinement stays — and it governs the script and the validation fragments alike, because a validation that verifies a minted token against the API that issued it has the same need its script had.
+It lives on the declaration rather than on the invocation so that *which generators may reach the network* is a question your tree answers at evaluation, with nothing to run and no flag history to reconstruct.
+What travels over a granted connection is outside what safix shreds or observes, which is the reason the grant is a line a reviewer sees.
+
+There is no `--no-sandbox`, and nothing spelled otherwise does the same thing.
+Where no backend is available — a kernel that refuses the namespaces bubblewrap is made of, or a platform with neither backend — `safix generate` refuses before the first fragment and names what it looked for.
+clan offers the flag because its generators can come from third-party modules and because it chose degradation over refusal; a safix generator is your own declaration, and safix prefers a named refusal to a silent weakening.
+
 ### Where the plaintext is
 
 A generator's inputs and outputs are files, so they exist, and this is where.
@@ -288,7 +317,8 @@ Where no memory-backed filesystem is available the run refuses, and `--allow-dis
 What that bounds, and what it does not, stated rather than implied.
 Overwriting a page of a memory-backed filesystem does not reach a copy already written to swap.
 A mode-`0700` directory is readable by every process running as you for the length of the run, where the pipe this replaced was readable by neither a third process nor a shell — that is a real reduction, and the two are not equivalent.
-And it is not a sandbox: a script that copies `$in/dep/name` elsewhere, or writes an output outside `$out`, has put plaintext where safix does not look.
+What the directory no longer has to carry alone is the fragment: a script that copies `$in/dep/name` elsewhere fails inside the envelope, so the containment does not rest on the fragment author getting it right.
+Where it still rests on them is a granted connection, which no envelope can follow.
 Write generators the way you would write any code that holds a credential.
 
 ### The definition a value was minted under
@@ -691,6 +721,7 @@ The port ran behind a differential harness comparing every subcommand against th
 With the port complete the harness was deleted with the runtime it compared against — 6205 lines — and its claims rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
 `safix-syscall-proof` (linux-only) observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe; `safix-channel-drills` damages the runtime once per channel and fails unless each damage is caught by the channel that exists to catch it.
 `safix-bridge-real-clan` (linux-only) drives the real clan command over a clan it builds inside the check — one machine, three `age`-backed generators, an identity minted per run — because every other bridge check drives a stub, and a stub goes on answering safix's arguments after clan has changed what they mean.
+`safix-generate-envelope` (linux-only) drives fragments that try to leave the sandbox and holds each attempt to failing, each one drilled against an unconfined run of the same fragment so that an absent file is the envelope's doing rather than the fragment's.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/` for the port and `openspec/changes/rust-only-runtime/` for the retirement.
 
 ## License
