@@ -25,7 +25,7 @@
 - [x] 4.1 Add the hostile-fragment fixture: a write outside the staging root fails inside the envelope and the run refuses with that fragment's own failure, storing nothing
 - [x] 4.2 Add the network-absence case: a fragment without the grant attempting a connection fails; platform-conditional presence per design D7
 - [x] 4.3 Add the declared-escape case: with the grant, the connection succeeds against a local listener and a write outside the staging root still fails
-- [ ] 4.4 Extend the strace reading in `syscall_proof.rs` to observe the envelope from outside the runtime, linux-only, with the non-linux half saying what it did not do
+- [x] 4.4 Extend the strace reading in `syscall_proof.rs` to observe the envelope from outside the runtime, linux-only, with the non-linux half saying what it did not do
 - [x] 4.5 Test the no-backend refusal by hiding the backend from the resolved toolset, and assert it precedes the first fragment
 - [x] 4.6 Test that `--no-sandbox` and any equivalent is refused as an unknown flag, which is the spec's no-bypass scenario
 

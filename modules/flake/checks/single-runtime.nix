@@ -59,6 +59,10 @@
       # to be caught, and caught by the pipe assertion rather than incidentally
       # by the residue sweep.
       #
+      # The same reading covers the envelope's other half: a fragment's open of a
+      # file in the repository, refused by the kernel, observed here rather than
+      # in the runtime that would be the thing lying about it.
+      #
       # `strace` needs ptrace, which is a linux capability and has no darwin
       # equivalent: `dtruss` needs system integrity protection disabled, which a
       # build sandbox cannot do. The check exists on both platforms and the

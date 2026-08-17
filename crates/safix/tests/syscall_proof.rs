@@ -26,6 +26,14 @@
 //! caught by the pipe assertion rather than incidentally by the residue sweep,
 //! which is why the file it plants is neither in the temporary directory nor
 //! named like a candidate document.
+//!
+//! The same tool reads the envelope, and reads it as the other half of the same
+//! question. Where a value went is one claim; where a fragment holding one could
+//! not go is the other, and both are answered from outside the runtime rather
+//! than by the runtime. A hostile fragment asks the kernel to open a file in the
+//! repository, the trace carries the refusal, and the same trace shows an open
+//! inside the staging root succeeding — so the refusal is the envelope's and not
+//! a fragment that never tried or a sandbox that refuses everything.
 
 // A test's failure is the point; see the note at the head of `harness/mod.rs`.
 #![allow(
@@ -237,6 +245,93 @@ mod linux {
         );
     }
 
+    /// The envelope, read from outside the runtime at the system call.
+    ///
+    /// The readings above say where a plaintext value went. This says where one
+    /// could not go, and says it from the same place and with the same tool: a
+    /// hostile fragment asks the kernel to open a file in the repository, the
+    /// kernel refuses, and the trace carries the refusal beside the path it was
+    /// refused for. Nothing in the runtime is consulted for that answer — which is
+    /// the point, since the runtime is what would be lying.
+    ///
+    /// `crates/safix/tests/sandbox.rs` makes the same claim from the other side by
+    /// observing that no such file exists afterwards. Both are worth having: a
+    /// file that is absent could be a fragment that never tried, and this shows
+    /// the attempt as well as its refusal.
+    ///
+    /// The trace also has to be non-empty in the way that matters, so the fragment
+    /// writes its output too: `$out` is inside the staging root and is bound
+    /// read-write, so the same trace shows one open refused and one allowed. A
+    /// sandbox that refused everything would fail on the second.
+    #[test]
+    fn the_envelope_refuses_a_fragments_open_outside_the_staging_root() {
+        /// Where the hostile fragment tries to put the value, and a name no
+        /// other fixture in this file writes.
+        const ESCAPE: &str = "leaked-by-the-traced-fragment";
+
+        let mut fixture = Fixture::new();
+        let escape = fixture.repo.join(ESCAPE);
+        fixture.seed_generator(
+            "api-token",
+            ANA_FILE,
+            &[],
+            &serde_json::json!({
+                "dependencies": [], "description": null,
+                "files": {}, "prompts": {}, "share": false,
+                "network": false,
+                "runtimeInputs": [],
+                "script": format!(
+                    "printf '{MINTED}' > \"$out/api-token\"\n\
+                     printf '{MINTED}' > \"$SAFIX_TEST_ESCAPE\""
+                ),
+                "validation": null,
+            }),
+        );
+
+        let (run, text) = traced(
+            &fixture,
+            safix(),
+            &["generate", "ana"],
+            None,
+            &[("SAFIX_TEST_ESCAPE", &escape.to_string_lossy())],
+            "trace=open,openat,write",
+        );
+        assert!(
+            !run.succeeded(),
+            "a fragment that wrote outside its staging root was not refused\n{}",
+            run.combined()
+        );
+        let text = text.unwrap_or_else(|reason| panic!("{reason}"));
+
+        let opens = |needle: &str| -> Vec<&str> {
+            text.lines()
+                .filter(|line| line.contains("open") && line.contains(needle))
+                .collect()
+        };
+
+        let escapes = opens(ESCAPE);
+        assert!(
+            !escapes.is_empty(),
+            "the fragment's attempt to open a file outside its staging root was not \
+             observed at all, so the reading is vacuous"
+        );
+        assert!(
+            escapes.iter().all(|line| line.contains("= -1 ")),
+            "an open outside the staging root succeeded: {escapes:?}"
+        );
+
+        let staged = opens(STAGING);
+        assert!(
+            staged.iter().any(|line| !line.contains("= -1 ")),
+            "no open inside the staging root succeeded, so the refusal above says \
+             nothing about the envelope and everything about the fragment"
+        );
+        assert!(
+            !escape.exists(),
+            "the refused open left a file in the repository"
+        );
+    }
+
     /// The prefix `staging.rs` names every staging root with.
     ///
     /// A literal rather than a read of the constant, so that renaming the
@@ -244,6 +339,39 @@ mod linux {
     /// the assertion is what an outside observer sees, and an outside observer
     /// has the name and not the constant.
     const STAGING: &str = "safix-stage-";
+
+    /// Run one invocation under `strace` and hand back what it did and what the
+    /// trace holds.
+    ///
+    /// The two readings in this file differ in which syscalls they ask for and in
+    /// whether the run is expected to succeed, and share everything else.
+    fn traced(
+        fixture: &Fixture,
+        program: &str,
+        arguments: &[&str],
+        stdin: Option<&str>,
+        extra: &[(&str, &str)],
+        syscalls: &str,
+    ) -> (Run, Result<String, String>) {
+        let log = fixture.scratch("trace");
+        let mut traced = vec![
+            "-f",
+            "-y",
+            "-s",
+            "512",
+            "-e",
+            syscalls,
+            "-o",
+            log.to_str().unwrap(),
+            program,
+        ];
+        traced.extend_from_slice(arguments);
+
+        let run = fixture.run_program("strace", &traced, stdin, extra);
+        let text = std::fs::read_to_string(&log)
+            .map_err(|cause| format!("strace produced no trace: {cause}"));
+        (run, text)
+    }
 
     /// Run one invocation under `strace`, and hold every write carrying one of
     /// the values to being a write into a pipe or into the staging root.
@@ -259,25 +387,9 @@ mod linux {
         extra: &[(&str, &str)],
         values: &[&str],
     ) -> Result<usize, String> {
-        let log = fixture.scratch("trace");
-        let mut traced = vec![
-            "-f",
-            "-y",
-            "-s",
-            "512",
-            "-e",
-            "trace=write",
-            "-o",
-            log.to_str().unwrap(),
-            program,
-        ];
-        traced.extend_from_slice(arguments);
-
-        let run = fixture.run_program("strace", &traced, stdin, extra);
+        let (run, text) = traced(fixture, program, arguments, stdin, extra, "trace=write");
         report(&run)?;
-
-        let text = std::fs::read_to_string(&log)
-            .map_err(|cause| format!("strace produced no trace: {cause}"))?;
+        let text = text?;
 
         let mut seen = 0;
         for line in text.lines() {
@@ -404,8 +516,10 @@ fn the_syscall_proof_needs_ptrace_and_was_not_made_here() {
     eprintln!(
         "the syscall proof needs ptrace, which is linux only; darwin's dtruss needs \
          system integrity protection disabled, which a build sandbox cannot do. \
-         No write was observed on this platform. The claim is made on linux, and \
-         `value_pipe.rs` holds the two channels a value must not travel down \
-         everywhere."
+         No write was observed on this platform, and neither was the envelope's \
+         refusal of an open outside the staging root. Both claims are made on \
+         linux; `value_pipe.rs` holds the two channels a value must not travel \
+         down everywhere, and `crates/safix-core/src/sandbox.rs` unit-tests the \
+         envelope this platform would be confined by."
     );
 }
