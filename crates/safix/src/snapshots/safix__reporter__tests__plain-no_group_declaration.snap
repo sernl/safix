@@ -1,0 +1,19 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: safix/groups/oncall.nix is not a group declaration this can edit, so oncall's membership
+was not touched.
+
+This edits one `members` list as text: a line inserted or a line removed,
+parsed before anything is staged. What it needs is that file, holding a
+`members` list of names it can read — a list written by hand as one line or
+as one name per line is both.
+
+A declaration living somewhere else is supported, and so is a `members` value
+computed rather than written: declarations merge, so where one is written is
+not something safix knows. But the edit has to have a file to make, so move
+the declaration to that path or edit the membership by hand.
+
+A hand edit owes the same disclosure this verb prints: removing a subject
+narrows every file the group's audience names and takes nothing back.

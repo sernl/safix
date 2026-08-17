@@ -47,8 +47,8 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use safix_core::{
-    Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, keygen,
-    set, sync,
+    Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
+    keygen, set, sync,
 };
 
 use reporter::Refusal;
@@ -178,6 +178,11 @@ const VERBS: &[Verb] = &[
         name: "enroll",
         help: usage::ENROLL,
         run: enroll_command,
+    },
+    Verb {
+        name: "group",
+        help: usage::GROUP,
+        run: group_command,
     },
 ];
 
@@ -778,6 +783,27 @@ fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     })
 }
 
+/// One subject into or out of one group's declared membership.
+///
+/// Two positionals in one order and no flags, because the two acts are the whole
+/// of the verb: an operator who has to remember which of `add` and `remove` takes
+/// a flag is an operator who gets it wrong on the one that narrows an audience.
+fn group_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "group add|remove <group> <subject>";
+    let act = match arguments.split_first() {
+        Some((word, _)) if word == "add" => group::Act::Add,
+        Some((word, _)) if word == "remove" => group::Act::Remove,
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+    let [_, group, subject] = arguments else {
+        return Err(Refusal::Usage { form: FORM });
+    };
+
+    let workspace = Workspace::discover()?;
+    group::run(&workspace, &Terminal, act, group, subject)?;
+    Ok(ExitCode::SUCCESS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{VERBS, usage};
@@ -817,5 +843,21 @@ mod tests {
             }
             previous = Some((at, name));
         }
+    }
+
+    /// The boundary sentence is one string, and the help text carries that one.
+    ///
+    /// `safix_core::delegation::BOUNDARY` is where it is written, and every refusal
+    /// in that family ends with it. This help text cannot interpolate a `const`
+    /// into a `const`, so the words are pasted — and pasted words drift, which is
+    /// what this reads.
+    #[test]
+    fn the_group_help_carries_the_boundary_sentence_word_for_word() {
+        assert!(
+            usage::GROUP.contains(safix_core::delegation::BOUNDARY),
+            "the help text's boundary paragraph has drifted from the one the \
+             refusals carry:\n{}",
+            safix_core::delegation::BOUNDARY
+        );
     }
 }

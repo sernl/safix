@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'oncal' is not a declared group of flake.safix.groups.
+
+Declared groups:
+  - infra
+  - oncall

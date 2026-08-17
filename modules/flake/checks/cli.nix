@@ -569,6 +569,36 @@
         mode "safix-delegation-unmanaged" "delegation"
           "an_unmanaged_person_never_consults_delegation";
 
+      # A group gains a member: one inserted line, every name and comment that was
+      # there kept, the recipient policy regenerated from the declarations that
+      # edit implies and committed beside it, and the delegation recorded in the
+      # commit. A second run writes nothing and commits nothing.
+      checks.safix-group-add =
+        mode "safix-group-add" "group"
+          "an_addition_is_one_line_and_the_policy_is_re_derived_beside_it";
+
+      # A group loses one: one removed line, the not-retroactive disclosure made,
+      # and the next `check` reporting the shrink as the revocation the verb said it
+      # was.
+      checks.safix-group-remove =
+        mode "safix-group-remove" "group"
+          "a_removal_says_what_it_does_not_undo_and_the_next_check_reports_the_shrink";
+
+      # The delegation over groups, which is silo coverage: a covered group is its
+      # organization's managers' to edit, and a group no silo set names is editable
+      # by whoever can commit with nothing consulted and nothing mentioned.
+      checks.safix-group-delegation =
+        mode "safix-group-delegation" "group"
+          "a_covered_group_is_its_organizations_and_an_uncovered_one_is_anybodys";
+
+      # Every refusal the verb has, each for its own reason: an undeclared group, an
+      # undeclared subject, a declaration this cannot edit, a `members` value it
+      # cannot read, and an act that is neither add nor remove. None leaves the
+      # declaration or HEAD moved.
+      checks.safix-group-refusals =
+        mode "safix-group-refusals" "group"
+          "refusals_each_have_their_own_code_and_leave_the_declaration_alone";
+
       # One mapping of each mode over one run: the database converges to safix,
       # safix converges to the database through the ordinary write path, a two-way
       # mapping with an empty database side bootstraps and records its agreement

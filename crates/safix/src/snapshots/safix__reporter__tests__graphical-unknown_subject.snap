@@ -1,0 +1,23 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::unknown_subject
+
+  × 'bo' is not a declared subject, so no membership may name it.
+  │ 
+  │ A subject is what can hold a key and appear in an audience: a person of
+  │ flake.safix.users, a machine, a service, or another group. An organization
+  │ is
+  │ not one — a principal is not a member, and an audience wanting its custody
+  │ names the organization.
+  │ 
+  │ A membership naming an undeclared subject is refused at the next
+  │ evaluation,
+  │ so nothing was written: an edit that wrote one would commit a tree that no
+  │ longer resolves.
+  │ 
+  │ Declared subjects:
+  │   - alice
+  │   - bob
+  │   - deck

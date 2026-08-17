@@ -637,6 +637,22 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// One group's declaration file, tracked, exactly as given.
+    ///
+    /// The text is the caller's because the shapes a declaration can be in are
+    /// what the editor's claims are about: a list on one line, a name per line, or
+    /// a value computed elsewhere that it must refuse rather than compound.
+    pub fn write_group_declaration(&self, group: &str, declaration: &str) {
+        std::fs::create_dir_all(self.repo.join("safix/groups")).unwrap();
+        std::fs::write(
+            self.repo.join(format!("safix/groups/{group}.nix")),
+            declaration,
+        )
+        .unwrap();
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-q", "-m", &format!("fixture: declare {group}")]);
+    }
+
     /// The identity every commit this fixture's runs make will carry.
     ///
     /// Written into the repository's own configuration rather than into the

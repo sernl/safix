@@ -77,7 +77,7 @@ in
         recipient = aliceKey;
         recipientNote = "alice — fixture identity, decrypts nothing";
         # The dotted anchor form below is, shape for shape, what `safix enroll`
-        # writes into a declaration (crates/safix-core/src/enroll/declaration.rs
+        # writes into a declaration (crates/safix-core/src/declaration.rs
         # asserts the emitted text); its acceptance through the real option here
         # is what proves an enrolled record evaluates.
         recoveryRecipients."alice-escrow".key = escrowKey;

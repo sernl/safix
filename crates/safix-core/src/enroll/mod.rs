@@ -33,7 +33,6 @@
 
 pub mod card;
 pub mod custody;
-pub mod declaration;
 pub mod identity;
 pub mod proof;
 pub mod pty;
@@ -46,7 +45,7 @@ use crate::error::{Error, Result};
 use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::workspace::Workspace;
-use crate::{delegation, fix, git, keygen, scratch, set, sops, staging};
+use crate::{declaration, delegation, fix, git, keygen, scratch, set, sops, staging};
 
 /// What an invocation asked for beyond the person.
 #[derive(Debug, Clone)]

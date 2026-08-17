@@ -688,6 +688,50 @@ pub(super) fn no_file_to_prove_with(user: &str) -> String {
     )
 }
 
+/// A name no declaration of any subject kind covers.
+///
+/// The list is every subject rather than every person, because a group's members
+/// are subjects: a machine, a service and another group each belong in one, so a
+/// list of people would read as a narrower rule than the option has.
+pub(super) fn unknown_subject(subject: &str, declared: &[String]) -> String {
+    format!(
+        "'{subject}' is not a declared subject, so no membership may name it.\n\
+        \n\
+        A subject is what can hold a key and appear in an audience: a person of\n\
+        flake.safix.users, a machine, a service, or another group. An organization is\n\
+        not one — a principal is not a member, and an audience wanting its custody\n\
+        names the organization.\n\
+        \n\
+        A membership naming an undeclared subject is refused at the next evaluation,\n\
+        so nothing was written: an edit that wrote one would commit a tree that no\n\
+        longer resolves.\n\
+        \n\
+        Declared subjects:{}",
+        bulleted(declared)
+    )
+}
+
+/// A group declared somewhere this verb cannot edit.
+pub(super) fn no_group_declaration(group: &str, file: &str) -> String {
+    format!(
+        "{file} is not a group declaration this can edit, so {group}'s membership\n\
+        was not touched.\n\
+        \n\
+        This edits one `members` list as text: a line inserted or a line removed,\n\
+        parsed before anything is staged. What it needs is that file, holding a\n\
+        `members` list of names it can read — a list written by hand as one line or\n\
+        as one name per line is both.\n\
+        \n\
+        A declaration living somewhere else is supported, and so is a `members` value\n\
+        computed rather than written: declarations merge, so where one is written is\n\
+        not something safix knows. But the edit has to have a file to make, so move\n\
+        the declaration to that path or edit the membership by hand.\n\
+        \n\
+        A hand edit owes the same disclosure this verb prints: removing a subject\n\
+        narrows every file the group's audience names and takes nothing back."
+    )
+}
+
 /// A list of option paths, joined as every refusal here joins one.
 fn joined(paths: &[String]) -> String {
     match paths.split_last() {

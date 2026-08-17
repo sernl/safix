@@ -28,8 +28,12 @@
 //! One module per subcommand that does more than read: [`set`] writes one typed
 //! value, [`fix`] converges the policy and the ciphertext onto the
 //! declarations, [`generate`] walks the generator graph, [`keygen`] mints an
-//! identity, [`adduser`] declares a person, and [`enroll`] takes a hardware key
-//! from a blank card to a proven recovery identity. [`inputs`] is how a
+//! identity, [`adduser`] declares a person, [`enroll`] takes a hardware key
+//! from a blank card to a proven recovery identity, and [`group`] edits one
+//! group's membership. [`declaration`] is the text editor the last two write
+//! declarations through — line insertions parsed by the real parser before
+//! anything is staged, rather than an evaluation that would lose every comment in
+//! the record it rewrote. [`inputs`] is how a
 //! generator's values reach its script, [`sandbox`] is the envelope that script
 //! runs inside, and [`scratch`] is what an aborted write must not leave behind.
 //! [`definition`] is the record a mint leaves of the declaration it minted
@@ -59,6 +63,7 @@ pub mod audit;
 pub mod bridge;
 pub mod check;
 pub mod clan;
+pub mod declaration;
 pub mod definition;
 pub mod delegation;
 mod digest;
@@ -68,6 +73,7 @@ mod error;
 pub mod fix;
 pub mod generate;
 pub mod git;
+pub mod group;
 pub mod inputs;
 pub mod keygen;
 pub mod model;

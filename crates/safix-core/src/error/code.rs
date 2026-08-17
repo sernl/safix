@@ -180,6 +180,9 @@ refusal_codes! {
     ClanUserRegistrationFailed => "safix::clan_user_registration_failed",
     EnrollHookFailed => "safix::enroll_hook_failed",
     ActorUndeclared => "safix::actor_undeclared",
+    UnknownGroup => "safix::unknown_group",
+    UnknownSubject => "safix::unknown_subject",
+    NoGroupDeclaration => "safix::no_group_declaration",
     ScaffoldOutOfScope => "safix::scaffold_out_of_scope",
 }
 

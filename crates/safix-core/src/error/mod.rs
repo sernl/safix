@@ -24,7 +24,8 @@ use prose::{
     HOST_WITHOUT_HOOK, NO_TERMINAL, OTP_REFUSED, PCSCD_UNAVAILABLE, actor_undeclared,
     already_declared, bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous,
     drifted, generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
-    no_file_to_prove_with, no_generator, recipients_lost, scaffold_out_of_scope,
+    no_file_to_prove_with, no_generator, no_group_declaration, recipients_lost,
+    scaffold_out_of_scope, unknown_subject,
 };
 
 /// A refusal from the safix runtime.
@@ -1188,6 +1189,36 @@ pub enum Error {
         delegation: Box<crate::delegation::Refused>,
         /// Every person the declarations name, in name order.
         declared: Vec<String>,
+    },
+
+    /// The declarations name no such group.
+    #[error(
+        "'{group}' is not a declared group of flake.safix.groups.\n\nDeclared groups:{}",
+        bulleted(.declared)
+    )]
+    UnknownGroup {
+        /// The name that was asked for.
+        group: String,
+        /// Every group the declarations do name, in name order.
+        declared: Vec<String>,
+    },
+
+    /// The declarations name no such subject.
+    #[error("{}", unknown_subject(.subject, .declared))]
+    UnknownSubject {
+        /// The name that was asked for.
+        subject: String,
+        /// Every subject the declarations do name, in name order.
+        declared: Vec<String>,
+    },
+
+    /// The group's declaration is not at the path this verb edits.
+    #[error("{}", no_group_declaration(.group, .file))]
+    NoGroupDeclaration {
+        /// The group whose membership was being edited.
+        group: String,
+        /// The path it was expected at.
+        file: String,
     },
 
     /// A declared person acting outside the delegation covering what they were

@@ -581,6 +581,18 @@ mod tests {
                 }),
                 declared: vec!["alice".into(), "bob".into(), "carol".into()],
             },
+            Code::UnknownGroup => Error::UnknownGroup {
+                group: "oncal".into(),
+                declared: vec!["infra".into(), "oncall".into()],
+            },
+            Code::UnknownSubject => Error::UnknownSubject {
+                subject: "bo".into(),
+                declared: vec!["alice".into(), "bob".into(), "deck".into()],
+            },
+            Code::NoGroupDeclaration => Error::NoGroupDeclaration {
+                group: "oncall".into(),
+                file: "safix/groups/oncall.nix".into(),
+            },
             Code::ScaffoldOutOfScope => Error::ScaffoldOutOfScope {
                 actor: "mallory".into(),
                 delegation: Box::new(delegation::Refused {

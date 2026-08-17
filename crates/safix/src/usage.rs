@@ -510,6 +510,61 @@ The database opens by challenge-response with no PIV PIN involved, so the
 card's PIN is reachable with the card in hand and no self-reference.
 ";
 
+/// `safix group -h`.
+///
+/// The last paragraph is [`safix_core::delegation::BOUNDARY`] word for word, and a
+/// test holds it to that string: it is the one sentence every delegation surface
+/// carries, and a second wording of it here would be a second answer to what the
+/// refusals are for.
+pub const GROUP: &str = "\
+safix group add|remove <group> <subject>
+
+Edit one group's declared membership: one name inserted into or removed from the
+`members` list in safix/groups/<group>.nix, parsed before anything is staged,
+with .sops.yaml regenerated from the declarations that edit implies and the two
+committed together.
+
+It writes no value, encrypts nothing and re-wraps nothing. A membership change is
+a reason to run `safix fix`, which is what re-wraps every file the group's
+audience names, and the report says so.
+
+\u{2500}\u{2500} what remove does not do \u{2500}\u{2500}
+Take anything back. A subject that has been in a group has held the data key of
+every file that group's audience names, so they have read every value in them,
+and no re-wrap unreads it. Only minting a new value revokes.
+
+`safix check` reports the shrink as the revocation it is, with rotation named as
+the remedy. `safix fix` aligns the ciphertext with the policy now declared, which
+is worth doing and is explicitly not that remedy.
+
+\u{2500}\u{2500} what is refused \u{2500}\u{2500}
+A group or a subject the declarations do not name, before anything is read: a
+membership naming either is refused at the next evaluation, so writing one would
+commit a tree that no longer resolves. An organization is refused as a member for
+the same reason — a principal is not a member, and an audience wanting its
+custody names the organization.
+
+A `members` value this cannot read is refused rather than compounded. What it
+reads is a list of names, written as one line or as one name per line; a value
+computed elsewhere is a declaration to edit by hand.
+
+A membership that would form a cycle among groups is refused at evaluation, with
+every participant named. This verb parses what it writes and does not evaluate
+the fleet, so that refusal arrives at the next build rather than here.
+
+\u{2500}\u{2500} the delegation \u{2500}\u{2500}
+Where a group is covered by an organization's silo declarations, only that
+organization's managers may edit it, judged against the identity the resulting
+commit will carry. A group no silo set names is covered by nobody and is editable
+by whoever can commit, exactly as before.
+
+These refusals bind the cooperative path and are not authorization. The tree is
+the authorization: anyone who can commit can edit these declarations by hand,
+evaluation refuses structure rather than people, and no delegation record places
+a key in any audience. What they buy is that a scaffold and the identity it is
+attributed to cannot disagree.
+";
+
 /// What a bare invocation says, and what `safix -h` prints.
 ///
 /// The shell runtime's own general usage, word for word: this binary implements
@@ -572,6 +627,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix keygen   [--for-someone-else] [<user>]      an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
+  safix group    add|remove <group> <subject>       edit a group's membership
 
 <user> defaults to $USER when flake.safix.users declares them, and otherwise to
 the sole declared holder when there is exactly one.
@@ -588,6 +644,20 @@ takes nothing back: they have already read every value in every file they could
 open, and only minting a new value revokes it. `safix fix` re-wraps each
 governed file's data key to the audience now declared, which aligns ciphertext
 with policy and is explicitly not revocation.
+
+\u{2500}\u{2500} who may scaffold for whom \u{2500}\u{2500}
+`flake.safix.organizations.<o>.managers` names the people who scaffold for an
+organization, and a person's own `flake.safix.users.<u>.managedBy` consents to
+that. Where both are declared, `safix enroll` and `safix group` accept those
+managers and refuse anybody else, judged against the identity the resulting
+commit will carry — there is no flag naming somebody else, because a scaffold and
+its attribution must not be able to disagree.
+
+Those refusals bind the cooperative path and are not authorization. The tree is
+the authorization: anyone who can commit can edit these declarations by hand,
+evaluation refuses structure rather than people, and no delegation record places a
+key in any audience. A person no organization manages is scaffolded by whoever can
+commit, exactly as before.
 
 \u{2500}\u{2500} what import and export are, and are not \u{2500}\u{2500}
 These two move values across the clan boundary, one declared mapping at a time.
