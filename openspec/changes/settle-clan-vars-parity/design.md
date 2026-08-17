@@ -4,6 +4,7 @@ See proposal.md — Why.
 What the approach rests on:
 
 - clan records a validation hash per generator and reports `invalid_generators` from `check` when the recorded hash no longer matches the definition (`clan_lib/vars/check.py:21,43-45`, mechanism `clan_lib/vars/_types.py:366-409`, at the pinned rev `56e35624`). safix's `validation` field is a different concept — a script judging a candidate value — and covers none of this.
+  Measured narrower than its prose suggests: the hash defaults to null unless the generator declares `validation` (`modules/clan/export-modules/generic-generator.nix:118-129`), so a script change alone leaves `clan vars check` green — observed by `safix-bridge-real-clan`. The digest this change records covers the whole definition, which makes it strictly broader than the record it takes inspiration from.
 - `safix_core::set::run` already takes `&mut dyn ValueSource` and is terminal-free (`crates/safix-core/src/set.rs`); the prompt is one source implementation at the CLI layer. `clan vars set` reads stdin when it is not a tty (`clan_lib/vars/set.py:59-70`), and safix's bridge feeds clan's `set` on exactly that contract (`crates/safix-core/src/clan.rs`).
 - The repository's path contracts: everything under `secrets/` is encrypted, without qualification; everything under `public/` is a declared public output. A plaintext definition record fits neither.
 
