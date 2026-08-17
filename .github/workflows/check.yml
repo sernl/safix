@@ -1,14 +1,23 @@
 # Runs the flake's own check surface on every push and pull request.
 #
-# This file is inert until the repository has a remote: nothing here has run
-# yet, because nothing here has been pushed. It activates on the first push to
-# a GitHub remote, and the first run is therefore also the first evidence that
-# the checks pass anywhere other than the machine they were written on.
-#
 # `nix flake check` builds every check rather than only evaluating them, which
 # is the point: the command's self-tests drive the real sops, the real age and
 # the real git against a throwaway repository, and evaluation alone would prove
 # nothing about them.
+#
+# Two jobs, run together rather than one behind the other, because the two
+# kinds of failure cost different amounts to find. `eval` instantiates every
+# output for every system safix declares and builds none of them, so an
+# evaluation error on aarch64-linux — a platform this workflow rents no runner
+# for — is a red mark within a few minutes instead of a platform nobody hears
+# from. `build` then builds the surface on the two platforms GitHub does rent.
+#
+# `build` runs nix-fast-build rather than `nix flake check`. `nix flake check`
+# stops at the first failing derivation and then names every other check as
+# failed without having run it, so a red run reports one check and withholds
+# the other ninety-seven; nix-fast-build builds each attribute independently
+# and reports each, and the junit file names every one that went red. It is
+# also what the rest of this fleet's flakes are checked with.
 name: check
 
 on:
@@ -17,26 +26,156 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: check-${{ github.ref }}
+  group: check-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-jobs:
-  flake-check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
+defaults:
+  run:
+    shell: bash
 
-      - uses: cachix/install-nix-action@v30
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    name: eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = false
 
-      - name: nix flake check
-        run: nix flake check --print-build-logs
+      # `--all-systems` is the reason this job exists: aarch64-linux is a system
+      # safix declares and nothing here builds, so without this its evaluation is
+      # only ever exercised on somebody's machine.
+      - name: every output instantiates, on every system safix declares
+        run: nix flake check --all-systems --no-build --show-trace
+
+      # Both formatters are checks of the flake and are built again by the build
+      # job. They are also the two failures a contributor is most likely to
+      # arrive with and the two cheapest to establish, and a formatting mistake
+      # answered in three minutes is worth the second build.
+      - name: the tree is formatted
+        if: ${{ !cancelled() }}
+        run: |
+          nix build --no-link --print-build-logs \
+            '.#checks.x86_64-linux.treefmt' \
+            '.#checks.x86_64-linux.safix-rs-fmt'
+
+  build:
+    name: build (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-darwin
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # What the surface asks of a store is more than a runner's root filesystem
+      # has spare: this flake's nixpkgs closure, the second one clan-core pins for
+      # the nested clan that `safix-bridge-real-clan` builds inside itself, a rust
+      # toolchain and a Qt application. This moves the store onto the space the
+      # image was using for tooling nothing here runs. The last step of this job
+      # reports what it actually cost, so the ceiling is a measurement rather than
+      # a guess.
+      - name: give the nix store the runner's disk
+        if: runner.os == 'Linux'
+        uses: wimpysworld/nothing-but-nix@687c797a730352432950c707ab493fcc951818d7 # v10
+        with:
+          hatchet-protocol: cleave
+          nix-permission-edict: true
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+            keep-going = true
+            ${{ runner.os == 'Linux' && 'build-dir = /nix/build' || '' }}
+
+      # `build-dir` is on `/nix` because the step above took the space `/tmp`
+      # was on: https://github.com/wimpysworld/nothing-but-nix/issues/18
+      - name: somewhere to build
+        if: runner.os == 'Linux'
+        run: sudo mkdir -p /nix/build
+
+      # Ubuntu 24.04 ships `kernel.apparmor_restrict_unprivileged_userns` at 1,
+      # which denies a user namespace to a process that is unconfined and has no
+      # CAP_SYS_ADMIN. The nix daemon is root and clears that bar; the builder it
+      # starts runs as uid 1000 with an empty effective capability set and does
+      # not. bubblewrap is made of user namespaces, and the checks that drive a
+      # generator run bubblewrap nested inside the nix build sandbox, so with the
+      # restriction in place the runtime's own probe finds no backend and every
+      # such check fails. It is nix's sandbox that is innocent here: it
+      # pivot_roots rather than chroots, so the kernel's own `current_chrooted`
+      # guard does not fire, and the same envelope runs nested without complaint
+      # on a machine that does not carry Ubuntu's restriction.
+      #
+      # Those checks are meant to fail on a machine that cannot run the envelope.
+      # This is the machine being made able to run it, rather than the checks
+      # being narrowed to what an unmodified runner happens to allow.
+      #
+      # The second knob is Ubuntu 25.04 and later, where unconfined processes are
+      # gated separately. It is absent on 24.04, which is why its presence is
+      # asked rather than assumed.
+      - name: let bubblewrap have a user namespace
+        if: runner.os == 'Linux'
+        run: |
+          for knob in kernel.apparmor_restrict_unprivileged_userns \
+                      kernel.apparmor_restrict_unprivileged_unconfined; do
+            if sysctl -n "$knob" >/dev/null 2>&1; then
+              sudo sysctl -w "$knob=0"
+            else
+              echo "$knob is not a knob on this kernel"
+            fi
+          done
+
+      # `--inputs-from .` so that `nixpkgs` means the nixpkgs this flake pins,
+      # rather than whatever the global registry resolves it to: a second nixpkgs
+      # would be a second closure to fetch for one tool. With the flake supplying
+      # the name, the global registry has nothing left to answer, and emptying it
+      # takes `channels.nixos.org` out of the run — which is one less thing to be
+      # down while a check is trying to establish something.
+      #
+      # `--eval-workers 4` bounds the contention between nix-eval-jobs' worker
+      # processes on the shared sqlite eval cache; more workers than that turn
+      # into lock waits rather than throughput.
+      #
+      # nix-fast-build writes its own job summary when it finds itself on
+      # Actions: successful logs folded, every failure unfolded with its last
+      # hundred lines. That is the report a reader wants, and the junit file
+      # below is the same result for anything that reads results rather than logs.
+      - name: build every check, and report every failure rather than the first
+        run: |
+          nix run --inputs-from . --option flake-registry '' nixpkgs#nix-fast-build -- \
+            --flake '.#checks.${{ matrix.system }}' \
+            --skip-cached \
+            --no-nom \
+            --eval-workers 4 \
+            --result-format junit \
+            --result-file check-results.xml
+
+      - name: the junit file itself
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: check-results-${{ matrix.system }}
+          path: check-results.xml
+          if-no-files-found: warn
+
+      - name: what the surface cost in disk
+        if: always()
+        run: |
+          df -h
+          sudo du -sh /nix/store || true
