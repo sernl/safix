@@ -511,6 +511,8 @@ sops-nix registers it as a bare string, so home-manager treats it as `entryAnywh
 The guard is narrower than it sounds, twice over, and its own failure message says so.
 Where home activation runs as a NixOS host's `home-manager-<user>.service`, systemd starts that unit after system activation has already switched the system generation, so a system switch is not undone by the refusal — only that user's home generation is held back.
 And presence and readability are all that were checked: a key that exists and is readable but is not a recipient of these files still fails later, in `sops-install-secrets`.
+That sentence is held by `safix-identity-recipiency`, against fixture ciphertext rather than against an activation, which is the one claim on this path an evaluation cannot make.
+The identity it drives is shown to open a document it *is* a recipient of before it is shown not to open one it is not, so what the refusal reports is recipiency and not a key file that was simply unusable.
 
 The system scope installs no such guard, and that asymmetry is deliberate.
 No atomic refusal point at NixOS activation has been demonstrated, and safix does not document a guarantee that no code enforces.
