@@ -17,6 +17,6 @@
 
 ## 4. The record
 
-- [ ] 4.1 README: the delegation section led by the boundary sentence; samples alice, bob, acme, mallory
-- [ ] 4.2 CHANGELOG under Unreleased
-- [ ] 4.3 Verify: `openspec validate add-management-delegation --strict` passes, and the archive-order note against `add-organization-custody` is recorded
+- [x] 4.1 README: the delegation section led by the boundary sentence; samples alice, bob, acme, mallory
+- [x] 4.2 CHANGELOG under Unreleased
+- [x] 4.3 Verify: `openspec validate add-management-delegation --strict` passes, and the archive-order note against `add-organization-custody` is recorded
