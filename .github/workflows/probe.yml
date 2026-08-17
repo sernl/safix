@@ -1,6 +1,9 @@
-# Temporary: measures what a GitHub runner will and will not let bubblewrap do,
-# and what each platform's check surface actually contains. Deleted once the
-# answers are recorded in check.yml.
+# Temporary: measures what a GitHub linux runner will and will not let
+# bubblewrap do, nested inside the nix build sandbox, before and after the
+# apparmor user-namespace restriction is relaxed. The runtime's own probe
+# discards bubblewrap's stderr, so the reason is not in a check's log; this runs
+# the same envelope by hand with the stderr kept. Deleted once the answer is
+# recorded in check.yml.
 name: probe
 
 on:
@@ -13,11 +16,19 @@ concurrency:
   group: probe-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
 jobs:
   userns:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: host facts
         run: |
@@ -33,13 +44,10 @@ jobs:
           echo "--- cpu/mem ---"
           nproc
           free -h
-
-      - name: host userns without nix
-        run: |
-          echo "unshare -Ur true:"
+          echo "--- unshare -Ur true, on the host ---"
           unshare -Ur true && echo "  ok" || echo "  refused rc=$?"
 
-      - uses: cachix/install-nix-action@v30
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -106,90 +114,12 @@ jobs:
         continue-on-error: true
         run: nix build --no-link -L -f /tmp/bwrap-probe.nix --argstr attempt relaxed
 
-      - name: what checks exist on this platform
-        run: |
-          nix eval --raw --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)' \
-            '.#checks.x86_64-linux'
-
       - name: the bwrap-dependent check, apparmor relaxed
         continue-on-error: true
         run: nix build --no-link -L '.#checks.x86_64-linux.safix-abort-residue'
-
-      - name: the whole surface, every failure rather than the first
-        continue-on-error: true
-        run: |
-          nix run nixpkgs#nix-fast-build -- \
-            --flake '.#checks.x86_64-linux' \
-            --skip-cached --no-nom --eval-workers 4 2>&1 | tail -200
 
       - name: disk after
         if: always()
         run: |
           df -h
           sudo du -sh /nix/store || true
-
-  darwin:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: host facts
-        run: |
-          uname -a
-          sw_vers
-          df -h
-          sysctl -n hw.ncpu
-          sysctl -n hw.memsize
-          ls -l /usr/bin/sandbox-exec
-
-      - uses: cachix/install-nix-action@v30
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: nix facts
-        run: |
-          nix --version
-          nix config show | grep -Ei 'sandbox|max-jobs|^cores|^system' || true
-
-      - name: what checks exist on this platform
-        run: |
-          nix eval --raw --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)' \
-            '.#checks.aarch64-darwin'
-
-      - name: the home-manager activation order on this platform
-        run: |
-          nix eval --impure --raw --expr '
-            let
-              flake = builtins.getFlake (toString ./.);
-              hm = flake.inputs.home-manager;
-              pkgs = flake.inputs.nixpkgs.legacyPackages.aarch64-darwin;
-              profile = hm.lib.homeManagerConfiguration {
-                inherit pkgs;
-                modules = [
-                  {
-                    home.username = "ana";
-                    home.homeDirectory = "/Users/ana";
-                    home.stateVersion = "24.11";
-                  }
-                ];
-              };
-              order = map (e: e.name) (hm.lib.hm.dag.topoSort profile.config.home.activation).result;
-            in
-            builtins.concatStringsSep "\n" order
-          '
-
-      - name: the failing structural check, alone
-        continue-on-error: true
-        run: nix build --no-link -L '.#checks.aarch64-darwin.safix-consumption-ordering'
-
-      - name: the whole surface, every failure rather than the first
-        continue-on-error: true
-        run: |
-          nix run nixpkgs#nix-fast-build -- \
-            --flake '.#checks.aarch64-darwin' \
-            --skip-cached --no-nom --eval-workers 4 2>&1 | tail -200
-
-      - name: disk after
-        if: always()
-        run: df -h
