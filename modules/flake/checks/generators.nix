@@ -235,6 +235,15 @@
           keys-pub = plain;
         };
 
+        # The network grant beside a generator that declares nothing, which is
+        # the audit surface: which generators may reach the network is a question
+        # the declarations answer, and both answers have to be readable for the
+        # question to be one.
+        networkGrant = {
+          reaching = gen { network = true; };
+          confined = gen { };
+        };
+
         # Length two, which is what `cyclic` sees and `selfDependency` must not
         # take over.
         cycle = {
@@ -394,6 +403,19 @@
           unsafePromptNameMessages = violationsOf fixtures.unsafePromptName;
           unsafePromptNameFires = planFires fixtures.unsafePromptName;
 
+          # ── the network grant, read where an operator reads it ──
+          # A declaration is well-formed with or without the grant, and the grant
+          # itself is readable per generator out of the same record the runtime
+          # gets. That read is the audit the envelope's spec promises: no runtime
+          # is consulted and nothing has to run for the tree to say which
+          # generators may reach the network.
+          networkGrantMessages = violationsOf fixtures.networkGrant;
+          networkGrants = lib.mapAttrs (_: placement: placement.generator.network) (
+            lib.filterAttrs (_: placement: placement.generator != null) (
+              (resolve.placementsOf (fleetOf fixtures.networkGrant) { }).ana
+            )
+          );
+
           cycleMessages = violationsOf fixtures.cycle;
           cycleFires = planFires fixtures.cycle;
         };
@@ -497,6 +519,12 @@
             "flake.safix.users.ana's generator on 'a' declares a prompt named 'Pass Phrase', which is not [a-z0-9][a-z0-9_-]* and so cannot be addressed from the script"
           ];
           unsafePromptNameFires = true;
+
+          networkGrantMessages = [ ];
+          networkGrants = {
+            confined = false;
+            reaching = true;
+          };
 
           cycleMessages = [
             "flake.safix.users.ana declares a cycle of generators: 'a' -> 'b' -> 'a'. Nothing can run first, so nothing runs."
