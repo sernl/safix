@@ -54,6 +54,7 @@ jobs:
             accept-flake-config = false
             keep-going = true
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+            download-attempts = 10
 
       # `nix flake check --no-build` is not the tool for this, and the reason is
       # the tree rather than the flag. `safix-module-collision` imports a module
@@ -96,6 +97,23 @@ jobs:
         include:
           - system: x86_64-linux
             runner: ubuntu-latest
+          # This leg is red, and it is red for a reason no runner setting
+          # reaches. `Staging::establish` refuses a machine with no
+          # memory-backed mount, and macOS has none: `memory_backed` asks
+          # `statfs` for tmpfs or ramfs, both of which are linux magic numbers,
+          # so on darwin the answer is no for every path — including a RAM disk
+          # `hdiutil` could attach. Sixty of the ninety-four checks fail from
+          # that one fact: `safix-rs-test`'s unwinding-guard test, whose
+          # deliberate panic never happens because the staging root was never
+          # established, and `safix-integration`, whose harness refuses with
+          # "/dev/shm is not tmpfs here and this suite stages plaintext",
+          # carrying the fifty-eight checks that run one of its tests with it.
+          #
+          # The leg stays and stays honest. What it needs is a decision about
+          # what the plaintext-staging rule means on a platform with no tmpfs —
+          # the acknowledgement the harness already names, a darwin answer in
+          # `memory_backed`, or presence in `integration.nix` — and that belongs
+          # to whoever owns the rule, not to a workflow file.
           - system: aarch64-darwin
             runner: macos-latest
     steps:
@@ -126,6 +144,7 @@ jobs:
             accept-flake-config = false
             keep-going = true
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+            download-attempts = 10
 
       # Ubuntu 24.04 ships `kernel.apparmor_restrict_unprivileged_userns` at 1,
       # which denies a user namespace to a process that is unconfined and has no
@@ -145,7 +164,9 @@ jobs:
       #
       # The second knob is Ubuntu 25.04 and later, where unconfined processes are
       # gated separately. It is absent on 24.04, which is why its presence is
-      # asked rather than assumed.
+      # asked rather than assumed. darwin has no counterpart to this step and
+      # needs none: its backend is `/usr/bin/sandbox-exec`, which the system
+      # supplies and no sysctl withholds.
       - name: let bubblewrap have a user namespace
         if: runner.os == 'Linux'
         run: |

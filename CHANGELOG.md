@@ -299,6 +299,9 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
   It does not instantiate, and the reason is the tree rather than a preference: `safix-module-collision` imports a module out of a store path `builtins.path` produced and `safix-generators` reads a fixture out of a derivation, so `nix flake check --no-build` computes those paths and then refuses the paths it computed — on the runner's own system, not only on another's.
   Instantiation belongs to the build job, whose evaluator realises what an evaluation demands, and the limit is recorded on the job rather than left to be rediscovered.
   nix is given the job's own token for the six `github:` inputs it fetches, because `api.github.com` rate-limits an unauthenticated caller by source address and runs were dying on HTTP 429 before evaluating a single check.
+  The x86_64-linux leg is green over all ninety-eight checks. The aarch64-darwin leg is not, and what it reports is a fact about darwin rather than about a runner: `staging::memory_backed` asks `statfs` for tmpfs or ramfs, both linux magic numbers, so no path on macOS is memory-backed and `Staging::establish` refuses.
+  Sixty of that platform's ninety-four checks fail from that one fact — `safix-rs-test`'s unwinding-guard test, whose deliberate panic never happens because no staging root was established, and `safix-integration`, whose harness refuses with "/dev/shm is not tmpfs here and this suite stages plaintext", carrying the fifty-eight checks that run one of its tests.
+  The leg is left reporting it rather than narrowed around it: what the plaintext-staging rule means where there is no tmpfs is a question about the rule, and the workflow is not the place it gets answered.
 
 ### Fixed
 

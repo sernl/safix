@@ -1019,8 +1019,10 @@ The option reference lives on the types themselves; this document is the narrati
 ## Status
 
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are here and green under `nix flake check`.
-Every push and pull request builds that surface on x86_64-linux and aarch64-darwin, and evaluates it for aarch64-linux, which nothing there builds.
+Green on x86_64-linux, which is where every push and pull request builds the whole surface.
 `.github/workflows/check.yml` carries the one thing a runner has to be told first: Ubuntu denies unprivileged user namespaces, and the checks that drive a generator are made of them.
+The same workflow builds aarch64-darwin and evaluates aarch64-linux, and the darwin leg is red: `staging::memory_backed` recognises tmpfs and ramfs, both linux, so no path on macOS is memory-backed, `Staging::establish` refuses, and the integration suite refuses with it.
+That is a question about what the plaintext-staging rule means where there is no tmpfs, and it is open.
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.
