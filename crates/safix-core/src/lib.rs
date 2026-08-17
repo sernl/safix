@@ -28,12 +28,20 @@
 //! One module per subcommand that does more than read: [`set`] writes one typed
 //! value, [`fix`] converges the policy and the ciphertext onto the
 //! declarations, [`generate`] walks the generator graph, [`keygen`] mints an
-//! identity, and [`adduser`] declares a person. [`inputs`] is how a generator's
-//! values reach its script, [`sandbox`] is the envelope that script runs inside,
-//! and [`scratch`] is what an aborted write must not leave behind.
+//! identity, [`adduser`] declares a person, and [`enroll`] takes a hardware key
+//! from a blank card to a proven recovery identity. [`inputs`] is how a
+//! generator's values reach its script, [`sandbox`] is the envelope that script
+//! runs inside, and [`scratch`] is what an aborted write must not leave behind.
 //! [`definition`] is the record a mint leaves of the declaration it minted
 //! under, which is what lets [`check`] report a value whose generator has
 //! changed since.
+//!
+//! [`enroll`] is the one exception to the sentence above about terminals, and
+//! only in appearance. It refuses without one, because a card has to be touched
+//! and somebody has to be told when; but it opens no terminal of its own to read
+//! from — the pseudo-terminal it opens exists so that a subprocess which reads
+//! only from a terminal can be answered, and the two questions the operator
+//! answers still arrive through traits the command implements.
 //!
 //! Every one of them was compared against a shell runtime by the differential
 //! harness before it shipped — standard output, standard error, exit code and
@@ -51,6 +59,7 @@ pub mod clan;
 pub mod definition;
 mod digest;
 pub mod edit;
+pub mod enroll;
 mod error;
 pub mod fix;
 pub mod generate;

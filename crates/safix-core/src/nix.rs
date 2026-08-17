@@ -40,6 +40,8 @@ pub enum Attribute {
     Bridge,
     /// The consumer's onboarding invocation, or null when none is configured.
     OnboardingHook,
+    /// The consumer's enrollment invocation, or null when none is configured.
+    EnrollHook,
 }
 
 impl Attribute {
@@ -56,6 +58,7 @@ impl Attribute {
             Self::NameRegex => "safix.lib.nameRegex",
             Self::Bridge => "safix.lib.bridge",
             Self::OnboardingHook => "safix.onboardingHook",
+            Self::EnrollHook => "safix.enrollHook",
         }
     }
 
@@ -72,6 +75,7 @@ impl Attribute {
             Self::NameRegex => "flake.safix.lib.nameRegex",
             Self::Bridge => "flake.safix.lib.bridge",
             Self::OnboardingHook => "flake.safix.onboardingHook",
+            Self::EnrollHook => "flake.safix.enrollHook",
         }
     }
 }

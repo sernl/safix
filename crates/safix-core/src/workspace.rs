@@ -196,6 +196,21 @@ impl Workspace {
         Ok(hook.unwrap_or_default())
     }
 
+    /// The consumer's enrollment invocation, or the empty string when none is
+    /// configured.
+    ///
+    /// Absent and unset are the same answer, for the reason
+    /// [`onboarding_hook`](Self::onboarding_hook) gives: both mean enrollment
+    /// does less rather than that something is wrong.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn enroll_hook(&self) -> Result<String> {
+        let hook: Option<String> = self.nix.eval_json(&self.root, Attribute::EnrollHook)?;
+        Ok(hook.unwrap_or_default())
+    }
+
     /// The recipient policy the declarations imply, as text.
     ///
     /// Uncached, because the one caller compares it against the committed file
