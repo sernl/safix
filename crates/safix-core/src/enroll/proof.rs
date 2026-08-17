@@ -20,7 +20,7 @@
 //!
 //! A governed file the person's audience covers, in full, into a pipe this
 //! process drains and drops. Nothing is extracted, nothing is written, and the
-//! value is a [`Secret`](crate::Secret) for the length of one statement. A canary
+//! value is a [`Secret`] for the length of one statement. A canary
 //! encrypted for the occasion would prove that a fresh file made from a fresh
 //! rule opens, which is not the question; the question is whether the store the
 //! person already has opens.

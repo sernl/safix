@@ -21,7 +21,7 @@
 //! there is no flag that reads a PIN from a pipe, and the alternative is a
 //! terminal prompt safix would then be answering on the operator's behalf. That
 //! is stated here rather than hidden, and it is why [`Credentials`] is not a
-//! [`Secret`](crate::Secret): a type whose only egress is a pipe cannot express
+//! [`Secret`]: a type whose only egress is a pipe cannot express
 //! a value that has to reach an argument vector, and using one anyway would
 //! misdescribe what happens. Every *other* egress — the generator's terminal,
 //! the password store, the safix secret — takes [`Credentials::pin_secret`] or

@@ -1,7 +1,7 @@
 //! One age identity in one retired slot, and the block that names it.
 //!
 //! The generator is `age-plugin-yubikey --generate`, driven under
-//! [`pty`](super::pty) because it reads the PIN from a terminal. Everything else
+//! [`pty`] because it reads the PIN from a terminal. Everything else
 //! it needs is a flag, so the argument vector below is built without a card and
 //! is asserted without one.
 //!

@@ -22,7 +22,7 @@
 //! declared; nothing is removed and nothing is replaced, in any file, on any
 //! path. A second card is a second run of the same verb and neither run knows
 //! about the other. The cost is that enrollment cannot revoke — but re-wrapping
-//! never could, and [`fix`](crate::fix) says so at length for the same reason.
+//! never could, and [`fix`] says so at length for the same reason.
 //!
 //! # The applet that is never touched
 //!
