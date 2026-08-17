@@ -104,6 +104,16 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// answer as "not memory-backed" and is not treated as one: a candidate that
 /// cannot be stat'd is skipped rather than refused, and running out of
 /// candidates is what raises the refusal.
+///
+/// The two magic numbers are linux's, and there is deliberately no third answer
+/// for darwin. A RAM disk attached with `hdiutil` carries an ordinary apfs or hfs
+/// filesystem, so `statfs` returns what a disk returns and the two are
+/// indistinguishable from here: any darwin "yes" would be a guess about a mount
+/// this function cannot see the backing of, and a guess is the one thing a probe
+/// whose whole purpose is refusing on doubt must not make. So on darwin every
+/// path answers `false`, `Staging::establish` refuses without
+/// [`ACKNOWLEDGEMENT`], and that refusal — not a fabricated yes — is the
+/// platform's contract.
 #[must_use]
 pub fn memory_backed(path: &Path) -> Option<bool> {
     let answer = rustix::fs::statfs(path).ok()?;
@@ -462,6 +472,21 @@ mod tests {
         reason = "the panic is the behaviour under test, not a failure path"
     )]
     fn a_panic_unwinding_through_the_guard_removes_the_tree() {
+        // Asked before the closure, because inside it a machine with no
+        // memory-backed mount returns early and an early return is
+        // indistinguishable from a panic that did not happen — which is how this
+        // test read as a failure on darwin while asserting nothing. There is no
+        // guard to unwind through where there is no staging root, and what the
+        // platform does instead is the subject of
+        // `establishment_answers_the_mounts_it_found`. The lock is scoped so the
+        // closure can take it again.
+        {
+            let _exclusive = crate::scratch::exclusive();
+            if Staging::establish(false).is_err() {
+                return;
+            }
+        }
+
         let (announce, root) = std::sync::mpsc::channel();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
@@ -489,6 +514,46 @@ mod tests {
         assert!(!is_one_component("nested/name"));
         assert!(!is_one_component(""));
         assert!(!is_one_component("."));
+    }
+
+    /// Establishment agrees with the probe, in both directions.
+    ///
+    /// Written as one claim over both outcomes rather than as a linux test and a
+    /// darwin test, because either half alone is vacuous on the other platform
+    /// and a vacuous half is what stops a claim being made without anybody
+    /// deciding to stop making it. Where some candidate answers memory-backed a
+    /// root is established; where none does the run is refused and the refusal
+    /// names the acknowledgement, which is the whole of what safix offers on a
+    /// platform with no tmpfs.
+    ///
+    /// This is the test a darwin heuristic in [`memory_backed`] would have to get
+    /// past. A fabricated "yes" makes the probe claim a mount the establishment
+    /// cannot use, and the mismatch fails here rather than surfacing as plaintext
+    /// on a disk.
+    #[test]
+    fn establishment_answers_the_mounts_it_found() {
+        let _exclusive = crate::scratch::exclusive();
+        let found = candidates();
+        let any_memory_backed = found.iter().any(|mount| memory_backed(mount) == Some(true));
+
+        match Staging::establish(false) {
+            Ok(staging) => assert!(
+                any_memory_backed,
+                "a root was established at {} with no candidate answering memory-backed",
+                staging.root().display()
+            ),
+            Err(refusal) => {
+                assert!(
+                    !any_memory_backed,
+                    "establishment refused while a candidate answered memory-backed: {refusal}"
+                );
+                let said = refusal.to_string();
+                assert!(
+                    said.contains(ACKNOWLEDGEMENT),
+                    "the refusal does not name {ACKNOWLEDGEMENT}: {said}"
+                );
+            }
+        }
     }
 
     #[test]
