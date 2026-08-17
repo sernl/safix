@@ -396,6 +396,7 @@ $ safix export     # push declared safix values into clan
 $ safix audit      # report which declared mappings' two sides disagree
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
+$ safix enroll     # a hardware key, from a blank card to a proven recovery identity
 ```
 
 Think of `check` and `fix` as `git status` and `git add` for secret policy.
@@ -454,6 +455,42 @@ Whether that independence is real is decided by one field, and the disclosure li
 Leaving it empty keeps their custody independent and has a cost no later edit undoes: with only their activation key, losing it makes their files unopenable by every party including the operator, because adding a recipient to an existing file requires decrypting it first.
 Listing an operator-held identity there instead buys recoverability at the price of that operator reading everything the person holds.
 The mitigation that keeps independence is a second recipient the person themselves holds.
+
+## Enrolling a hardware key: `safix enroll`
+
+`recoveryRecipients` is where a hardware token belongs, and getting one in there used to be seven manual steps that proved nothing at the end.
+It is now one verb.
+
+```console
+$ safix enroll
+# 12345678 is factory-fresh. Generating a PIN and a distinct PUK...
+# 👆 Please touch the YubiKey
+# 12345678 is enrolled for ana.
+```
+
+A touch is the only thing you do.
+Everything else happens in one run, in this order: the card is selected; its PIV access is provisioned when the card is factory-fresh, with a safix-generated PIN, a distinct safix-generated PUK and a random management key put on the card under the PIN; an age identity is generated in the first empty retired slot, driven under a pseudo-terminal that supplies the PIN; the identity block is appended to the same file `safix keygen` appends to; the card's recipient is added to the person's `recoveryRecipients`; `.sops.yaml` is regenerated, every governed file re-wrapped, and the three committed together; the recipient is registered with clan through clan's own command when a clan is declared, and `flake.safix.enrollHook` receives the person, the serial and the recipient; the generated PIN and PUK become that person's own safix secret, named for the serial.
+
+Then the step the hand ceremony never had.
+The card alone opens a governed file in the person's audience, with an identity source holding only the card's stub, exercising the PIN and the touch.
+An enrollment whose proof has not passed reports itself incomplete and exits non-zero — nothing is undone, because the identity, the recipient and the re-wrap are additive and correct on their own.
+
+Everything is additive, on every path.
+A recipient is appended, an identity block is appended, a name is declared; nothing is removed and nothing is replaced.
+A backup key is the same verb run again: each card gets its own identity and its own recipient, and neither run knows about the other.
+A re-wrap that dropped a recipient a file had before the run is refused rather than committed.
+
+Three things are refused, and each refusal names why.
+No OTP slot is written under any flag — a programmed challenge-response slot is what opens a password database, the database has no record of the secret it was built with, and writing that slot ends it permanently.
+`--touch-policy never` is refused, because the touch is the property a card is for.
+And a run with no terminal is refused before the card is touched, because somebody has to touch it and somebody has to be told when.
+
+The management key is stored nowhere: PIN possession is management possession, so a stored copy would be a credential with no reader.
+The PIN and PUK land in the person's own custody by default, with an honest caveat — a PIN readable by the software identity adds protection only once that identity is retired or absent, and `--no-store-pin` turns it off.
+`--mirror-to-store` writes them to the password store as well: through the session's secret service when it answers, with no prompt at all, and through `keepassxc-cli` with one password prompt when it does not.
+
+The primary `recipient` stays software-only.
+Activation decrypts with nobody present, so a card belongs in `recoveryRecipients` and `safix adduser` refuses one for the other field.
 
 ## Wiring it to your own user registry
 

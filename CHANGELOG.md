@@ -50,6 +50,32 @@ The fleet needs no declaration change: no generator declared today reaches the n
 
 ### Added
 
+- `safix enroll`: one verb from a blank hardware key to a proven recovery identity, with a touch as the ceiling of required interaction.
+  It selects the card, provisions PIV access when the card is factory-fresh — a safix-generated PIN, a distinct safix-generated PUK, and a random management key put on the card under the PIN and stored nowhere else — generates an age identity in the first empty retired slot, appends the identity block to the same file `safix keygen` appends to, adds the card's recipient to the person's `recoveryRecipients`, regenerates the policy, re-wraps every governed file, and commits the three together.
+  Everything is additive on every path: nothing is removed or replaced, a backup key is the same verb run again, and a re-wrap that dropped a recipient a file had before the run is refused rather than committed.
+- The step the manual ceremony never had: the card alone opening a governed file in the person's audience, with an identity source holding only the card's stub.
+  age sorts native identities before plugin identities, so an ambient `keys.txt` would satisfy the decrypt with a software key and the proof would be about that key; the isolated source and the cleared identity variables are what make it about the card.
+  A proof that has not passed leaves the enrollment reported incomplete and exits non-zero, with nothing undone — the identity, the recipient and the re-wrap are additive and correct on their own.
+  `openspec/changes/enroll-hardware-custody/design.md` records the decision under D4, and the gap `dotfiles`' `one-unlock-bootstrap` design named is what it closes.
+- `age-plugin-yubikey --generate` reads its PIN from a terminal and from nowhere else — there is no flag, and its prompt returns the empty string off-tty — so `safix-core` grew one pseudo-terminal wrapper for it.
+  The prompt is recognised by shape rather than by text: a password prompt is a program turning the terminal's echo off, and the pseudo-terminal's attributes are readable from the master end, so a plugin upgrade that rewords the prompt still gets the PIN.
+  One attempt and no more: a card allows three, and a run that answered every prompt would spend all three on the same wrong PIN.
+- The generated PIN and PUK become the person's own safix secret by default, named for the serial, written through the same path `safix set` writes through, with `--no-store-pin` as the opt-out.
+  The caveat is stated beside the default rather than under it: a PIN readable by the software identity adds protection only once that identity is retired or absent.
+  `--mirror-to-store` writes them to the password store as well — the session's secret service when it answers, with no prompt at all, and `keepassxc-cli` with one password prompt when it does not, and skippable entirely.
+  Both transports take the credentials on standard input; neither argument vector can carry one.
+- `flake.safix.enrollHook`, beside `onboardingHook`, receiving the person, the serial and the card's recipient.
+  Registration with clan is not the hook's: when `flake.safix.bridge.clanFlake` is set, the recipient goes through `clan secrets users add` (or `add-key`, reached by outcome rather than by reading clan's wording), which is what keeps safix from writing into clan's store.
+  Unset is a supported configuration: enrollment succeeds without it, having done less, and says so.
+- Three refusals whose reason is a page rather than a sentence.
+  No OTP slot is written under any flag, and asking is refused with the hazard named: a programmed challenge-response slot is what opens a password database, the database has no record of the secret it was built with, and writing that slot ends it permanently for every copy.
+  `--touch-policy never` is refused, because a card that decrypts without a touch is a smartcard emulating a file.
+  A run with no terminal is refused before the card is touched, because somebody has to touch it and somebody has to be told when.
+- Eight checks over the enrollment target, driven against a card surface that records what it was handed: `safix-enroll`, `-backup`, `-refusals`, `-one-attempt`, `-proof`, `-proof-isolation`, `-hook` and `-custody`.
+  `ykman`, the age plugin and the two password stores are stubbed for the reason clan is — the claims are about the delegation, and a stub can be asked what it saw — and for one more that clan does not have: the real tools act on hardware, so a suite that drove them would be one argument away from an irreversible loss and one that drove a real password store would write into the operator's own.
+  What the checks deliberately do not establish is that an `age1yubikey1…` recipient is one real sops can wrap a data key to, because wrapping to a plugin recipient runs the plugin and the plugin runs the card; the passing path of the proof machinery is asserted separately, against real sops, with a software identity standing where the card's stub goes.
+  The six drills observed red while the change was written are recorded in `modules/flake/checks/cli.nix`.
+
 - A third top-level tree, `state/safix/definitions/`, holding one plaintext line per generated value: a digest of the generator declaration that minted it, written by `safix generate` in the same commit as the value and refreshed by every regeneration.
   Neither existing tree could hold it. A path named for secrets has to mean that everything under it is encrypted without qualification, and `public/` means declared public outputs a nix module reads at evaluation; a bookkeeping file there would dilute that into "plaintext things safix wrote".
   The digest covers everything that decides what a mint produces — the script, `runtimeInputs`, the `network` grant, prompts, dependencies, the outputs with their secrecy, and the validation fragment — and neither of the two fields that cannot: `description` is a label and `share` is derived by the resolver from the entries.
