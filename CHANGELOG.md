@@ -300,9 +300,21 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
   It does not instantiate, and the reason is the tree rather than a preference: `safix-module-collision` imports a module out of a store path `builtins.path` produced and `safix-generators` reads a fixture out of a derivation, so `nix flake check --no-build` computes those paths and then refuses the paths it computed — on the runner's own system, not only on another's.
   Instantiation belongs to the build job, whose evaluator realises what an evaluation demands, and the limit is recorded on the job rather than left to be rediscovered.
   nix is given the job's own token for the six `github:` inputs it fetches, because `api.github.com` rate-limits an unauthenticated caller by source address and runs were dying on HTTP 429 before evaluating a single check.
-  The x86_64-linux leg is green over all ninety-eight checks. The aarch64-darwin leg is not, and what it reports is a fact about darwin rather than about a runner: `staging::memory_backed` asks `statfs` for tmpfs or ramfs, both linux magic numbers, so no path on macOS is memory-backed and `Staging::establish` refuses.
-  Sixty of that platform's ninety-four checks fail from that one fact — `safix-rs-test`'s unwinding-guard test, whose deliberate panic never happens because no staging root was established, and `safix-integration`, whose harness refuses with "/dev/shm is not tmpfs here and this suite stages plaintext", carrying the fifty-eight checks that run one of its tests.
-  The leg is left reporting it rather than narrowed around it: what the plaintext-staging rule means where there is no tmpfs is a question about the rule, and the workflow is not the place it gets answered.
+  Both legs are green, and getting the darwin one there settled what the plaintext-staging rule means on a platform with no tmpfs.
+
+### The darwin staging contract is tested rather than assumed
+
+`staging::memory_backed` asks `statfs` for tmpfs or ramfs, both linux magic numbers, and gains no darwin answer: a RAM disk `hdiutil` attaches carries an ordinary apfs filesystem and `statfs` returns what a disk returns, so any yes would be a guess about a mount the function cannot see the backing of.
+So on darwin nothing is memory-backed, `Staging::establish` refuses, and the refusal names `--allow-disk-staging`. That was already the contract; what changes is that it is now asserted, and that the platform is tested under it.
+
+`establishment_answers_the_mounts_it_found` states the contract as one proposition over both outcomes rather than as a linux test and a darwin test, because either half alone is vacuous on the other platform: where a candidate answers memory-backed a root is established, and where none does the run is refused naming the acknowledgement.
+It is the test a fabricated darwin yes would have to get past, and it replaces three staging tests that returned quietly when establishment refused and a fourth that asserted outside its own closure — which is why darwin reported "the deliberate panic did not happen" while asserting nothing.
+
+The integration suite runs there under the acknowledgement the runtime documents, threaded into the three verbs that stage — `edit`, `generate` and `enroll`, which are the three places `Staging::establish` is reached from — when `SAFIX_TEST_DISK_STAGING` is set, which is darwin only.
+That is not a way around the rule: withholding it would not test the refusal, which is asserted in its own right, it would only stop darwin being tested at all. Nothing changes on linux, and the drill that needs a run without the flag keeps one.
+
+What stays linux-only is the tmpfs guarantee itself. `safix-memory-backing` holds the probe against `/proc/mounts`, and the comparison means something only with both directions present — a probe stuck at either answer agrees with a machine that has only mounts of that kind.
+darwin cannot supply the memory-backed direction, so the check would assert the disk-backed half alone and pass a probe stuck at "disk-backed", which is the exact defeat it exists to catch. It is absent there rather than half-made, which is the same shape as `safix-syscall-proof`'s ptrace and `safix-generate-envelope`'s bubblewrap.
 
 ### Fixed
 
