@@ -201,7 +201,7 @@ pub fn report(refusal: &Refusal) {
 mod tests {
     use std::io;
 
-    use safix_core::{Code, Error};
+    use safix_core::{Code, Error, delegation};
 
     use super::*;
 
@@ -570,6 +570,27 @@ mod tests {
                 output: "Error: user alice already exists".into(),
             },
             Code::EnrollHookFailed => Error::EnrollHookFailed { status: 2 },
+            Code::ActorUndeclared => Error::ActorUndeclared {
+                name: "Mallory Example".into(),
+                email: "mallory@example.com".into(),
+                delegation: Box::new(delegation::Refused {
+                    through: delegation::Through::Consent {
+                        person: "bob".into(),
+                    },
+                    organizations: vec!["acme".into()],
+                }),
+                declared: vec!["alice".into(), "bob".into(), "carol".into()],
+            },
+            Code::ScaffoldOutOfScope => Error::ScaffoldOutOfScope {
+                actor: "mallory".into(),
+                delegation: Box::new(delegation::Refused {
+                    through: delegation::Through::Consent {
+                        person: "bob".into(),
+                    },
+                    organizations: vec!["acme".into()],
+                }),
+                managers: vec!["alice".into()],
+            },
         }
     }
 
@@ -614,6 +635,23 @@ mod tests {
                 Refusal::Runtime(Error::UnknownSyncMapping {
                     mapping: "grafana".into(),
                     declared: Vec::new(),
+                }),
+            ),
+            // The group half of the same refusal: the delegation is silo coverage
+            // rather than a person's consent, two organizations cover the group,
+            // and neither declares a manager — so the sentence joins two option
+            // paths and the heading stands over nothing.
+            (
+                "scaffold_out_of_scope_group",
+                Refusal::Runtime(Error::ScaffoldOutOfScope {
+                    actor: "dave".into(),
+                    delegation: Box::new(delegation::Refused {
+                        through: delegation::Through::Silo {
+                            group: "oncall".into(),
+                        },
+                        organizations: vec!["acme".into(), "globex".into()],
+                    }),
+                    managers: Vec::new(),
                 }),
             ),
         ]

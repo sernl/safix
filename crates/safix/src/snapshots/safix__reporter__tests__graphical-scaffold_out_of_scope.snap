@@ -1,0 +1,28 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::scaffold_out_of_scope
+
+  × flake.safix.users.bob is delegated to flake.safix.organizations.acme by
+  │ flake.safix.users.bob.managedBy.
+  │ mallory is not among the managers named there, so nothing about it was
+  │ edited: the check ran before any file was written, and the identity it
+  │ read
+  │ is the one a commit made here would carry.
+  │ 
+  │ Declared managers:
+  │   - alice
+  │ 
+  │ A manager runs this, or this name joins them — one line under
+  │ flake.safix.organizations.acme.managers, committed first.
+  │ 
+  │ These refusals bind the cooperative path and are not authorization. The
+  │ tree is
+  │ the authorization: anyone who can commit can edit these declarations by
+  │ hand,
+  │ evaluation refuses structure rather than people, and no delegation record
+  │ places
+  │ a key in any audience. What they buy is that a scaffold and the identity
+  │ it is
+  │ attributed to cannot disagree.

@@ -12,6 +12,8 @@
 //! library, and the shell runtime spells its own `$PROG` into the same
 //! sentences.
 
+use crate::delegation::Refused;
+
 /// The one-per-line bulleted continuation the shell writes with `sed 's/^/  - /'`.
 ///
 /// Empty for an empty list, and leading rather than trailing with its newline,
@@ -683,5 +685,111 @@ pub(super) fn no_file_to_prove_with(user: &str) -> String {
         \n\
         \x20   safix set {user} <name>\n\
         \x20   safix enroll {user}"
+    )
+}
+
+/// A list of option paths, joined as every refusal here joins one.
+fn joined(paths: &[String]) -> String {
+    match paths.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::from("nothing"),
+    }
+}
+
+/// The organizations a delegation names, as their option paths.
+fn organizations(named: &[String]) -> String {
+    joined(
+        &named
+            .iter()
+            .map(|organization| format!("flake.safix.organizations.{organization}"))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Where those organizations declare their managers, which is where a name joins
+/// them.
+fn manager_sites(named: &[String]) -> String {
+    joined(
+        &named
+            .iter()
+            .map(|organization| format!("flake.safix.organizations.{organization}.managers"))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The sentence both delegation refusals open the record with.
+fn delegated_by(delegation: &Refused) -> String {
+    format!(
+        "{} is delegated to {} by {}.",
+        delegation.through.subject(),
+        organizations(&delegation.organizations),
+        delegation.through.site()
+    )
+}
+
+/// A commit identity no declaration corresponds to, met where a delegation asked
+/// who is acting.
+///
+/// The boundary sentence is reached through [`crate::delegation::BOUNDARY`] rather
+/// than written here, so that no surface can carry a second wording of it.
+pub(super) fn actor_undeclared(
+    name: &str,
+    email: &str,
+    delegation: &Refused,
+    declared: &[String],
+) -> String {
+    format!(
+        "a commit made here would be authored by '{name} <{email}>', and\n\
+        flake.safix.users declares nobody of that name.\n\
+        \n\
+        {}\n\
+        A delegated scaffold is judged against the identity its own commit will\n\
+        carry, so this run stops before editing anything.\n\
+        \n\
+        That identity is user.name and user.email as this repository resolves them,\n\
+        because the commit is the act: there is no flag naming somebody else, since a\n\
+        flag would let the check and the attribution disagree. It is matched to a\n\
+        declared person by name and by nothing else — no declaration maps a git\n\
+        identity to a person, and taking one from an address's local part is how the\n\
+        wrong name ends up in history.\n\
+        \n\
+        Declared people:{}\n\
+        \n\
+        Set the identity this repository commits under to a name the fleet declares,\n\
+        or declare the person these commits already name:\n\
+        \n\
+        \x20   git config user.name <name>\n\
+        \n\
+        {}",
+        delegated_by(delegation),
+        bulleted(declared),
+        crate::delegation::BOUNDARY
+    )
+}
+
+/// A declared person acting outside the delegation covering what they were about
+/// to edit.
+pub(super) fn scaffold_out_of_scope(
+    actor: &str,
+    delegation: &Refused,
+    managers: &[String],
+) -> String {
+    format!(
+        "{}\n\
+        {actor} is not among the managers named there, so nothing about it was\n\
+        edited: the check ran before any file was written, and the identity it read\n\
+        is the one a commit made here would carry.\n\
+        \n\
+        Declared managers:{}\n\
+        \n\
+        A manager runs this, or this name joins them — one line under\n\
+        {}, committed first.\n\
+        \n\
+        {}",
+        delegated_by(delegation),
+        bulleted(managers),
+        manager_sites(&delegation.organizations),
+        crate::delegation::BOUNDARY
     )
 }

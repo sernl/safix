@@ -19,7 +19,8 @@ use std::sync::OnceLock;
 use crate::error::{Error, Result};
 use crate::git::Git;
 use crate::model::{
-    Audiences, Bridge, GeneratorPlan, GovernedFiles, Keepassxc, Placement, Placements, Recipients,
+    Audiences, Bridge, Delegation, GeneratorPlan, GovernedFiles, Keepassxc, Placement, Placements,
+    Recipients,
 };
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
@@ -35,6 +36,7 @@ pub struct Workspace {
     audiences: OnceLock<Audiences>,
     governed_files: OnceLock<GovernedFiles>,
     recipients: OnceLock<Recipients>,
+    delegation: OnceLock<Delegation>,
     generator_plan: OnceLock<GeneratorPlan>,
     bridge: OnceLock<Bridge>,
     keepassxc: OnceLock<Keepassxc>,
@@ -70,6 +72,7 @@ impl Workspace {
             audiences: OnceLock::new(),
             governed_files: OnceLock::new(),
             recipients: OnceLock::new(),
+            delegation: OnceLock::new(),
             generator_plan: OnceLock::new(),
             bridge: OnceLock::new(),
             keepassxc: OnceLock::new(),
@@ -147,6 +150,17 @@ impl Workspace {
     pub fn recipients(&self) -> Result<&Recipients> {
         cached(&self.recipients, || {
             self.nix.eval_json(&self.root, Attribute::Recipients)
+        })
+    }
+
+    /// Who may scaffold for whom, and over which groups.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn delegation(&self) -> Result<&Delegation> {
+        cached(&self.delegation, || {
+            self.nix.eval_json(&self.root, Attribute::Delegation)
         })
     }
 

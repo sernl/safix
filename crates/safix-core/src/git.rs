@@ -195,6 +195,30 @@ impl Git {
         Ok(head.trim_end_matches('\n').to_owned())
     }
 
+    /// Who a commit made here would be authored by.
+    ///
+    /// `git var GIT_AUTHOR_IDENT` rather than two reads of `git config`, because
+    /// the question is who the commit will name and that is what this answers:
+    /// one resolution of `user.name` and `user.email` through this repository's
+    /// own configuration, its includes and its worktree, and through the
+    /// environment where an invocation overrides them. Two `config` reads would
+    /// answer a narrower question and could disagree with the commit that
+    /// follows, which is the one thing a delegation check must not do.
+    ///
+    /// The value is git's ident line — `Name <email> <timestamp> <zone>` — and
+    /// the timestamp is dropped: it is the moment this was asked rather than a
+    /// property of the identity.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::GitCommandFailed`] when git cannot resolve an identity at all,
+    /// which is the state a commit would also be refused in, and
+    /// [`Error::GitOutputNotText`] when what it printed is not text.
+    pub fn author_identity(&self, root: &Path) -> Result<Identity> {
+        let ident = self.capture(root, &["var".into(), "GIT_AUTHOR_IDENT".into()])?;
+        Ok(parse_identity(ident.trim_end_matches('\n')))
+    }
+
     fn command(&self, root: &Path) -> Command {
         let mut command = Command::new(&self.program);
         command.arg("-C").arg(root);
@@ -299,6 +323,36 @@ fn describe(arguments: &[OsString]) -> String {
         .join(" ")
 }
 
+/// Who a commit would be authored by.
+///
+/// Both halves are carried because both reach the commit, and a refusal about an
+/// identity has to print what the operator would see in `git log` rather than
+/// half of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// `user.name`, as this repository resolves it.
+    pub name: String,
+    /// `user.email`, as this repository resolves it.
+    pub email: String,
+}
+
+/// Split git's ident line into its name and its address.
+///
+/// The shape is `Name <email> <timestamp> <zone>`, and the address is taken from
+/// between the angle brackets rather than by splitting on whitespace: a name may
+/// hold spaces and an address may not hold a bracket, so the brackets are the one
+/// unambiguous boundary. A line that carries no brackets leaves the address empty
+/// rather than being guessed at from the words around it.
+fn parse_identity(ident: &str) -> Identity {
+    let (name, rest) = ident.split_once('<').unwrap_or((ident, ""));
+    Identity {
+        name: name.trim().to_owned(),
+        email: rest
+            .split_once('>')
+            .map_or(String::new(), |(email, _)| email.trim().to_owned()),
+    }
+}
+
 /// A git operation that is part-way through, and the marker that says so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InProgress {
@@ -306,4 +360,31 @@ pub struct InProgress {
     pub state: &'static str,
     /// The path whose existence is the evidence.
     pub marker: PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ident_line_splits_at_the_brackets_and_keeps_a_name_with_spaces() {
+        assert_eq!(
+            parse_identity("Alice Example <alice@example.com> 1766000000 +0000"),
+            Identity {
+                name: String::from("Alice Example"),
+                email: String::from("alice@example.com"),
+            }
+        );
+    }
+
+    #[test]
+    fn an_ident_line_with_no_address_leaves_it_empty_rather_than_guessing() {
+        assert_eq!(
+            parse_identity("alice"),
+            Identity {
+                name: String::from("alice"),
+                email: String::new(),
+            }
+        );
+    }
 }

@@ -34,7 +34,10 @@
 //! runs inside, and [`scratch`] is what an aborted write must not leave behind.
 //! [`definition`] is the record a mint leaves of the declaration it minted
 //! under, which is what lets [`check`] report a value whose generator has
-//! changed since.
+//! changed since. [`delegation`] is who may perform a scaffold for whom, read
+//! off the declarations and matched against the identity the resulting commit
+//! would carry; it guards the cooperative path and is explicitly not
+//! authorization, which its own documentation states at length.
 //!
 //! [`enroll`] is the one exception to the sentence above about terminals, and
 //! only in appearance. It refuses without one, because a card has to be touched
@@ -57,6 +60,7 @@ pub mod bridge;
 pub mod check;
 pub mod clan;
 pub mod definition;
+pub mod delegation;
 mod digest;
 pub mod edit;
 pub mod enroll;

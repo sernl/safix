@@ -21,10 +21,10 @@ use std::io;
 pub use code::Code;
 
 use prose::{
-    HOST_WITHOUT_HOOK, NO_TERMINAL, OTP_REFUSED, PCSCD_UNAVAILABLE, already_declared,
-    bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous, drifted,
-    generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
-    no_file_to_prove_with, no_generator, recipients_lost,
+    HOST_WITHOUT_HOOK, NO_TERMINAL, OTP_REFUSED, PCSCD_UNAVAILABLE, actor_undeclared,
+    already_declared, bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous,
+    drifted, generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
+    no_file_to_prove_with, no_generator, recipients_lost, scaffold_out_of_scope,
 };
 
 /// A refusal from the safix runtime.
@@ -1170,6 +1170,36 @@ pub enum Error {
     EnrollHookFailed {
         /// What the hook exited with.
         status: i32,
+    },
+
+    /// A delegation check was reached and the commit's identity names no declared
+    /// person.
+    ///
+    /// Its own refusal rather than an out-of-scope one, because the two have
+    /// different remedies: this is a repository whose identity says nothing the
+    /// declarations can match, and no edit to a `managers` list would change that.
+    #[error("{}", actor_undeclared(.name, .email, .delegation, .declared))]
+    ActorUndeclared {
+        /// `user.name`, as this repository resolves it.
+        name: String,
+        /// `user.email`, as this repository resolves it.
+        email: String,
+        /// The delegation that asked who is acting.
+        delegation: Box<crate::delegation::Refused>,
+        /// Every person the declarations name, in name order.
+        declared: Vec<String>,
+    },
+
+    /// A declared person acting outside the delegation covering what they were
+    /// about to edit.
+    #[error("{}", scaffold_out_of_scope(.actor, .delegation, .managers))]
+    ScaffoldOutOfScope {
+        /// The declared person a commit made here would name.
+        actor: String,
+        /// The delegation that refused them.
+        delegation: Box<crate::delegation::Refused>,
+        /// Every manager the organizations it names declare, in name order.
+        managers: Vec<String>,
     },
 }
 

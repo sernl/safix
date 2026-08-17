@@ -30,6 +30,8 @@ pub enum Attribute {
     GovernedFiles,
     /// `user -> every age key that user can open a file with`.
     Recipients,
+    /// Who may scaffold for whom, and over which groups.
+    Delegation,
     /// The recipient policy these declarations imply, as text.
     PolicyText,
     /// `user -> what may run, in which order, reading and writing what`.
@@ -55,6 +57,7 @@ impl Attribute {
             Self::Audiences => "safix.lib.audiences",
             Self::GovernedFiles => "safix.lib.governedFiles",
             Self::Recipients => "safix.lib.recipients",
+            Self::Delegation => "safix.lib.delegation",
             Self::PolicyText => "safix.lib.policyText",
             Self::GeneratorPlan => "safix.lib.generatorPlan",
             Self::NameRegex => "safix.lib.nameRegex",
@@ -73,6 +76,7 @@ impl Attribute {
             Self::Audiences => "flake.safix.lib.audiences",
             Self::GovernedFiles => "flake.safix.lib.governedFiles",
             Self::Recipients => "flake.safix.lib.recipients",
+            Self::Delegation => "flake.safix.lib.delegation",
             Self::PolicyText => "flake.safix.lib.policyText",
             Self::GeneratorPlan => "flake.safix.lib.generatorPlan",
             Self::NameRegex => "flake.safix.lib.nameRegex",

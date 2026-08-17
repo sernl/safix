@@ -1,0 +1,33 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: a commit made here would be authored by 'Mallory Example <mallory@example.com>', and
+flake.safix.users declares nobody of that name.
+
+flake.safix.users.bob is delegated to flake.safix.organizations.acme by flake.safix.users.bob.managedBy.
+A delegated scaffold is judged against the identity its own commit will
+carry, so this run stops before editing anything.
+
+That identity is user.name and user.email as this repository resolves them,
+because the commit is the act: there is no flag naming somebody else, since a
+flag would let the check and the attribution disagree. It is matched to a
+declared person by name and by nothing else — no declaration maps a git
+identity to a person, and taking one from an address's local part is how the
+wrong name ends up in history.
+
+Declared people:
+  - alice
+  - bob
+  - carol
+
+Set the identity this repository commits under to a name the fleet declares,
+or declare the person these commits already name:
+
+    git config user.name <name>
+
+These refusals bind the cooperative path and are not authorization. The tree is
+the authorization: anyone who can commit can edit these declarations by hand,
+evaluation refuses structure rather than people, and no delegation record places
+a key in any audience. What they buy is that a scaffold and the identity it is
+attributed to cannot disagree.

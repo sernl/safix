@@ -46,7 +46,7 @@ use crate::error::{Error, Result};
 use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::workspace::Workspace;
-use crate::{fix, git, keygen, scratch, set, sops, staging};
+use crate::{delegation, fix, git, keygen, scratch, set, sops, staging};
 
 /// What an invocation asked for beyond the person.
 #[derive(Debug, Clone)]
@@ -126,7 +126,8 @@ pub fn terminal_present() -> bool {
 /// # Errors
 ///
 /// [`Error::NoTerminal`] before the card is touched, then every refusal on the
-/// path: [`Error::UnknownUser`], [`Error::NoCardConnected`],
+/// path: [`Error::UnknownUser`], [`Error::ActorUndeclared`],
+/// [`Error::ScaffoldOutOfScope`], [`Error::NoCardConnected`],
 /// [`Error::CardsAmbiguous`], [`Error::PcscdUnavailable`],
 /// [`Error::CardCommandFailed`], [`Error::TouchPolicyNever`],
 /// [`Error::CardPinRejected`], [`Error::PluginFailed`],
@@ -147,6 +148,14 @@ pub fn run(
     scratch::set_floor(workspace.root());
     let _guard = scratch::Guard;
 
+    // Before the card is selected, not only before the record is edited. A card
+    // that has been provisioned is a card whose PIN and PUK were replaced, and an
+    // out-of-scope run that had got that far would have changed something
+    // irreversible while refusing to change anything reversible.
+    workspace.require_user(user)?;
+    let scope = delegation::over_person(workspace, user)?;
+    scope.announce(progress);
+
     let ykman = card::Ykman::from_environment();
     let mut ceremony = Ceremony {
         workspace: reload(workspace),
@@ -154,8 +163,8 @@ pub fn run(
         user,
         serial: ykman.select(options.serial.as_deref())?,
         options,
+        scope,
     };
-    ceremony.workspace.require_user(user)?;
 
     let access = ceremony.provision(&ykman, operator)?;
     let captured = ceremony.generate(&access.pin)?;
@@ -216,6 +225,9 @@ struct Ceremony<'run> {
     user: &'run str,
     serial: String,
     options: &'run Options,
+    /// The delegation this run is performed under, decided before the card was
+    /// selected and carried through to the commit it records itself in.
+    scope: delegation::Scope,
 }
 
 impl Ceremony<'_> {
@@ -368,14 +380,19 @@ impl Ceremony<'_> {
                 .filter(|governed| self.workspace.absolute(governed).exists())
                 .cloned(),
         );
+        let mut message = format!(
+            "feat(safix): enroll {} as a recovery recipient for {}",
+            self.serial, self.user
+        );
+        if let Some(context) = self.scope.commit_context() {
+            message.push_str("\n\n");
+            message.push_str(&context);
+        }
         git::commit_written_files(
             self.workspace.git(),
             self.workspace.root(),
             self.progress,
-            &format!(
-                "feat(safix): enroll {} as a recovery recipient for {}",
-                self.serial, self.user
-            ),
+            &message,
             &written,
         )?;
 

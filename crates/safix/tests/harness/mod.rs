@@ -269,6 +269,12 @@ pub struct Fixture {
     /// A machine belongs here beside a person: it holds a key, so a report that
     /// found its stanza can name it.
     subjects: Value,
+    /// The managers each organization declares, the consent each managed person
+    /// declares, and each group's membership with the organizations covering it.
+    /// `subjects` is not held here: [`Fixture::write_fixtures`] derives it the way
+    /// the nix half does, so a fixture cannot declare a group whose members the
+    /// name space does not carry.
+    delegation: Value,
     genplan: Value,
     bridge: Value,
     keepassxc: Value,
@@ -352,6 +358,11 @@ impl Fixture {
             // has to be silent about an empty mirror rather than refuse.
             keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
             subjects: json!({ "alice": [alice.clone()], "bob": [bob.clone()] }),
+            // What a fleet that has never heard of delegation evaluates to, and
+            // every test that declares none drives it: the verbs have to consult
+            // nothing for a target no delegation covers, which is the whole of the
+            // compatibility promise.
+            delegation: json!({ "managers": {}, "managedBy": {}, "groups": {} }),
             clan_flake: None,
             genplan: json!({
                 "alice": { "order": [], "outputs": {}, "inputs": {} },
@@ -585,6 +596,56 @@ impl Fixture {
         let name = format!("card-{serial}-piv-access");
         self.placements["alice"][&name] = placement(ALICE_FILE, &name, "private", "alice");
         self.write_fixtures();
+    }
+
+    /// Declare one organization's managers, and every person consenting to its
+    /// management.
+    ///
+    /// Both halves at once because both are needed for a scaffold to be judged at
+    /// all: an organization's managers reach nobody until somebody's own record
+    /// names it.
+    pub fn delegate(&mut self, organization: &str, managers: &[&str], managed: &[&str]) {
+        self.delegation["managers"][organization] = json!(managers);
+        for person in managed {
+            self.delegation["managedBy"][*person] = json!(organization);
+        }
+        self.write_fixtures();
+    }
+
+    /// Declare one group: its membership, and the organizations whose silo
+    /// declarations cover it.
+    ///
+    /// The coverage arrives as data because that is how the runtime reads it: the
+    /// silo sets and the expansion that decides it live in `resolve.nix`, and
+    /// `modules/flake/checks/subjects.nix` is where that computation is held to
+    /// literals.
+    pub fn declare_group(&mut self, group: &str, members: &[&str], organizations: &[&str]) {
+        self.delegation["groups"][group] = json!({
+            "members": members,
+            "organizations": organizations,
+        });
+        self.write_fixtures();
+    }
+
+    /// Declare a person who holds nothing, as the placements carry one.
+    ///
+    /// Every declared person has a row there, empty when they hold no secret, and
+    /// that row is what makes them a name the runtime can match a commit's
+    /// identity against.
+    pub fn seed_holder_of_nothing(&mut self, user: &str) {
+        self.placements[user] = json!({});
+        self.write_fixtures();
+    }
+
+    /// The identity every commit this fixture's runs make will carry.
+    ///
+    /// Written into the repository's own configuration rather than into the
+    /// environment, because that is what the delegation check reads and what
+    /// `git commit` will write: the two cannot be made to disagree here any more
+    /// than they can at an operator's terminal.
+    pub fn commit_as(&self, name: &str, email: &str) {
+        self.git(&["config", "user.name", name]);
+        self.git(&["config", "user.email", email]);
     }
 
     /// Name a file the consumer governs without declaring a secret in it.
@@ -942,6 +1003,28 @@ impl Fixture {
         write_json(&self.work.join("keepassxc.json"), &self.keepassxc);
         write_json(&self.work.join("recipients.json"), &self.subjects);
         write_json(&self.work.join("governed.json"), &governed);
+
+        // The subject name space, derived here the way `resolve.nix` derives it:
+        // every declared person, every declared group, and every organization the
+        // delegation names. A fixture that maintained it by hand could declare a
+        // group whose members the name space does not carry, which is a fleet
+        // evaluation refuses and so a state the runtime never meets.
+        let mut subjects: Vec<String> = self
+            .placements
+            .as_object()
+            .map(|held| held.keys().cloned().collect())
+            .unwrap_or_default();
+        for named in [&self.delegation["groups"], &self.delegation["managers"]] {
+            if let Some(declared) = named.as_object() {
+                subjects.extend(declared.keys().cloned());
+            }
+        }
+        subjects.sort();
+        subjects.dedup();
+
+        let mut delegation = self.delegation.clone();
+        delegation["subjects"] = json!(subjects);
+        write_json(&self.work.join("delegation.json"), &delegation);
         if !self.work.join("hook.json").exists() {
             self.set_hook(None);
         }
@@ -1422,6 +1505,10 @@ impl Fixture {
                 "SAFIX_FIXTURE_RECIPIENTS",
                 self.work.join("recipients.json"),
             )
+            .env(
+                "SAFIX_FIXTURE_DELEGATION",
+                self.work.join("delegation.json"),
+            )
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
             .env("SAFIX_FIXTURE_KEEPASSXC", self.work.join("keepassxc.json"))
@@ -1438,7 +1525,18 @@ impl Fixture {
             // names the one it wants through `run_env`, which is applied after
             // this.
             .env_remove("VISUAL")
-            .env_remove("EDITOR");
+            .env_remove("EDITOR")
+            // The identity a commit carries is resolved by git, which reads these
+            // before it reads the repository's configuration. A run that inherited
+            // them would be judged against whoever is running the suite, so a
+            // delegation test would pass or fail by a property of that machine;
+            // removed, `git config user.name` in the fixture repository is the
+            // whole of what decides it.
+            .env_remove("GIT_AUTHOR_NAME")
+            .env_remove("GIT_AUTHOR_EMAIL")
+            .env_remove("GIT_COMMITTER_NAME")
+            .env_remove("GIT_COMMITTER_EMAIL")
+            .env_remove("EMAIL");
         match reporter {
             Reporter::Plain => command.env("SAFIX_ERROR_FORMAT", "plain"),
             Reporter::Graphical => command.env_remove("SAFIX_ERROR_FORMAT"),

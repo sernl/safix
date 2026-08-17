@@ -547,6 +547,28 @@
         mode "safix-enroll-custody" "enrollment"
           "the_mirrored_credentials_travel_standard_input_and_round_trip";
 
+      # A manager scaffolding for somebody who consented to that: the run proceeds
+      # and its commit records the organization it was performed for, in the same
+      # words the run announced before it edited anything.
+      checks.safix-delegation =
+        mode "safix-delegation" "delegation"
+          "a_manager_scaffolds_for_a_managed_person_and_the_commit_records_the_organization";
+
+      # The two refusals, before the card is selected and before any file is
+      # written: a declared person outside the delegation, and an identity no
+      # declaration corresponds to. Neither reaches the card, neither commits, and
+      # neither leaves the record it was refused over changed.
+      checks.safix-delegation-refusals =
+        mode "safix-delegation-refusals" "delegation"
+          "an_out_of_scope_actor_is_refused_before_the_card_and_before_any_file";
+
+      # A person no delegation covers, scaffolded by an identity the declarations do
+      # not name at all. It proceeds, which is the sharpest form the compatibility
+      # promise takes: a verb that consulted delegation there would refuse.
+      checks.safix-delegation-unmanaged =
+        mode "safix-delegation-unmanaged" "delegation"
+          "an_unmanaged_person_never_consults_delegation";
+
       # One mapping of each mode over one run: the database converges to safix,
       # safix converges to the database through the ordinary write path, a two-way
       # mapping with an empty database side bootstraps and records its agreement

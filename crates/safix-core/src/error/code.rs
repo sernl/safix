@@ -179,6 +179,8 @@ refusal_codes! {
     StoreEntryAbsent => "safix::store_entry_absent",
     ClanUserRegistrationFailed => "safix::clan_user_registration_failed",
     EnrollHookFailed => "safix::enroll_hook_failed",
+    ActorUndeclared => "safix::actor_undeclared",
+    ScaffoldOutOfScope => "safix::scaffold_out_of_scope",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

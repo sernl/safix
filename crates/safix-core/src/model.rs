@@ -524,6 +524,90 @@ pub struct Holders {
     pub orphaned: Vec<String>,
 }
 
+/// One group, as a delegation reads it: who is in it, and whose it is.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegatedGroup {
+    /// The subjects the declaration names, as it names them.
+    pub members: Vec<String>,
+    /// Every organization whose silo declarations cover this group, in name
+    /// order.
+    ///
+    /// Empty is the ordinary case and the whole of the unmanaged default: a group
+    /// no silo set names is nobody's, and an edit to it is refused by nothing.
+    pub organizations: Vec<String>,
+}
+
+/// Who may scaffold for whom, and over which groups.
+///
+/// Not part of the audience algebra and deliberately kept out of it: no value
+/// here places a key in any audience, so a fleet that declares a delegation
+/// derives the byte-identical tree. What it decides is which acting identity the
+/// scaffolding verbs accept, and the acting identity is the one the commit those
+/// verbs make would carry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Delegation {
+    /// `organization -> the people it declares as managers`, in name order.
+    pub managers: BTreeMap<String, Vec<String>>,
+    /// `person -> the organization their own record consents to be managed by`.
+    ///
+    /// Only the people who declare one, so an unmanaged fleet is an empty map
+    /// rather than a map of nulls.
+    #[serde(rename = "managedBy")]
+    pub managed_by: BTreeMap<String, String>,
+    /// `group -> its membership and the organizations covering it`.
+    pub groups: BTreeMap<String, DelegatedGroup>,
+    /// Every declared subject's name, in name order.
+    ///
+    /// The name space a group edit is checked against, which travels here because
+    /// the verb that reads a delegation is the verb that needs it: a membership
+    /// naming a subject the fleet does not declare is refused at evaluation, and
+    /// a verb that wrote one would have committed a tree that no longer resolves.
+    pub subjects: Vec<String>,
+}
+
+impl Delegation {
+    /// The organization whose managers scaffold for this person, if one does.
+    #[must_use]
+    pub fn managing(&self, person: &str) -> Option<&str> {
+        self.managed_by.get(person).map(String::as_str)
+    }
+
+    /// Whether this person is among an organization's managers.
+    #[must_use]
+    pub fn is_manager(&self, organization: &str, person: &str) -> bool {
+        self.managers
+            .get(organization)
+            .is_some_and(|managers| managers.iter().any(|manager| manager == person))
+    }
+
+    /// The managers one organization declares, empty for one that declares none.
+    #[must_use]
+    pub fn managers_of(&self, organization: &str) -> &[String] {
+        self.managers
+            .get(organization)
+            .map_or(&[], |managers| managers.as_slice())
+    }
+
+    /// One group's record, if the fleet declares it.
+    #[must_use]
+    pub fn group(&self, group: &str) -> Option<&DelegatedGroup> {
+        self.groups.get(group)
+    }
+
+    /// Every group the fleet declares, in name order.
+    pub fn groups(&self) -> impl Iterator<Item = &str> {
+        self.groups.keys().map(String::as_str)
+    }
+
+    /// Whether the fleet declares a subject of this name.
+    #[must_use]
+    pub fn declares_subject(&self, subject: &str) -> bool {
+        self.subjects.iter().any(|declared| declared == subject)
+    }
+}
+
 /// Which way a mapping's value moves, written as its endpoints.
 ///
 /// Not `import` and `export`: `clan vars export` moves values out of clan and
