@@ -100,23 +100,30 @@ jobs:
         include:
           - system: x86_64-linux
             runner: ubuntu-latest
-          # This leg is red, and it is red for a reason no runner setting
-          # reaches. `Staging::establish` refuses a machine with no
-          # memory-backed mount, and macOS has none: `memory_backed` asks
-          # `statfs` for tmpfs or ramfs, both of which are linux magic numbers,
-          # so on darwin the answer is no for every path — including a RAM disk
-          # `hdiutil` could attach. Sixty of the ninety-four checks fail from
-          # that one fact: `safix-rs-test`'s unwinding-guard test, whose
-          # deliberate panic never happens because the staging root was never
-          # established, and `safix-integration`, whose harness refuses with
-          # "/dev/shm is not tmpfs here and this suite stages plaintext",
-          # carrying the fifty-eight checks that run one of its tests with it.
+          # This leg is red, and what is left of its redness is the runner rather
+          # than the platform. The staging half is settled: darwin has no
+          # memory-backed mount, the runtime's answer to that is a refusal naming
+          # `--allow-disk-staging`, and the suite runs under that acknowledgement
+          # — see `stagingEnv` in modules/flake/checks/integration.nix.
           #
-          # The leg stays and stays honest. What it needs is a decision about
-          # what the plaintext-staging rule means on a platform with no tmpfs —
-          # the acknowledgement the harness already names, a darwin answer in
-          # `memory_backed`, or presence in `integration.nix` — and that belongs
-          # to whoever owns the rule, not to a workflow file.
+          # What remains is the envelope. A generator fragment runs inside
+          # `/usr/bin/sandbox-exec` on darwin, and on a GitHub macOS runner
+          # applying a profile fails outright:
+          #
+          #     sandbox-exec: sandbox_apply: Operation not permitted
+          #     safix: the generator for 'slow' exited 71; nothing was written.
+          #
+          # nix's own sandbox is not the obstacle: it reports `sandbox = false`
+          # on this runner already, so unlike ubuntu's user-namespace restriction
+          # there is no setting left to relax. Four generator tests of
+          # `abort_residue` fail on it, and they carry `safix-integration` and the
+          # fifty-seven checks that run one of its tests with them.
+          #
+          # It is left showing for the reason those checks exist: they are meant
+          # to fail on a machine that cannot run the envelope, and this machine
+          # cannot. Whether a platform whose runner cannot apply the envelope is
+          # worth a matrix entry is a question about the matrix, and it is not
+          # answered here.
           - system: aarch64-darwin
             runner: macos-latest
     steps:

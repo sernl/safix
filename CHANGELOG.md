@@ -300,7 +300,11 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
   It does not instantiate, and the reason is the tree rather than a preference: `safix-module-collision` imports a module out of a store path `builtins.path` produced and `safix-generators` reads a fixture out of a derivation, so `nix flake check --no-build` computes those paths and then refuses the paths it computed — on the runner's own system, not only on another's.
   Instantiation belongs to the build job, whose evaluator realises what an evaluation demands, and the limit is recorded on the job rather than left to be rediscovered.
   nix is given the job's own token for the six `github:` inputs it fetches, because `api.github.com` rate-limits an unauthenticated caller by source address and runs were dying on HTTP 429 before evaluating a single check.
-  Both legs are green, and getting the darwin one there settled what the plaintext-staging rule means on a platform with no tmpfs.
+  The x86_64-linux leg is green over all ninety-eight checks. Settling what the plaintext-staging rule means on a platform with no tmpfs took the aarch64-darwin leg from sixty failures to four, and the four that remain are the runner rather than the platform: a generator fragment runs inside `/usr/bin/sandbox-exec` there, and on a GitHub macOS runner applying a profile fails with `sandbox_apply: Operation not permitted`, so the generator exits 71 and nothing is written.
+  nix's own sandbox is not the obstacle — it is already off on that runner — so unlike ubuntu's user-namespace restriction there is no setting left to relax, and the four `abort_residue` generator tests carry `safix-integration` and the checks that run one of its tests with them.
+  That is the same shape as the linux restriction and it is left showing for the same reason: those checks exist to fail on a machine that cannot run the envelope.
+
+  It also shows the darwin backend probe to be weaker than the linux one. `Envelope::probe` runs bubblewrap over the real envelope on linux and asks only whether `/usr/bin/sandbox-exec` exists on darwin, so where the file is present and unusable the probe answers yes and the refusal arrives at the first fragment instead of before any of them.
 
 ### The darwin staging contract is tested rather than assumed
 
