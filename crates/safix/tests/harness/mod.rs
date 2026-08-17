@@ -441,6 +441,18 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Replace a declared generator's record, leaving its run-plan entry alone.
+    ///
+    /// What an operator editing a declaration does: the generator still writes the
+    /// same outputs and still sits where it sat in the order, and what changed is
+    /// the record the runtime reads. [`Fixture::seed_generator`] appends to the
+    /// order, so calling it twice for one name declares that generator twice —
+    /// which is a fleet the resolver refuses rather than an edit.
+    pub fn edit_generator(&mut self, name: &str, record: &Value) {
+        self.placements["ana"][name]["generator"] = record.clone();
+        self.write_fixtures();
+    }
+
     /// Name a file the consumer governs without declaring a secret in it.
     pub fn govern_extra(&mut self, path: &str) {
         self.extras = vec![path.to_owned()];

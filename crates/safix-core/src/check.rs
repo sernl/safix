@@ -1,12 +1,16 @@
 //! The drift report: what the declarations say, against what the repository
 //! holds.
 //!
-//! Four questions, in the order the shell runtime asks them, because the order
-//! is what the report reads as and a reader who has fixed the policy expects
-//! the recipient findings under it. Nothing here writes, decrypts, or holds an
-//! identity: every question is answered from the declarations and from the
-//! structure of the ciphertext, which is what lets one machine judge files
-//! belonging to people whose keys it does not have.
+//! Five questions. The first four are the shell runtime's, in the order it asks
+//! them, because the order is what the report reads as and a reader who has fixed
+//! the policy expects the recipient findings under it. The fifth is newer and sits
+//! last: whether a generated value was minted under the declaration that is there
+//! now, answered from the record `generate` leaves — see [`crate::definition`].
+//!
+//! Nothing here writes, decrypts, or holds an identity: every question is
+//! answered from the declarations, from the structure of the ciphertext, and from
+//! one plaintext record about a declaration, which is what lets one machine judge
+//! files belonging to people whose keys it does not have.
 //!
 //! A finding is data. The prose the command prints for each one is the shell
 //! runtime's prose, and it lives in the command beside the other rendering, so
@@ -15,6 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use crate::definition;
 use crate::error::{Error, Result};
 use crate::model::Holders;
 use crate::sops::document::{self, KeyState};
@@ -111,6 +116,23 @@ pub enum Finding {
         /// The key the value sits under.
         key: String,
     },
+
+    /// A generated value whose recorded definition is not the one the
+    /// declarations carry now.
+    ///
+    /// Carries no value and no derivative of one: the record it is read from is a
+    /// digest of the declaration, and the value itself is never opened to answer
+    /// this question.
+    DefinitionDrift {
+        /// The user who holds the entry.
+        user: String,
+        /// The entry's name.
+        name: String,
+        /// The entry the generator that minted it is declared on.
+        generator: String,
+        /// The repository-relative path of the record.
+        record: String,
+    },
 }
 
 /// Every disagreement, in report order, for every user or for one.
@@ -131,6 +153,7 @@ pub fn run(workspace: &Workspace, only: Option<&str>) -> Result<Vec<Finding>> {
     recipients(workspace, &mut documents, &mut findings)?;
     let strays = shared(workspace, &mut documents, &mut findings)?;
     values(workspace, &mut documents, &strays, only, &mut findings)?;
+    definitions(workspace, only, &mut findings)?;
 
     Ok(findings)
 }
@@ -360,6 +383,65 @@ fn values(
             findings.push(Finding::UnclaimedValue {
                 file: file.clone(),
                 key: key.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Generated values whose recorded definition is not the declared one.
+///
+/// Last, because it is the only question here that is not about a file's
+/// contents or its recipients: the four before it read the tree the operator is
+/// converging, and this one reads what a past run recorded about a declaration.
+/// An operator who has just fixed the policy expects the recipient findings under
+/// it, and one who has just edited a generator expects this at the end.
+///
+/// Three states are out of scope and produce nothing. An entry nothing generates
+/// has no definition to have drifted from. An entry with no record predates the
+/// record, and asserting drift over an absent record would report every value
+/// minted before this existed — a claim about when the tool changed rather than
+/// about the tree. And a record whose leading tag is not the one this version
+/// writes is a record this version cannot read, so it says nothing rather than
+/// reporting the whole tree as drifted the day the canonical form moves.
+///
+/// One finding per record rather than per carrier. A shared entry is one value
+/// under one record, and reporting it once per person who holds it would be three
+/// findings with one remedy between them.
+fn definitions(
+    workspace: &Workspace,
+    only: Option<&str>,
+    findings: &mut Vec<Finding>,
+) -> Result<()> {
+    let placements = workspace.placements()?;
+    let mut reported: BTreeSet<String> = BTreeSet::new();
+
+    for user in placements.users() {
+        if only.is_some_and(|wanted| wanted != user) {
+            continue;
+        }
+        for (name, placement) in placements.held_by(user).into_iter().flatten() {
+            let Some((generator, declared)) = placements.producer_of(user, name) else {
+                continue;
+            };
+            let record = definition::record_path(name, placement);
+            if !reported.insert(record.clone()) {
+                continue;
+            }
+            let Some(text) = workspace.read_relative(&record)? else {
+                continue;
+            };
+            let Some(recorded) = definition::recorded(&text) else {
+                continue;
+            };
+            if recorded == definition::digest(declared) {
+                continue;
+            }
+            findings.push(Finding::DefinitionDrift {
+                user: user.to_owned(),
+                name: name.clone(),
+                generator: generator.to_owned(),
+                record,
             });
         }
     }

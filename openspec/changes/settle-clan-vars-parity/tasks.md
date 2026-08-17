@@ -7,10 +7,10 @@
 
 ## 2. The drift finding
 
-- [ ] 2.1 Add the fifth finding class to `check`: recorded digest present and unequal to the current declaration's digest — naming the entry and both remedies, carrying no value
-- [ ] 2.2 Hold the out-of-scope cases quiet: no generator, no record, or an unknown record version produce no drift finding
-- [ ] 2.3 Render the finding in the CLI with the existing findings-are-data split
-- [ ] 2.4 Verify: a fixture minted, then its declaration edited, produces the finding; regeneration clears it; a hand-set entry and a record-less value never produce it
+- [x] 2.1 Add the fifth finding class to `check`: recorded digest present and unequal to the current declaration's digest — naming the entry and both remedies, carrying no value. `Finding::DefinitionDrift` carries the user, the name, the entry the generator is declared on and the record's path, and no value. One finding per record rather than per carrier, so a shared entry is reported once
+- [x] 2.2 Hold the out-of-scope cases quiet: no generator, no record, or an unknown record version produce no drift finding. The producer is read off the placements rather than the run plan — `Placements::producer_of`, bound to `UserPlan::producer_of` by a test — because the plan is guarded and a report that evaluated it would fall silent on exactly the trees whose declarations are wrong
+- [x] 2.3 Render the finding in the CLI with the existing findings-are-data split
+- [x] 2.4 Verify: a fixture minted, then its declaration edited, produces the finding; regeneration clears it; a hand-set entry and a record-less value never produce it. `safix-generate-definition-drift` runs it; two drills observed red — never reporting fails the drift assertion, always reporting fails the four silences
 
 ## 3. The stream source for set
 

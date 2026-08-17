@@ -192,6 +192,39 @@ impl Placements {
             .filter(|(_, held)| !held.is_empty())
             .map(|(user, _)| user.as_str())
     }
+
+    /// The generator that writes this name for this user, and the entry it is
+    /// declared on.
+    ///
+    /// The same relation [`UserPlan::producer_of`] reads out of the run plan,
+    /// read here out of the placements instead. Two readings of one fact is a
+    /// cost, and the test binding them is what pays it: `resolve.nix` computes a
+    /// generator's outputs as the entry it is declared on followed by the names
+    /// under `files`, and both readings are exactly that.
+    ///
+    /// It exists because [`crate::check`] has to answer on a tree the run plan
+    /// refuses. `flake.safix.lib.generatorPlan` is guarded — a cycle, a
+    /// self-dependency or two producers for one output throws rather than
+    /// returning an order — while `placements` is not, so a drift report that
+    /// read the plan would fall silent on exactly the trees whose declarations
+    /// are wrong.
+    #[must_use]
+    pub fn producer_of(&self, user: &str, name: &str) -> Option<(&str, &Generator)> {
+        let held = self.held_by(user)?;
+        if let Some((entry, generator)) = held
+            .get_key_value(name)
+            .and_then(|(entry, placement)| Some((entry, placement.generator.as_ref()?)))
+        {
+            return Some((entry.as_str(), generator));
+        }
+        held.iter().find_map(|(entry, placement)| {
+            let generator = placement.generator.as_ref()?;
+            generator
+                .files
+                .contains_key(name)
+                .then_some((entry.as_str(), generator))
+        })
+    }
 }
 
 /// Which side of a generator's name space one input came from.
@@ -635,6 +668,43 @@ mod tests {
         // always encrypted; a further output says for itself.
         assert!(generator.is_secret("api-token"));
         assert!(!generator.is_secret("api-token-pub"));
+    }
+
+    /// The two readings of "which generator writes this name" agree.
+    ///
+    /// [`Placements::producer_of`] reads the placements and
+    /// [`UserPlan::producer_of`] reads the run plan. They are two projections of
+    /// one declaration, and this is what holds them to it: the plan below is built
+    /// the way `resolve.nix` builds it — the entry a generator is declared on,
+    /// then the names under `files` — so a reading that answered differently for
+    /// any name in either direction fails here.
+    #[test]
+    fn the_two_readings_of_a_producer_agree() {
+        let placements: Placements = serde_json::from_str(PLACEMENT).unwrap();
+        let plan: GeneratorPlan = serde_json::from_str(
+            r#"{
+              "ana": {
+                "order": ["api-token"],
+                "outputs": { "api-token": ["api-token", "api-token-pub"] },
+                "inputs": { "api-token": {} }
+              },
+              "cy": { "order": [], "outputs": {}, "inputs": {} }
+            }"#,
+        )
+        .unwrap();
+
+        for name in ["api-token", "api-token-pub", "nobody-writes-this"] {
+            let off_the_plan = plan.for_user("ana").unwrap().producer_of(name);
+            let off_the_placements = placements.producer_of("ana", name).map(|(entry, _)| entry);
+            assert_eq!(
+                off_the_plan, off_the_placements,
+                "the two readings disagree about what writes '{name}'"
+            );
+        }
+
+        // A user who holds nothing, and one the declarations do not name at all.
+        assert!(placements.producer_of("cy", "api-token").is_none());
+        assert!(placements.producer_of("nobody", "api-token").is_none());
     }
 
     #[test]

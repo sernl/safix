@@ -279,6 +279,16 @@
         mode "safix-generate-public" "generators"
           "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
 
+      # The definition record, and the drift `check` reports over it. A mint leaves
+      # one line under state/safix/definitions/ carrying a digest and none of the
+      # value; an edit to the declaration afterwards is reported naming the entry
+      # and both remedies and no value; regenerating clears it, with the refreshed
+      # record riding that commit; and a hand-set entry, a record in a format this
+      # version does not write, and an absent record each produce nothing.
+      checks.safix-generate-definition-drift =
+        mode "safix-generate-definition-drift" "generators"
+          "a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it";
+
       # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
       # nothing, an unchanged buffer commits nothing, and a changed one goes
       # through the same path `set` writes through. No staging root outlives any

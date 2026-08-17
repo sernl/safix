@@ -149,19 +149,27 @@ pub const CHECK: &str = "\
 safix check [<user>]
 
 Report drift and change nothing. Exits non-zero when there is any, and each
-finding prints the command that resolves it. Four classes:
+finding prints the command that resolves it. Five classes:
 
   - the committed .sops.yaml against the policy the declarations imply
   - each governed file's recipients against the audience declared for it
   - declared names with no value, saying which have a generator
   - values in a governed file that no declaration claims
+  - generated values minted under a generator that has changed since
 
-`fix` handles the first two. The last two are decisions rather than
+`fix` handles the first two. The last three are decisions rather than
 convergences — a value is minted or typed, an unclaimed one is declared or
-deleted — so nothing here does them for you.
+deleted, and a value whose generator has changed is either regenerated or the
+edit is reverted — so nothing here does them for you.
+
+The last class is answered from state/safix/definitions/, where `generate` records
+a digest of the definition it minted under, in the same commit as the value. A
+value with no record predates the record and is not a finding: no record, no
+claim.
 
 It needs no identity for any file it examines: every question above is answered
-from the document's structure, and nothing on this path decrypts.
+from the document's structure and from that plaintext record, and nothing on this
+path decrypts.
 ";
 
 /// `safix generate -h`.

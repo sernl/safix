@@ -205,12 +205,17 @@ let
   # an uppercase element, which the name alphabet excludes, so no declaration can
   # ever make one of them a real directory and the claim cannot be weakened by
   # someone adding a user.
-  # The last two are the public store's own shape. A rule reaching them is a
-  # rule over a tree nothing is placed *encrypted* in, which is what this check
-  # asks — and it is asked here as well as by `safix-public-no-rule` on purpose.
-  # That one asks "does a rule reach the public store"; this one asks "does a
-  # rule reach anywhere nothing is placed". A refactor that weakened one is
-  # unlikely to weaken both.
+  # The public store's own shape is among them. A rule reaching it is a rule over
+  # a tree nothing is placed *encrypted* in, which is what this check asks — and
+  # it is asked here as well as by `safix-public-no-rule` on purpose. That one
+  # asks "does a rule reach the public store"; this one asks "does a rule reach
+  # anywhere nothing is placed". A refactor that weakened one is unlikely to
+  # weaken both.
+  #
+  # The definition-record tree is the third top-level prefix and is here for the
+  # same reason, with one difference: nothing in nix computes its paths, because
+  # nothing in nix reads a record. `crates/safix-core/src/definition.rs` is its
+  # one implementation, and these two probes are the shape it writes.
   catchAllProbes = [
     "x.yaml"
     "UNCLAIMED.yaml"
@@ -220,6 +225,8 @@ let
     "some/other/place/UNCLAIMED.yaml"
     "public/safix/users/UNCLAIMED/x/value"
     "public/safix/shared/UNCLAIMED/x/value"
+    "state/safix/definitions/UNCLAIMED/x"
+    "state/safix/definitions/shared/UNCLAIMED/x"
   ];
 
   catchAllMessagesOf =

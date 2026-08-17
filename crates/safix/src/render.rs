@@ -80,8 +80,8 @@ fn mint_command(mint: &Mint) -> String {
 
 /// Dispatch to the family a finding belongs to.
 ///
-/// Split by family rather than written as one arm per variant, because the four
-/// families are the four questions `check` asks and each one's prose is a
+/// Split by family rather than written as one arm per variant, because the five
+/// families are the five questions `check` asks and each one's prose is a
 /// paragraph that reads as a whole.
 fn push_finding(out: &mut String, finding: &Finding) {
     match finding {
@@ -93,6 +93,7 @@ fn push_finding(out: &mut String, finding: &Finding) {
             push_shared(out, finding);
         }
         Finding::ValuelessName { .. } | Finding::UnclaimedValue { .. } => push_values(out, finding),
+        Finding::DefinitionDrift { .. } => push_definition(out, finding),
         _ => {}
     }
 }
@@ -327,6 +328,63 @@ fn push_values(out: &mut String, finding: &Finding) {
         }
 
         _ => {}
+    }
+}
+
+/// A generated value whose declaration has changed since it was minted.
+///
+/// The paragraph names both remedies and recommends neither, because the tree
+/// holds a value and a declaration that disagree about how the value comes to be
+/// and nothing here knows which of the two the operator meant. Regenerating adopts
+/// the declaration; reverting the edit adopts the value.
+///
+/// No value appears, and none could: the finding is derived from a digest of the
+/// declaration, and `check` never opened the file the value is in.
+///
+/// This is the one paragraph on this page with no shell antecedent — the record it
+/// reads did not exist then — so it is held to the literals `crates/safix/tests/`
+/// asserts and to nothing else.
+fn push_definition(out: &mut String, finding: &Finding) {
+    if let Finding::DefinitionDrift {
+        user,
+        name,
+        generator,
+        record,
+    } = finding
+    {
+        headline(
+            out,
+            &format!(
+                "flake.safix.users.{user} holds '{name}', minted by the generator on \
+                 '{generator}', and that declaration is not the one it was minted under."
+            ),
+        );
+        detail(
+            out,
+            &format!("{record} records the definition the value was minted under, and the"),
+        );
+        detail(
+            out,
+            "declaration no longer produces it. The value in the tree is a function of a",
+        );
+        detail(
+            out,
+            "generator that no longer exists, and reads exactly like one the current",
+        );
+        detail(out, "declaration would produce.");
+        detail(
+            out,
+            "Which of the two is right is yours to say, not this tool's.",
+        );
+        remedy(out, "adopt the declaration by minting a new value:");
+        remedy(
+            out,
+            &format!("    {PROGRAM} generate --regenerate {user} {name}"),
+        );
+        remedy(
+            out,
+            &format!("or adopt the value by reverting the edit to the '{generator}' generator"),
+        );
     }
 }
 

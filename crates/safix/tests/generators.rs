@@ -681,6 +681,133 @@ fn a_rotation_carries_its_downstream_set_and_nothing_else() {
         .expect_success("rotating a generator with no dependents");
 }
 
+/// What a mint records about its own declaration, and what `check` says when
+/// that declaration changes underneath the value.
+///
+/// The record is the whole of what makes the drift detectable, so this test reads
+/// it directly rather than only through the report: one line, a format tag and a
+/// digest, and none of the minted value anywhere in it.
+///
+/// Then the four states the finding has to tell apart. A declaration edited after
+/// the mint is reported, naming both remedies and no value. Regenerating clears
+/// it. A hand-set entry never produces it, because nothing minted it. And a
+/// generated value whose record is absent, or is in a format this version does not
+/// write, produces nothing either — grandfathering is the claim, not an accident.
+#[test]
+fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
+    const RECORD: &str = "state/safix/definitions/ana/recorded";
+    const MINTED: &str = "CANARY-minted-under-the-first-definition";
+
+    let mut fixture = Fixture::new();
+    fixture.make_sops_file(ANA_FILE, &["api-token"]);
+    fixture.seed_generator(
+        "recorded",
+        ANA_FILE,
+        &[],
+        &plain(&format!("printf '%s' {MINTED} > \"$out/recorded\"")),
+    );
+
+    fixture
+        .run(&["generate", "ana", "recorded"])
+        .expect_success("the first mint");
+    assert_eq!(fixture.value(ANA_FILE, "recorded"), MINTED);
+
+    // One line: the format tag, a space, sixty-four hexadecimal digits, a
+    // newline. Read as bytes, because what the record must not carry is anything
+    // derived from the value.
+    let recorded = fixture.read(RECORD);
+    let (tag, hex) = recorded
+        .trim_end_matches('\n')
+        .split_once(' ')
+        .expect("the record is a tag and a digest");
+    assert_eq!(tag, "safix-definition-v1");
+    assert_eq!(hex.len(), 64, "the digest is not a sha256: {hex}");
+    assert!(
+        hex.chars().all(|digit| digit.is_ascii_hexdigit()),
+        "the digest is not hexadecimal: {hex}"
+    );
+    assert!(
+        !recorded.contains(MINTED),
+        "the record carries the value it was minted beside"
+    );
+    assert_eq!(
+        recorded.lines().count(),
+        1,
+        "the record is more than one line: {recorded:?}"
+    );
+
+    // Nothing has drifted yet, which is what makes the finding below a
+    // consequence of the edit rather than of the record existing.
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+
+    // The declaration changes and the value does not. Same outputs, same place in
+    // the order, a different script — the edit that used to be invisible.
+    fixture.edit_generator(
+        "recorded",
+        &plain("printf '%s' CANARY-a-different-definition > \"$out/recorded\""),
+    );
+
+    let drifted = fixture
+        .run(&["check", "ana"])
+        .expect_refusal("a check over a drifted definition");
+    drifted.says("flake.safix.users.ana holds 'recorded', minted by the generator on 'recorded'");
+    drifted.says(RECORD);
+    drifted.says("safix generate --regenerate ana recorded");
+    drifted.says("or adopt the value by reverting the edit");
+    drifted.silent_about(MINTED);
+    drifted.silent_about("CANARY-a-different-definition");
+    drifted.silent_about(hex);
+
+    // The value is still the one the first definition minted: a report writes
+    // nothing.
+    assert_eq!(fixture.value(ANA_FILE, "recorded"), MINTED);
+
+    // Regenerating adopts the declaration, and refreshes the record in the same
+    // commit as the value it now describes.
+    fixture
+        .run(&["generate", "--regenerate", "ana", "recorded"])
+        .expect_success("regenerating under the current declaration");
+    assert_eq!(
+        fixture.value(ANA_FILE, "recorded"),
+        "CANARY-a-different-definition"
+    );
+    let refreshed = fixture.read(RECORD);
+    assert_ne!(refreshed, recorded, "the regeneration kept the old record");
+    let commit = fixture.commit_matching("generate recorded");
+    assert_eq!(
+        fixture.paths_in(&commit),
+        vec![ANA_FILE.to_owned(), RECORD.to_owned()],
+        "the refreshed record did not ride the regeneration's commit"
+    );
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+
+    // A hand-set entry has no generator, so there is no definition it could have
+    // drifted from. `api-token` holds a value from the fixture document.
+    assert!(
+        !fixture.exists("state/safix/definitions/ana/api-token"),
+        "a hand-set entry acquired a definition record"
+    );
+
+    // A record this version cannot read says nothing, which is what keeps a change
+    // to the canonical form from reporting every value in the tree as drifted.
+    fixture.write(RECORD, "safix-definition-v2 0000\n");
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+
+    // And a generated value with no record at all is grandfathered: it predates
+    // the record, and asserting drift over an absent one would be a claim about
+    // when the tool changed.
+    std::fs::remove_file(fixture.repo.join(RECORD)).unwrap();
+    fixture
+        .run(&["check", "ana"])
+        .silent_about("minted by the generator on");
+}
+
 /// clan's wireguard keypair, ported: one generator, a private half that is
 /// encrypted and a public half stored in the clear.
 ///
