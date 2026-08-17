@@ -164,6 +164,19 @@ fn eval(arguments: &[String]) -> ! {
 /// The anchors follow `git ls-files`, which is what an evaluation sees; the
 /// rules half comes from the fixture, because rendering it is `policy.nix`'s
 /// claim and this stands in for an evaluation rather than for the renderer.
+///
+/// Both halves of a person's keys are projected: their `recipient`, and every
+/// entry of their `recoveryRecipients`. That second one is what makes an
+/// enrollment's edit observably move `.sops.yaml` — the anchor for the card
+/// appears in the regenerated policy and is committed with it — rather than
+/// something a fixture asserted about itself.
+///
+/// Where this stops short of `policy.nix` is the rules, and deliberately: the real
+/// renderer grants a recovery recipient in the creation rule too, and a rule
+/// naming an `age1yubikey1…` key would send the real `sops updatekeys` to the age
+/// plugin, which needs the card. So the projection is the anchors, the sandbox has
+/// no card, and the wrap itself is the one thing these checks leave to the
+/// operator's first real run.
 fn policy_text(root: &Path) -> String {
     let mut policy = String::from("keys:\n");
     for tracked in capture(root, &["ls-files", "--", "safix/users"]).lines() {
@@ -180,15 +193,44 @@ fn policy_text(root: &Path) -> String {
                 .and_then(|rest| rest.strip_suffix("\";"))
         });
         if let Some(recipient) = recipient {
-            policy.push_str("  - &");
-            policy.push_str(user);
-            policy.push(' ');
-            policy.push_str(recipient);
-            policy.push('\n');
+            policy.push_str(&anchor(user, recipient));
+        }
+        for (nth, recovery) in recovery_recipients(&declaration).iter().enumerate() {
+            policy.push_str(&anchor(&format!("{user}_recovery_{nth}"), recovery));
         }
     }
     policy.push_str(&read(Path::new(&environment("SAFIX_FIXTURE_RULES"))));
     policy
+}
+
+/// One anchor line, in the shape `policy.nix` renders one.
+///
+/// `crates/safix/tests/harness/mod.rs` writes the fixture's own committed policy
+/// and renders anchors the same way; a change to the shape here without one there
+/// is a `check` that reports drift against a policy nothing moved.
+fn anchor(name: &str, key: &str) -> String {
+    format!("  - &{name} {key}\n")
+}
+
+/// Every key a declaration's `recoveryRecipients` names.
+///
+/// The single-line list form, which is the one `safix enroll` writes and extends.
+/// A multi-line list is valid nix and is not produced by anything under test, so
+/// it is not read here rather than half-read.
+fn recovery_recipients(declaration: &str) -> Vec<String> {
+    let Some(line) = declaration
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("recoveryRecipients"))
+    else {
+        return Vec::new();
+    };
+    line.split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|key| !key.trim().is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Run a generator's script with its declared tools nominally on `PATH`.

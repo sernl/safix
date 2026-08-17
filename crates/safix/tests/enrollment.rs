@@ -2,26 +2,29 @@
 //!
 //! # What is asserted here, and what cannot be
 //!
-//! Everything `safix enroll` does: which argument vectors reach `ykman` and what
-//! flags carry, that the generated PUK is distinct from the generated PIN, that
-//! the management key is generated on the card and named nowhere, that the
-//! generator is answered on a terminal with one attempt, that the identity block
-//! lands where `keygen` appends and the recipient lands in `recoveryRecipients`,
-//! that the commit is exactly the ceremony's own paths, that clan is reached
-//! through clan's command and the hook receives three arguments, that the
-//! credentials travel standard input and no argument vector, and that the proof's
-//! identity source holds one line and no ambient identity is reachable from it.
+//! Everything `safix enroll` does: which argument vectors reach `ykman` and that
+//! no credential is in any of them or in any environment, on any path; that the
+//! generated PUK is distinct from the generated PIN and that both travelled a
+//! hidden prompt; that the management key is generated on the card and named
+//! nowhere; that each prompted drive is answered a bounded number of times; that
+//! the identity block lands where `keygen` appends and the recipient lands in
+//! `recoveryRecipients`; that the edit moves the regenerated policy and the commit
+//! is exactly the ceremony's own paths; that clan is reached through clan's command
+//! and the hook receives three arguments; that the credentials travel standard
+//! input; and that the proof's identity source holds one line with no ambient
+//! identity reachable from it.
 //!
 //! What cannot be asserted without a card is the other side of two of those
-//! boundaries. `ykman`'s arguments meaning to `ykman` what safix thinks they
-//! mean, and an `age1yubikey1…` recipient being one real sops can wrap a data key
-//! to, both need the hardware and the plugin: wrapping to a plugin recipient runs
-//! the plugin, and the plugin runs the card. So the fixture's nix half does not
-//! project `recoveryRecipients` into the generated policy — the real one does —
-//! and no file in these tests carries the card's stanza. The proof therefore does
-//! not pass here, and that is the observation rather than a gap: a proof that
-//! passed with no card and a software identity ambient would mean the isolation
-//! had failed, which is exactly what
+//! boundaries. `ykman`'s arguments and prompts meaning to `ykman` what safix
+//! thinks they mean, and an `age1yubikey1…` recipient being one real sops can wrap
+//! a data key to, both need the hardware and the plugin: wrapping to a plugin
+//! recipient runs the plugin, and the plugin runs the card. So the fixture's nix
+//! half projects a recovery recipient into the policy's anchors, where the claim
+//! that the edit moved the policy lives, and not into its creation rules, where
+//! the wrap would be attempted — and no file in these tests carries the card's
+//! stanza. The proof therefore does not pass here, and that is the observation
+//! rather than a gap: a proof that passed with no card and a software identity
+//! ambient would mean the isolation had failed, which is exactly what
 //! [`the_proof_is_isolated_from_every_ambient_identity`] reads.
 //!
 //! The proof machinery's passing path is asserted separately and hardware-free,
@@ -69,12 +72,12 @@ const CARD: &str = "age1yubikey1qfixture0000000000000000000000000000000000000000
 /// The backup card's recipient.
 const BACKUP_CARD: &str = "age1yubikey1qbackup0000000000000000000000000000000000000000000000000";
 
-/// The PIN the stubbed generator accepts, which is the one safix generated.
+/// The PIN safix generated, read out of the prompt `ykman` was answered on.
 ///
-/// `any` rather than a literal: safix generates the PIN, so the stub cannot be
-/// told it in advance. It is read out of what `ykman` was handed, which is the
-/// only place a test can see it — and reading it there is also how "the PIN safix
-/// set is the PIN the generator was answered with" becomes an assertion.
+/// Not a literal: safix generates it, so no test can know it in advance. What the
+/// stub recorded when it prompted for it is the only place it is observable — and
+/// that is the point rather than an inconvenience, because it means the value
+/// exists nowhere a test could have read it from a process listing.
 fn generated_pin(fixture: &Fixture) -> String {
     let recorded = fixture.card_recorded("pin");
     let line = recorded.lines().next().unwrap_or_default();
@@ -86,6 +89,28 @@ fn generated_puk(fixture: &Fixture) -> String {
     let recorded = fixture.card_recorded("puk");
     let line = recorded.lines().next().unwrap_or_default();
     line.rsplit("-> ").next().unwrap_or_default().to_owned()
+}
+
+/// Refuse a credential that appears in any argument vector or any environment,
+/// on any path the run took.
+///
+/// The unconditional half of the spec's custody requirement, and it is asserted
+/// over every invocation the whole ceremony made rather than over the store's
+/// alone: `ykman` is where a PIN used to travel as an option, so a reading scoped
+/// to the stores would have passed over exactly the channel that mattered.
+fn refuse_credentials_on_public_channels(fixture: &Fixture, values: &[&str]) {
+    for value in values {
+        assert!(
+            !value.is_empty(),
+            "an empty value would make this assertion vacuous"
+        );
+        for (channel, recorded) in [
+            ("an argument vector", fixture.card_recorded("argv")),
+            ("an environment", fixture.card_recorded("environ")),
+        ] {
+            assert!(!recorded.contains(value), "a credential reached {channel}");
+        }
+    }
 }
 
 /// The environment one enrollment run needs, with the card's own switches.
@@ -151,8 +176,30 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
         "a management key was named, so one was chosen off the card"
     );
 
-    // ── the OTP applet, never ──
+    // ── every credential travelled a prompt, and no public channel ──
+    // The unconditional reading, over every invocation the ceremony made. What
+    // makes it possible is that ykman's credential options are omitted: five
+    // prompts answered on a pseudo-terminal, and an argument vector that carries
+    // nothing but the serial and the two published factory constants.
+    refuse_credentials_on_public_channels(&fixture, &[&pin, &puk]);
+    assert_eq!(
+        fixture.card_recorded("ykman-prompt").lines().count(),
+        5,
+        "the five ykman prompts were not the channel the credentials travelled: \
+         two for the PUK and its confirmation, two for the PIN and its \
+         confirmation, one for the management key's PIN"
+    );
     let argv = fixture.card_recorded("argv");
+    for names_a_credential in ["-n", "--new-pin", "--new-puk", "--pin"] {
+        assert!(
+            !argv
+                .split_whitespace()
+                .any(|word| word == names_a_credential),
+            "{names_a_credential} appeared in an argument vector: {argv}"
+        );
+    }
+
+    // ── the OTP applet, never ──
     assert!(
         !argv.contains(" otp"),
         "an argument vector named the OTP applet: {argv}"
@@ -215,14 +262,24 @@ fn enrollment_provisions_generates_wires_and_commits_once() {
     let ceremony = fixture.paths_in("HEAD~1");
     assert_eq!(
         ceremony,
-        vec!["safix/users/ana.nix".to_owned()],
-        "the ceremony's commit is not exactly the record it edited"
+        vec![".sops.yaml".to_owned(), "safix/users/ana.nix".to_owned()],
+        "the ceremony's commit is not the record it edited and the policy that saw it"
     );
-    // The policy and the governed files were staged with it and are absent from
-    // the commit because nothing about them changed: the fixture's nix half does
-    // not project `recoveryRecipients` into the generated policy, for the reason
-    // the module head gives. What the commit must not do is leave either behind
-    // dirty, which is what this reads.
+
+    // The policy moved because the edit moved it: the card is an anchor in the
+    // regenerated document, which is only true if the edited record was staged
+    // before the evaluation read it — an evaluation reads the files git tracks, so
+    // regenerating first writes the policy of the declarations as they stood
+    // without the card.
+    let policy = fixture.read(".sops.yaml");
+    assert!(
+        policy.contains(CARD),
+        "the regenerated policy does not carry the card just enrolled: {policy}"
+    );
+    assert!(
+        policy.contains(&fixture.ana),
+        "the regenerated policy dropped the software recipient"
+    );
     assert_eq!(
         fixture.status(),
         "",
@@ -790,36 +847,67 @@ fn the_mirrored_credentials_travel_standard_input_and_round_trip() {
         recorded.contains(&entry),
         "the entry was not filed under the serial: {recorded}"
     );
-    // Scoped to the store's own invocations. `ykman` takes a PIN as a flag and has
-    // no interface that reads one from a pipe, which `enroll::card` states as the
-    // cost of that interface; what the custody paths owe is that neither store
-    // ever sees one in argv or in its environment, and that is what these read.
-    let store_invocations = |recorded: String, opens: &str| -> Vec<String> {
-        recorded
-            .lines()
-            .filter(|line| line.starts_with(opens))
-            .map(str::to_owned)
-            .collect()
-    };
-    let vectors = store_invocations(fixture.card_recorded("argv"), "store ");
-    assert!(!vectors.is_empty(), "the service was never asked to store");
-    for line in vectors {
-        assert!(
-            !line.contains(&pin) && !line.contains(&puk),
-            "a credential reached a store's argument vector: {line}"
-        );
-    }
-    let environments = store_invocations(fixture.card_recorded("environ"), "[store ");
+    // Unconditional and over every invocation, not just the store's: what the
+    // credential travelled here is standard input, and what it travelled at the
+    // card was a prompt, so no argument vector and no environment on any path
+    // carries one.
     assert!(
-        !environments.is_empty(),
+        fixture
+            .card_recorded("argv")
+            .lines()
+            .any(|line| line.starts_with("store ")),
+        "the service was never asked to store"
+    );
+    assert!(
+        fixture
+            .card_recorded("environ")
+            .lines()
+            .any(|line| line.starts_with("[store ")),
         "the store's environment was not recorded"
     );
-    for line in environments {
-        assert!(
-            !line.contains(&pin) && !line.contains(&puk),
-            "a credential reached a store's environment"
-        );
-    }
+    refuse_credentials_on_public_channels(&fixture, &[&pin, &puk]);
+}
+
+/// A `ykman` drive that asks past its bound is not answered further.
+///
+/// The bounded-answer discipline at the card boundary, where the flag-driven
+/// provisioning this replaced had no such question to ask. The stub is made to
+/// prompt once more than the drive needs; a run that answered whatever it was
+/// asked would sail past it and, on a real card, would be a run that submitted a
+/// value nobody chose.
+#[test]
+fn a_ykman_drive_that_asks_past_its_bound_stops_the_run() {
+    let fixture = Fixture::new();
+    fixture.seed_declarations();
+    let head = fixture.head();
+
+    let mut environment = card_env(&fixture, SERIAL, CARD);
+    environment.push((
+        "SAFIX_CARD_STUB_EXTRA_PROMPT".to_owned(),
+        "change-puk".to_owned(),
+    ));
+
+    let refused = fixture.run_on_terminal(&["enroll", "ana"], "", &as_pairs(&environment));
+    refused.says("refused the PIN");
+    refused.says("One attempt, deliberately");
+
+    // Three prompts answered, not four: the new PUK, its confirmation, and then
+    // nothing for the one the stub added.
+    assert_eq!(
+        fixture.card_recorded("ykman-prompt").lines().count(),
+        2,
+        "the run answered a prompt past the bound"
+    );
+    assert_eq!(
+        fixture.card_recorded("pin"),
+        "",
+        "the run went on to the next drive after a drive that asked too much"
+    );
+    assert_eq!(fixture.head(), head, "the aborted run committed something");
+    assert!(
+        !fixture.read("safix/users/ana.nix").contains(CARD),
+        "the aborted run still wired a recipient"
+    );
 }
 
 /// The graphical code of one refusal, which is where a code is rendered.

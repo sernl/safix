@@ -3,7 +3,7 @@
 See proposal.md — Why.
 Measured facts the approach rests on (research 2026-08-17; clan-core at `56e35624`, age-plugin-yubikey 0.5.1, ykman 5.9.2, sops 3.13.3 vendoring age v1.3.1):
 
-- Every ykman PIV access operation is flag-driven and non-interactive, including `change-management-key --protect --generate` (random key, PIN-protected, on-card). Factory defaults: PIN `123456`, PUK `12345678`, standard TDES management key.
+- Every ykman PIV access operation can be driven without a person, including `change-management-key --protect --generate` (random key, PIN-protected, on-card). Each credential is an option, and each option omitted becomes a hidden prompt through `click`. Factory defaults: PIN `123456`, PUK `12345678`, standard TDES management key. safix omits the credential options and answers the prompts; D1's amendment records why.
 - `age-plugin-yubikey --generate` prompts for the PIN on a TTY only; piped stdin submits an empty string (dialoguer/console return `""` off-tty) and fails. A pseudo-terminal is the only programmatic path. Slot selection: retired slots 1-20 (PIV `82`-`95`), first-empty by default; `--serial` mandatory with two cards connected; `Error::MultipleYubiKeys` otherwise. When stdout is not a terminal the recipient is echoed to stderr as `Recipient: age1…` — the scrape point.
 - The plugin's own factory-default flow forces a PIN change and sets PUK = PIN. safix pre-provisions with ykman instead, keeping PIN and PUK distinct.
 - age sorts native identities before plugin identities at decrypt (`age.go:324-341` in the vendored v1.3.1), so an enrolled card is never touched while a software identity opens the file.
@@ -26,13 +26,22 @@ Non-goals:
 ### D1. safix provisions access with ykman first, then drives the plugin; the plugin's own onboarding is bypassed
 
 The plugin's factory-default flow collapses PUK into PIN and prompts twice.
-ykman sets PIN, PUK (distinct, both generated), and a protected on-card management key with flags alone; the plugin then sees a provisioned card, asks once for the PIN, and the pseudo-terminal supplies it.
+ykman sets PIN, PUK (distinct, both generated), and a protected on-card management key; the plugin then sees a provisioned card, asks once for the PIN, and the pseudo-terminal supplies it.
 The management key is deliberately unsaved: protected mode means PIN possession is management possession, and a stored management key would be a credential with no reader.
+
+Amended during apply: "with flags alone" was the measured shape of ykman's interface and is not the shape safix uses.
+The delta spec's custody requirement — "Neither SHALL appear on standard output unbidden, in an argument vector, or in an environment variable" — is unconditional, and an argument vector is readable by every process on the machine, so the credential options are omitted and ykman's own prompts are answered on the same pseudo-terminal D2 owns.
+Two values still travel as options and neither is a generated credential: the serial, and the factory-default PIN and PUK, which are published constants identical on every card and which provisioning only ever meets because the state probe routes an already-provisioned card away.
+That split is also what keeps the pseudo-terminal drive sound: each remaining prompt asks for one value, so no prompt boundary has to be guessed at.
 
 ### D2. The pseudo-terminal is a narrow, owned mechanism
 
-One PTY wrapper, in safix-core, that runs one command, writes one line when prompted, and surfaces everything else to the operator's real terminal — used for `--generate` and for the proof's PIN entry.
-`expect` as a runtime dependency was rejected: the interaction is two prompts, not a protocol, and a dependency that scripts arbitrary TTYs is a bigger surface than the twenty lines that answer these two.
+One PTY wrapper, in safix-core, that runs one command, writes one line when prompted, and surfaces everything else to the operator's real terminal — used for `--generate`, for ykman's credential prompts (see D1's amendment), and for the proof's PIN entry.
+`expect` as a runtime dependency was rejected: the interaction is a handful of prompts, not a protocol, and a dependency that scripts arbitrary TTYs is a bigger surface than the code that answers these.
+
+Amended during apply: the wrapper answers every prompt of one invocation with the same value, bounded, rather than walking a sequence of different answers.
+A sequence cannot be paced soundly — both tools set and restore the terminal with `TCSAFLUSH`, which discards input written ahead of the prompt it belongs to, and nothing observable separates one prompt from the next because a hidden read restores the echo the instant the answer arrives.
+Every prompt safix drives asks for the same thing, so no boundary has to be found: the generator asks for the PIN once, `change-management-key --protect` asks for it once, and `change-pin` and `change-puk` ask for the new credential and then for its confirmation.
 
 ### D3. The PIN and PUK are auto-registered in safix, and mirrored to the password store when the operator wishes
 

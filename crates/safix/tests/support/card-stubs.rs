@@ -8,13 +8,13 @@
 //!
 //! `ykman`, `age-plugin-yubikey` and the two password stores are boundaries safix
 //! delegates across, and the claims are about the delegation: that the PIN and
-//! the PUK safix generated are distinct and reach `ykman` as flags, that the
-//! management key is generated on the card and named nowhere, that the generator
-//! is answered on a terminal with exactly one attempt, that a credential reaches
-//! a store on standard input and never in argv, and that no path issues an OTP
-//! command. Every one of those is a statement about what safix does at the
-//! boundary, and a stub that records what it was handed answers it better than
-//! the real tool, because it can be asked what it saw.
+//! the PUK safix generated are distinct and reach `ykman` down a prompt rather
+//! than in an argument vector, that the management key is generated on the card
+//! and named nowhere, that each prompted drive is answered a bounded number of
+//! times, that a credential reaches a store on standard input, and that no path
+//! issues an OTP command. Every one of those is a statement about what safix does
+//! at the boundary, and a stub that records what it was handed answers it better
+//! than the real tool, because it can be asked what it saw.
 //!
 //! There is a second reason here that the clan stub does not have, and it is the
 //! whole reason this file is one binary with four roles rather than a set of
@@ -40,8 +40,11 @@
 //!   management key is held on the card under the PIN. That line's presence is
 //!   the provisioned-or-factory answer, and asking costs no PIN retry.
 //! - `ykman --device <serial> piv access change-pin|change-puk` take the current
-//!   and new values as flags; `change-management-key --protect --generate --pin`
-//!   puts a random key on the card under the PIN.
+//!   value as an option and, with `-n` omitted, prompt for the new one with a
+//!   confirmation — one hidden read each, through `click`, which sets and restores
+//!   the terminal around it the way `getpass` does.
+//!   `change-management-key --protect --generate` puts a random key on the card
+//!   under the PIN and, with `--pin` omitted, prompts for that PIN once.
 //! - `age-plugin-yubikey --generate` writes its chatter and its PIN prompt to
 //!   standard error, turning the terminal's echo off around the read
 //!   (`dialoguer::Password`, via `console`), instructs the operator to touch the
@@ -65,14 +68,14 @@
 //!
 //! # What each role records
 //!
-//! Every invocation's argument vector, so a test can assert what a credential
-//! flag was given and that no vector ever named the OTP applet. Every
-//! invocation's environment, which is the other half of that claim: a credential
-//! that reached a store must have arrived on standard input, and neither of the
-//! two channels a process listing can read. Every value that arrived on standard
-//! input, so a test can assert what reached a store and by which channel. And,
-//! for the generator, whether its three streams were terminals — which is the one
-//! thing the prompt claim cannot be made without.
+//! Every invocation's argument vector and every invocation's environment, which
+//! together are the two channels a process listing can read — so a test can say
+//! unconditionally that no credential travelled either, on any path. Every answer
+//! given to a hidden prompt, which is where the credentials do travel and is
+//! therefore the only place a test can observe a value safix generated. Every
+//! value that arrived on standard input, so a test can assert what reached a store
+//! and by which channel. And, for the generator, whether its three streams were
+//! terminals — which is the one thing the prompt claim cannot be made without.
 
 use std::io::{Read as _, Write as _};
 
@@ -90,6 +93,13 @@ const NO_PCSCD: &str = "SAFIX_CARD_STUB_NO_PCSCD";
 
 /// A subcommand word this invocation refuses, for the refusal drills.
 const REFUSES: &str = "SAFIX_CARD_STUB_REFUSES";
+
+/// A `ykman` subcommand that asks one prompt more than it needs.
+///
+/// How the bounded-answer drill is run at the `ykman` boundary: the wrapper is
+/// told to answer a fixed number of prompts, and this makes the tool ask one
+/// more. A run that answered whatever it was asked would sail past it.
+const EXTRA_PROMPT: &str = "SAFIX_CARD_STUB_EXTRA_PROMPT";
 
 /// The recipient the generator prints, which the fixture chose.
 const RECIPIENT: &str = "SAFIX_CARD_STUB_RECIPIENT";
@@ -174,11 +184,8 @@ fn ykman(arguments: &[String]) -> ! {
             "change-pin",
             "-P",
             current,
-            "-n",
-            new,
         ] => {
-            record("pin", &format!("{serial} {current} -> {new}"));
-            std::process::exit(0);
+            changed("pin", serial, current);
         }
         [
             "--device",
@@ -188,11 +195,8 @@ fn ykman(arguments: &[String]) -> ! {
             "change-puk",
             "-p",
             current,
-            "-n",
-            new,
         ] => {
-            record("puk", &format!("{serial} {current} -> {new}"));
-            std::process::exit(0);
+            changed("puk", serial, current);
         }
         [
             "--device",
@@ -202,10 +206,14 @@ fn ykman(arguments: &[String]) -> ! {
             "change-management-key",
             "--protect",
             "--generate",
-            "--pin",
-            pin,
             "-f",
         ] => {
+            // One prompt, and its value is the one the card judges: this is the
+            // drive whose bound is one rather than two.
+            let pin = ykman_prompt("Enter PIN: ");
+            if extra_prompt_for("change-management-key") {
+                let _ = ykman_prompt("Enter PIN: ");
+            }
             record("management-key", &format!("{serial} protected under {pin}"));
             std::process::exit(0);
         }
@@ -214,6 +222,41 @@ fn ykman(arguments: &[String]) -> ! {
             other.join(" ")
         )),
     }
+}
+
+/// One credential changed, asking for the new value and then for it again.
+///
+/// The shape `click` gives `ykman piv access change-pin` and `change-puk` when
+/// their `-n` option is omitted: the current value came in as an option, and the
+/// new one is prompted for with a confirmation. Both prompts are hidden, and the
+/// terminal's echo is turned off and restored around each read the way `getpass`
+/// does it — which is the shape the wrapper answers on.
+fn changed(what: &str, serial: &str, current: &str) -> ! {
+    let new = ykman_prompt(&format!("Enter the new {}: ", what.to_uppercase()));
+    let again = ykman_prompt("Repeat for confirmation: ");
+    if new != again {
+        refuse("Error: the two entries do not match");
+    }
+    // The drill: one prompt more than the wrapper is bounded to answer. It sits
+    // after the confirmation so the run has already submitted what it meant to,
+    // and the wrapper's refusal is what stops the rest.
+    if extra_prompt_for(&format!("change-{what}")) {
+        let _ = ykman_prompt(&format!("Enter the new {}: ", what.to_uppercase()));
+    }
+    record(what, &format!("{serial} {current} -> {new}"));
+    std::process::exit(0);
+}
+
+/// Whether a test asked this subcommand for one prompt more than it needs.
+fn extra_prompt_for(subcommand: &str) -> bool {
+    named(EXTRA_PROMPT).as_deref() == Some(subcommand)
+}
+
+/// One hidden prompt, recorded so a test can count what was answered.
+fn ykman_prompt(prompt: &str) -> String {
+    let answer = read_unechoed(prompt);
+    record("ykman-prompt", &answer);
+    answer
 }
 
 /// Generate an identity, asking for the PIN on the terminal the way the real

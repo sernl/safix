@@ -159,6 +159,22 @@
 # Writing a newline after the last value fed to a store rather than only between
 # values fails `enroll-custody` on the round trip, which finds a byte in the
 # stored credential that nobody put there.
+# Passing a generated credential to ykman as an option rather than answering its
+# prompt fails `enroll` on the unconditional reading: every invocation's argument
+# vector and environment are recorded, and neither may contain the PIN or the PUK
+# on any path. Observed red by adding a `--pin` carrying the PIN back to the
+# management-key drive. The earlier shape of this check read only the store's own
+# invocations and would have passed over exactly the channel that mattered.
+# Sampling the echo state to find where one prompt ends and the next begins fails
+# `enroll` and `enroll-one-attempt` intermittently rather than reliably, which is
+# why the wrapper does not do it: a hidden read restores the terminal in
+# microseconds and both tools flush pending input when they set it, so a wrapper
+# that sequenced answers would put the wrong value in the wrong prompt under load.
+# Answering an echo-off state immediately rather than waiting for the terminal to
+# fall quiet fails `enroll` by queueing a second copy of the value behind the
+# first, because a prompt's text is written after the echo goes off.
+# Answering whatever a drive asks rather than a bounded number of prompts fails
+# `enroll-one-attempt-ykman`, whose stub asks once more than the drive needs.
 # Dropping one of the four card-surface overrides from a run's environment fails
 # every enrollment check before a process is spawned, on the harness's own guard.
 # That drill was run deliberately and is the one whose failure mode is not a red
@@ -451,6 +467,14 @@
       checks.safix-enroll-one-attempt =
         mode "safix-enroll-one-attempt" "enrollment"
           "a_rejected_pin_aborts_after_one_attempt";
+
+      # The same bounded-answer discipline at the card's own boundary, where the
+      # credentials travel a prompt rather than an argument vector: a drive that
+      # asks past its bound is not answered further, and the run stops with
+      # nothing wired and nothing committed.
+      checks.safix-enroll-one-attempt-ykman =
+        mode "safix-enroll-one-attempt-ykman" "enrollment"
+          "a_ykman_drive_that_asks_past_its_bound_stops_the_run";
 
       # The proof's isolation, which is what makes the proof about the card. An
       # ambient software identity opens the file the proof names, and the run is

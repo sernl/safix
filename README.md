@@ -485,6 +485,10 @@ No OTP slot is written under any flag — a programmed challenge-response slot i
 `--touch-policy never` is refused, because the touch is the property a card is for.
 And a run with no terminal is refused before the card is touched, because somebody has to touch it and somebody has to be told when.
 
+No credential safix generates reaches an argument vector or an environment variable, on any path.
+`ykman`'s credential options are omitted so that it prompts, and the prompts are answered on a pseudo-terminal — an argument vector is readable by every process on the machine, and for a PIN that is the whole difference between a credential and a published one.
+The two values that do travel as options are the serial and the factory defaults every card ships with.
+
 The management key is stored nowhere: PIN possession is management possession, so a stored copy would be a credential with no reader.
 The PIN and PUK land in the person's own custody by default, with an honest caveat — a PIN readable by the software identity adds protection only once that identity is retired or absent, and `--no-store-pin` turns it off.
 `--mirror-to-store` writes them to the password store as well: through the session's secret service when it answers, with no prompt at all, and through `keepassxc-cli` with one password prompt when it does not.

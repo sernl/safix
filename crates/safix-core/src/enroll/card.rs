@@ -1,11 +1,28 @@
-//! The card's PIV access: enumerated, probed, and provisioned by flags alone.
+//! The card's PIV access: enumerated, probed, and provisioned.
 //!
-//! Everything `ykman` does to PIV access is non-interactive, so this module is a
-//! set of argument vectors and a driver that runs them. The vectors are built by
-//! functions that take no card and touch no reader, which is what lets every
-//! construction below be asserted without one — the card is present in exactly
-//! one place, [`Ykman`], and every claim about *what is said to it* is a claim
-//! about a `Vec<String>`.
+//! This module is a set of argument vectors and a driver that runs them. The
+//! vectors are built by functions that take no card and touch no reader, which is
+//! what lets every construction below be asserted without one — the card is
+//! present in exactly one place, [`Ykman`], and every claim about *what is said to
+//! it* is a claim about a `Vec<String>`.
+//!
+//! # No generated credential reaches an argument vector
+//!
+//! `ykman piv access` takes each credential as an option and prompts for it when
+//! the option is omitted, so the options are omitted and the prompts are answered
+//! on a pseudo-terminal — see [`pty`]. An argument vector is readable
+//! by every process on the machine, which for a PIN is the difference between a
+//! credential and a published one, and there is no version of "the flag is
+//! convenient" that survives that.
+//!
+//! Two strings do travel as options, and neither is a credential. The serial
+//! selects a card and is public. And the *current* PIN and PUK of a factory-fresh
+//! card are the values Yubico documents and every card ships with, identical
+//! everywhere, granting nothing to whoever reads them — supplying those as options
+//! is what leaves each remaining prompt asking for one value, which is what makes
+//! the pseudo-terminal drive sound rather than a guess at prompt boundaries.
+//! Provisioning only ever runs against a card the state probe found factory-fresh,
+//! so those are the only values they can be.
 //!
 //! # What is never issued
 //!
@@ -13,19 +30,16 @@
 //! the other holds the challenge-response secret a password database is opened
 //! by, and programming that slot ends the database. [`every_argument_vector`]
 //! exists so that "no code path issues an OTP command" is a test rather than a
-//! promise.
+//! promise, and so is "no construction carries anything but public words".
 //!
-//! # Where the PIN goes
+//! # Why [`Credentials`] is not a [`Secret`]
 //!
-//! Into `ykman`'s argument vector, because that is the interface `ykman` has:
-//! there is no flag that reads a PIN from a pipe, and the alternative is a
-//! terminal prompt safix would then be answering on the operator's behalf. That
-//! is stated here rather than hidden, and it is why [`Credentials`] is not a
-//! [`Secret`]: a type whose only egress is a pipe cannot express
-//! a value that has to reach an argument vector, and using one anyway would
-//! misdescribe what happens. Every *other* egress — the generator's terminal,
-//! the password store, the safix secret — takes [`Credentials::pin_secret`] or
-//! [`Credentials::record`] and travels a pipe.
+//! Because the custody record is a function of both halves, and [`Secret`] has no
+//! accessor to compute one from — that absence is the whole of its discipline.
+//! So this type holds the two values and hands out [`Secret`]s: one per half for
+//! the prompts, and one for the record. It has no accessor of its own, and the
+//! traits that would amount to one are absent under the same compiled assertions
+//! [`Secret`] carries.
 //!
 //! # Two couplings to ykman's own wording
 //!
@@ -38,12 +52,16 @@
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::probe::{DebugFallback as _, DisplayFallback as _, Implements, SerializeFallback as _};
+use crate::progress::Progress;
 use crate::secret::Secret;
+
+use super::pty;
 
 /// The environment variable that replaces the program, for checks.
 ///
@@ -104,10 +122,10 @@ const ENTROPY_SOURCE: &str = "/dev/urandom";
 
 /// The PIN and, when safix generated it, the PUK for one card.
 ///
-/// Not a [`Secret`], deliberately, and the module documentation says why: these
-/// reach `ykman`'s argument vector because `ykman` has no other interface for
-/// them. What that costs is stated rather than disguised, and everything else
-/// this type hands out is a [`Secret`] travelling a pipe.
+/// Not a [`Secret`], deliberately, and the module documentation says why: the
+/// custody record is a function of both halves and [`Secret`] has no accessor to
+/// compute one from. Everything this hands out is a [`Secret`], and every one of
+/// them leaves down a pipe or a pseudo-terminal.
 ///
 /// The absent traits below are the same ones [`Secret`] asserts the absence of,
 /// and they are asserted the same way: a `Debug` derived here would print a PIN
@@ -162,21 +180,6 @@ impl Credentials {
         Self { pin, puk: None }
     }
 
-    /// The PIN, on its way into an argument vector.
-    ///
-    /// The one egress that is not a pipe, named so that every call site reads as
-    /// the deliberate act it is. See the module documentation.
-    #[must_use]
-    pub fn pin_for_flag(&self) -> &str {
-        &self.pin
-    }
-
-    /// The PUK, on its way into an argument vector, when safix generated one.
-    #[must_use]
-    pub fn puk_for_flag(&self) -> Option<&str> {
-        self.puk.as_ref().map(|puk| puk.as_str())
-    }
-
     /// Whether safix generated these, and so whether they are safix's to store.
     #[must_use]
     pub fn generated(&self) -> bool {
@@ -185,8 +188,8 @@ impl Credentials {
 
     /// The PIN as a value that can only leave down a pipe.
     ///
-    /// What the generator's terminal is answered with, and what the password
-    /// store receives.
+    /// What `ykman`'s prompt and the generator's prompt are answered with, and
+    /// what the password store receives.
     ///
     /// # Errors
     ///
@@ -194,6 +197,18 @@ impl Credentials {
     /// slice cannot fail at.
     pub fn pin_secret(&self) -> Result<Secret> {
         Secret::read_from(&mut self.pin.as_bytes())
+    }
+
+    /// The PUK as a value that can only leave down a pipe, when there is one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SecretRead`] when the in-memory copy cannot be read.
+    pub fn puk_secret(&self) -> Result<Option<Secret>> {
+        match &self.puk {
+            Some(puk) => Ok(Some(Secret::read_from(&mut puk.as_bytes())?)),
+            None => Ok(None),
+        }
     }
 
     /// Both halves as one value, in the shape a custody entry holds them.
@@ -282,34 +297,40 @@ pub fn info_arguments(serial: &str) -> Vec<String> {
     device(serial, &["piv", "info"])
 }
 
-/// `ykman --device <serial> piv access change-pin -P <current> -n <new>`.
+/// `ykman --device <serial> piv access change-pin -P <factory>`.
+///
+/// The new PIN is not here. `-n` is omitted so that `ykman` prompts for it, and
+/// the prompt is answered on a pseudo-terminal; the module documentation says why
+/// an argument vector is not an acceptable channel for it. `-P` carries the
+/// factory default, which is a published constant rather than a credential, and
+/// carrying it is what leaves the remaining prompts asking for one value.
 #[must_use]
-pub fn change_pin_arguments(serial: &str, current: &str, new: &str) -> Vec<String> {
-    device(
-        serial,
-        &["piv", "access", "change-pin", "-P", current, "-n", new],
-    )
+pub fn change_pin_arguments(serial: &str) -> Vec<String> {
+    device(serial, &["piv", "access", "change-pin", "-P", FACTORY_PIN])
 }
 
-/// `ykman --device <serial> piv access change-puk -p <current> -n <new>`.
+/// `ykman --device <serial> piv access change-puk -p <factory>`.
+///
+/// The new PUK is prompted for, exactly as the new PIN is, and for the same
+/// reason.
 #[must_use]
-pub fn change_puk_arguments(serial: &str, current: &str, new: &str) -> Vec<String> {
-    device(
-        serial,
-        &["piv", "access", "change-puk", "-p", current, "-n", new],
-    )
+pub fn change_puk_arguments(serial: &str) -> Vec<String> {
+    device(serial, &["piv", "access", "change-puk", "-p", FACTORY_PUK])
 }
 
 /// `ykman --device <serial> piv access change-management-key --protect
-/// --generate --pin <pin> -f`.
+/// --generate -f`.
 ///
-/// `--protect` is what puts the key on the card under the PIN and `--generate`
-/// is what makes it random. Together they mean the management key is never a
-/// string this process holds, which is why nothing stores it: PIN possession is
-/// management possession, and a stored copy would be a credential with no
-/// reader.
+/// `--protect` is what puts the key on the card under the PIN and `--generate` is
+/// what makes it random. Together they mean the management key is never a string
+/// this process holds, which is why nothing stores it: PIN possession is
+/// management possession, and a stored copy would be a credential with no reader.
+///
+/// `--pin` is omitted, so the PIN is prompted for. This is the one drive whose
+/// prompted value is submitted to the card and judged by a retry counter, which
+/// is why it is answered at most once.
 #[must_use]
-pub fn protect_management_key_arguments(serial: &str, pin: &str) -> Vec<String> {
+pub fn protect_management_key_arguments(serial: &str) -> Vec<String> {
     device(
         serial,
         &[
@@ -318,8 +339,6 @@ pub fn protect_management_key_arguments(serial: &str, pin: &str) -> Vec<String> 
             "change-management-key",
             "--protect",
             "--generate",
-            "--pin",
-            pin,
             "-f",
         ],
     )
@@ -352,21 +371,62 @@ pub fn state_in(reported: &str) -> State {
     State::FactoryFresh
 }
 
+/// The serial every construction in [`every_argument_vector`] is built over.
+const FIXTURE_SERIAL: &str = "00000000";
+
+/// Every word any construction in this module may contain.
+///
+/// Read by the module's own test rather than by the runtime, which is why it is
+/// marked as such: the claim it carries is a claim about this module's source, and
+/// a runtime that consulted it would be checking its own arithmetic.
+///
+/// The other half of what [`every_argument_vector`] is for: a construction that
+/// carried a generated credential would carry a word that is not on this list, and
+/// the module's own test is what says so. Extending the list is therefore a
+/// deliberate act with a reviewer attached, which is the property wanted — the two
+/// credential-shaped entries here are the published factory defaults and are named
+/// so that adding a *third* cannot pass unnoticed.
+#[cfg(test)]
+const PUBLIC_WORDS: [&str; 17] = [
+    "list",
+    "--serials",
+    "--device",
+    FIXTURE_SERIAL,
+    "piv",
+    "info",
+    "access",
+    "change-pin",
+    "change-puk",
+    "change-management-key",
+    "--protect",
+    "--generate",
+    "-f",
+    // The two options that carry a value, and the two values they carry. Both
+    // values are the constants every card ships with, documented by Yubico and
+    // identical everywhere, so reading one off a process listing grants nothing.
+    // Nothing safix generated is here, and nothing safix generated can be added
+    // without this list growing under review.
+    "-P",
+    FACTORY_PIN,
+    "-p",
+    FACTORY_PUK,
+];
+
 /// Every argument vector this module can construct, over one fixture input.
 ///
-/// The instrument behind the OTP refusal. "No code path issues an OTP command"
-/// is otherwise a claim about code nobody read; here it is a claim about a list
-/// the compiler makes this module keep complete, because a construction added
-/// without a line here is a construction no test covers and the module's own
-/// test says so.
+/// The instrument behind two claims. "No code path issues an OTP command" is
+/// otherwise something about code nobody read; here it is a statement about a list
+/// the module's own tests hold complete. So is "no construction carries a
+/// credential", which is the claim the change to prompt-driven provisioning
+/// exists to make true.
 #[must_use]
 pub fn every_argument_vector() -> Vec<Vec<String>> {
     vec![
         list_arguments(),
-        info_arguments("00000000"),
-        change_pin_arguments("00000000", FACTORY_PIN, "11111111"),
-        change_puk_arguments("00000000", FACTORY_PUK, "22222222"),
-        protect_management_key_arguments("00000000", "11111111"),
+        info_arguments(FIXTURE_SERIAL),
+        change_pin_arguments(FIXTURE_SERIAL),
+        change_puk_arguments(FIXTURE_SERIAL),
+        protect_management_key_arguments(FIXTURE_SERIAL),
     ]
 }
 
@@ -457,34 +517,98 @@ impl Ykman {
     /// the factory's, which is recoverable, rather than one whose management key
     /// is protected under a PIN nobody set.
     ///
+    /// Each new credential is written down a pseudo-terminal rather than into an
+    /// argument vector, which is what the whole shape of this function is for.
+    ///
     /// # Errors
     ///
-    /// [`Error::YkmanUnavailable`] when the binary cannot be run and
+    /// [`Error::YkmanUnavailable`] when the binary cannot be run,
+    /// [`Error::CardPinRejected`] when a drive asks past its bound, and
     /// [`Error::CardCommandFailed`] carrying `ykman`'s own message when it
     /// refuses.
-    pub fn provision(&self, serial: &str, credentials: &Credentials) -> Result<()> {
-        let Some(puk) = credentials.puk_for_flag() else {
+    pub fn provision(
+        &self,
+        serial: &str,
+        credentials: &Credentials,
+        progress: &dyn Progress,
+        idle_limit: Duration,
+    ) -> Result<()> {
+        let Some(puk) = credentials.puk_secret()? else {
             return Err(Error::CardCommandFailed {
-                arguments: change_puk_arguments(serial, FACTORY_PUK, "<generated>").join(" "),
+                arguments: change_puk_arguments(serial).join(" "),
                 output: String::from(
                     "provisioning was asked for with a PIN that safix did not generate",
                 ),
             });
         };
-        let pin = credentials.pin_for_flag();
+        let pin = credentials.pin_secret()?;
 
-        self.run(&change_puk_arguments(serial, FACTORY_PUK, puk))?;
-        self.run(&change_pin_arguments(serial, FACTORY_PIN, pin))?;
-        self.run(&protect_management_key_arguments(serial, pin))
+        // Two answers each for the two credential changes: `ykman` asks for the
+        // new value and then for it again as a confirmation, and both are the one
+        // value. One answer for the management key, whose prompt is the only one
+        // here whose value the card judges against a retry counter.
+        self.prompted(
+            serial,
+            &change_puk_arguments(serial),
+            &puk,
+            2,
+            progress,
+            idle_limit,
+        )?;
+        self.prompted(
+            serial,
+            &change_pin_arguments(serial),
+            &pin,
+            2,
+            progress,
+            idle_limit,
+        )?;
+        self.prompted(
+            serial,
+            &protect_management_key_arguments(serial),
+            &pin,
+            1,
+            progress,
+            idle_limit,
+        )
     }
 
-    /// One invocation, refusing on anything but success.
-    fn run(&self, arguments: &[String]) -> Result<()> {
-        let finished = self.capture(arguments)?;
-        if finished.status.success() {
+    /// One invocation whose prompts are answered on a pseudo-terminal.
+    ///
+    /// Standard error is the terminal, so `ykman`'s own account of a refusal
+    /// arrives in the transcript rather than on a captured pipe — which is where
+    /// the refusal below takes it from.
+    fn prompted(
+        &self,
+        serial: &str,
+        arguments: &[String],
+        answer: &Secret,
+        limit: usize,
+        progress: &dyn Progress,
+        idle_limit: Duration,
+    ) -> Result<()> {
+        let mut command = Command::new(&self.program);
+        command.args(arguments);
+
+        let session = pty::answering(&mut command, answer, limit, serial, progress, idle_limit)
+            // The wrapper names the program it could not run as the plugin,
+            // because the plugin is its other caller; here it is ykman, and a
+            // refusal that named the wrong binary would send the operator to the
+            // wrong missing tool.
+            .map_err(|refusal| match refusal {
+                Error::PluginUnavailable { program, cause } => {
+                    Error::YkmanUnavailable { program, cause }
+                }
+                other => other,
+            })?;
+
+        if session.status == 0 {
             return Ok(());
         }
-        Err(Self::refused(arguments, &finished))
+        Err(Error::CardCommandFailed {
+            arguments: arguments.join(" "),
+            output: session.terminal.trim_end_matches('\n').to_owned(),
+        })
     }
 
     /// One invocation, with both streams captured.
@@ -507,38 +631,17 @@ impl Ykman {
 
     /// A refusal carrying what was said and what came back.
     ///
-    /// The arguments are redacted of anything that is not public: a PIN reaches
-    /// `ykman`'s argument vector because it must, and a refusal is a string that
-    /// travels further than one process, so it does not reach that.
+    /// The arguments go in verbatim, which they can because no construction in
+    /// this module carries a credential — [`PUBLIC_WORDS`] is what holds that, and
+    /// it is what let the redaction this used to need be deleted rather than
+    /// maintained.
     fn refused(arguments: &[String], finished: &std::process::Output) -> Error {
         let complaint = String::from_utf8_lossy(&finished.stderr);
         Error::CardCommandFailed {
-            arguments: redacted(arguments).join(" "),
+            arguments: arguments.join(" "),
             output: complaint.trim_end_matches('\n').to_owned(),
         }
     }
-}
-
-/// An argument vector with every credential replaced by a placeholder.
-///
-/// The flags that carry one are named here rather than inferred, so a flag added
-/// to a construction above without a line here shows up as a credential in a
-/// message — which the module's own test is what catches.
-#[must_use]
-pub fn redacted(arguments: &[String]) -> Vec<String> {
-    const CARRIES_A_CREDENTIAL: [&str; 4] = ["-P", "-p", "-n", "--pin"];
-    let mut out: Vec<String> = Vec::with_capacity(arguments.len());
-    let mut hide_next = false;
-    for argument in arguments {
-        if hide_next {
-            out.push(String::from("<redacted>"));
-            hide_next = false;
-            continue;
-        }
-        hide_next = CARRIES_A_CREDENTIAL.contains(&argument.as_str());
-        out.push(argument.clone());
-    }
-    out
 }
 
 #[cfg(test)]
@@ -574,52 +677,77 @@ mod tests {
 
     #[test]
     fn the_management_key_is_generated_and_protected_and_never_named() {
-        let arguments = protect_management_key_arguments("12345678", "87654321");
+        let arguments = protect_management_key_arguments("12345678");
         assert!(arguments.iter().any(|word| word == "--protect"));
         assert!(arguments.iter().any(|word| word == "--generate"));
         assert!(
             !arguments.iter().any(|word| word == "--management-key"),
             "a management key was named, so one was chosen off the card"
         );
+        assert!(
+            !arguments.iter().any(|word| word == "--pin"),
+            "the PIN was passed as a flag rather than prompted for"
+        );
     }
 
+    /// No construction carries anything but a word from the published list.
+    ///
+    /// The whole of the argument-vector claim, and it is stated over the words
+    /// rather than over a redaction: a generated credential is by construction not
+    /// a word anybody wrote into this module, so a vector holding one holds a word
+    /// that is not on the list. That is why the redaction this replaced could be
+    /// deleted rather than kept in step.
     #[test]
-    fn a_refusal_names_the_flags_and_never_the_credentials_behind_them() {
-        // A serial with no digit run in common with either credential, so
-        // "the credential is absent" and "the serial is present" are separable
-        // claims: `12345678` would contain the factory PIN as a substring.
-        let shown = redacted(&change_pin_arguments("99887766", "123456", "44332211")).join(" ");
-        assert!(shown.contains("-P <redacted> -n <redacted>"));
-        assert!(!shown.contains("123456"));
-        assert!(!shown.contains("44332211"));
-        assert!(shown.contains("--device 99887766"), "the serial is public");
-    }
-
-    #[test]
-    fn every_flag_that_carries_a_credential_hides_it() {
+    fn no_construction_carries_anything_but_a_public_word() {
         for arguments in every_argument_vector() {
-            let shown = redacted(&arguments).join(" ");
-            for (flag, value) in [
-                ("-P", FACTORY_PIN),
-                ("-p", FACTORY_PUK),
-                ("-n", "11111111"),
-                ("--pin", "11111111"),
-            ] {
-                if arguments.iter().any(|word| word == flag) {
-                    assert!(!shown.contains(value), "{flag} left its value in {shown}");
-                }
+            for word in &arguments {
+                assert!(
+                    PUBLIC_WORDS.contains(&word.as_str()),
+                    "a construction carries a word that is not public: {word} in {arguments:?}"
+                );
             }
         }
+    }
+
+    /// The two option-borne values are the published factory defaults and nothing
+    /// else, and no option takes a new credential.
+    #[test]
+    fn the_only_credential_shaped_options_are_the_factory_defaults() {
+        let flags: Vec<String> = every_argument_vector().concat();
+        for asks_for_a_new_value in ["-n", "--new-pin", "--new-puk", "--pin", "--management-key"] {
+            assert!(
+                !flags.iter().any(|word| word == asks_for_a_new_value),
+                "{asks_for_a_new_value} would carry a generated credential in argv"
+            );
+        }
+        // `-P` and `-p` do appear, and what follows each is the constant every
+        // card ships with rather than anything this run minted.
+        let follows = |flag: &str| -> Option<String> {
+            flags
+                .iter()
+                .position(|word| word == flag)
+                .and_then(|at| flags.get(at.saturating_add(1)))
+                .cloned()
+        };
+        assert_eq!(follows("-P").as_deref(), Some(FACTORY_PIN));
+        assert_eq!(follows("-p").as_deref(), Some(FACTORY_PUK));
     }
 
     #[test]
     fn a_generated_pin_and_puk_are_eight_digits_and_differ() {
         let credentials = Credentials::generate().expect("the kernel's pool is readable");
-        let pin = credentials.pin_for_flag().to_owned();
-        let puk = credentials
-            .puk_for_flag()
-            .expect("generate produces both halves")
-            .to_owned();
+        let shown = |value: &Secret| {
+            let mut written = Vec::new();
+            value.write_to(&mut written).expect("a vec can be written");
+            String::from_utf8(written).expect("digits are text")
+        };
+        let pin = shown(&credentials.pin_secret().expect("a slice can be read"));
+        let puk = shown(
+            &credentials
+                .puk_secret()
+                .expect("a slice can be read")
+                .expect("generate produces both halves"),
+        );
         for value in [&pin, &puk] {
             assert_eq!(value.len(), CREDENTIAL_LENGTH);
             assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
@@ -633,9 +761,24 @@ mod tests {
     #[test]
     fn a_pin_from_elsewhere_carries_no_puk_and_so_is_not_ours_to_store() {
         let credentials = Credentials::existing(Zeroizing::new(String::from("87654321")));
-        assert_eq!(credentials.pin_for_flag(), "87654321");
-        assert_eq!(credentials.puk_for_flag(), None);
+        assert!(
+            credentials
+                .puk_secret()
+                .expect("a slice can be read")
+                .is_none()
+        );
         assert!(!credentials.generated());
+
+        let mut written = Vec::new();
+        credentials
+            .record()
+            .expect("a slice can be read")
+            .write_to(&mut written)
+            .expect("a vec can be written");
+        assert_eq!(
+            written, b"PIN=87654321",
+            "a record named a PUK that safix never set"
+        );
     }
 
     #[test]

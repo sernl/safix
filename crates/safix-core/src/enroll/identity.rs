@@ -214,7 +214,10 @@ pub fn generate(
     let mut command = Command::new(program());
     command.args(&arguments);
 
-    let session = pty::answering_once(&mut command, pin, &request.serial, progress, idle_limit)?;
+    // One prompt, so a second one is a rejected PIN: the plugin asks once per
+    // generation and asks again only when the card refused what it was given. The
+    // bound is what keeps the run from walking a card's three retries to zero.
+    let session = pty::answering(&mut command, pin, 1, &request.serial, progress, idle_limit)?;
 
     if session.status != 0 {
         return Err(Error::PluginFailed {

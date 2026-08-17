@@ -245,7 +245,7 @@ impl Ceremony<'_> {
                     ),
                 );
                 let credentials = card::Credentials::generate()?;
-                ykman.provision(serial, &credentials)?;
+                ykman.provision(serial, &credentials, self.progress, self.options.idle_limit)?;
                 note(
                     self.progress,
                     "the management key is on the card and nowhere else: PIN possession is \

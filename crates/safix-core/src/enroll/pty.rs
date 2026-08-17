@@ -1,25 +1,73 @@
-//! One command on a pseudo-terminal, answered once.
+//! One command on a pseudo-terminal, answered prompt by prompt.
 //!
-//! `age-plugin-yubikey --generate` reads the PIN from a terminal and from
-//! nowhere else. There is no flag for it, and its prompt is `dialoguer`'s, which
-//! returns the empty string when the stream it would prompt on is not a
-//! terminal. A pseudo-terminal is therefore not a convenience here; it is the
-//! only programmatic path, and this module is the whole of it.
+//! Two tools on this path read a credential from a terminal and from nowhere
+//! else, and neither has a flag that takes one off a pipe.
+//! `age-plugin-yubikey --generate` prompts through `dialoguer`, which returns the
+//! empty string when the stream it would prompt on is not a terminal. `ykman piv
+//! access` prompts through `click` when its credential options are omitted — and
+//! omitting them is the point, because the alternative is a PIN in an argument
+//! vector, which is a channel any process on the machine can read. A
+//! pseudo-terminal is therefore not a convenience here; it is the only channel
+//! that is both programmatic and private, and this module is the whole of it.
 //!
-//! # How the prompt is recognised
+//! # How a prompt is recognised
 //!
 //! By shape, not by text. A password prompt is a program turning the terminal's
 //! echo off, and the pseudo-terminal's attributes are readable from the master
-//! end, so the falling edge of `ECHO` is the prompt — whatever wording the
-//! plugin puts in front of it, in whatever language its translations are loaded
-//! in. A plugin upgrade that rewords the prompt still gets the PIN.
+//! end, so an echo that is off is a prompt — whatever wording is in front of it,
+//! in whatever language the tool's translations are loaded in. A tool upgrade
+//! that rewords a prompt still gets its answer.
 //!
-//! # One attempt, and why
+//! # One value, a bounded number of times
 //!
-//! A wrong PIN costs a retry, and a card has three. So the answer is written on
-//! the first falling edge and never again: a second prompt means the first
-//! answer was rejected, and the run stops there with the counter at two rather
-//! than walking it to zero. The refusal says so.
+//! Every prompt of one invocation gets the same value, and at most `limit` of
+//! them are answered. That is deliberately not a sequence of different answers,
+//! and the reason is that a sequence cannot be paced soundly. Both tools set and
+//! restore the terminal with `TCSAFLUSH`, which discards input that has arrived
+//! and not been read, so answers cannot be written ahead of the prompts they
+//! belong to; and nothing observable separates one prompt from the next, because
+//! a hidden read restores the terminal the instant the answer arrives and the
+//! following read turns it off again, both far faster than any polling interval.
+//! A wrapper that guessed at those boundaries would put the wrong value in the
+//! wrong prompt, occasionally, under load.
+//!
+//! Every prompt this drives asks for the same thing, so the boundaries do not
+//! have to be found. The generator asks for the PIN once. `change-management-key
+//! --protect` asks for the PIN once. `change-pin` and `change-puk` ask for the new
+//! credential and then for it again as a confirmation — one value, twice — because
+//! the *current* credential is supplied as a flag, and on the only card this ever
+//! runs against that current credential is the published factory default rather
+//! than anything safix generated.
+//!
+//! # Where a retry is actually spent, and what the bound protects
+//!
+//! A retry is spent by submitting a wrong value to the card, not by being
+//! prompted and not by declining to answer. In `change-pin` and `change-puk` the
+//! submitted-to-the-card value is the *current* one, which the tool takes from
+//! its flag and submits exactly once; the prompted value is the new credential,
+//! which no counter judges. In `change-management-key --protect` and in the
+//! generator the prompted value *is* the submitted one, and there the bound is
+//! one: a second prompt means the card refused what it was given, and the run
+//! stops with the counter one below where it started rather than walking it to
+//! zero.
+//!
+//! A prompt arriving past the bound is not answered at all, which is also what
+//! covers a tool that asks more questions than the caller expected: the run
+//! aborts having submitted only what it was told to, which for a provisioning
+//! drive means a card that was not provisioned rather than a card whose retries
+//! were spent finding out.
+//!
+//! # Why the wrapper waits for quiet before answering
+//!
+//! A prompt's own text is written *after* the echo goes off — `getpass` and
+//! `console` both set the terminal first and print second — so an echo that has
+//! just gone off is not yet a prompt that is waiting. Answering it immediately
+//! would sometimes put a second copy of the value in the queue behind the first.
+//! So the wrapper answers only once the terminal has been quiet for a polling
+//! interval and its own last answer is at least that old. Inside a prompt the
+//! tool already holds, quiet never lasts that long: it has the line and moves on
+//! in microseconds. Waiting for genuine silence is therefore the difference
+//! between a prompt that is waiting and one that is still being written.
 //!
 //! # Which stream gets the terminal
 //!
@@ -75,22 +123,23 @@ pub struct Session {
     pub terminal: String,
     /// What the child exited with, or one when a signal ended it.
     pub status: i32,
-    /// Whether a password prompt was seen and answered.
-    pub answered: bool,
+    /// How many prompts were seen and answered.
+    pub answered: usize,
 }
 
 /// Run one command with a pseudo-terminal on its input and its commentary,
-/// answering the first password prompt with `answer` and nothing after it.
+/// answering up to `limit` password prompts with `answer` and none beyond them.
 ///
 /// # Errors
 ///
 /// [`Error::PtyUnusable`] when a pseudo-terminal cannot be opened or read,
 /// [`Error::PluginUnavailable`] when the command cannot be run,
-/// [`Error::CardPinRejected`] when a second prompt arrives after the answer was
-/// given, and [`Error::PluginFailed`] when the run stalls past `idle_limit`.
-pub fn answering_once(
+/// [`Error::CardPinRejected`] when a prompt arrives past `limit`, and
+/// [`Error::PluginStalled`] when the run says nothing for `idle_limit`.
+pub fn answering(
     command: &mut Command,
     answer: &Secret,
+    limit: usize,
     serial: &str,
     progress: &dyn Progress,
     idle_limit: Duration,
@@ -116,6 +165,7 @@ pub fn answering_once(
         &pair.master,
         &mut child,
         answer,
+        limit,
         serial,
         progress,
         idle_limit,
@@ -143,47 +193,54 @@ pub fn answering_once(
 /// What the drain loop saw.
 struct Drained {
     text: String,
-    answered: bool,
+    answered: usize,
 }
 
-/// Read the master until the child is done, answering the first prompt.
+/// Read the master until the child is done, answering the prompts it makes.
 fn drain(
     master: &OwnedFd,
     child: &mut Child,
     answer: &Secret,
+    limit: usize,
     serial: &str,
     progress: &dyn Progress,
     idle_limit: Duration,
 ) -> Result<Drained> {
     let mut text = String::new();
-    let mut answered: Option<Instant> = None;
+    let mut answered: usize = 0;
+    let mut last_byte = Instant::now();
+    let mut last_answer: Option<Instant> = None;
     let mut last_movement = Instant::now();
     let mut buffer = [0_u8; 4096];
 
     loop {
-        // Sampled every turn rather than only when the master has nothing, because
-        // a prompt is a state and not an event: the echo goes off, is restored the
-        // instant the line is read, and goes off again for a second prompt, all
-        // faster than any polling interval. A watcher looking for the transition
-        // would miss the restoration in between and then see no transition at all.
-        match asked(master, answered, idle_limit) {
-            Asked::No => (),
-            Asked::First => {
-                write_answer(master, answer)?;
-                answered = Some(Instant::now());
-                last_movement = Instant::now();
-            }
-            Asked::Again => {
+        // A prompt that is waiting, rather than one still being written: the echo
+        // is off, nothing has arrived for a polling interval, and this wrapper's
+        // own last answer is at least that old. The module documentation states
+        // why each of the three is load-bearing.
+        let waiting = echo_is_off(master)
+            && last_byte.elapsed() >= POLL_INTERVAL
+            && last_answer.is_none_or(|at| at.elapsed() >= POLL_INTERVAL);
+        if waiting {
+            if answered >= limit {
+                // Not answered, and that is the whole of the protection: a retry
+                // is spent by submitting a value, so declining to submit one costs
+                // nothing and stops the run one below where it started.
                 let _ = child.kill();
                 return Err(Error::CardPinRejected {
                     serial: serial.to_owned(),
                 });
             }
+            write_answer(master, answer)?;
+            answered = answered.saturating_add(1);
+            last_answer = Some(Instant::now());
+            last_movement = Instant::now();
         }
 
         match rustix::io::read(master, &mut buffer) {
             Ok(read) if read > 0 => {
-                last_movement = Instant::now();
+                last_byte = Instant::now();
+                last_movement = last_byte;
                 if let Some(bytes) = buffer.get(..read) {
                     let shown = String::from_utf8_lossy(bytes);
                     progress.write(&shown);
@@ -225,43 +282,7 @@ fn drain(
         }
     }
 
-    Ok(Drained {
-        text,
-        answered: answered.is_some(),
-    })
-}
-
-/// What the echo state says about whether a password is being asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Asked {
-    /// Nothing is waiting on a password right now.
-    No,
-    /// A prompt is up and has not been answered.
-    First,
-    /// A prompt is up and one was already answered, so the answer was rejected.
-    Again,
-}
-
-/// How long after answering a prompt an echo that is still off is a new prompt.
-///
-/// A password read restores the terminal the instant the line arrives — the
-/// answer is written with its newline, so the read returns immediately — which
-/// makes an echo still off well after that a second prompt rather than the tail of
-/// the first. Generous enough that no plausible restoration is mistaken for a
-/// re-prompt, and short enough that the run does not spend a card's retries
-/// waiting to be sure.
-const REPROMPT_GRACE: Duration = Duration::from_millis(250);
-
-/// Whether a password prompt is up, and whether it is the second one.
-fn asked(master: &OwnedFd, answered: Option<Instant>, idle_limit: Duration) -> Asked {
-    if !echo_is_off(master) {
-        return Asked::No;
-    }
-    match answered {
-        None => Asked::First,
-        Some(at) if at.elapsed() >= REPROMPT_GRACE.min(idle_limit) => Asked::Again,
-        Some(_) => Asked::No,
-    }
+    Ok(Drained { text, answered })
 }
 
 /// Whether the pseudo-terminal currently has echo turned off.
@@ -368,13 +389,14 @@ mod tests {
     #[test]
     fn the_prompt_is_answered_once_and_the_answer_reaches_the_command() {
         let recorded = Recorded::default();
-        let session = answering_once(
+        let session = answering(
             &mut asking(
                 "printf 'about to ask\\n' >&2; \
                  stty -echo; printf 'PIN: ' >&2; read -r answer; stty echo; \
                  printf '\\n' >&2; printf 'got=%s\\n' \"$answer\"",
             ),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_secs(20),
@@ -382,7 +404,7 @@ mod tests {
         .expect("the wrapper answers a prompt");
 
         assert_eq!(session.status, 0);
-        assert!(session.answered, "no prompt was recognised");
+        assert_eq!(session.answered, 1, "the one prompt was not answered once");
         assert_eq!(
             String::from_utf8_lossy(&session.stdout).trim_end(),
             "got=87654321",
@@ -398,16 +420,76 @@ mod tests {
         );
     }
 
+    /// A value and its confirmation, which is the shape `change-pin` asks in.
+    ///
+    /// Two prompts, one value, and the terminal set and restored around each read
+    /// the way `click` does it — so the run has no observable gap between one
+    /// prompt and the next, which is the case this wrapper is built not to need.
+    #[test]
+    fn a_value_and_its_confirmation_are_both_answered_with_the_one_value() {
+        let recorded = Recorded::default();
+        let session = answering(
+            &mut asking(
+                "for label in new again; do \
+                   stty -echo; printf '%s: ' \"$label\" >&2; read -r answer; stty echo; \
+                   printf '\\n' >&2; printf '%s=%s\\n' \"$label\" \"$answer\"; \
+                 done",
+            ),
+            &secret("22222222"),
+            2,
+            "12345678",
+            &recorded,
+            Duration::from_secs(20),
+        )
+        .expect("the wrapper answers a value and its confirmation");
+
+        assert_eq!(session.status, 0);
+        assert_eq!(session.answered, 2, "not every prompt was answered");
+        assert_eq!(
+            String::from_utf8_lossy(&session.stdout).trim_end(),
+            "new=22222222\nagain=22222222",
+            "the value did not reach both prompts"
+        );
+    }
+
+    /// A tool that asks one more question than the bound allows is not answered.
+    #[test]
+    fn a_prompt_past_the_bound_aborts_with_nothing_further_submitted() {
+        let recorded = Recorded::default();
+        let refusal = answering(
+            &mut asking(
+                "for label in one two; do \
+                   stty -echo; printf '%s: ' \"$label\" >&2; read -r answer; stty echo; \
+                   printf '\\n' >&2; printf '%s=%s\\n' \"$label\" \"$answer\"; \
+                 done; printf 'never reached\\n'",
+            ),
+            &secret("111111"),
+            1,
+            "12345678",
+            &recorded,
+            Duration::from_secs(20),
+        );
+
+        assert!(
+            matches!(
+                refusal,
+                Err(Error::CardPinRejected { ref serial }) if serial == "12345678"
+            ),
+            "a prompt past the bound was answered anyway"
+        );
+    }
+
     #[test]
     fn a_second_prompt_aborts_rather_than_spending_another_retry() {
         let recorded = Recorded::default();
-        let refusal = answering_once(
+        let refusal = answering(
             &mut asking(
                 "stty -echo; printf 'PIN: ' >&2; read -r one; stty echo; printf '\\n' >&2; \
                  stty -echo; printf 'PIN again: ' >&2; read -r two; stty echo; \
                  printf 'never reached\\n'",
             ),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_secs(20),
@@ -425,9 +507,10 @@ mod tests {
     #[test]
     fn a_command_that_never_asks_runs_to_completion_unanswered() {
         let recorded = Recorded::default();
-        let session = answering_once(
+        let session = answering(
             &mut asking("printf 'no prompt here\\n' >&2; printf 'done\\n'"),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_secs(20),
@@ -435,20 +518,21 @@ mod tests {
         .expect("a command that asks nothing is not a failure");
 
         assert_eq!(session.status, 0);
-        assert!(!session.answered);
+        assert_eq!(session.answered, 0);
         assert_eq!(String::from_utf8_lossy(&session.stdout).trim_end(), "done");
     }
 
     #[test]
     fn standard_output_is_a_pipe_and_standard_error_is_the_terminal() {
         let recorded = Recorded::default();
-        let session = answering_once(
+        let session = answering(
             &mut asking(
                 "if [ -t 1 ]; then printf 'stdout=terminal\\n'; else printf 'stdout=pipe\\n'; fi; \
                  if [ -t 2 ]; then printf 'stderr=terminal\\n'; else printf 'stderr=pipe\\n'; fi; \
                  if [ -t 0 ]; then printf 'stdin=terminal\\n'; else printf 'stdin=pipe\\n'; fi",
             ),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_secs(20),
@@ -464,9 +548,10 @@ mod tests {
     #[test]
     fn a_command_that_stalls_ends_the_run_rather_than_holding_the_terminal() {
         let recorded = Recorded::default();
-        let refusal = answering_once(
+        let refusal = answering(
             &mut asking("read -r nothing"),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_millis(300),
@@ -481,9 +566,10 @@ mod tests {
     #[test]
     fn a_command_that_cannot_be_run_is_refused_by_name() {
         let recorded = Recorded::default();
-        let refusal = answering_once(
+        let refusal = answering(
             &mut Command::new("safix-no-such-plugin-command"),
             &secret("87654321"),
+            1,
             "12345678",
             &recorded,
             Duration::from_secs(1),

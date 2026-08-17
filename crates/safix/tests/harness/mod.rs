@@ -367,6 +367,13 @@ impl Fixture {
     /// than the declared audience is exactly the stale `.sops.yaml` a new file
     /// would be created through, and the narrowing test says only which anchors
     /// it grants.
+    /// The anchor lines are rendered the way `tests/support/nix-stub.rs` renders
+    /// the regenerated ones — one `  - &name key` per key a person holds — because
+    /// the two documents are compared: a committed policy whose anchors are shaped
+    /// differently from the regenerated one is drift `check` would report against a
+    /// tree nothing moved. The recovery anchors are absent here and present there,
+    /// and that asymmetry is the point rather than a mismatch: this file is written
+    /// before any card exists, and the enrollment's edit is what adds one.
     pub fn write_policy(&self, shared_anchors: &[&str]) {
         let mut policy = String::from("keys:\n");
         write!(policy, "  - &ana {}\n  - &bo {}\n", self.ana, self.bo).unwrap();
