@@ -94,12 +94,23 @@ jobs:
     name: build (${{ matrix.system }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      # Hoisted to job scope because a step `if` cannot read the secrets
+      # context; the cachix step and the build step both condition on this.
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - system: x86_64-linux
             runner: ubuntu-latest
+          # The arm half of linux, on the arm64 runner GitHub provides free to
+          # public repositories. Same kernel, same apparmor restriction, same
+          # full surface: the user-namespace step below keys on the operating
+          # system rather than the architecture, so this leg needs nothing of
+          # its own.
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
           # This leg runs a scoped surface, and the scope is the runner's rather
           # than the platform's. A generator fragment runs inside
           # `/usr/bin/sandbox-exec` on darwin, and a GitHub macOS runner will not
@@ -153,6 +164,19 @@ jobs:
             keep-going = true
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
             download-attempts = 10
+
+      # The binary cache, present exactly when its token is: with no
+      # `CACHIX_AUTH_TOKEN` secret the step does not run and the workflow is
+      # what it was without a cache. This step wires substitution — reading
+      # `sernl-safix` ahead of a build — and skips pushing, because pushing is
+      # nix-fast-build's below, which uploads each result as it is built rather
+      # than in one sweep at the end of the job.
+      - uses: cachix/cachix-action@97e5ff84d02b3b4f9936339f767e17f03c9252ed # v16
+        if: ${{ env.CACHIX_AUTH_TOKEN != '' }}
+        with:
+          name: sernl-safix
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
 
       # Ubuntu 24.04 ships `kernel.apparmor_restrict_unprivileged_userns` at 1,
       # which denies a user namespace to a process that is unconfined and has no
@@ -258,8 +282,9 @@ jobs:
       # the 8.5 GiB store they sit in, per platform, against a repository budget
       # of ten gigabytes — most of the budget, evicted often, to save under four
       # minutes of a fifteen-minute run. The lever worth pulling is a binary cache
-      # with a token, which nix-fast-build takes as `--cachix-cache`, and which
-      # needs a secret a workflow file cannot create for itself.
+      # with a token, and it is wired: when the `CACHIX_AUTH_TOKEN` secret
+      # exists, the cachix step above substitutes from `sernl-safix` and the
+      # invocation below pushes each result to it as it is built.
       - name: build every check, and report every failure rather than the first
         env:
           SELECT: ${{ steps.scope.outputs.select }}
@@ -271,6 +296,13 @@ jobs:
             scope=(--select "$SELECT")
           fi
 
+          # Push exactly when the token exists, which is also when the cachix
+          # step configured substitution.
+          cache=()
+          if [ -n "${CACHIX_AUTH_TOKEN:-}" ]; then
+            cache=(--cachix-cache sernl-safix)
+          fi
+
           nix run --inputs-from . --option flake-registry '' nixpkgs#nix-fast-build -- \
             --flake '.#checks.${{ matrix.system }}' \
             --skip-cached \
@@ -278,7 +310,7 @@ jobs:
             --eval-workers 4 \
             --result-format junit \
             --result-file check-results.xml \
-            "${scope[@]}"
+            "${scope[@]}" "${cache[@]}"
 
       - name: the junit file itself
         if: ${{ !cancelled() }}

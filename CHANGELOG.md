@@ -106,6 +106,9 @@ What is deliberately absent. Bulk onboarding: a hundred hosts are groups' and ta
 
 ### Added
 
+- The check workflow builds `aarch64-linux` on GitHub's arm64 runner, the full surface beside `x86_64-linux`'s: same kernel, same user-namespace step, nothing of its own.
+  The binary cache is wired behind its secret: with `CACHIX_AUTH_TOKEN` present the run substitutes from and pushes to `sernl-safix`, and without it the workflow is what it was.
+  `v0.2.0` is now a signed, annotated tag with a matching GitHub release, and a repository ruleset refuses updates and deletions of `v*` tags, so a version, once cut, stays where it was cut.
 - `flake.safix.organizations.<o>.managers` and `flake.safix.users.<u>.managedBy`: the two halves of a delegation, and `flake.safix.lib.delegation` as the projection the verbs read them through.
   Neither places a key in any audience, so a fleet declaring both derives the byte-identical tree; either side naming what the fleet does not declare is refused at evaluation.
   An organization with no custody may still name managers, because managing is not reading, and an organization naming no managers is not an error — it manages nobody, and the verb that reaches one says so rather than the evaluation refusing a tree whose artifacts are all correct.
