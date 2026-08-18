@@ -164,13 +164,15 @@ jobs:
             keep-going = true
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
             download-attempts = 10
+            extra-substituters = https://sernl-safix.cachix.org
+            extra-trusted-public-keys = sernl-safix.cachix.org-1:1AR/W7vHqw4fOVvY9lr79O4N2JigaPTf2sJSUEVXoZQ=
 
-      # The binary cache, present exactly when its token is: with no
-      # `CACHIX_AUTH_TOKEN` secret the step does not run and the workflow is
-      # what it was without a cache. This step wires substitution — reading
-      # `sernl-safix` ahead of a build — and skips pushing, because pushing is
-      # nix-fast-build's below, which uploads each result as it is built rather
-      # than in one sweep at the end of the job.
+      # Substitution needs no secret — the cache is public and its signing key
+      # is above, so every run reads it, forks and secretless events included.
+      # Pushing is the half a token gates: this step installs and authenticates
+      # the cachix client when `CACHIX_AUTH_TOKEN` exists, and skips pushing
+      # itself because nix-fast-build below uploads each result as it is built
+      # rather than in one sweep at the end of the job.
       - uses: cachix/cachix-action@97e5ff84d02b3b4f9936339f767e17f03c9252ed # v16
         if: ${{ env.CACHIX_AUTH_TOKEN != '' }}
         with:
