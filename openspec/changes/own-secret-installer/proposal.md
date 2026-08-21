@@ -2,9 +2,9 @@
 
 Throughout this change, revisions are named because every claim below was read at one.
 `sops-nix` is `github:Mic92/sops-nix` at `a8627b21b9107c5711c96b84f32a9a4b3d45295f`, this flake's `inputs.sops-nix`.
-clan-core pins `f1406619a3884cd5c47992a70b8b35c9c0fcb4c9`; the four files this change reasons about are byte-identical between the two, so no claim here depends on which one a consumer's tree resolves to.
+clan-core pins `f1406619a3884cd5c47992a70b8b35c9c0fcb4c9`; of the five sops-nix files this change reasons about, four are byte-identical between the two revisions, and the fifth, `modules/home-manager/sops.nix`, differs only at `:371` and `:438` in two `stdenv.isLinux`-versus-`stdenv.hostPlatform.isLinux` lines that nothing here cites, so no claim depends on which one a consumer's tree resolves to.
 `clan-core` is `56e35624d94e4f1ac55d36575ebab97cbd9b9cdd`, this flake's `inputs.clan-core`.
-`nixpkgs` is `59ea0b1c043c463e39fcb3cfb9a5c8bcf0777c72`.
+`nixpkgs` is `0e251e24a4f24e036a084b6b4b2d2491af4167f4`, this flake's root `inputs.nixpkgs`; clan-core pins a different one, `59ea0b1c043c463e39fcb3cfb9a5c8bcf0777c72`, and the `activation-script.nix` anchors below are byte-identical at both.
 
 ## Why
 
@@ -47,7 +47,7 @@ The two halves are one repair.
 There is a second defect underneath the first, and it is the one that would survive a narrow fix.
 `sops.age.sshKeyPaths` defaults to the ed25519 entries of `services.openssh.hostKeys`, filtered by `defaultImportKeys` at `modules/sops/default.nix:181-191`, which drops every key whose path begins `/run/secrets` under the comment "Skip ssh keys deployed with sops to avoid a catch 22".
 On a clan machine every host key is at `/run/secrets/openssh/...`, so the filter empties the list, and `sops.age.keyFile` is null, and `sops.gnupg.*` is unset.
-sops-nix's key-source assertion at `:432-441` then fires — its condition does not include `services.openssh.enable`, only its message mentions it — so evaluation refuses with a message naming five sops-nix options and none of safix's.
+sops-nix's key-source assertion at `:432-441` then fires — its condition tests four options and does not include `services.openssh.enable`, which only its message at `:440` mentions — so evaluation refuses naming sops-nix's options and none of safix's.
 `modules/consume/nixos.nix:19-23`, `modules/consume/common.nix:92-94` and `README.md:193`, `:805` and `:828` all state the opposite: that the system scope usually has an identity without naming one.
 On the fleet this package was extracted from, that sentence is false on every machine.
 The pilot got past it by setting `safix.identity.sshKeyPaths` by hand, which is a consumer working around a claim safix made.
@@ -63,7 +63,12 @@ The pilot got past it by setting `safix.identity.sshKeyPaths` by hand, which is 
   safix reads no option of clan's to discover it, for the reason `consumer-integration` already gives about user registries.
 - The system-scope identity is derived by safix rather than inherited from sops-nix's default, using the same rule with the correct prefix: exclude the host keys this installer itself deploys, which are now under `/run/safix`, and not the ones a different secret store deploys under `/run/secrets`.
 - Where nothing is derivable, the system scope refuses at evaluation with safix's own message naming safix's options, in the shape `modules/consume/common.nix:95-129` already established for the user scope.
-- The manifest safix writes is checked by the same binary that will read it, through the `-check-mode=manifest` `checkPhase` `manifest-for.nix:54-58` already uses, so a drift between safix's hand-written JSON and the installer's schema is a build failure rather than an activation failure.
+- The manifest safix writes is checked at build time by the same binary that will read it, through the `checkPhase` at `manifest-for.nix:54-58`, so a drift between safix's hand-written JSON and the installer's schema is a build failure rather than an activation failure.
+  That `checkPhase` is conditional and safix mirrors the conditional rather than picking a branch of it.
+  `validateSopsFiles` defaults true (`modules/sops/default.nix:228-230`), so the mode that runs over safix's entries today is `sopsfile`, which reads the ciphertext (`main.go:507`), parses it by format, and verifies each declared `key` resolves (`:559`), where `manifest` mode returns a stub from `loadSopsFile` without reading the file at all (`:503-505`) and skips that check (`:558`).
+  Both catch schema drift, which is what this bullet is for, so naming `manifest` alone would have read as correct and would have silently dropped the ciphertext half of what the package validates today.
+- The nix-level refusals safix currently gets are copied into safix's builder rather than assumed to travel with the entry type.
+  `manifest-for.nix:11-28` refuses a `sopsFile` that does not exist and one that lies outside the nix store, and it does so inside the builder safix no longer calls, so safix carries the same block under the same `validateSopsFiles` gate.
 
 Not in scope: any change to the home-manager scope, whose store is already relocatable through sops-nix's own options and whose activation guard is unaffected; any change to custody, the resolver, the policy renderer, the bridge, or the CLI; any patch to sops-nix, vendored or otherwise; and darwin, where clan mounts an HFS RAM disk by a different route (`age.nix:98-106`) and no failure has been observed.
 
@@ -89,5 +94,5 @@ Affected code:
 - Modified: `README.md:193`, `:805` and `:828` — the three sentences that state the system scope inherits a usable identity from sops-nix.
 
 Affected checks: `modules/flake/checks/installer.nix` is new and carries the manifest roots, the per-entry path default, the ordering, the identity derivation, the refusal, and the coexistence claim.
-`modules/flake/checks/consumption.nix` changes where it reads the system-scope arrival, because that arrival is no longer `config.sops.secrets`.
+`modules/flake/checks/consumption.nix` changes where it reads the system-scope arrival, because that arrival is no longer `config.sops.secrets`, and gains the system-scope half of the inert claim, whose existing probes are home-manager only and so would not notice an ungated installer.
 Every claim gets a severity drill in `tasks.md`, and the one claim an evaluation cannot hold — that the installer's destructive branch is real — is drilled against the binary itself.

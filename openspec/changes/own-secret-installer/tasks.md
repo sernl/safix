@@ -4,7 +4,7 @@ Revisions are as named in `proposal.md`, and every line anchor below was read at
 Where a task says "hold", it means add a check that fails when the claim stops being true, not add a sentence asserting it.
 
 Three disciplines hold throughout.
-No real recipient, no real hostname, and no real user name from any fleet enters this repository; fixtures use `ana`, `bo`, `cy` and synthetic `age1` strings, as the existing consumption fixtures do.
+No real recipient, no real hostname, and no real user name from any fleet enters this repository; fixtures use the `alice`, `bob` and `carol` names the existing consumption fixtures already use, together with synthetic `age1` strings.
 Nothing here deploys, switches, or activates anything: every verification builds or evaluates, and the one runtime claim is driven inside a build sandbox against the installer binary.
 No sentence describing a guarantee is written before the code enforcing it exists in the same commit.
 
@@ -12,6 +12,7 @@ A note on where the regression lives, because the obvious place is wrong.
 `crates/safix/tests/support/clan-stub.rs` and `nix-stub.rs` stand in for subprocess boundaries the command crosses — `clan vars get`, `nix eval` — and the rust suite drives the command.
 Nothing in this defect is reachable from the command: it is a NixOS module composing with another NixOS module, and it fails during activation.
 So the regression is in the nix check suite, and the single claim an evaluation cannot hold is driven against the installer binary in group 8.
+`modules/flake/checks/real-clan.nix` is the other place a reader will look, because it already solves running clan inside a build sandbox with clan's own `setupNixInNix`, and it is wrong for this for the same reason: it drives the clan CLI across the bridge, and no CLI invocation can hold a claim about how two NixOS modules compose during activation.
 
 ## 1. The four facts the remedy rests on, held before anything is built
 
@@ -26,31 +27,36 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 ## 2. The manifest safix writes
 
 - [ ] 2.1 Write `modules/consume/installer.nix` building a manifest with `pkgs.writeTextFile`, carrying every field the provisioner's builder emits (`manifest-for.nix:33-51`) with safix's own values for the two roots
-- [ ] 2.2 Give the derivation the provisioner's own `checkPhase`, `sops-install-secrets -check-mode=manifest "$out"`, taken from `manifest-for.nix:54-58` and run with `config.sops.validationPackage`
-- [ ] 2.3 Read `keepGenerations`, `useTmpfs`, `placeholder`, `environment`, `gnupg.home`, `gnupg.sshKeyPaths` and `age.plugins` from the `sops` namespace rather than minting a second option surface, and record at the top of the file that safix continues to couple to those settings while no longer using the provisioner's installer
-- [ ] 2.4 Add `safix-installer-manifest` asserting the built manifest parses, that its two roots are safix's, and that its `userMode` is false
-- [ ] 2.5 In the same check, build the provisioner's own manifest from `inputs.sops-nix` over the same fixture and assert the two JSON key sets are equal, so a field the provisioner adds reddens this check on the commit that moves the pin rather than reaching a host
-- [ ] 2.6 Severity drill: dropping one field from safix's manifest turns 2.5 red; giving the derivation a manifest the binary rejects turns 2.2 into a build failure, observed
-- [ ] 2.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-manifest` green, and both drills in 2.6 observed
+- [ ] 2.2 Give the derivation the provisioner's own `checkPhase` from `manifest-for.nix:54-58`, run with `config.sops.validationPackage`, mirroring its conditional rather than picking a branch of it: `-check-mode=${if config.sops.validateSopsFiles then "sopsfile" else "manifest"}`
+- [ ] 2.3 Record beside it why the branch is load-bearing, because `manifest` is the tempting one and the weaker one: `validateSopsFiles` defaults true (`modules/sops/default.nix:228-230`), so `sopsfile` is what runs over safix's entries today, and `manifest` mode returns a stub from `loadSopsFile` without reading the file (`main.go:503-505`) and skips the key-presence check (`:558`), leaving the JSON schema and nothing else
+- [ ] 2.4 Copy the nix-level assertion block at `manifest-for.nix:11-28` into safix's builder — both the named file-existence message and the "is not in the Nix store" refusal — under the same `config.sops.validateSopsFiles` gate the original carries at `:27`, because that block lives in the builder safix does not call and does not travel with the option type (group 4 records why)
+- [ ] 2.5 Read `package`, `validationPackage`, `validateSopsFiles`, `log`, `keepGenerations`, `useTmpfs`, `placeholder`, `environment`, `gnupg.home`, `gnupg.sshKeyPaths` and `age.plugins` from the `sops` namespace rather than minting a second option surface, and record at the top of the file that safix continues to couple to those settings while no longer using the provisioner's installer
+- [ ] 2.6 Note at `placeholder` why it is read and why it will be empty: it is defined only under `mkIf (config.sops.templates != { })` and maps over `config.sops.secrets` (`modules/sops/templates/default.nix:116`, `:130-134`), and safix now leaves both empty, so the field is carried for schema parity rather than for content
+- [ ] 2.7 Expose the built manifest as `system.build.safix-manifest`, mirroring the provisioner's `system.build.sops-nix-manifest` (`modules/sops/default.nix:534`), so the checks in groups 2, 3 and 6 read one concrete attribute rather than rebuilding the derivation each time
+- [ ] 2.8 Add `safix-installer-manifest` asserting the built manifest parses, that its two roots are safix's, and that its `userMode` is false
+- [ ] 2.9 In the same check, build the provisioner's own manifest from `inputs.sops-nix` over the same fixture and assert the two JSON key sets are equal, so a field the provisioner adds reddens this check on the commit that moves the pin rather than reaching a host
+- [ ] 2.10 Severity drill: dropping one field from safix's manifest turns 2.9 red; giving the derivation a manifest the binary rejects turns 2.2 into a build failure, observed; and pinning the mode to `manifest` over a fixture whose declared `key` is absent from its ciphertext turns that same build green, which is the evidence that the two modes are not interchangeable
+- [ ] 2.11 Verify: `nix build .#checks.x86_64-linux.safix-installer-manifest` green, and every drill in 2.10 observed
 
 ## 3. The store roots and the per-entry path default, which move together
 
 - [ ] 3.1 Set the manifest's `secretsMountPoint` to `/run/safix.d` and its `symlinkPath` to `/run/safix`, both settable through options of the consumption namespace so a consumer with a reason can move them
 - [ ] 3.2 Default every resolved entry that declares no path to `<symlinkPath>/<name>`, replacing reliance on the provisioner's `/run/secrets/<name>` default (`modules/sops/default.nix:73-80`), and update the comment at `modules/flake/safix/resolve.nix:2130-2131` that records where a path-less entry parks
-- [ ] 3.3 Add `safix-installer-store` asserting, off one built manifest, that the two roots are safix's and that every entry's path is inside the symlink path
+- [ ] 3.3 Add `safix-installer-store` asserting, off `system.build.safix-manifest`, that the two roots are safix's and that every entry's path is inside the symlink path
 - [ ] 3.4 Assert in the same check that an entry declaring a path of its own keeps it, and that the path-collision refusal at `resolve.nix:2142-2164` is unchanged, by resolving a fixture whose two entries declare one path and asserting it still throws
 - [ ] 3.5 Severity drill, and this is the one that matters most in this group: move the root without moving the entry default and assert the check goes red, because that combination is what makes `symlinkSecretsAndTemplates` (`main.go:254-268`) write a symlink into the other store's directory instead of colliding with it
 - [ ] 3.6 Verify: `nix build .#checks.x86_64-linux.safix-installer-store` green, and the drill in 3.5 observed red
 
-## 4. One installer, and the typing that has to survive leaving the provisioner's option
+## 4. One installer, and the validation that has to survive leaving the provisioner's option
 
 - [ ] 4.1 Declare `safix.installed` in `modules/consume/common.nix` with `type = options.sops.secrets.type`, read off the provisioner's own declaration in the same evaluation, and define it from `safix.secrets` at system scope
 - [ ] 4.2 Remove the `sops.secrets = cfg.secrets` definition from `modules/consume/nixos.nix:79`, keeping the identity definitions at `:81-85` where the installer reads them back
-- [ ] 4.3 Build the manifest from `config.safix.installed` rather than from the raw resolution, so every entry has passed the provisioner's `secretType` (`modules/sops/default.nix:46`) and `manifest-for.nix`'s file-existence refusals
-- [ ] 4.4 Add `safix-installer-sole` asserting that a fixture system configuration with a non-empty resolution has an empty `config.sops.secrets`, no provisioner activation step, no provisioner unit, and exactly one installer invocation, which is safix's
-- [ ] 4.5 Assert in the same check that an entry whose `sopsFile` is outside the nix store is still refused, which is the provisioner's type doing its work through safix's option
-- [ ] 4.6 Severity drill: restoring the `sops.secrets` definition turns 4.4 red on the provisioner-step assertion; declaring `safix.installed` with a plain `attrsOf raw` turns 4.5 red
-- [ ] 4.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-sole` green, and both drills observed
+- [ ] 4.3 Build the manifest from `config.safix.installed` rather than from the raw resolution, so every entry has passed the provisioner's `secretType` (`modules/sops/default.nix:46`): its mode, owner, group, uid and gid coercions, its `sopsFile` default, and the `sopsFileHash` default that forces `builtins.hashFile "sha256"` under `validateSopsFiles` (`:51-53`)
+- [ ] 4.4 Do not expect the type to carry more than that, which is the correction this group exists to record and which was settled by evaluating it rather than by reading it: an option declared `type = options.sops.secrets.type` accepts an entry whose `sopsFile` is outside the store and returns it unchanged, because `pathNotInStore` is declared at `:19-25` and used at exactly one site, `sops.age.keyFile` at `:338`, never on a secret entry, whose `sopsFile` is plain `lib.types.path` at `:137`, and because the store-membership refusal is `manifest-for.nix:19-23`, inside the builder safix does not call — what refuses instead is the block copied in 2.4
+- [ ] 4.5 Add `safix-installer-sole` asserting that a fixture system configuration with a non-empty resolution has an empty `config.sops.secrets`, no provisioner activation step, no provisioner unit, and exactly one installer invocation, which is safix's
+- [ ] 4.6 Assert in the same check that an entry whose `sopsFile` is outside the nix store is still refused and that the refusal is safix's own copied block, by matching its message text; assert separately that a `sopsFile` that does not exist also refuses, and record that this second one is incidental — the forced `hashFile` throws a bare `path '...' does not exist`, which is not safix's message and which `tryEval` does not catch
+- [ ] 4.7 Severity drill: restoring the `sops.secrets` definition turns 4.5 red on the provisioner-step assertion; removing the block copied in 2.4 turns the outside-store half of 4.6 red, which is the evidence the option type never carried it
+- [ ] 4.8 Verify: `nix build .#checks.x86_64-linux.safix-installer-sole` green, and both drills observed
 
 ## 5. The named entry, both mechanisms, and the ordering options
 
@@ -69,7 +75,7 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 - [ ] 6.2 Record at the option why the exclusion prefix is safix's store rather than `/run/secrets`: the provisioner's filter at `modules/sops/default.nix:181-191` excludes the store its own installer writes, and safix's store is now a different one
 - [ ] 6.3 Make a consumer-named identity win over the derived one, and make the derivation contribute nothing when the switch is off
 - [ ] 6.4 Add `safix-installer-identity` asserting that a fixture whose host keys sit under `/run/secrets` derives them, that a fixture whose host keys sit under `/run/safix` does not, and that a named identity is unchanged by either
-- [ ] 6.5 Assert in the same check that the derived identity reaches the built manifest's `ageSshKeyPaths`, so the claim is about what the binary will read rather than about an intermediate option
+- [ ] 6.5 Assert in the same check that the derived identity reaches `system.build.safix-manifest`'s `ageSshKeyPaths`, so the claim is about what the binary will read rather than about an intermediate option
 - [ ] 6.6 Severity drill: restoring the `/run/secrets` prefix turns 6.4 red on the first fixture; dropping the exclusion entirely turns it red on the second
 - [ ] 6.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-identity` green, and both drills observed
 
@@ -99,15 +105,18 @@ This is the only claim in the change that an evaluation cannot hold, because the
 ## 9. The consumption checks that read the old arrival
 
 - [ ] 9.1 Move `modules/flake/checks/consumption.nix:388`, which reads `(nixosFor "bob").config.sops.secrets`, to read `config.safix.installed`, and record beside it that the system scope no longer delivers through the provisioner's option
-- [ ] 9.2 Re-check every other assertion in that file that reads `sops.*` at system scope, and leave the home-manager half untouched
-- [ ] 9.3 Confirm `safix-consumption-ordering` is unaffected, since it holds a home-manager activation DAG and this change touches no home-manager path
-- [ ] 9.4 Verify: `nix build .#checks.x86_64-linux.safix-consumption-system` and `.#checks.x86_64-linux.safix-consumption` and `.#checks.x86_64-linux.safix-consumption-ordering` and `.#checks.x86_64-linux.safix-consumption-refusals` all green
+- [ ] 9.2 Hold `secret-consumption`'s unmodified requirement that a profile resolving nothing is inert — "no secrets, no identity configuration, no activation entry, and no unit" — at the system scope, which this change gives two new surfaces to and where nothing holds it today, the existing inert probes being built from `inertProfile = moduleForm "carol"` (`modules/flake/checks/consumption.nix:215`) and reading `home.activation` and `systemd.user.services` (`:527-535`, expected at `:567-576`), so an ungated `system.activationScripts.safixInstallSecrets` or `systemd.services.safix-install-secrets` would pass every check in the suite
+- [ ] 9.3 Add the system-scope half to `safix-consumption-system`: evaluate `nixosFor "carol"`, the same user who resolves nothing on that host, and assert `system.activationScripts ? safixInstallSecrets` and `systemd.services ? safix-install-secrets` are both false, alongside the identity fields the user-scope probe already reads
+- [ ] 9.4 Severity drill: dropping the `enable` gate from either installer mechanism turns 9.3 red on that mechanism, and neither drill reddens anything else, which is the evidence that the gate is what holds the requirement rather than an accident of the fixture
+- [ ] 9.5 Re-check every other assertion in that file that reads `sops.*` at system scope, and leave the home-manager half untouched
+- [ ] 9.6 Confirm `safix-consumption-ordering` is unaffected, since it holds a home-manager activation DAG and this change touches no home-manager path
+- [ ] 9.7 Verify: `nix build .#checks.x86_64-linux.safix-consumption-system` and `.#checks.x86_64-linux.safix-consumption` and `.#checks.x86_64-linux.safix-consumption-ordering` and `.#checks.x86_64-linux.safix-consumption-refusals` all green, and both drills in 9.4 observed
 
 ## 10. Documentation, and the three sentences that are currently false
 
 - [ ] 10.1 Rewrite `README.md:193` so it says the recipient is the age form of the host identity and that safix derives which key that is, rather than that the provisioner's default finds it
 - [ ] 10.2 Rewrite `README.md:805` and `README.md:828`, both of which state the system scope keeps the provisioner's host-key default, and say instead what safix derives and what it excludes
-- [ ] 10.3 Rewrite the header of `modules/consume/nixos.nix:19-23` and the note at `modules/consume/common.nix:92-94`, which make the same claim at the option
+- [ ] 10.3 Rewrite the header of `modules/consume/nixos.nix:19-23` and the note at `modules/consume/common.nix:92-94`, which make the same claim at the option, and while in that region correct `common.nix:126-128`, which says the provisioner's key-source assertion "names its five": the message at `modules/sops/default.nix:440` names three, its condition tests four, and the two assertions of that block together name four distinct options
 - [ ] 10.4 Document the installer: the two roots, the ordering options with the values a clan host needs, the derivation switch, and both refusals
 - [ ] 10.5 State the coexistence limit plainly — that this covers safix's installer, and that a consumer writing `sops.secrets` directly on such a host still collides
 - [ ] 10.6 Verify: every guarantee stated in the README names a check in this repository that holds it, and `rg -n '/run/secrets' README.md modules/` returns only the sentences that are about another store
@@ -115,7 +124,7 @@ This is the only claim in the change that an evaluation cannot hold, because the
 ## 11. Verification
 
 - [ ] 11.1 `openspec validate own-secret-installer --strict`
-- [ ] 11.2 `openspec validate --all --strict`, compared against the baseline of 19 passed and 0 failed recorded when this change was proposed
+- [ ] 11.2 `openspec validate --all --strict`, compared against the baseline recorded when this change was proposed: 19 specs, plus this change, reported as 20 passed and 0 failed over 20 items
 - [ ] 11.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` lists every check named in groups 1 through 8
 - [ ] 11.4 `nix flake check` green
 - [ ] 11.5 `cargo test` green, confirming the rust suite is untouched by a change that has no command surface

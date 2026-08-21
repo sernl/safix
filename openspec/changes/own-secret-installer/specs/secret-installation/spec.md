@@ -15,11 +15,11 @@ The provisioner's installer SHALL therefore be inert with respect to anything sa
 - **THEN** the configuration carries an installer invocation of this package's own, naming a manifest this package built
 - **AND** the provisioner's secrets option is empty, so the provisioner's installer, its activation entry, its unit and its key-source assertion are all inert
 
-#### Scenario: The resolved set is still typed by the provisioner
+#### Scenario: The resolved set is typed by the provisioner and refused by this package
 
 - **WHEN** an entry of the resolved set is read back before the manifest is built
-- **THEN** it has passed through the provisioner's own secret type, with its file-existence and store-membership refusals intact
-- **AND** the type is read off the provisioner's own option declaration rather than restated
+- **THEN** it has passed through the provisioner's own secret type, read off the provisioner's option declaration rather than restated, so its mode, ownership, sops-file and file-hash defaults are the provisioner's
+- **AND** the refusals the provisioner applies in its own manifest builder rather than in that type — a sops file that does not exist, and one outside the nix store — are carried by this package's builder instead, because the type does not carry them and this package does not call that builder
 
 #### Scenario: What a consumer reads to see what arrived
 
@@ -52,13 +52,14 @@ No entry SHALL be written, symlinked, or removed outside that store except at a 
 
 ### Requirement: The manifest is validated by the binary that will read it
 
-The manifest SHALL be checked at build time by the installer binary in its manifest-checking mode.
+The manifest SHALL be checked at build time by the installer binary, in whichever of its checking modes the provisioner's own sops-file validation setting selects, so that this package validates neither less nor more than the provisioner does over the same entries.
 The set of fields the manifest carries SHALL be held against the set the provisioner's own manifest builder emits, so that a field the provisioner adds is a failing check rather than a failing activation.
 
 #### Scenario: A malformed manifest does not reach a machine
 
 - **WHEN** the manifest derivation is built
-- **THEN** the installer binary checks it in manifest mode as part of that build
+- **THEN** the installer binary checks it as part of that build, in the mode the provisioner's validation setting selects
+- **AND** the mode is not fixed to the weaker of the two, which validates the schema alone and never reads the ciphertext
 - **AND** a manifest it rejects fails the build
 
 #### Scenario: The provisioner grows a field

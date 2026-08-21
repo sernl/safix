@@ -44,7 +44,12 @@ sops-nix already exploits this on itself.
 That submodule is the existence proof, and it is why this change needs no upstream cooperation at all.
 
 safix does not call `manifestFor` itself, because that would make the sops-nix source tree a dependency of a module that must be importable without one — `nixosModules.safix` imports nothing by contract, and there is no honest way for it to reach `${inputs.sops-nix}/modules/sops/manifest-for.nix`.
-So safix writes the JSON with `pkgs.writeTextFile` and validates it with the binary that will read it, using the `checkPhase` `manifest-for.nix:54-58` already uses: `sops-install-secrets -check-mode=manifest "$out"`.
+The checks are under no such constraint and do reach it, which is not a contradiction but the arrangement that makes the copy checkable: the flake has the input and the exported module does not, so holding the module's output against the provisioner's own builder is something only a check can do.
+So safix writes the JSON with `pkgs.writeTextFile` and validates it with the binary that will read it, using the `checkPhase` at `manifest-for.nix:54-58`.
+That `checkPhase` is conditional, and safix mirrors the conditional rather than a branch of it: `-check-mode=${if cfg.validateSopsFiles then "sopsfile" else "manifest"}`, with `validateSopsFiles` defaulting true (`default.nix:228-230`).
+So the mode safix runs by default is `sopsfile`, which is the mode the provisioner runs over safix's entries today.
+The two are not near-equivalents and the difference runs the wrong way for a casual choice: `manifest` mode returns a stub from `loadSopsFile` without reading the file (`main.go:503-505`) and skips the key-presence check (`:558`), so it validates the JSON schema alone, where `sopsfile` mode reads the ciphertext (`:507`), parses it by format, and verifies each declared `key` resolves (`:559`).
+Schema drift, which is what D1 needs the check for, is caught by either — which is exactly why naming `manifest` would have looked right while dropping the ciphertext half of the package's current build-time validation.
 The field set is copied from `manifest-for.nix:33-51` at the pinned revision.
 Copying a schema is a drift risk and it is answered rather than accepted: a check builds sops-nix's own manifest from `inputs.sops-nix`, which the check has and the module does not, and compares the two JSON key sets.
 A field sops-nix adds reddens that check on the commit that bumps the input, which is the only place a fresh required field could otherwise reach a machine unannounced.
@@ -61,17 +66,30 @@ That is a worse failure than the current one because it is silent.
 
 The path-collision refusal at `resolve.nix:2125-2164` is unaffected and its comment stays true: a minted default is a function of the name alone and so still cannot collide, and only a declared path can.
 
-### D3. safix stops defining `sops.secrets`, and recovers the typing it was getting for free
+### D3. safix stops defining `sops.secrets`, and reconstructs the validation that came with it
 
 Two installers cannot both be right about one resolved set.
-sops-nix gates its entire installer on `regularSecrets != { }` (`default.nix:27`, `:432`, `:468`, `:498`), so the way to have exactly one is for safix's system module to leave `sops.secrets` empty and carry its resolution elsewhere.
+sops-nix gates its entire installer on the resolved set being empty — `regularSecrets != { }` at `default.nix:27`, `:468` and `:498`, and `cfg.secrets != { }` at `:432` — so the way to have exactly one is for safix's system module to leave `sops.secrets` empty and carry its resolution elsewhere.
 Doing so also disarms sops-nix's key-source assertion (`:432-441`), which is correct: it is an assertion about sops-nix's installer, and on this path sops-nix has none.
 
-What that gives up is the option-type validation safix currently gets by assigning into a typed option.
-It is recovered rather than dropped: `safix.installed` is declared with `type = options.sops.secrets.type`, read off sops-nix's own declaration in the same evaluation, so every entry still passes through `secretType` (`default.nix:46`) with its `pathNotInStore` check, its `sopsFileHash`, its mode and owner and group coercions, and its file-existence assertions in `manifest-for.nix:11-28`.
+What that gives up is the validation safix currently gets by assigning into a typed option, and it divides into two halves that travel differently.
+
+The half the type carries is recovered by reusing the type.
+`safix.installed` is declared with `type = options.sops.secrets.type`, read off sops-nix's own declaration in the same evaluation, so every entry still passes through `secretType` (`default.nix:46`): its mode, owner, group, uid and gid coercions, its `sopsFile` default, and its `sopsFileHash`, whose default forces `builtins.hashFile "sha256" config.sopsFile` under `cfg.validateSopsFiles` (`:51-53`).
+A `sopsFile` that does not exist therefore still refuses once the manifest reads that field, but incidentally rather than by a named mechanism: the error is a bare `path '...' does not exist`, not sops-nix's assertion, and `tryEval` does not catch it.
 The submodule's `config` block defaults `sopsFile` from `sops.defaultSopsFile`, which is harmless because safix sets `sopsFile` on every entry explicitly (`resolve.nix:2244`).
 
-safix keeps reading and defining the rest of the `sops.*` namespace — `package`, `validationPackage`, `keepGenerations`, `useTmpfs`, `placeholder`, `environment`, `age.plugins`, and its own `age.keyFile` and `age.sshKeyPaths` — so a consumer who tunes sops-nix still tunes safix, and safix does not mint a second copy of an option surface that already exists.
+The half the type does not carry has to be copied, and this was settled by evaluating it rather than by reading it, because reading it the other way is the easy mistake.
+A system evaluated with sops-nix's module plus one option declared `type = options.sops.secrets.type`, given an entry whose `sopsFile` is `/etc/hosts` — a path outside the store — evaluates clean and returns the value unchanged.
+Two independent facts account for that.
+`pathNotInStore` is declared at `default.nix:19-25` and used at exactly one site, `sops.age.keyFile` at `:338`; it is never applied to a secret entry, whose `sopsFile` is plain `lib.types.path` at `:137`.
+And the store-membership refusal, the one that says "is not in the Nix store", lives only at `manifest-for.nix:19-23`, inside the builder D1 deliberately does not call.
+
+So safix's own builder carries a copy of the assertion block at `manifest-for.nix:11-28` — both halves, the named file-existence message and the store-membership refusal — under the same `cfg.validateSopsFiles` gate the original has at `:27`.
+That is a few lines rather than a design change, and it is the stronger arrangement anyway: the refusal becomes safix's own, named and matchable by a check, where the incidental `hashFile` throw is neither.
+
+safix keeps reading and defining the rest of the `sops.*` namespace — `package`, `validationPackage`, `validateSopsFiles`, `log`, `keepGenerations`, `useTmpfs`, `placeholder`, `environment`, `gnupg.home`, `gnupg.sshKeyPaths`, `age.plugins`, and its own `age.keyFile` and `age.sshKeyPaths` — so a consumer who tunes sops-nix still tunes safix, and safix does not mint a second copy of an option surface that already exists.
+`placeholder` is read and will be empty: it is defined only under `mkIf (config.sops.templates != { })` and maps over `config.sops.secrets` (`modules/sops/templates/default.nix:116`, `:130-134`), and safix now leaves both empty, so the field is carried for schema parity rather than for content.
 
 ### D4. The entry is named, because a merged entry cannot depend on its other half
 
@@ -82,6 +100,11 @@ There is exactly one node in the activation DAG, so there is no edge to state, a
 
 Naming safix's entry `safixInstallSecrets` creates the second node, and with it the ability to write the edge.
 That is the whole of why the rename is load-bearing, and it costs nothing: nothing outside safix names this entry.
+
+Both mechanisms sit inside the module's `enable` gate, and that is an existing obligation reaching two new surfaces rather than a new one.
+`secret-consumption`'s requirement that a profile resolving nothing is inert — "no secrets, no identity configuration, no activation entry, and no unit" — is unmodified by this change and so now governs `system.activationScripts.safixInstallSecrets` and `systemd.services.safix-install-secrets` as well.
+Nothing holds it there today: `consumption.nix`'s inert probes are built from a home-manager profile (`:215`) and read `home.activation` and `systemd.user.services` (`:527-535`), so an ungated system-scope installer would pass every check in the suite.
+`tasks.md` group 9 adds the system-scope half.
 
 ### D5. The ordering itself is the consumer's to name, in both of the forms NixOS offers
 
@@ -179,7 +202,7 @@ It is the only one of the four that reaches all three hardcoded decisions, it ne
 ## Risks / Trade-offs
 
 Copying sops-nix's manifest schema is the largest one.
-It is bounded by the `-check-mode=manifest` validation at build time and by the key-set comparison against `inputs.sops-nix` in the check suite, and both fail on the commit that bumps the input rather than on a machine.
+It is bounded by the binary's own build-time check in whichever mode `validateSopsFiles` selects, and by the key-set comparison against `inputs.sops-nix` in the check suite, and both fail on the commit that bumps the input rather than on a machine.
 It is not eliminated: a field whose *meaning* changes without its name changing passes both.
 
 Owning the installer means owning its failure modes.
