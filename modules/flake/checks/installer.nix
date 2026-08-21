@@ -319,7 +319,7 @@
           cfg = manifestFixture.config.sops;
         })
           "-safix-parity"
-          manifestFixture.config.sops.secrets
+          manifestFixture.config.safix.installed
           { }
           { };
 

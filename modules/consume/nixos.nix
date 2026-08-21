@@ -39,18 +39,22 @@ in
 {
   imports = [ ./installer.nix ];
 
-  options.safix = common.sharedOptions {
-    inherit cfg;
+  options.safix =
+    common.sharedOptions {
+      inherit cfg;
 
-    # A system configuration knows its own host, and knows no person: which
-    # people's system-scope entries land here is exactly what this module is
-    # asked.
-    userDefault = null;
-    userDefaultText = lib.literalExpression "null";
+      # A system configuration knows its own host, and knows no person: which
+      # people's system-scope entries land here is exactly what this module is
+      # asked.
+      userDefault = null;
+      userDefaultText = lib.literalExpression "null";
 
-    hostnameDefault = config.networking.hostName;
-    hostnameDefaultText = lib.literalExpression "config.networking.hostName";
-  };
+      hostnameDefault = config.networking.hostName;
+      hostnameDefaultText = lib.literalExpression "config.networking.hostName";
+    }
+    // {
+      installed = common.installedOptionFor options;
+    };
 
   config = lib.mkMerge [
     {
@@ -78,18 +82,24 @@ in
     }
 
     (lib.mkIf cfg.enable {
-      sops = {
-        # An entry that declares no path parks at `<symlinkPath>/<name>`,
-        # minted here rather than left to the provisioner's `/run/secrets/<name>`
-        # default: the installer creates a symlink at any path that is not
-        # `<symlinkPath>/<name>` (`main.go:254-268`), so safix's store root and
-        # this default must move together or a moved root writes symlinks into
-        # the other store's directory.
-        secrets = lib.mapAttrs (
-          name: entry:
-          entry // lib.optionalAttrs (!(entry ? path)) { path = "${cfg.installer.symlinkPath}/${name}"; }
-        ) cfg.secrets;
+      # The resolved set arrives in safix's own typed option rather than in
+      # `sops.secrets`, which stays empty: two installers cannot both be right
+      # about one resolved set, and the provisioner gates its entire installer
+      # — activation entry, unit and key-source assertion — on its own secrets
+      # option being non-empty.
+      #
+      # An entry that declares no path parks at `<symlinkPath>/<name>`, minted
+      # here rather than left to the provisioner's `/run/secrets/<name>`
+      # default: the installer creates a symlink at any path that is not
+      # `<symlinkPath>/<name>` (`main.go:254-268`), so safix's store root and
+      # this default must move together or a moved root writes symlinks into
+      # the other store's directory.
+      safix.installed = lib.mapAttrs (
+        name: entry:
+        entry // lib.optionalAttrs (!(entry ? path)) { path = "${cfg.installer.symlinkPath}/${name}"; }
+      ) cfg.secrets;
 
+      sops = {
         age.keyFile = cfg.identity.keyFile;
 
         # The provisioner's own default is the host's ed25519 keys, and an empty

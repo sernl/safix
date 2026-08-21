@@ -385,7 +385,11 @@ in
           ];
         };
 
-      systemView = viewOf (nixosFor "bob").config.sops.secrets;
+      # Read off `safix.installed` rather than `sops.secrets`: the system scope
+      # no longer delivers through the provisioner's option, which safix leaves
+      # empty so that exactly one installer — safix's own — acts on the
+      # resolved set.
+      systemView = viewOf (nixosFor "bob").config.safix.installed;
 
       sortNames = lib.sort (a: b: a < b);
     in

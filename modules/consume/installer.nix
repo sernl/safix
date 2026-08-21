@@ -28,7 +28,12 @@ let
   cfg = config.safix;
   sopsCfg = config.sops;
 
-  installedEntries = builtins.attrValues config.sops.secrets;
+  # Read from the typed set rather than from the raw resolution, so every
+  # entry has passed the provisioner's own `secretType`
+  # (`modules/sops/default.nix:46`): its mode, owner, group, uid and gid
+  # coercions, its `sopsFile` default, and the `sopsFileHash` default that
+  # forces `builtins.hashFile "sha256"` under `validateSopsFiles` (`:51-53`).
+  installedEntries = builtins.attrValues config.safix.installed;
 
   # Copied from the provisioner's builder (`manifest-for.nix:11-28`), under the
   # same `validateSopsFiles` gate it carries there. The copy is load-bearing:

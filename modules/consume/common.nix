@@ -141,6 +141,33 @@ let
   optionDefaultPriority = (lib.mkOptionDefault null).priority;
 
   wasSet = option: option.highestPrio < optionDefaultPriority;
+  # System scope only: the resolved set typed by the secret provisioner's own
+  # entry type, read off the provisioner's option declaration in the same
+  # evaluation rather than restated, so every entry carries the provisioner's
+  # mode, owner, group, uid and gid coercions, its `sopsFile` default, and its
+  # `sopsFileHash` default, which forces `builtins.hashFile "sha256"` under
+  # `sops.validateSopsFiles`.
+  #
+  # The type carries exactly that and no more, settled by evaluating it: an
+  # entry whose `sopsFile` lies outside the nix store passes this type
+  # unchanged, because the provisioner's `pathNotInStore` is declared at
+  # `modules/sops/default.nix:19-25` and applied at one site, `sops.age.keyFile`
+  # (`:338`), never to a secret entry, whose `sopsFile` is plain
+  # `lib.types.path` (`:137`) — and the store-membership refusal lives at
+  # `manifest-for.nix:19-23`, inside the builder safix does not call. What
+  # refuses instead is the copy of that block in `./installer.nix`.
+  installedOptionFor =
+    options:
+    mkOption {
+      type = options.sops.secrets.type;
+      default = { };
+      description = ''
+        What safix resolved for this system configuration, typed by the secret
+        provisioner's own entry type and read back by safix's installer. This
+        is where the resolved set arrives: safix builds its installer manifest
+        from this option and leaves the provisioner's `sops.secrets` empty.
+      '';
+    };
 in
 {
   inherit
@@ -148,6 +175,7 @@ in
     flakelessMessage
     violationMessage
     noIdentityMessage
+    installedOptionFor
     wasSet
     ;
 
