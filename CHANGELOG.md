@@ -19,6 +19,23 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### The system scope installs its own secrets, into its own store
+
+This is a breaking change to the nix surface for any consumer reading `config.sops.secrets` on a system configuration: that option now reads empty.
+`config.safix.secrets` is unchanged and remains the resolved set, and `config.safix.installed` is the same set typed by the provisioner's own entry type, which is what safix's installer manifest is built from.
+
+The system module previously assigned its resolution into `sops.secrets` and inherited the provisioner's activation, whose store, activation-entry name, and identity rule are all hardcoded to being the only installer on the host.
+On a machine that already runs another secret store — clan owns `/run/secrets` as a ramfs mount and names its activation entry `setupSecrets`, as the provisioner does — all three collide, and the union of the two failure modes is every activation.
+safix now builds its own manifest and runs the provisioner's binary itself, with no patch to sops-nix: the two store roots are manifest fields the provisioner's own builder already overrides for its secrets-for-users submodule.
+
+- The store is `/run/safix.d` and `/run/safix`, movable through `safix.installer.secretsMountPoint` and `safix.installer.symlinkPath`, and an entry declaring no path parks at `/run/safix/<name>`; the root and that default are one claim, because a root moved alone writes into the foreign store instead of colliding with it.
+- The installer registers as `system.activationScripts.safixInstallSecrets`, or as `systemd.services.safix-install-secrets` where sysusers or userborn manage users, and the ordering against a foreign store is the consumer's to name: `safix.installer.afterActivation` and `safix.installer.afterUnits`, which on a clan host are `[ "setupSecrets" ]` and `[ "age-decrypt-secrets.service" ]`.
+- The system-scope identity is derived by safix — the ed25519 host keys outside safix's own store, with `safix.identity.deriveHostKeys` as the switch — rather than inherited from a provisioner default whose exclusion prefix empties the list on exactly the hosts this change exists for.
+- Where nothing is configured or derivable, evaluation refuses naming safix's identity options, because the provisioner's own key-source assertion is conditional on a secrets option safix now leaves empty and would never fire; before decrypting, the installer checks each identity path and refuses naming the ordering options as the remedy.
+- Coexistence covers safix's own installer and is demonstrated against the real binary; a consumer writing `sops.secrets` directly on such a host still collides.
+
+The eight `safix-installer-*` checks hold the mechanism, the manifest, the store, the sole installer, the ordering, the identity, the refusals, and the coexistence, and `safix-consumption-system` now holds the inert claim at the system scope's two new surfaces.
+
 ### The generator envelope is clan's, and what that costs
 
 This is a breaking change to the generator interface and to what a fragment written for safix 0.2 may assume.

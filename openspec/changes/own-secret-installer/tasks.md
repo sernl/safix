@@ -123,9 +123,9 @@ This is the only claim in the change that an evaluation cannot hold, because the
 
 ## 11. Verification
 
-- [ ] 11.1 `openspec validate own-secret-installer --strict`
-- [ ] 11.2 `openspec validate --all --strict`, compared against the baseline recorded when this change was proposed: 19 specs, plus this change, reported as 20 passed and 0 failed over 20 items
-- [ ] 11.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` lists every check named in groups 1 through 8
-- [ ] 11.4 `nix flake check` green
-- [ ] 11.5 `cargo test` green, confirming the rust suite is untouched by a change that has no command surface
-- [ ] 11.6 `rg` the whole tree for any real fleet identifier and confirm none
+- [x] 11.1 `openspec validate own-secret-installer --strict`
+- [x] 11.2 `openspec validate --all --strict`, compared against the baseline recorded when this change was proposed: 19 specs, plus this change, reported as 20 passed and 0 failed over 20 items
+- [x] 11.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` lists every check named in groups 1 through 8
+- [x] 11.4 `nix flake check` green
+- [x] 11.5 `cargo test` green, confirming the rust suite is untouched by a change that has no command surface
+- [x] 11.6 `rg` the whole tree for any real fleet identifier and confirm none
