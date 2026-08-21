@@ -20,6 +20,7 @@
 # builds over one fixture from both builders and compares.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -27,6 +28,24 @@
 let
   cfg = config.safix;
   sopsCfg = config.sops;
+
+  # The provisioner's activation-path environment (`modules/sops/default.nix:32-44`,
+  # `with-environment.nix`): the consumer's `sops.environment`, with HOME set
+  # because sops otherwise searches an unset $HOME for ssh keys and warns, and
+  # the age plugins put on PATH because an activation script has none.
+  activationEnvironment = sopsCfg.environment // {
+    HOME = "/var/empty";
+    PATH = lib.makeBinPath sopsCfg.age.plugins;
+  };
+
+  installerCall = ''
+    (
+    ${lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (n: v: "  export ${n}='${v}'") activationEnvironment
+    )}
+      ${sopsCfg.package}/bin/sops-install-secrets ${manifest}
+    )
+  '';
 
   # Read from the typed set rather than from the raw resolution, so every
   # entry has passed the provisioner's own `secretType`
@@ -138,6 +157,51 @@ in
         colliding with it.
       '';
     };
+
+    useSystemdActivation = lib.mkOption {
+      type = lib.types.bool;
+      default =
+        (options.systemd ? sysusers && config.systemd.sysusers.enable)
+        || (options.services ? userborn && config.services.userborn.enable);
+      defaultText = lib.literalExpression (
+        "(options.systemd ? sysusers && config.systemd.sysusers.enable) "
+        + "|| (options.services ? userborn && config.services.userborn.enable)"
+      );
+      description = ''
+        Whether safix installs its secrets from a systemd unit rather than
+        from an activation script. Defaults from the host's own
+        user-management options — the same condition the provisioner and its
+        secrets-for-users submodule both compute — and deliberately not from
+        `sops.useSystemdActivation`: that switch now governs an installer
+        safix no longer uses, and it is global to every consumer of the
+        provisioner in the tree, so reading it would couple safix's mechanism
+        to a foreign installer's setting.
+      '';
+    };
+
+    afterActivation = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "setupSecrets" ];
+      description = ''
+        Activation steps safix's installer runs after, on a host using
+        activation-script installation. Named by the consumer: safix reads no
+        option of another secret store to discover its installer, so ordering
+        against one is stated here. Naming nothing is supported and leaves
+        the installer unordered.
+      '';
+    };
+
+    afterUnits = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "age-decrypt-secrets.service" ];
+      description = ''
+        Units safix's installer runs after, on a host using systemd-unit
+        installation. The unit-mechanism counterpart of
+        `safix.installer.afterActivation`, with the same contract.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -145,5 +209,65 @@ in
     # (`modules/sops/default.nix:534`), so checks read one concrete attribute
     # rather than rebuilding the derivation each time.
     system.build.safix-manifest = manifest;
+
+    # The name is load-bearing. Both the provisioner and clan register their
+    # installers as `setupSecrets`, and two definitions of one step name merge
+    # into a single node whose halves run in definition order — one node in
+    # the activation DAG has no edge to state. An entry named
+    # `safixInstallSecrets` is its own node, which is what makes the
+    # consumer-named ordering below expressible at all.
+    system.activationScripts.safixInstallSecrets = lib.mkIf (!cfg.installer.useSystemdActivation) (
+      lib.stringAfter
+        (
+          [
+            "specialfs"
+            "users"
+            "groups"
+          ]
+          ++ cfg.installer.afterActivation
+        )
+        ''
+          [ -e /run/current-system ] || echo installing safix secrets...
+          ${installerCall}
+        ''
+      // lib.optionalAttrs (config.system ? dryActivationScript) {
+        supportsDryActivation = true;
+      }
+    );
+
+    # The unit form, mirroring the provisioner's wiring
+    # (`modules/sops/default.nix:467-495`) including its
+    # `sysinit-reactivation.target` relationship, so the unit re-runs on a
+    # `nixos-rebuild switch` rather than only at boot.
+    systemd.services.safix-install-secrets = lib.mkIf cfg.installer.useSystemdActivation {
+      wantedBy = [ "sysinit.target" ];
+      after = [
+        "local-fs.target"
+        "systemd-sysusers.service"
+        "userborn.service"
+      ]
+      ++ cfg.installer.afterUnits;
+      requiredBy = [ "sysinit-reactivation.target" ];
+      before = [ "sysinit-reactivation.target" ];
+      environment = sopsCfg.environment // {
+        SOPS_RESTART_UNITS_VIA_SYSTEMCTL = "1";
+      };
+      path = sopsCfg.age.plugins;
+
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = [ "${sopsCfg.package}/bin/sops-install-secrets ${manifest}" ];
+        RemainAfterExit = true;
+      };
+      unitConfig = {
+        DefaultDependencies = "no";
+        RequiresMountsFor = lib.concatLists [
+          (lib.lists.optional (sopsCfg.gnupg.home != null) sopsCfg.gnupg.home)
+          sopsCfg.gnupg.sshKeyPaths
+          (lib.lists.optional (sopsCfg.age.keyFile != null) sopsCfg.age.keyFile)
+          sopsCfg.age.sshKeyPaths
+        ];
+      };
+    };
   };
 }

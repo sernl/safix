@@ -60,14 +60,14 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 
 ## 5. The named entry, both mechanisms, and the ordering options
 
-- [ ] 5.1 Register the installer as `system.activationScripts.safixInstallSecrets`, and record in the file why the name is load-bearing: two definitions of one name are one node with no edge to state
-- [ ] 5.2 Add the systemd form as `systemd.services.safix-install-secrets`, mirroring the provisioner's unit wiring at `modules/sops/default.nix:467-495` including its `sysinit-reactivation.target` relationship, so the unit re-runs on a switch
-- [ ] 5.3 Select between the two from `config.systemd.sysusers.enable` and `config.services.userborn.enable`, the same condition the provisioner and clan both compute (`default.nix:321-323`, `secrets-for-users/default.nix:28-30`), with `safix.installer.useSystemdActivation` as the override, and record why the selection is not read from `sops.useSystemdActivation`
-- [ ] 5.4 Add `safix.installer.afterActivation` and `safix.installer.afterUnits`, both `listOf str` defaulting to `[ ]`, and wire each into the mechanism selected in 5.3
-- [ ] 5.5 Add `safix-installer-ordering` asserting, off two evaluated fixture configurations, that the activation form's step is its own node and carries the named dependency in its `deps`, and that the unit form carries the named unit in its `after`
-- [ ] 5.6 Assert in the same check that a fixture naming neither option still evaluates and registers the installer with no foreign dependency, so an unordered host is a supported configuration rather than an omission
-- [ ] 5.7 Severity drill: naming the step `setupSecrets` again turns 5.5 red on the own-node assertion; dropping the `deps` wiring turns it red on the dependency assertion
-- [ ] 5.8 Verify: `nix build .#checks.x86_64-linux.safix-installer-ordering` green, and both drills observed
+- [x] 5.1 Register the installer as `system.activationScripts.safixInstallSecrets`, and record in the file why the name is load-bearing: two definitions of one name are one node with no edge to state
+- [x] 5.2 Add the systemd form as `systemd.services.safix-install-secrets`, mirroring the provisioner's unit wiring at `modules/sops/default.nix:467-495` including its `sysinit-reactivation.target` relationship, so the unit re-runs on a switch
+- [x] 5.3 Select between the two from `config.systemd.sysusers.enable` and `config.services.userborn.enable`, the same condition the provisioner and clan both compute (`default.nix:321-323`, `secrets-for-users/default.nix:28-30`), with `safix.installer.useSystemdActivation` as the override, and record why the selection is not read from `sops.useSystemdActivation`
+- [x] 5.4 Add `safix.installer.afterActivation` and `safix.installer.afterUnits`, both `listOf str` defaulting to `[ ]`, and wire each into the mechanism selected in 5.3
+- [x] 5.5 Add `safix-installer-ordering` asserting, off two evaluated fixture configurations, that the activation form's step is its own node and carries the named dependency in its `deps`, and that the unit form carries the named unit in its `after`
+- [x] 5.6 Assert in the same check that a fixture naming neither option still evaluates and registers the installer with no foreign dependency, so an unordered host is a supported configuration rather than an omission
+- [x] 5.7 Severity drill: naming the step `setupSecrets` again turns 5.5 red on the own-node assertion; dropping the `deps` wiring turns it red on the dependency assertion
+- [x] 5.8 Verify: `nix build .#checks.x86_64-linux.safix-installer-ordering` green, and both drills observed
 
 ## 6. The identity the system scope derives
 

@@ -64,6 +64,19 @@
 # collide: two entries of one person declaring one path still refuse, and a
 # minted default, being a function of the name, cannot.
 #
+# ── the named entry, both mechanisms, and the consumer's ordering ──
+# `safix-installer-ordering` evaluates three fixtures. One carries a foreign
+# store's step under the shared `setupSecrets` name and names it through
+# `safix.installer.afterActivation`: safix's step is its own node beside it,
+# carries the name in its `deps`, and the foreign node's text never gains the
+# installer call. One enables userborn, so the selection follows the host's
+# own user-management options — not `sops.useSystemdActivation`, which now
+# governs an installer safix does not use — and the unit carries the unit
+# named by `safix.installer.afterUnits` in its `after`, plus the
+# `sysinit-reactivation.target` wiring that re-runs it on a switch. And the
+# unadorned fixture registers the installer with no foreign dependency, so a
+# host with no foreign store is a supported configuration.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -76,7 +89,10 @@
 # mode refuses, which is the measured evidence the two modes are not
 # interchangeable. Dropping the minted path default turns the store check's
 # path map red on every path-less entry, at `/run/secrets/<name>` — the
-# silent-write combination the map exists to forbid.
+# silent-write combination the map exists to forbid. Registering the installer
+# as `setupSecrets` again turns the ordering check red on the own-node facts —
+# the installer call lands inside the shared node's text — and dropping the
+# `afterActivation` wiring turns exactly the dependency assertion red.
 {
   config,
   inputs,
@@ -406,6 +422,148 @@
           }
         ) { }
       );
+
+      mkStructuralCheck = import ./mk-structural-check.nix pkgs;
+
+      # A host that carries a foreign store's activation step under the name
+      # both colliding packages use, and names it through safix's option.
+      orderedActivationFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            sops.validateSopsFiles = false;
+            system.activationScripts.setupSecrets =
+              lib.stringAfter
+                [
+                  "specialfs"
+                  "users"
+                  "groups"
+                ]
+                ''
+                  echo safix-fixture-foreign-store-half
+                '';
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+              installer.afterActivation = [ "setupSecrets" ];
+            };
+          }
+        ];
+      };
+
+      # A host whose user management moves secret installation into a unit,
+      # so the selection is exercised from the host's own option rather than
+      # from safix's override, and the ordering is a unit ordering.
+      orderedUnitFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            sops.validateSopsFiles = false;
+            services.userborn.enable = true;
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+              installer.afterUnits = [ "age-decrypt-secrets.service" ];
+            };
+          }
+        ];
+      };
+
+      orderingFacts =
+        let
+          activationScripts = orderedActivationFixture.config.system.activationScripts;
+          safixStep =
+            activationScripts.safixInstallSecrets or {
+              deps = [ ];
+              text = "";
+            };
+          unit =
+            orderedUnitFixture.config.systemd.services.safix-install-secrets or {
+              after = [ ];
+              wantedBy = [ ];
+              requiredBy = [ ];
+              before = [ ];
+              serviceConfig = { };
+            };
+          unorderedScripts = manifestFixture.config.system.activationScripts;
+          unorderedStep =
+            unorderedScripts.safixInstallSecrets or {
+              deps = [ ];
+            };
+        in
+        {
+          actual = {
+            activation = {
+              ownNode = (activationScripts ? safixInstallSecrets) && (activationScripts ? setupSecrets);
+              foreignStepNotMerged = !(lib.hasInfix "sops-install-secrets" activationScripts.setupSecrets.text);
+              deps = lib.sort (a: b: a < b) (lib.unique safixStep.deps);
+              runsTheInstaller = lib.hasInfix "bin/sops-install-secrets" safixStep.text;
+              noUnit = orderedActivationFixture.config.systemd.services ? safix-install-secrets;
+            };
+
+            unit = {
+              exists = orderedUnitFixture.config.systemd.services ? safix-install-secrets;
+              afterNamedUnit = builtins.elem "age-decrypt-secrets.service" unit.after;
+              wantedBySysinit = builtins.elem "sysinit.target" unit.wantedBy;
+              rerunsOnSwitch =
+                builtins.elem "sysinit-reactivation.target" unit.requiredBy
+                && builtins.elem "sysinit-reactivation.target" unit.before;
+              runsTheInstaller = lib.any (lib.hasInfix "bin/sops-install-secrets") (
+                lib.toList unit.serviceConfig.ExecStart
+              );
+              noActivationStep = orderedUnitFixture.config.system.activationScripts ? safixInstallSecrets;
+            };
+
+            # A fixture naming neither option: registered, and unordered
+            # against anything foreign, so a host with no foreign store is a
+            # supported configuration rather than an omission.
+            unordered = {
+              registered = unorderedScripts ? safixInstallSecrets;
+              deps = lib.sort (a: b: a < b) (lib.unique unorderedStep.deps);
+              noUnit = manifestFixture.config.systemd.services ? safix-install-secrets;
+            };
+          };
+
+          expected = {
+            activation = {
+              ownNode = true;
+              foreignStepNotMerged = true;
+              deps = [
+                "groups"
+                "setupSecrets"
+                "specialfs"
+                "users"
+              ];
+              runsTheInstaller = true;
+              noUnit = false;
+            };
+
+            unit = {
+              exists = true;
+              afterNamedUnit = true;
+              wantedBySysinit = true;
+              rerunsOnSwitch = true;
+              runsTheInstaller = true;
+              noActivationStep = false;
+            };
+
+            unordered = {
+              registered = true;
+              deps = [
+                "groups"
+                "specialfs"
+                "users"
+              ];
+              noUnit = false;
+            };
+          };
+        };
     in
     {
       # Every claim here evaluates a NixOS system configuration, so the check
@@ -559,6 +717,12 @@
 
               touch $out
             '';
+
+        safix-installer-ordering = mkStructuralCheck {
+          name = "safix-installer-ordering";
+          actual = orderingFacts.actual;
+          expected = orderingFacts.expected;
+        };
       };
     };
 }
