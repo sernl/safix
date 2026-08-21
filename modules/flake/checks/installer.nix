@@ -51,6 +51,19 @@
 # selects the checking branch that never reads ciphertext, and the branch
 # itself stays the module's conditional rather than a value this check pins.
 #
+# ── the store and the entry default, one claim ──
+# `safix-installer-store` reads the built manifest of the same fixture twice,
+# once at the default roots and once with both moved through
+# `safix.installer.*`, and holds one map per fixture: every entry that
+# declared a path keeps it, and every entry that did not parks at
+# `<symlinkPath>/<name>` under that fixture's own root. The map is one claim
+# deliberately — the installer symlinks any entry path that is not
+# `<symlinkPath>/<name>` (`main.go:254-268`), so a root moved without the
+# entry default does not collide with a foreign store, it writes into it. The
+# path-collision refusal is held beside it over the smallest fleet that can
+# collide: two entries of one person declaring one path still refuse, and a
+# minted default, being a function of the name, cannot.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -61,7 +74,9 @@
 # build failure; and pinning the check mode to `manifest` over an entry whose
 # declared key is absent from its ciphertext builds green where `sopsfile`
 # mode refuses, which is the measured evidence the two modes are not
-# interchangeable.
+# interchangeable. Dropping the minted path default turns the store check's
+# path map red on every path-less entry, at `/run/secrets/<name>` — the
+# silent-write combination the map exists to forbid.
 {
   config,
   inputs,
@@ -307,6 +322,90 @@
           manifestFixture.config.sops.secrets
           { }
           { };
+
+      # The same fixture with both roots moved through the options, so the
+      # settability claim and the root-and-default coupling are measured at the
+      # option rather than at the literal.
+      movedFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            sops.validateSopsFiles = false;
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+              installer = {
+                secretsMountPoint = "/run/safix-moved.d";
+                symlinkPath = "/run/safix-moved";
+              };
+            };
+          }
+        ];
+      };
+
+      movedManifest = movedFixture.config.system.build.safix-manifest;
+
+      # name -> the path the manifest must carry, read off the pre-typed
+      # resolution: an entry that declared a path keeps it, and a path-less
+      # entry parks under the fixture's own symlink path. Holding both against
+      # the built manifest in one map is what makes the root and the entry
+      # default one claim rather than two.
+      entryPathContract =
+        fixture:
+        lib.mapAttrs (
+          name: entry: entry.path or "${fixture.config.safix.installer.symlinkPath}/${name}"
+        ) fixture.config.safix.secrets;
+
+      resolve = import ../safix/resolve.nix { inherit lib; };
+      fleetTypes = import ../safix/types.nix { inherit lib; };
+
+      typedRecords =
+        optionType: definition:
+        (lib.evalModules {
+          modules = [
+            { options.value = lib.mkOption { type = optionType; }; }
+            { value = definition; }
+          ];
+        }).config.value;
+
+      fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
+
+      # Two entries of one person declaring one path, the smallest fleet the
+      # collision refusal can fire on, so the minted default's inability to
+      # collide is held beside the declared paths' refusal staying in force.
+      collidingFleet = {
+        users = typedRecords (lib.types.attrsOf fleetTypes.profile) {
+          alice = {
+            recipient = "age1fixture-alice-0000000000000000000000000000000000";
+            private = {
+              first.path = _cfg: "/var/lib/safix-fixture/one";
+              second.path = _cfg: "/var/lib/safix-fixture/one";
+            };
+          };
+        };
+        catalogue = typedRecords (lib.types.attrsOf fleetTypes.entry) { };
+        machines = typedRecords (lib.types.attrsOf fleetTypes.machine) { };
+        services = typedRecords (lib.types.attrsOf fleetTypes.service) { };
+        groups = typedRecords (lib.types.attrsOf fleetTypes.group) { };
+        organizations = typedRecords (lib.types.attrsOf fleetTypes.organization) { };
+        silos = typedRecords (lib.types.attrsOf fleetTypes.silo) { };
+      };
+
+      collisionStillRefused = fires (
+        resolve.materializeFor (
+          collidingFleet
+          // {
+            root = "";
+            hostname = "somewhere";
+            tags = [ ];
+            user = "alice";
+            scope = "system";
+          }
+        ) { }
+      );
     in
     {
       # Every claim here evaluates a NixOS system configuration, so the check
@@ -406,6 +505,57 @@
                 echo "safix-installer-manifest: logging key sets differ from the provisioner's builder"
                 exit 1
               fi
+
+              touch $out
+            '';
+
+        safix-installer-store =
+          pkgs.runCommand "safix-installer-store"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              safixManifest = safixManifest;
+              movedManifest = movedManifest;
+              expectedPathsJson = builtins.toJSON (entryPathContract manifestFixture);
+              movedPathsJson = builtins.toJSON (entryPathContract movedFixture);
+              collisionRefused = builtins.toJSON collisionStillRefused;
+              passAsFile = [
+                "expectedPathsJson"
+                "movedPathsJson"
+              ];
+              meta.description = "the store roots and the per-entry path default, held as one claim";
+            }
+            ''
+              [ "$collisionRefused" = true ] || {
+                echo "safix-installer-store: two entries declaring one path no longer refuse"
+                exit 1
+              }
+
+              [ "$(jq -r .secretsMountPoint "$safixManifest")" = /run/safix.d ] || {
+                echo "safix-installer-store: default secretsMountPoint is not safix's own"
+                exit 1
+              }
+              [ "$(jq -r .symlinkPath "$safixManifest")" = /run/safix ] || {
+                echo "safix-installer-store: default symlinkPath is not safix's own"
+                exit 1
+              }
+              [ "$(jq -r .secretsMountPoint "$movedManifest")" = /run/safix-moved.d ] || {
+                echo "safix-installer-store: secretsMountPoint did not follow its option"
+                exit 1
+              }
+              [ "$(jq -r .symlinkPath "$movedManifest")" = /run/safix-moved ] || {
+                echo "safix-installer-store: symlinkPath did not follow its option"
+                exit 1
+              }
+
+              for pair in "$safixManifest=$expectedPathsJsonPath" "$movedManifest=$movedPathsJsonPath"; do
+                manifest="''${pair%%=*}"
+                contract="''${pair#*=}"
+                if ! diff -u <(jq -S . "$contract") <(jq -S '.secrets | map({ (.name): .path }) | add' "$manifest"); then
+                  echo ""
+                  echo "safix-installer-store: entry paths broke the root-and-default contract in $manifest"
+                  exit 1
+                fi
+              done
 
               touch $out
             '';

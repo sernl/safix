@@ -2127,8 +2127,10 @@ let
       # the defect belongs to the declarations, not to the configuration that
       # happens to import them, so it is refused here for every user and every
       # host rather than only where a check has a table. Entries handed no path
-      # park at the provisioner's own default, which is a function of the name
-      # and so cannot collide; only a declared path can.
+      # park at the consuming scope's default — the system module mints
+      # `<symlinkPath>/<name>` in safix's own store, the user scope keeps the
+      # provisioner's — and either is a function of the name and so cannot
+      # collide; only a declared path can.
       declaredPaths = lib.concatLists (
         lib.mapAttrsToList (
           name: secret:

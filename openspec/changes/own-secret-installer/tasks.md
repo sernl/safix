@@ -40,12 +40,12 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 
 ## 3. The store roots and the per-entry path default, which move together
 
-- [ ] 3.1 Set the manifest's `secretsMountPoint` to `/run/safix.d` and its `symlinkPath` to `/run/safix`, both settable through options of the consumption namespace so a consumer with a reason can move them
-- [ ] 3.2 Default every resolved entry that declares no path to `<symlinkPath>/<name>`, replacing reliance on the provisioner's `/run/secrets/<name>` default (`modules/sops/default.nix:73-80`), and update the comment at `modules/flake/safix/resolve.nix:2130-2131` that records where a path-less entry parks
-- [ ] 3.3 Add `safix-installer-store` asserting, off `system.build.safix-manifest`, that the two roots are safix's and that every entry's path is inside the symlink path
-- [ ] 3.4 Assert in the same check that an entry declaring a path of its own keeps it, and that the path-collision refusal at `resolve.nix:2142-2164` is unchanged, by resolving a fixture whose two entries declare one path and asserting it still throws
-- [ ] 3.5 Severity drill, and this is the one that matters most in this group: move the root without moving the entry default and assert the check goes red, because that combination is what makes `symlinkSecretsAndTemplates` (`main.go:254-268`) write a symlink into the other store's directory instead of colliding with it
-- [ ] 3.6 Verify: `nix build .#checks.x86_64-linux.safix-installer-store` green, and the drill in 3.5 observed red
+- [x] 3.1 Set the manifest's `secretsMountPoint` to `/run/safix.d` and its `symlinkPath` to `/run/safix`, both settable through options of the consumption namespace so a consumer with a reason can move them
+- [x] 3.2 Default every resolved entry that declares no path to `<symlinkPath>/<name>`, replacing reliance on the provisioner's `/run/secrets/<name>` default (`modules/sops/default.nix:73-80`), and update the comment at `modules/flake/safix/resolve.nix:2130-2131` that records where a path-less entry parks
+- [x] 3.3 Add `safix-installer-store` asserting, off `system.build.safix-manifest`, that the two roots are safix's and that every entry's path is inside the symlink path
+- [x] 3.4 Assert in the same check that an entry declaring a path of its own keeps it, and that the path-collision refusal at `resolve.nix:2142-2164` is unchanged, by resolving a fixture whose two entries declare one path and asserting it still throws
+- [x] 3.5 Severity drill, and this is the one that matters most in this group: move the root without moving the entry default and assert the check goes red, because that combination is what makes `symlinkSecretsAndTemplates` (`main.go:254-268`) write a symlink into the other store's directory instead of colliding with it
+- [x] 3.6 Verify: `nix build .#checks.x86_64-linux.safix-installer-store` green, and the drill in 3.5 observed red
 
 ## 4. One installer, and the validation that has to survive leaving the provisioner's option
 

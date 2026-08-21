@@ -79,7 +79,16 @@ in
 
     (lib.mkIf cfg.enable {
       sops = {
-        secrets = cfg.secrets;
+        # An entry that declares no path parks at `<symlinkPath>/<name>`,
+        # minted here rather than left to the provisioner's `/run/secrets/<name>`
+        # default: the installer creates a symlink at any path that is not
+        # `<symlinkPath>/<name>` (`main.go:254-268`), so safix's store root and
+        # this default must move together or a moved root writes symlinks into
+        # the other store's directory.
+        secrets = lib.mapAttrs (
+          name: entry:
+          entry // lib.optionalAttrs (!(entry ? path)) { path = "${cfg.installer.symlinkPath}/${name}"; }
+        ) cfg.secrets;
 
         age.keyFile = cfg.identity.keyFile;
 

@@ -65,8 +65,8 @@ let
           # `safix-installer-manifest` holds this file to.
           templates = [ ];
 
-          secretsMountPoint = "/run/safix.d";
-          symlinkPath = "/run/safix";
+          secretsMountPoint = cfg.installer.secretsMountPoint;
+          symlinkPath = cfg.installer.symlinkPath;
           keepGenerations = sopsCfg.keepGenerations;
           gnupgHome = sopsCfg.gnupg.home;
           sshKeyPaths = sopsCfg.gnupg.sshKeyPaths;
@@ -105,6 +105,36 @@ let
       };
 in
 {
+  options.safix.installer = {
+    secretsMountPoint = lib.mkOption {
+      type = lib.types.str;
+      default = "/run/safix.d";
+      description = ''
+        Where safix's installer keeps its generation directories. A manifest
+        field rather than a provisioner option: `sops-install-secrets` reads it
+        from the manifest JSON, so this store is safix's own and disjoint from
+        any store another component of the host owns.
+      '';
+    };
+
+    symlinkPath = lib.mkOption {
+      type = lib.types.str;
+      default = "/run/safix";
+      description = ''
+        Where safix's installed secrets appear: a symlink to the latest
+        generation under `safix.installer.secretsMountPoint`, and the directory
+        every resolved entry that declares no path of its own parks under, as
+        `''${symlinkPath}/<name>`.
+
+        The root and that per-entry default move together: the installer
+        creates a symlink at any entry path that is not
+        `<symlinkPath>/<name>`, so a moved root with an unmoved default would
+        write safix's symlinks into the other store's directory instead of
+        colliding with it.
+      '';
+    };
+  };
+
   config = lib.mkIf cfg.enable {
     # Mirrors the provisioner's `system.build.sops-nix-manifest`
     # (`modules/sops/default.nix:534`), so checks read one concrete attribute
