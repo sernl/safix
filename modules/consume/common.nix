@@ -88,10 +88,10 @@ let
   # User scope only, and named here rather than in ./home.nix for the same
   # reason as the two above: a check can read a string off this file without
   # evaluating a module, and a message assembled inside a `throw` is one nothing
-  # can hold. It names the user scope literally because there is no system-scope
-  # counterpart — sops-nix's NixOS module defaults `sops.age.sshKeyPaths` to the
-  # ed25519 keys of `config.services.openssh.hostKeys`, so a system
-  # configuration that names no identity usually still has one.
+  # can hold. It names the user scope literally because the system scope's
+  # identity story is different twice over and has its own message below: there
+  # an identity is usually derivable from the host's ssh keys, and the refusal
+  # exists because nothing else would fire at all.
   noIdentityMessage =
     { cfg, resolved }:
     let
@@ -124,8 +124,10 @@ let
       arrival here.
 
       safix refuses first so that the refusal names these two options. The next
-      thing to refuse would be sops-nix's own key-source assertion, which names
-      its five and neither of safix's.
+      thing to refuse would be sops-nix's own key-source assertion, whose
+      condition tests four of its options, whose message names three, and whose
+      block's two assertions together name four distinct options — none of them
+      safix's.
     '';
   # Whether a consumer wrote a definition for an option, rather than the
   # option's own default standing in for one.
@@ -141,6 +143,79 @@ let
   optionDefaultPriority = (lib.mkOptionDefault null).priority;
 
   wasSet = option: option.highestPrio < optionDefaultPriority;
+  # System scope only, beside `noIdentityMessage` for the same reason: a check
+  # can read the string without evaluating a module. The system scope has its
+  # own message because its identity story differs twice over — an identity is
+  # usually derivable from the host's ssh keys, and the refusal that would
+  # otherwise fire does not: the provisioner's key-source assertion sits
+  # inside `mkIf (cfg.secrets != { })` (`modules/sops/default.nix:432-441`),
+  # and safix now leaves that option empty, so without safix's own refusal
+  # nothing refuses at all and the configuration evaluates green while
+  # installing nothing decryptable.
+  noSystemIdentityMessage =
+    { cfg, resolved }:
+    let
+      subject = if cfg.machine or null != null then cfg.machine else cfg.user;
+    in
+    ''
+      safix: ${toString (builtins.length (builtins.attrNames resolved))} secret(s) resolve for ${subject} on this system
+      configuration, and no decryption identity is configured or derivable.
+
+      Name one:
+
+        safix.identity.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+
+      or set safix.identity.keyFile to an age key file this machine holds — or
+      leave safix.identity.deriveHostKeys on and let openssh manage host keys
+      outside safix's own store, which is what the derivation reads.
+
+      safix refuses first because nothing else will: the secret provisioner's
+      key-source assertion is conditional on its own secrets option, which
+      safix leaves empty, so without this refusal the configuration evaluates
+      green and installs nothing decryptable.
+    '';
+
+  # The two refusals safix's manifest builder copies from the provisioner's
+  # (`manifest-for.nix:11-28`), named here for the reason every message above
+  # is: a check can read what a consumer would see, where a string assembled
+  # inside a `throw` is one nothing can hold. Without this copy nothing
+  # refuses at all — the type these entries pass through carries neither
+  # refusal, and the builder that does lives in the provisioner's tree, which
+  # safix no longer calls.
+  sopsFileMissingMessage =
+    { name, file }: "safix: cannot find '${file}', the sops file of resolved entry '${name}'";
+
+  sopsFileOutsideStoreMessage =
+    { name, file }:
+    "safix: '${file}', the sops file of resolved entry '${name}', is not in the Nix store. Add it to the Nix store or set sops.validateSopsFiles to false";
+
+  # System scope only: the resolved set typed by the secret provisioner's own
+  # entry type, read off the provisioner's option declaration in the same
+  # evaluation rather than restated, so every entry carries the provisioner's
+  # mode, owner, group, uid and gid coercions, its `sopsFile` default, and its
+  # `sopsFileHash` default, which forces `builtins.hashFile "sha256"` under
+  # `sops.validateSopsFiles`.
+  #
+  # The type carries exactly that and no more, settled by evaluating it: an
+  # entry whose `sopsFile` lies outside the nix store passes this type
+  # unchanged, because the provisioner's `pathNotInStore` is declared at
+  # `modules/sops/default.nix:19-25` and applied at one site, `sops.age.keyFile`
+  # (`:338`), never to a secret entry, whose `sopsFile` is plain
+  # `lib.types.path` (`:137`) — and the store-membership refusal lives at
+  # `manifest-for.nix:19-23`, inside the builder safix does not call. What
+  # refuses instead is the copy of that block in `./installer.nix`.
+  installedOptionFor =
+    options:
+    mkOption {
+      type = options.sops.secrets.type;
+      default = { };
+      description = ''
+        What safix resolved for this system configuration, typed by the secret
+        provisioner's own entry type and read back by safix's installer. This
+        is where the resolved set arrives: safix builds its installer manifest
+        from this option and leaves the provisioner's `sops.secrets` empty.
+      '';
+    };
 in
 {
   inherit
@@ -148,6 +223,10 @@ in
     flakelessMessage
     violationMessage
     noIdentityMessage
+    noSystemIdentityMessage
+    sopsFileMissingMessage
+    sopsFileOutsideStoreMessage
+    installedOptionFor
     wasSet
     ;
 

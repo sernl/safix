@@ -76,6 +76,13 @@
 # Pointing the second collision copy at the first's path fails `twoPaths`, which
 # is the drill for the check that the export shape rests on: it is only evidence
 # while the two paths really are two.
+# The system-scope inert probes have one drill per mechanism, each moving the
+# real definition outside the enable gate while keeping its own selection
+# condition: the ungated activation entry fails `inert.activationHost.step`
+# alone — the userborn host stays green because its selection would pick the
+# unit — and the ungated unit fails `inert.systemdHost.unit` alone, and
+# neither reddens anything else in the suite, which is the evidence the gate
+# is what holds the requirement rather than an accident of the fixture.
 {
   config,
   inputs,
@@ -368,8 +375,8 @@ in
         scope = "system";
       };
 
-      nixosFor =
-        user:
+      nixosWith =
+        user: extra:
         inputs.nixpkgs.lib.nixosSystem {
           modules = [
             config.flake.nixosModules.default
@@ -377,15 +384,39 @@ in
               nixpkgs.hostPlatform = system;
               networking.hostName = "server";
               system.stateVersion = "24.05";
+
+              # The identity the fixture decrypts with is the derived one: with
+              # openssh managing host keys outside safix's store, the system
+              # scope needs no named identity, which is the arrangement the
+              # README documents.
+              services.openssh.enable = true;
               safix = {
                 lib = safix;
                 inherit user;
               };
             }
-          ];
+          ]
+          ++ extra;
         };
 
-      systemView = viewOf (nixosFor "bob").config.sops.secrets;
+      nixosFor = user: nixosWith user [ ];
+
+      # The system-scope half of the inert claim: carol resolves nothing on
+      # this host, and the requirement that a profile resolving nothing
+      # defines no activation entry and no unit now governs two new surfaces,
+      # `system.activationScripts.safixInstallSecrets` and
+      # `systemd.services.safix-install-secrets`. Both hosts are probed
+      # because each mechanism only registers where its selection holds: a
+      # drill that ungates the unit can only redden a host that would select
+      # the unit form, which is what the userborn variant is for.
+      inertSystem = nixosFor "carol";
+      inertSystemdSystem = nixosWith "carol" [ { services.userborn.enable = true; } ];
+
+      # Read off `safix.installed` rather than `sops.secrets`: the system scope
+      # no longer delivers through the provisioner's option, which safix leaves
+      # empty so that exactly one installer — safix's own — acts on the
+      # resolved set.
+      systemView = viewOf (nixosFor "bob").config.safix.installed;
 
       sortNames = lib.sort (a: b: a < b);
     in
@@ -409,6 +440,28 @@ in
                 "mode"
               ] systemView.bob-service;
               hostnameFromTheHost = (nixosFor "bob").config.safix.hostname;
+
+              inert = {
+                activationHost = {
+                  step = inertSystem.config.system.activationScripts ? safixInstallSecrets;
+                  unit = inertSystem.config.systemd.services ? safix-install-secrets;
+                };
+                systemdHost = {
+                  step = inertSystemdSystem.config.system.activationScripts ? safixInstallSecrets;
+                  unit = inertSystemdSystem.config.systemd.services ? safix-install-secrets;
+                };
+
+                # The identity fields the user-scope probe also reads. Limited
+                # severity here, recorded rather than implied: an ungated
+                # identity definition writes the same values these defaults
+                # already hold — a null keyFile, and a derived list equal to
+                # the provisioner's own openssh default — so the two mechanism
+                # probes above are what carry the requirement.
+                identity = {
+                  keyFile = inertSystem.config.sops.age.keyFile;
+                  sshKeyPaths = inertSystem.config.sops.age.sshKeyPaths;
+                };
+              };
 
               # Selection is custody and custody has no scope: what arrives at the
               # system scope is exactly what the scope-free resolver selected.
@@ -435,6 +488,22 @@ in
                 mode = "0400";
               };
               hostnameFromTheHost = "server";
+
+              inert = {
+                activationHost = {
+                  step = false;
+                  unit = false;
+                };
+                systemdHost = {
+                  step = false;
+                  unit = false;
+                };
+                identity = {
+                  keyFile = null;
+                  sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                };
+              };
+
               selectionIsScopeFree = true;
             };
           };

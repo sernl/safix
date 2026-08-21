@@ -76,6 +76,7 @@
         ./modules/flake/checks/envelope.nix
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/generators.nix
+        ./modules/flake/checks/installer.nix
         ./modules/flake/checks/keepassxc.nix
         ./modules/flake/checks/materialization.nix
         ./modules/flake/checks/namespace.nix

@@ -285,11 +285,11 @@ in
 
               # A machine subject's recipient is `ssh-to-age` of a host key, so a
               # host that has one is the case this shape stands for. It is also
-              # what makes sops-nix's own identity default non-empty:
-              # `sops.age.sshKeyPaths` takes the ed25519 host keys of a host
-              # running sshd and nothing otherwise, which is the difference
-              # between a machine that opens its entries with the identity it
-              # already had and one that has no identity at all.
+              # what safix's identity derivation reads: the ed25519 host keys of
+              # a host running sshd, excluding only safix's own store, and
+              # nothing otherwise — the difference between a machine that opens
+              # its entries with the identity it already had and one whose
+              # resolution refuses for want of any.
               services.openssh.enable = true;
               safix = {
                 lib = safix;
@@ -347,7 +347,7 @@ in
         {
           person =
             if nixos then
-              viewOf (nixosFor { user = "alice"; } projection).sops.secrets
+              viewOf (nixosFor { user = "alice"; } projection).safix.installed
             else
               viewOf
                 (home {
@@ -358,7 +358,7 @@ in
                 }).sops.secrets;
           machine =
             if nixos then
-              viewOf (nixosFor { machine = "deck"; } projection).sops.secrets
+              viewOf (nixosFor { machine = "deck"; } projection).safix.installed
             else
               viewOf
                 (home {
@@ -374,7 +374,7 @@ in
           # name and nests it, on each shape, rather than that the three agree.
           machineRaw =
             if nixos then
-              (nixosFor { machine = "deck"; } projection).sops.secrets
+              (nixosFor { machine = "deck"; } projection).safix.installed
             else
               (home {
                 subject = {
@@ -414,7 +414,7 @@ in
           safix = projectionOf broken.${fleetName};
         in
         {
-          nixos = fires (nixosFor { user = "alice"; } safix).sops.secrets;
+          nixos = fires (nixosFor { user = "alice"; } safix).safix.secrets;
           homeInNixos =
             fires
               (homeFor {
@@ -505,10 +505,11 @@ in
 
             # ── the service, across the three shapes ──
             # The entry a service was granted arrives on the machine the service
-            # runs on, under the service's own composed name, and the provisioner
-            # takes that name and nests the file under it. Read off each shape's own
-            # arrival rather than from safix, because the claim is about what
-            # sops-nix does with the name safix hands it.
+            # runs on, under the service's own composed name, and the store's
+            # path default takes that name and nests the file under it — safix's
+            # own minted default at system scope, the provisioner's at the two
+            # home shapes. Read off each shape's own arrival rather than from
+            # safix, because the claim is about what the name becomes on disk.
             serviceEntry = lib.mapAttrs (_n: v: v.machine."nginx/service-token") shapes;
             servicePath = lib.mapAttrs (_n: v: v.machineRaw."nginx/service-token".path) shapes;
 
@@ -526,7 +527,7 @@ in
                   "owner"
                   "group"
                   "mode"
-                ] (nixosFor { machine = "deck"; } owning).sops.secrets."nginx/service-token";
+                ] (nixosFor { machine = "deck"; } owning).safix.installed."nginx/service-token";
                 homeInNixos =
                   fires
                     (homeFor {
@@ -642,7 +643,7 @@ in
             });
 
             servicePath = {
-              nixos = "/run/secrets/nginx/service-token";
+              nixos = "/run/safix/nginx/service-token";
               homeInNixos = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
               standalone = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
             };

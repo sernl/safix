@@ -1,10 +1,11 @@
 # safix in a NixOS configuration: the same `safix.*` namespace as the
 # home-manager module, materializing at system scope.
 #
-# This module imports nothing. `nixosModules.default` is this file plus sops-nix's
-# own NixOS module; a tree that already imports sops-nix at a revision of its own
-# imports this file instead, as `nixosModules.safix`. See `./home.nix` for the
-# measured reason the choice exists.
+# This module imports nothing outside safix. `nixosModules.default` is this file
+# plus sops-nix's own NixOS module; a tree that already imports sops-nix at a
+# revision of its own imports this file instead, as `nixosModules.safix`. See
+# `./home.nix` for the measured reason the choice exists. `./installer.nix` is
+# safix's own and travels with this file in both forms.
 #
 # ── no activation guard here, and why ──
 # The home-manager module installs a read-only identity preflight that sorts
@@ -16,11 +17,12 @@
 # where a refusal leaves the previous generation intact. Claiming one would be
 # documenting a guarantee that no code in this repository enforces.
 #
-# The failure the home-scope guard exists for is also rarer here. sops-nix
-# defaults `sops.age.sshKeyPaths` to the host's ed25519 keys, which exist on any
-# host that runs sshd, so a system configuration usually has an identity without
-# naming one — which is why `safix.identity.sshKeyPaths` is defined onto the
-# provisioner only when it is set.
+# The failure the home-scope guard exists for is also rarer here: safix derives
+# a system-scope identity from the host's ed25519 keys, excluding only the ones
+# inside its own store, so a host that runs sshd usually decrypts without naming
+# one — and where nothing is derivable, the resolution refuses at evaluation in
+# safix's own words, before the installer's own pre-decryption check refuses a
+# path that is not there yet.
 {
   config,
   options,
@@ -34,27 +36,75 @@ let
   };
 
   cfg = config.safix;
+
+  # The provisioner's own derivation rule (`modules/sops/default.nix:181-191`)
+  # with the exclusion prefix that is actually safix's. The exclusion avoids a
+  # catch-22 — decrypting with a key this installer itself deploys — which is
+  # a statement about safix's store, now `safix.installer.symlinkPath`, and
+  # not about `/run/secrets`, where a foreign store's keys were placed before
+  # safix runs and are exactly the identity to decrypt with.
+  derivedHostKeys =
+    if cfg.identity.deriveHostKeys && config.services.openssh.enable then
+      map (e: e.path) (
+        lib.filter (
+          e: e.type == "ed25519" && !(lib.hasPrefix cfg.installer.symlinkPath e.path)
+        ) config.services.openssh.hostKeys
+      )
+    else
+      [ ];
 in
 {
-  options.safix = common.sharedOptions {
-    inherit cfg;
+  imports = [ ./installer.nix ];
 
-    # A system configuration knows its own host, and knows no person: which
-    # people's system-scope entries land here is exactly what this module is
-    # asked.
-    userDefault = null;
-    userDefaultText = lib.literalExpression "null";
+  options.safix =
+    common.sharedOptions {
+      inherit cfg;
 
-    hostnameDefault = config.networking.hostName;
-    hostnameDefaultText = lib.literalExpression "config.networking.hostName";
-  };
+      # A system configuration knows its own host, and knows no person: which
+      # people's system-scope entries land here is exactly what this module is
+      # asked.
+      userDefault = null;
+      userDefaultText = lib.literalExpression "null";
+
+      hostnameDefault = config.networking.hostName;
+      hostnameDefaultText = lib.literalExpression "config.networking.hostName";
+    }
+    // {
+      installed = common.installedOptionFor options;
+    };
 
   config = lib.mkMerge [
     {
-      safix.secrets = common.resolvedFor {
-        inherit cfg;
-        target = config;
-      };
+      # A `throw` while this option is forced, mirroring the user scope's
+      # refusal, because at this scope nothing else refuses at all: the
+      # provisioner's key-source assertion sits inside its
+      # `mkIf (cfg.secrets != { })` and safix leaves that option empty, so a
+      # configuration resolving entries with nothing to decrypt them would
+      # evaluate green and install nothing decryptable.
+      safix.secrets =
+        let
+          resolved = common.resolvedFor {
+            inherit cfg;
+            target = config;
+          };
+
+          hasGnupgSource = config.sops.gnupg.home != null || config.sops.gnupg.sshKeyPaths != [ ];
+
+          # safix's own two options plus the derivation, rather than
+          # `sops.age.*`: safix defines those from these under the enable
+          # gate, and `enable` defaults to whether this resolved, so reading
+          # them back here is a cycle. `sops.gnupg.*` is safe to read because
+          # safix defines none of it.
+          hasIdentity =
+            cfg.identity.keyFile != null
+            || cfg.identity.sshKeyPaths != [ ]
+            || hasGnupgSource
+            || derivedHostKeys != [ ];
+        in
+        if resolved != { } && !hasIdentity then
+          throw (common.noSystemIdentityMessage { inherit cfg resolved; })
+        else
+          resolved;
 
       # Outside the enable gate deliberately. Each of these fires exactly when
       # the resolution is empty for want of the option it names, which is when
@@ -75,14 +125,33 @@ in
     }
 
     (lib.mkIf cfg.enable {
-      sops = {
-        secrets = cfg.secrets;
+      # The resolved set arrives in safix's own typed option rather than in
+      # `sops.secrets`, which stays empty: two installers cannot both be right
+      # about one resolved set, and the provisioner gates its entire installer
+      # — activation entry, unit and key-source assertion — on its own secrets
+      # option being non-empty.
+      #
+      # An entry that declares no path parks at `<symlinkPath>/<name>`, minted
+      # here rather than left to the provisioner's `/run/secrets/<name>`
+      # default: the installer creates a symlink at any path that is not
+      # `<symlinkPath>/<name>` (`main.go:254-268`), so safix's store root and
+      # this default must move together or a moved root writes symlinks into
+      # the other store's directory.
+      safix.installed = lib.mapAttrs (
+        name: entry:
+        entry // lib.optionalAttrs (!(entry ? path)) { path = "${cfg.installer.symlinkPath}/${name}"; }
+      ) cfg.secrets;
 
+      sops = {
         age.keyFile = cfg.identity.keyFile;
 
-        # The provisioner's own default is the host's ed25519 keys, and an empty
-        # list here must not replace it.
-        age.sshKeyPaths = lib.mkIf (cfg.identity.sshKeyPaths != [ ]) cfg.identity.sshKeyPaths;
+        # Defined unconditionally, replacing the provisioner's own default —
+        # whose exclusion prefix is the store safix no longer writes — with
+        # safix's derivation. A consumer-named identity always wins, and a
+        # derivation that yields nothing leaves the list empty rather than
+        # borrowing a rule made for another installer's store.
+        age.sshKeyPaths =
+          if cfg.identity.sshKeyPaths != [ ] then cfg.identity.sshKeyPaths else derivedHostKeys;
       };
     })
   ];
