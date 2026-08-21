@@ -77,6 +77,18 @@
 # unadorned fixture registers the installer with no foreign dependency, so a
 # host with no foreign store is a supported configuration.
 #
+# ── one installer ──
+# `safix-installer-sole` holds, over the fixture whose resolution is the four
+# entries `safix-consumption-system` also reads, that the provisioner is
+# inert: its secrets option is empty, its activation step and unit are absent,
+# and a scan of every activation step's text and every unit's ExecStart finds
+# exactly one invocation of the installer binary, safix's. Beside it, the two
+# refusals the typed set does not carry are measured on fixtures with one
+# injected entry each: a sops file outside the nix store and one that does
+# not exist both refuse through the block `modules/consume/installer.nix`
+# copies from the provisioner's builder, whose messages are named in
+# `common.nix` so this check can read them.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -93,6 +105,12 @@
 # as `setupSecrets` again turns the ordering check red on the own-node facts —
 # the installer call lands inside the shared node's text — and dropping the
 # `afterActivation` wiring turns exactly the dependency assertion red.
+# Restoring the `sops.secrets` delivery turns the sole check red on the
+# provisioner-step facts, with both installers visible at once; removing the
+# copied refusal block turns its refusal fixtures into the incidental failure
+# the block pre-empts — a hard `sopsFileHash` evaluation error that is not
+# safix's message and that `tryEval` cannot catch — which is the evidence the
+# option type never carried the refusal.
 {
   config,
   inputs,
@@ -564,6 +582,154 @@
             };
           };
         };
+
+      systemCommon = import ../../consume/common.nix {
+        inherit lib;
+        scope = "system";
+      };
+
+      names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
+
+      # An enabled configuration resolving nothing, with one entry injected
+      # into the typed set directly, so each refusal is measured on exactly the
+      # entry that earns it rather than beside the fleet's. In pure evaluation
+      # an out-of-store path is also unreadable, so the outside-store entry
+      # trips both halves of the copied block; the store-membership half is
+      # still the one the removal drill isolates, because without the block the
+      # failure is the forced `builtins.hashFile` refusing the path — a hard
+      # evaluation error that is not safix's message and that `tryEval` cannot
+      # catch, which is what these fixtures would surface if the copy were
+      # dropped.
+      refusalFixtureWith =
+        entry:
+        inputs.nixpkgs.lib.nixosSystem {
+          modules = [
+            config.flake.nixosModules.default
+            {
+              nixpkgs.hostPlatform = system;
+              system.stateVersion = "24.05";
+              safix.enable = true;
+              safix.installed = entry;
+            }
+          ];
+        };
+
+      outsideStoreFixture = refusalFixtureWith {
+        outside.sopsFile = "/etc/hosts";
+      };
+
+      missingFileFixture = refusalFixtureWith {
+        missing.sopsFile = "${builtins.storeDir}/safix-fixture-absent/nope.yaml";
+      };
+
+      soleFacts =
+        let
+          scripts = manifestFixture.config.system.activationScripts;
+          services = manifestFixture.config.systemd.services;
+
+          # The full script the option's `apply` assembles aggregates every
+          # step, so it is excluded by name; a step registered as a bare string
+          # is its own text.
+          textOf = v: if lib.isAttrs v then v.text else v;
+
+          invocationsIn =
+            set: extract:
+            lib.sort (a: b: a < b) (
+              builtins.attrNames (lib.filterAttrs (n: v: n != "script" && extract v) set)
+            );
+        in
+        {
+          actual = {
+            # The fixture resolves the four entries `safix-consumption-system`
+            # also reads, so the inertness below is evidence rather than an
+            # empty resolution passing vacuously.
+            established = lib.sort (a: b: a < b) (builtins.attrNames manifestFixture.config.safix.installed);
+
+            provisionerInert = {
+              secretsOption = manifestFixture.config.sops.secrets;
+              activationStep = scripts ? setupSecrets;
+              unit = services ? sops-install-secrets;
+            };
+
+            # Exactly one invocation of the installer binary, and it is
+            # safix's: every activation step's text and every unit's ExecStart
+            # is scanned, so a second invocation appearing anywhere reddens
+            # this rather than only the two names the provisioner uses.
+            invocations = {
+              activation = invocationsIn scripts (v: lib.hasInfix "bin/sops-install-secrets" (textOf v));
+              units = invocationsIn services (
+                v: lib.any (lib.hasInfix "bin/sops-install-secrets") (lib.toList (v.serviceConfig.ExecStart or [ ]))
+              );
+            };
+
+            refusals = {
+              outsideStore = {
+                refuses = fires outsideStoreFixture.config.system.build.safix-manifest;
+                namesTheStore =
+                  names
+                    [
+                      "is not in the Nix store"
+                      "sops.validateSopsFiles"
+                      "/etc/hosts"
+                      "outside"
+                    ]
+                    [
+                      (systemCommon.sopsFileOutsideStoreMessage {
+                        name = "outside";
+                        file = "/etc/hosts";
+                      })
+                    ];
+              };
+              missingFile = {
+                refuses = fires missingFileFixture.config.system.build.safix-manifest;
+                namesTheFile =
+                  names
+                    [
+                      "cannot find"
+                      "nope.yaml"
+                      "missing"
+                    ]
+                    [
+                      (systemCommon.sopsFileMissingMessage {
+                        name = "missing";
+                        file = "${builtins.storeDir}/safix-fixture-absent/nope.yaml";
+                      })
+                    ];
+              };
+            };
+          };
+
+          expected = {
+            established = [
+              "bob-service"
+              "ops-handover"
+              "ops-tooling"
+              "team-vault"
+            ];
+
+            provisionerInert = {
+              secretsOption = { };
+              activationStep = false;
+              unit = false;
+            };
+
+            invocations = {
+              activation = [ "safixInstallSecrets" ];
+              units = [ ];
+            };
+
+            refusals = {
+              outsideStore = {
+                refuses = true;
+                namesTheStore = true;
+              };
+              missingFile = {
+                refuses = true;
+                namesTheFile = true;
+              };
+            };
+          };
+        };
     in
     {
       # Every claim here evaluates a NixOS system configuration, so the check
@@ -722,6 +888,12 @@
           name = "safix-installer-ordering";
           actual = orderingFacts.actual;
           expected = orderingFacts.expected;
+        };
+
+        safix-installer-sole = mkStructuralCheck {
+          name = "safix-installer-sole";
+          actual = soleFacts.actual;
+          expected = soleFacts.expected;
         };
       };
     };

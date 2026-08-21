@@ -141,6 +141,20 @@ let
   optionDefaultPriority = (lib.mkOptionDefault null).priority;
 
   wasSet = option: option.highestPrio < optionDefaultPriority;
+  # The two refusals safix's manifest builder copies from the provisioner's
+  # (`manifest-for.nix:11-28`), named here for the reason every message above
+  # is: a check can read what a consumer would see, where a string assembled
+  # inside a `throw` is one nothing can hold. Without this copy nothing
+  # refuses at all — the type these entries pass through carries neither
+  # refusal, and the builder that does lives in the provisioner's tree, which
+  # safix no longer calls.
+  sopsFileMissingMessage =
+    { name, file }: "safix: cannot find '${file}', the sops file of resolved entry '${name}'";
+
+  sopsFileOutsideStoreMessage =
+    { name, file }:
+    "safix: '${file}', the sops file of resolved entry '${name}', is not in the Nix store. Add it to the Nix store or set sops.validateSopsFiles to false";
+
   # System scope only: the resolved set typed by the secret provisioner's own
   # entry type, read off the provisioner's option declaration in the same
   # evaluation rather than restated, so every entry carries the provisioner's
@@ -175,6 +189,8 @@ in
     flakelessMessage
     violationMessage
     noIdentityMessage
+    sopsFileMissingMessage
+    sopsFileOutsideStoreMessage
     installedOptionFor
     wasSet
     ;

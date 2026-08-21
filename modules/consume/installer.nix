@@ -26,6 +26,11 @@
   ...
 }:
 let
+  common = import ./common.nix {
+    inherit lib;
+    scope = "system";
+  };
+
   cfg = config.safix;
   sopsCfg = config.sops;
 
@@ -63,16 +68,24 @@ let
   failedAssertions = builtins.foldl' (
     acc: secret:
     acc
-    ++ lib.optional (
-      !builtins.pathExists secret.sopsFile
-    ) "safix: cannot find '${secret.sopsFile}', the sops file of resolved entry '${secret.name}'"
+    ++ lib.optional (!builtins.pathExists secret.sopsFile) (
+      common.sopsFileMissingMessage {
+        inherit (secret) name;
+        file = secret.sopsFile;
+      }
+    )
     ++
       lib.optional
         (
           !builtins.isPath secret.sopsFile
           && !(builtins.isString secret.sopsFile && lib.hasPrefix builtins.storeDir secret.sopsFile)
         )
-        "safix: '${secret.sopsFile}', the sops file of resolved entry '${secret.name}', is not in the Nix store. Add it to the Nix store or set sops.validateSopsFiles to false"
+        (
+          common.sopsFileOutsideStoreMessage {
+            inherit (secret) name;
+            file = secret.sopsFile;
+          }
+        )
   ) [ ] installedEntries;
 
   manifest =
