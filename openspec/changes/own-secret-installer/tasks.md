@@ -81,13 +81,13 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 
 ## 7. The two refusals
 
-- [ ] 7.1 Add the evaluation-time refusal to `modules/consume/common.nix` as a named message function beside `noIdentityMessage`, so a check can read the string without evaluating a module, and fire it at system scope when the resolution is non-empty and no identity is configured or derivable
-- [ ] 7.2 Have the message name `safix.identity.sshKeyPaths`, `safix.identity.keyFile` and `safix.identity.deriveHostKeys`, and record why the provisioner cannot be left to refuse: its key-source assertion sits inside `mkIf (cfg.secrets != { })` (`modules/sops/default.nix:432-441`), which safix now leaves empty, so nothing refuses at all
-- [ ] 7.3 Add the pre-decryption check to the installer script: for each configured identity path, test presence and readability, and exit non-zero naming each path, how it failed, both ordering options from 5.4, and that a foreign store which has not yet run is the usual cause
-- [ ] 7.4 State the limit in that message the way the user-scope preflight states its own (`modules/consume/home.nix`, the `remediation` binding): presence and readability were checked, decryption was not
-- [ ] 7.5 Add `safix-installer-refusals` holding both — the evaluation refusal read off a configuration evaluated without the module system's assertion collection, as `safix-consumption-refusals` already does, and the installer script's text asserted to name every configured path and to exit non-zero, without running it
-- [ ] 7.6 Severity drill: removing the evaluation refusal turns 7.5 red and nothing else goes red, which is the evidence that no other refusal covers it; dropping one identity path from the script turns the script assertion red
-- [ ] 7.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-refusals` green, and both drills observed
+- [x] 7.1 Add the evaluation-time refusal to `modules/consume/common.nix` as a named message function beside `noIdentityMessage`, so a check can read the string without evaluating a module, and fire it at system scope when the resolution is non-empty and no identity is configured or derivable
+- [x] 7.2 Have the message name `safix.identity.sshKeyPaths`, `safix.identity.keyFile` and `safix.identity.deriveHostKeys`, and record why the provisioner cannot be left to refuse: its key-source assertion sits inside `mkIf (cfg.secrets != { })` (`modules/sops/default.nix:432-441`), which safix now leaves empty, so nothing refuses at all
+- [x] 7.3 Add the pre-decryption check to the installer script: for each configured identity path, test presence and readability, and exit non-zero naming each path, how it failed, both ordering options from 5.4, and that a foreign store which has not yet run is the usual cause
+- [x] 7.4 State the limit in that message the way the user-scope preflight states its own (`modules/consume/home.nix`, the `remediation` binding): presence and readability were checked, decryption was not
+- [x] 7.5 Add `safix-installer-refusals` holding both — the evaluation refusal read off a configuration evaluated without the module system's assertion collection, as `safix-consumption-refusals` already does, and the installer script's text asserted to name every configured path and to exit non-zero, without running it
+- [x] 7.6 Severity drill: removing the evaluation refusal turns 7.5 red and nothing else goes red, which is the evidence that no other refusal covers it; dropping one identity path from the script turns the script assertion red
+- [x] 7.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-refusals` green, and both drills observed
 
 ## 8. Coexistence, held against the binary rather than against an evaluation
 

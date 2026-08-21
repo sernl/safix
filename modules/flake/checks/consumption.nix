@@ -377,6 +377,12 @@ in
               nixpkgs.hostPlatform = system;
               networking.hostName = "server";
               system.stateVersion = "24.05";
+
+              # The identity the fixture decrypts with is the derived one: with
+              # openssh managing host keys outside safix's store, the system
+              # scope needs no named identity, which is the arrangement the
+              # README documents.
+              services.openssh.enable = true;
               safix = {
                 lib = safix;
                 inherit user;

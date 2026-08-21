@@ -141,6 +141,38 @@ let
   optionDefaultPriority = (lib.mkOptionDefault null).priority;
 
   wasSet = option: option.highestPrio < optionDefaultPriority;
+  # System scope only, beside `noIdentityMessage` for the same reason: a check
+  # can read the string without evaluating a module. The system scope has its
+  # own message because its identity story differs twice over — an identity is
+  # usually derivable from the host's ssh keys, and the refusal that would
+  # otherwise fire does not: the provisioner's key-source assertion sits
+  # inside `mkIf (cfg.secrets != { })` (`modules/sops/default.nix:432-441`),
+  # and safix now leaves that option empty, so without safix's own refusal
+  # nothing refuses at all and the configuration evaluates green while
+  # installing nothing decryptable.
+  noSystemIdentityMessage =
+    { cfg, resolved }:
+    let
+      subject = if cfg.machine or null != null then cfg.machine else cfg.user;
+    in
+    ''
+      safix: ${toString (builtins.length (builtins.attrNames resolved))} secret(s) resolve for ${subject} on this system
+      configuration, and no decryption identity is configured or derivable.
+
+      Name one:
+
+        safix.identity.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+
+      or set safix.identity.keyFile to an age key file this machine holds — or
+      leave safix.identity.deriveHostKeys on and let openssh manage host keys
+      outside safix's own store, which is what the derivation reads.
+
+      safix refuses first because nothing else will: the secret provisioner's
+      key-source assertion is conditional on its own secrets option, which
+      safix leaves empty, so without this refusal the configuration evaluates
+      green and installs nothing decryptable.
+    '';
+
   # The two refusals safix's manifest builder copies from the provisioner's
   # (`manifest-for.nix:11-28`), named here for the reason every message above
   # is: a check can read what a consumer would see, where a string assembled
@@ -189,6 +221,7 @@ in
     flakelessMessage
     violationMessage
     noIdentityMessage
+    noSystemIdentityMessage
     sopsFileMissingMessage
     sopsFileOutsideStoreMessage
     installedOptionFor

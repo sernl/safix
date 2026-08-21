@@ -48,8 +48,97 @@ let
     ${lib.concatStringsSep "\n" (
       lib.mapAttrsToList (n: v: "  export ${n}='${v}'") activationEnvironment
     )}
-      ${sopsCfg.package}/bin/sops-install-secrets ${manifest}
+      ${installerScript}
     )
+  '';
+
+  # ── the pre-decryption identity check ──
+  # The same shape as the user scope's preflight in `./home.nix`, run by the
+  # installer itself so both mechanisms carry it. A keyFile the consumer set
+  # is fatal to the binary when unreadable, so it is required on its own; ssh
+  # key paths are individually skipped by the binary with a line to stderr, so
+  # they are load-bearing only collectively and only while they are the sole
+  # source; a gnupg source decrypts on its own.
+  requiredIdentities = lib.optional (sopsCfg.age.keyFile != null && !sopsCfg.age.generateKey) {
+    path = toString sopsCfg.age.keyFile;
+    origin = "safix.identity.keyFile";
+  };
+
+  hasGnupgSource = sopsCfg.gnupg.home != null || sopsCfg.gnupg.sshKeyPaths != [ ];
+
+  sshKeyOrigin =
+    i:
+    if cfg.identity.sshKeyPaths != [ ] then
+      "safix.identity.sshKeyPaths[${toString i}]"
+    else
+      "derived from services.openssh.hostKeys";
+
+  sufficientIdentities = lib.optionals (sopsCfg.age.keyFile == null && !hasGnupgSource) (
+    lib.imap0 (i: p: {
+      path = toString p;
+      origin = sshKeyOrigin i;
+    }) sopsCfg.age.sshKeyPaths
+  );
+
+  note = identity: state: lib.escapeShellArg "${identity.path}  (${state}) — ${identity.origin}";
+
+  record = accumulator: identity: ''
+    if [ ! -e ${lib.escapeShellArg identity.path} ]; then
+      ${accumulator}+=(${note identity "missing"})
+    elif [ ! -r ${lib.escapeShellArg identity.path} ]; then
+      ${accumulator}+=(${note identity "present but not readable"})
+    fi
+  '';
+
+  checkRequired = record "safixIdentityFailures";
+
+  checkSufficient = identity: ''
+    ${record "safixIdentityCandidates" identity}
+    if [ -r ${lib.escapeShellArg identity.path} ]; then
+      safixIdentityUsable=1
+    fi
+  '';
+
+  preflightRemediation = ''
+
+    ${toString (builtins.length installedEntries)} secret(s) are declared to arrive in ${cfg.installer.symlinkPath}, and none
+    of the paths above is a readable decryption identity.
+
+    On a host where another secret store places the identity, the usual cause
+    is ordering: the foreign store's activation step or unit has not run yet.
+    Name what safix must wait for:
+
+      safix.installer.afterActivation = [ "<that store's activation step>" ];
+      safix.installer.afterUnits = [ "<that store's unit>" ];
+
+    Presence and readability were checked; decryption was not. A key that
+    exists and is readable but is not a recipient of these files still fails
+    afterwards, in sops-install-secrets.
+  '';
+
+  installerScript = pkgs.writeShellScript "safix-install-secrets" ''
+    safixIdentityFailures=()
+    safixIdentityCandidates=()
+    safixIdentityUsable=0
+
+    ${lib.concatMapStrings checkRequired requiredIdentities}
+    ${lib.concatMapStrings checkSufficient sufficientIdentities}
+    ${lib.optionalString (sufficientIdentities != [ ]) ''
+      if (( safixIdentityUsable == 0 )); then
+        safixIdentityFailures+=("''${safixIdentityCandidates[@]}")
+      fi
+    ''}
+    if (( ''${#safixIdentityFailures[@]} > 0 )); then
+      echo "safix: no readable decryption identity — secret installation refused" >&2
+      printf '%s\n' "" >&2
+      printf '  %s\n' "''${safixIdentityFailures[@]}" >&2
+      printf '%s\n' ${lib.escapeShellArg preflightRemediation} >&2
+      exit 1
+    fi
+
+    unset safixIdentityFailures safixIdentityCandidates safixIdentityUsable
+
+    exec ${sopsCfg.package}/bin/sops-install-secrets ${manifest}
   '';
 
   # Read from the typed set rather than from the raw resolution, so every
@@ -240,8 +329,11 @@ in
   config = lib.mkIf cfg.enable {
     # Mirrors the provisioner's `system.build.sops-nix-manifest`
     # (`modules/sops/default.nix:534`), so checks read one concrete attribute
-    # rather than rebuilding the derivation each time.
+    # rather than rebuilding the derivation each time. The installer script is
+    # exposed beside it so a check can hold the preflight's text without
+    # running it.
     system.build.safix-manifest = manifest;
+    system.build.safix-installer = installerScript;
 
     # The name is load-bearing. Both the provisioner and clan register their
     # installers as `setupSecrets`, and two definitions of one step name merge
@@ -289,7 +381,7 @@ in
 
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = [ "${sopsCfg.package}/bin/sops-install-secrets ${manifest}" ];
+        ExecStart = [ "${installerScript}" ];
         RemainAfterExit = true;
       };
       unitConfig = {

@@ -74,10 +74,36 @@ in
 
   config = lib.mkMerge [
     {
-      safix.secrets = common.resolvedFor {
-        inherit cfg;
-        target = config;
-      };
+      # A `throw` while this option is forced, mirroring the user scope's
+      # refusal, because at this scope nothing else refuses at all: the
+      # provisioner's key-source assertion sits inside its
+      # `mkIf (cfg.secrets != { })` and safix leaves that option empty, so a
+      # configuration resolving entries with nothing to decrypt them would
+      # evaluate green and install nothing decryptable.
+      safix.secrets =
+        let
+          resolved = common.resolvedFor {
+            inherit cfg;
+            target = config;
+          };
+
+          hasGnupgSource = config.sops.gnupg.home != null || config.sops.gnupg.sshKeyPaths != [ ];
+
+          # safix's own two options plus the derivation, rather than
+          # `sops.age.*`: safix defines those from these under the enable
+          # gate, and `enable` defaults to whether this resolved, so reading
+          # them back here is a cycle. `sops.gnupg.*` is safe to read because
+          # safix defines none of it.
+          hasIdentity =
+            cfg.identity.keyFile != null
+            || cfg.identity.sshKeyPaths != [ ]
+            || hasGnupgSource
+            || derivedHostKeys != [ ];
+        in
+        if resolved != { } && !hasIdentity then
+          throw (common.noSystemIdentityMessage { inherit cfg resolved; })
+        else
+          resolved;
 
       # Outside the enable gate deliberately. Each of these fires exactly when
       # the resolution is empty for want of the option it names, which is when

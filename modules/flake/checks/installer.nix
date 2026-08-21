@@ -99,6 +99,19 @@
 # not the `/run/secrets` the provisioner hardcodes, because the catch-22 the
 # exclusion avoids is decrypting with a key this installer itself deploys.
 #
+# ── the two refusals ──
+# `safix-installer-refusals` holds both. The evaluation refusal is a throw
+# while `safix.secrets` is forced, read off a configuration that resolves
+# entries with nothing derivable and nothing named — nothing here forces the
+# assertion collection, so what fires is safix's own message or nothing, and
+# nothing else can fire: the provisioner's key-source assertion sits inside
+# its `mkIf (cfg.secrets != { })`, which safix leaves empty. The installer
+# script's half is held as text off `system.build.safix-installer` without
+# running it: it names every configured identity path, exits non-zero, names
+# both ordering options as the remedy and the foreign store that has not run
+# as the usual cause, and states the limit the user scope's preflight states —
+# presence and readability were checked, decryption was not.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -123,7 +136,11 @@
 # option type never carried the refusal. Restoring the `/run/secrets` prefix
 # turns the identity check red on the clan-shaped fixture, which derives
 # nothing; dropping the exclusion entirely turns it red on the safix-store
-# fixture, which derives the key safix itself deploys.
+# fixture, which derives the key safix itself deploys. Removing the
+# evaluation refusal turns the refusals check red on `noIdentity.refuses`
+# while every other check in this file and the consumption suite stays green,
+# which is the evidence no other refusal covers it; dropping one identity
+# path from the script turns exactly `script.namesTheIdentity` red.
 {
   config,
   inputs,
@@ -351,6 +368,7 @@
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
             };
           }
         ];
@@ -384,6 +402,7 @@
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
               installer = {
                 secretsMountPoint = "/run/safix-moved.d";
                 symlinkPath = "/run/safix-moved";
@@ -479,6 +498,7 @@
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
               installer.afterActivation = [ "setupSecrets" ];
             };
           }
@@ -500,6 +520,7 @@
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
               installer.afterUnits = [ "age-decrypt-secrets.service" ];
             };
           }
@@ -534,7 +555,7 @@
               ownNode = (activationScripts ? safixInstallSecrets) && (activationScripts ? setupSecrets);
               foreignStepNotMerged = !(lib.hasInfix "sops-install-secrets" activationScripts.setupSecrets.text);
               deps = lib.sort (a: b: a < b) (lib.unique safixStep.deps);
-              runsTheInstaller = lib.hasInfix "bin/sops-install-secrets" safixStep.text;
+              runsTheInstaller = lib.hasInfix "safix-install-secrets" safixStep.text;
               noUnit = orderedActivationFixture.config.systemd.services ? safix-install-secrets;
             };
 
@@ -545,7 +566,7 @@
               rerunsOnSwitch =
                 builtins.elem "sysinit-reactivation.target" unit.requiredBy
                 && builtins.elem "sysinit-reactivation.target" unit.before;
-              runsTheInstaller = lib.any (lib.hasInfix "bin/sops-install-secrets") (
+              runsTheInstaller = lib.any (lib.hasInfix "safix-install-secrets") (
                 lib.toList unit.serviceConfig.ExecStart
               );
               noActivationStep = orderedUnitFixture.config.system.activationScripts ? safixInstallSecrets;
@@ -651,8 +672,14 @@
         foreignKeys =
           (identityFixture { services.openssh.hostKeys = foreignHostKeys; })
           .config.system.build.safix-manifest;
+        # These two derive nothing, so each names a keyFile: without one the
+        # system scope's no-identity refusal fires, which is its own check's
+        # subject rather than this one's.
         safixKeys =
-          (identityFixture { services.openssh.hostKeys = safixHostKeys; }).config.system.build.safix-manifest;
+          (identityFixture {
+            services.openssh.hostKeys = safixHostKeys;
+            safix.identity.keyFile = "/var/lib/safix-fixture/key.txt";
+          }).config.system.build.safix-manifest;
         namedOverForeign =
           (identityFixture {
             services.openssh.hostKeys = foreignHostKeys;
@@ -667,6 +694,7 @@
           (identityFixture {
             services.openssh.hostKeys = foreignHostKeys;
             safix.identity.deriveHostKeys = false;
+            safix.identity.keyFile = "/var/lib/safix-fixture/key.txt";
           }).config.system.build.safix-manifest;
       };
 
@@ -704,6 +732,99 @@
         missing.sopsFile = "${builtins.storeDir}/safix-fixture-absent/nope.yaml";
       };
 
+      # A configuration that resolves entries and can decrypt none of them:
+      # openssh unmanaged, so nothing is derivable, and no identity named. The
+      # refusal is read off `safix.secrets` directly — a throw while the
+      # option is forced — which is the system scope's counterpart of reading
+      # a profile without the module system's assertion collection: nothing
+      # here forces `config.assertions`, so what fires is safix's own message
+      # or nothing.
+      identityFreeSystem = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            sops.validateSopsFiles = false;
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+            };
+          }
+        ];
+      };
+
+      refusalsFacts =
+        let
+          installerText = manifestFixture.config.system.build.safix-installer.text;
+        in
+        {
+          actual = {
+            noIdentity = {
+              refuses = fires identityFreeSystem.config.safix.secrets;
+              namesTheOptions =
+                names
+                  [
+                    "safix.identity.sshKeyPaths"
+                    "safix.identity.keyFile"
+                    "safix.identity.deriveHostKeys"
+                  ]
+                  [
+                    (systemCommon.noSystemIdentityMessage {
+                      cfg = {
+                        user = "bob";
+                        machine = null;
+                      };
+                      resolved.bob-service = { };
+                    })
+                  ];
+
+              # The guard reads the identity rather than refusing every
+              # configuration that resolves: the same subject with a derivable
+              # identity resolves his four entries.
+              withIdentity = lib.sort (a: b: a < b) (builtins.attrNames manifestFixture.config.safix.secrets);
+            };
+
+            # The installer script's own half, held as text without running
+            # it: it names every configured identity path, refuses non-zero,
+            # names both ordering options as the remedy and the foreign store
+            # that has not run as the usual cause, and states its limit the
+            # way the user scope's preflight does.
+            script = {
+              namesTheIdentity = lib.hasInfix "/etc/ssh/safix-fixture-identity" installerText;
+              refuses = lib.hasInfix "exit 1" installerText;
+              namesTheOrderingOptions =
+                lib.hasInfix "safix.installer.afterActivation" installerText
+                && lib.hasInfix "safix.installer.afterUnits" installerText;
+              namesTheUsualCause = lib.hasInfix "has not run yet" installerText;
+              statesItsLimit =
+                lib.hasInfix "readability" installerText && lib.hasInfix "not a recipient" installerText;
+            };
+          };
+
+          expected = {
+            noIdentity = {
+              refuses = true;
+              namesTheOptions = true;
+              withIdentity = [
+                "bob-service"
+                "ops-handover"
+                "ops-tooling"
+                "team-vault"
+              ];
+            };
+
+            script = {
+              namesTheIdentity = true;
+              refuses = true;
+              namesTheOrderingOptions = true;
+              namesTheUsualCause = true;
+              statesItsLimit = true;
+            };
+          };
+        };
+
       soleFacts =
         let
           scripts = manifestFixture.config.system.activationScripts;
@@ -738,9 +859,9 @@
             # is scanned, so a second invocation appearing anywhere reddens
             # this rather than only the two names the provisioner uses.
             invocations = {
-              activation = invocationsIn scripts (v: lib.hasInfix "bin/sops-install-secrets" (textOf v));
+              activation = invocationsIn scripts (v: lib.hasInfix "install-secrets" (textOf v));
               units = invocationsIn services (
-                v: lib.any (lib.hasInfix "bin/sops-install-secrets") (lib.toList (v.serviceConfig.ExecStart or [ ]))
+                v: lib.any (lib.hasInfix "install-secrets") (lib.toList (v.serviceConfig.ExecStart or [ ]))
               );
             };
 
@@ -976,6 +1097,12 @@
           name = "safix-installer-sole";
           actual = soleFacts.actual;
           expected = soleFacts.expected;
+        };
+
+        safix-installer-refusals = mkStructuralCheck {
+          name = "safix-installer-refusals";
+          actual = refusalsFacts.actual;
+          expected = refusalsFacts.expected;
         };
 
         # Held against the built manifests' `ageSshKeyPaths` rather than
