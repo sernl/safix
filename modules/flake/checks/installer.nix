@@ -89,6 +89,16 @@
 # copies from the provisioner's builder, whose messages are named in
 # `common.nix` so this check can read them.
 #
+# ── the identity the system scope derives ──
+# `safix-installer-identity` reads `ageSshKeyPaths` out of five built
+# manifests rather than out of the option that fed them. A clan-shaped host
+# whose keys lie under `/run/secrets` derives its ed25519 key and drops the
+# rsa one; a host whose keys lie inside safix's own store derives nothing; a
+# named identity survives both placements unchanged; and the switch turned
+# off contributes nothing. The exclusion prefix is safix's own symlink path,
+# not the `/run/secrets` the provisioner hardcodes, because the catch-22 the
+# exclusion avoids is decrypting with a key this installer itself deploys.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -110,7 +120,10 @@
 # copied refusal block turns its refusal fixtures into the incidental failure
 # the block pre-empts — a hard `sopsFileHash` evaluation error that is not
 # safix's message and that `tryEval` cannot catch — which is the evidence the
-# option type never carried the refusal.
+# option type never carried the refusal. Restoring the `/run/secrets` prefix
+# turns the identity check red on the clan-shaped fixture, which derives
+# nothing; dropping the exclusion entirely turns it red on the safix-store
+# fixture, which derives the key safix itself deploys.
 {
   config,
   inputs,
@@ -588,6 +601,75 @@
         scope = "system";
       };
 
+      # The identity fixtures share the bob resolution and vary only what the
+      # derivation reads: where the host's keys lie, whether an identity is
+      # named, and whether the switch is on. `services.openssh.enable` is on
+      # because the derivation mirrors the provisioner's whole rule, which
+      # derives nothing from a host whose keys openssh does not manage.
+      identityFixture =
+        extra:
+        inputs.nixpkgs.lib.nixosSystem {
+          modules = [
+            config.flake.nixosModules.default
+            {
+              nixpkgs.hostPlatform = system;
+              networking.hostName = "server";
+              system.stateVersion = "24.05";
+              sops.validateSopsFiles = false;
+              services.openssh.enable = true;
+              safix = {
+                lib = config.flake.safix.lib;
+                user = "bob";
+              };
+            }
+            extra
+          ];
+        };
+
+      # A clan-shaped host: every host key inside a store safix does not own,
+      # with a non-ed25519 entry beside it that the type filter must drop.
+      foreignHostKeys = [
+        {
+          path = "/run/secrets/openssh/ssh.id_ed25519";
+          type = "ed25519";
+        }
+        {
+          path = "/run/secrets/openssh/ssh.id_rsa";
+          type = "rsa";
+          bits = 4096;
+        }
+      ];
+
+      safixHostKeys = [
+        {
+          path = "/run/safix/host-key.ed25519";
+          type = "ed25519";
+        }
+      ];
+
+      identityManifests = {
+        foreignKeys =
+          (identityFixture { services.openssh.hostKeys = foreignHostKeys; })
+          .config.system.build.safix-manifest;
+        safixKeys =
+          (identityFixture { services.openssh.hostKeys = safixHostKeys; }).config.system.build.safix-manifest;
+        namedOverForeign =
+          (identityFixture {
+            services.openssh.hostKeys = foreignHostKeys;
+            safix.identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-named" ];
+          }).config.system.build.safix-manifest;
+        namedOverSafix =
+          (identityFixture {
+            services.openssh.hostKeys = safixHostKeys;
+            safix.identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-named" ];
+          }).config.system.build.safix-manifest;
+        derivationOff =
+          (identityFixture {
+            services.openssh.hostKeys = foreignHostKeys;
+            safix.identity.deriveHostKeys = false;
+          }).config.system.build.safix-manifest;
+      };
+
       names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
 
       # An enabled configuration resolving nothing, with one entry injected
@@ -895,6 +977,43 @@
           actual = soleFacts.actual;
           expected = soleFacts.expected;
         };
+
+        # Held against the built manifests' `ageSshKeyPaths` rather than
+        # against `sops.age.sshKeyPaths`, so the claim is about what the
+        # binary will read rather than about an intermediate option.
+        safix-installer-identity =
+          pkgs.runCommand "safix-installer-identity"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              foreignKeys = identityManifests.foreignKeys;
+              safixKeys = identityManifests.safixKeys;
+              namedOverForeign = identityManifests.namedOverForeign;
+              namedOverSafix = identityManifests.namedOverSafix;
+              derivationOff = identityManifests.derivationOff;
+              meta.description = "the system-scope identity derivation, excluding only safix's own store";
+            }
+            ''
+              assertIdentity() {
+                if ! diff -u <(echo "$2" | jq -S .) <(jq -S .ageSshKeyPaths "$1"); then
+                  echo ""
+                  echo "safix-installer-identity: $3"
+                  exit 1
+                fi
+              }
+
+              assertIdentity "$foreignKeys" '["/run/secrets/openssh/ssh.id_ed25519"]' \
+                "a host key another store deployed was not derived, or the type filter leaked"
+              assertIdentity "$safixKeys" '[]' \
+                "a host key inside safix's own store was derived"
+              assertIdentity "$namedOverForeign" '["/etc/ssh/safix-fixture-named"]' \
+                "a named identity did not survive foreign host keys"
+              assertIdentity "$namedOverSafix" '["/etc/ssh/safix-fixture-named"]' \
+                "a named identity did not survive safix-store host keys"
+              assertIdentity "$derivationOff" '[]' \
+                "the derivation contributed with its switch off"
+
+              touch $out
+            '';
       };
     };
 }

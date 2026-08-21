@@ -71,13 +71,13 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 
 ## 6. The identity the system scope derives
 
-- [ ] 6.1 Add `safix.identity.deriveHostKeys`, default true at system scope, producing the ed25519 entries of `config.services.openssh.hostKeys` whose paths do not begin with safix's own symlink path
-- [ ] 6.2 Record at the option why the exclusion prefix is safix's store rather than `/run/secrets`: the provisioner's filter at `modules/sops/default.nix:181-191` excludes the store its own installer writes, and safix's store is now a different one
-- [ ] 6.3 Make a consumer-named identity win over the derived one, and make the derivation contribute nothing when the switch is off
-- [ ] 6.4 Add `safix-installer-identity` asserting that a fixture whose host keys sit under `/run/secrets` derives them, that a fixture whose host keys sit under `/run/safix` does not, and that a named identity is unchanged by either
-- [ ] 6.5 Assert in the same check that the derived identity reaches `system.build.safix-manifest`'s `ageSshKeyPaths`, so the claim is about what the binary will read rather than about an intermediate option
-- [ ] 6.6 Severity drill: restoring the `/run/secrets` prefix turns 6.4 red on the first fixture; dropping the exclusion entirely turns it red on the second
-- [ ] 6.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-identity` green, and both drills observed
+- [x] 6.1 Add `safix.identity.deriveHostKeys`, default true at system scope, producing the ed25519 entries of `config.services.openssh.hostKeys` whose paths do not begin with safix's own symlink path
+- [x] 6.2 Record at the option why the exclusion prefix is safix's store rather than `/run/secrets`: the provisioner's filter at `modules/sops/default.nix:181-191` excludes the store its own installer writes, and safix's store is now a different one
+- [x] 6.3 Make a consumer-named identity win over the derived one, and make the derivation contribute nothing when the switch is off
+- [x] 6.4 Add `safix-installer-identity` asserting that a fixture whose host keys sit under `/run/secrets` derives them, that a fixture whose host keys sit under `/run/safix` does not, and that a named identity is unchanged by either
+- [x] 6.5 Assert in the same check that the derived identity reaches `system.build.safix-manifest`'s `ageSshKeyPaths`, so the claim is about what the binary will read rather than about an intermediate option
+- [x] 6.6 Severity drill: restoring the `/run/secrets` prefix turns 6.4 red on the first fixture; dropping the exclusion entirely turns it red on the second
+- [x] 6.7 Verify: `nix build .#checks.x86_64-linux.safix-installer-identity` green, and both drills observed
 
 ## 7. The two refusals
 

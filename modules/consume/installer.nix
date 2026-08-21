@@ -217,6 +217,26 @@ in
     };
   };
 
+  options.safix.identity.deriveHostKeys = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Whether the system scope, given no named identity, derives one from the
+      ed25519 entries of `services.openssh.hostKeys` whose paths lie outside
+      safix's own secret store.
+
+      The exclusion prefix is `safix.installer.symlinkPath` rather than the
+      `/run/secrets` the provisioner's filter hardcodes
+      (`modules/sops/default.nix:181-191`), because the exclusion exists to
+      avoid decrypting with a key this installer itself deploys, and that is a
+      statement about this package's store. A host key another store placed
+      under `/run/secrets` before safix runs is exactly the identity safix
+      should decrypt with. An identity named through
+      `safix.identity.sshKeyPaths` or `safix.identity.keyFile` always wins,
+      and turning this off makes the derivation contribute nothing.
+    '';
+  };
+
   config = lib.mkIf cfg.enable {
     # Mirrors the provisioner's `system.build.sops-nix-manifest`
     # (`modules/sops/default.nix:534`), so checks read one concrete attribute

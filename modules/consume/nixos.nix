@@ -35,6 +35,22 @@ let
   };
 
   cfg = config.safix;
+
+  # The provisioner's own derivation rule (`modules/sops/default.nix:181-191`)
+  # with the exclusion prefix that is actually safix's. The exclusion avoids a
+  # catch-22 — decrypting with a key this installer itself deploys — which is
+  # a statement about safix's store, now `safix.installer.symlinkPath`, and
+  # not about `/run/secrets`, where a foreign store's keys were placed before
+  # safix runs and are exactly the identity to decrypt with.
+  derivedHostKeys =
+    if cfg.identity.deriveHostKeys && config.services.openssh.enable then
+      map (e: e.path) (
+        lib.filter (
+          e: e.type == "ed25519" && !(lib.hasPrefix cfg.installer.symlinkPath e.path)
+        ) config.services.openssh.hostKeys
+      )
+    else
+      [ ];
 in
 {
   imports = [ ./installer.nix ];
@@ -102,9 +118,13 @@ in
       sops = {
         age.keyFile = cfg.identity.keyFile;
 
-        # The provisioner's own default is the host's ed25519 keys, and an empty
-        # list here must not replace it.
-        age.sshKeyPaths = lib.mkIf (cfg.identity.sshKeyPaths != [ ]) cfg.identity.sshKeyPaths;
+        # Defined unconditionally, replacing the provisioner's own default —
+        # whose exclusion prefix is the store safix no longer writes — with
+        # safix's derivation. A consumer-named identity always wins, and a
+        # derivation that yields nothing leaves the list empty rather than
+        # borrowing a rule made for another installer's store.
+        age.sshKeyPaths =
+          if cfg.identity.sshKeyPaths != [ ] then cfg.identity.sshKeyPaths else derivedHostKeys;
       };
     })
   ];
