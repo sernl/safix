@@ -1,10 +1,11 @@
 # safix in a NixOS configuration: the same `safix.*` namespace as the
 # home-manager module, materializing at system scope.
 #
-# This module imports nothing. `nixosModules.default` is this file plus sops-nix's
-# own NixOS module; a tree that already imports sops-nix at a revision of its own
-# imports this file instead, as `nixosModules.safix`. See `./home.nix` for the
-# measured reason the choice exists.
+# This module imports nothing outside safix. `nixosModules.default` is this file
+# plus sops-nix's own NixOS module; a tree that already imports sops-nix at a
+# revision of its own imports this file instead, as `nixosModules.safix`. See
+# `./home.nix` for the measured reason the choice exists. `./installer.nix` is
+# safix's own and travels with this file in both forms.
 #
 # ── no activation guard here, and why ──
 # The home-manager module installs a read-only identity preflight that sorts
@@ -36,6 +37,8 @@ let
   cfg = config.safix;
 in
 {
+  imports = [ ./installer.nix ];
+
   options.safix = common.sharedOptions {
     inherit cfg;
 

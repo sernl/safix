@@ -37,13 +37,33 @@
 # failed half records a status and the other half still runs; that record is
 # held here rather than asserted in prose.
 #
+# ── the manifest safix writes ──
+# `safix-installer-manifest` evaluates a fixture system configuration through
+# the exported module, builds `system.build.safix-manifest`, and holds it three
+# ways: it parses, its two roots are safix's own rather than the provisioner's,
+# and its `userMode` is false. The same fixture's entries are then run through
+# the provisioner's own builder from `inputs.sops-nix` — which the flake has
+# and the exported module deliberately does not — and the two manifests' JSON
+# key sets are asserted equal, so a field the provisioner adds reddens this
+# check on the commit that moves the pin rather than reaching a host. The
+# fixture sets `sops.validateSopsFiles = false` because the fixture fleet's
+# sops files are paths into this flake that no committed file backs; that
+# selects the checking branch that never reads ciphertext, and the branch
+# itself stays the module's conditional rather than a value this check pins.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
 # definitions with two differently-named steps turns the merge assertion red:
 # the node list stops being the singleton and neither body reaches the shared
-# text.
+# text. Dropping a field from safix's manifest turns the key-set parity
+# assertion red; corrupting the manifest text turns its own checkPhase into a
+# build failure; and pinning the check mode to `manifest` over an entry whose
+# declared key is absent from its ciphertext builds green where `sopsfile`
+# mode refuses, which is the measured evidence the two modes are not
+# interchangeable.
 {
+  config,
   inputs,
   lib,
   ...
@@ -251,6 +271,42 @@
           };
         };
       };
+
+      # A system configuration through the exported module, resolving bob on
+      # the fixture fleet's server, the same subject `safix-consumption-system`
+      # reads. `validateSopsFiles` is off because the fleet's sops files are
+      # paths into this flake that no committed file backs, and both builders
+      # below mirror the same conditional, so the comparison stays over one
+      # fixture.
+      manifestFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            sops.validateSopsFiles = false;
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+            };
+          }
+        ];
+      };
+
+      safixManifest = manifestFixture.config.system.build.safix-manifest;
+
+      # The provisioner's own builder from `inputs.sops-nix`, over the same
+      # fixture's cfg and the same typed entries, so the key-set comparison
+      # below is between two builders and one input.
+      parityManifest =
+        (pkgs.callPackage "${inputs.sops-nix}/modules/sops/manifest-for.nix" {
+          cfg = manifestFixture.config.sops;
+        })
+          "-safix-parity"
+          manifestFixture.config.sops.secrets
+          { }
+          { };
     in
     {
       # Every claim here evaluates a NixOS system configuration, so the check
@@ -307,6 +363,49 @@
                 echo "safix-installer-mechanism: secrets-for-users did not relocate symlinkPath"
                 exit 1
               }
+
+              touch $out
+            '';
+
+        safix-installer-manifest =
+          pkgs.runCommand "safix-installer-manifest"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              safixManifest = safixManifest;
+              parityManifest = parityManifest;
+              meta.description = "the built manifest's roots and its field-set parity with the provisioner's builder";
+            }
+            ''
+              jq empty "$safixManifest"
+
+              [ "$(jq '.secrets | length' "$safixManifest")" -gt 0 ] || {
+                echo "safix-installer-manifest: the fixture resolved nothing, so nothing below is evidence"
+                exit 1
+              }
+
+              [ "$(jq -r .secretsMountPoint "$safixManifest")" = /run/safix.d ] || {
+                echo "safix-installer-manifest: secretsMountPoint is not safix's own"
+                exit 1
+              }
+              [ "$(jq -r .symlinkPath "$safixManifest")" = /run/safix ] || {
+                echo "safix-installer-manifest: symlinkPath is not safix's own"
+                exit 1
+              }
+              [ "$(jq -r .userMode "$safixManifest")" = false ] || {
+                echo "safix-installer-manifest: userMode is not false"
+                exit 1
+              }
+
+              if ! diff -u <(jq -S keys "$parityManifest") <(jq -S keys "$safixManifest"); then
+                echo ""
+                echo "safix-installer-manifest: manifest key sets differ from the provisioner's builder"
+                exit 1
+              fi
+              if ! diff -u <(jq -S '.logging | keys' "$parityManifest") <(jq -S '.logging | keys' "$safixManifest"); then
+                echo ""
+                echo "safix-installer-manifest: logging key sets differ from the provisioner's builder"
+                exit 1
+              fi
 
               touch $out
             '';
