@@ -93,14 +93,14 @@ So the regression is in the nix check suite, and the single claim an evaluation 
 
 This is the only claim in the change that an evaluation cannot hold, because the hazard is a runtime branch: `prepareSecretsDir` calls `os.RemoveAll` on the symlink path whenever it exists and is not a symlink (`main.go:404`, `:415-423`).
 
-- [ ] 8.1 Add `safix-installer-coexistence` as a `runCommand` that runs the real `sops-install-secrets` twice inside the build sandbox, over fixture ciphertext and a fixture age identity, in user mode so no privileged mount is needed
-- [ ] 8.2 First run: point the manifest's symlink path at a pre-created ordinary directory holding a sentinel file, and assert the sentinel is gone afterwards, which demonstrates the destructive branch is real rather than assumed
-- [ ] 8.3 Second run: point the manifest at safix's own roots, with the same foreign directory and sentinel present elsewhere, and assert the sentinel survives and the foreign directory is byte-identical afterwards
-- [ ] 8.4 Assert the second run's own outputs landed inside safix's store and that no path outside it was created, by walking the sandbox tree before and after and diffing the two listings
-- [ ] 8.5 Record in the check header what this stands in for and what it does not: the observed failure was `EBUSY` on a mountpoint, a sandbox cannot mount, and the branch being demonstrated is the removal itself, which is what a mountpoint turns into an error
-- [ ] 8.6 Gate the check on Linux, following `safix-syscall-proof` and `safix-consumption-system`, and make its absence explicit rather than trivially green
-- [ ] 8.7 Severity drill: pointing the second run's manifest back at the foreign directory turns 8.3 red
-- [ ] 8.8 Verify: `nix build .#checks.x86_64-linux.safix-installer-coexistence` green, and the drill observed red
+- [x] 8.1 Add `safix-installer-coexistence` as a `runCommand` that runs the real `sops-install-secrets` twice inside the build sandbox, over fixture ciphertext and a fixture age identity, in user mode so no privileged mount is needed
+- [x] 8.2 First run: point the manifest's symlink path at a pre-created ordinary directory holding a sentinel file, and assert the sentinel is gone afterwards, which demonstrates the destructive branch is real rather than assumed
+- [x] 8.3 Second run: point the manifest at safix's own roots, with the same foreign directory and sentinel present elsewhere, and assert the sentinel survives and the foreign directory is byte-identical afterwards
+- [x] 8.4 Assert the second run's own outputs landed inside safix's store and that no path outside it was created, by walking the sandbox tree before and after and diffing the two listings
+- [x] 8.5 Record in the check header what this stands in for and what it does not: the observed failure was `EBUSY` on a mountpoint, a sandbox cannot mount, and the branch being demonstrated is the removal itself, which is what a mountpoint turns into an error
+- [x] 8.6 Gate the check on Linux, following `safix-syscall-proof` and `safix-consumption-system`, and make its absence explicit rather than trivially green
+- [x] 8.7 Severity drill: pointing the second run's manifest back at the foreign directory turns 8.3 red
+- [x] 8.8 Verify: `nix build .#checks.x86_64-linux.safix-installer-coexistence` green, and the drill observed red
 
 ## 9. The consumption checks that read the old arrival
 

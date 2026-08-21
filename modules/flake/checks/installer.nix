@@ -112,6 +112,16 @@
 # as the usual cause, and states the limit the user scope's preflight states —
 # presence and readability were checked, decryption was not.
 #
+# ── coexistence, against the binary ──
+# `safix-installer-coexistence` runs the real `sops-install-secrets` twice in
+# the sandbox, in user mode, over ciphertext and an age identity generated
+# there. Pointed at an ordinary directory holding a sentinel, the binary
+# removes it — the destructive branch is measured, not assumed. Pointed at
+# safix's own roots with the same foreign directory beside it, the sentinel
+# survives, the foreign directory is byte-identical, the rest of the tree is
+# unchanged by a before-and-after walk, and safix's own store holds the
+# decrypted fixture plaintext.
+#
 # ── severity, each drill observed red ──
 # Removing the `extraJson` argument from the relocated manifest turns the
 # root assertion red on the hardcoded values. Replacing the two `setupSecrets`
@@ -140,7 +150,9 @@
 # evaluation refusal turns the refusals check red on `noIdentity.refuses`
 # while every other check in this file and the consumption suite stays green,
 # which is the evidence no other refusal covers it; dropping one identity
-# path from the script turns exactly `script.namesTheIdentity` red.
+# path from the script turns exactly `script.namesTheIdentity` red. Pointing
+# the coexistence check's second run back at the foreign directory turns it
+# red on the tree walk, with the foreign store's paths gone.
 {
   config,
   inputs,
@@ -1138,6 +1150,106 @@
                 "a named identity did not survive safix-store host keys"
               assertIdentity "$derivationOff" '[]' \
                 "the derivation contributed with its switch off"
+
+              touch $out
+            '';
+
+        # What this stands in for, and what it does not: the failure observed
+        # on the pilot host was EBUSY — `prepareSecretsDir` calling RemoveAll
+        # on a live ramfs mount — and a build sandbox cannot mount, so the
+        # branch demonstrated here is the removal itself (`main.go:404`,
+        # `:415-423`), which is what a mountpoint turns into an error. The
+        # binary is run for real, in user mode so no privilege is needed, over
+        # ciphertext and an age identity generated inside the sandbox. Linux
+        # only, and absent rather than trivially green elsewhere: this whole
+        # file's checks exist only where a NixOS configuration evaluates.
+        safix-installer-coexistence =
+          pkgs.runCommand "safix-installer-coexistence"
+            {
+              nativeBuildInputs = [
+                pkgs.age
+                pkgs.sops
+                pkgs.jq
+                inputs.sops-nix.packages.${system}.sops-install-secrets
+              ];
+              meta.description = "the destructive branch is real, and safix's roots never reach a foreign store";
+            }
+            ''
+              export HOME="$TMPDIR"
+              export XDG_RUNTIME_DIR="$TMPDIR/run"
+              mkdir -p "$XDG_RUNTIME_DIR"
+              work="$TMPDIR/work"
+              mkdir -p "$work"
+              cd "$work"
+
+              age-keygen -o "$TMPDIR/identity.txt" 2>/dev/null
+              recipient=$(age-keygen -y "$TMPDIR/identity.txt")
+              printf 'token: safix-coexistence-fixture\n' > "$TMPDIR/plain.yaml"
+              sops encrypt --age "$recipient" "$TMPDIR/plain.yaml" > cipher.yaml
+
+              manifestFor() {
+                jq -n --arg symlink "$1" --arg mount "$2" \
+                  --arg cipher "$work/cipher.yaml" --arg key "$TMPDIR/identity.txt" '{
+                  secrets: [ {
+                    name: "token", key: "token", path: ($symlink + "/token"),
+                    format: "yaml", mode: "0400", owner: "", group: "", uid: 0, gid: 0,
+                    sopsFile: $cipher, sopsFileHash: "", restartUnits: [], reloadUnits: [],
+                    neededForUsers: false
+                  } ],
+                  templates: [],
+                  secretsMountPoint: $mount, symlinkPath: $symlink,
+                  keepGenerations: 1, gnupgHome: "", sshKeyPaths: [],
+                  ageKeyFile: $key, ageSshKeyPaths: [], useTmpfs: false,
+                  placeholderBySecretName: {}, userMode: true,
+                  logging: { keyImport: false, secretChanges: false }
+                }' > "$3"
+              }
+
+              mkdir foreign-destroyed foreign-preserved
+              echo sentinel > foreign-destroyed/sentinel
+              echo sentinel > foreign-preserved/sentinel
+              cp -r foreign-preserved "$TMPDIR/foreign-preserved.expected"
+
+              manifestFor "$work/foreign-destroyed" "$work/foreign-destroyed.d" manifest-destructive.json
+              manifestFor "$work/safix" "$work/safix.d" manifest-safix.json
+
+              sops-install-secrets -ignore-passwd manifest-destructive.json
+              if [ -e foreign-destroyed/sentinel ]; then
+                echo "safix-installer-coexistence: the sentinel survived, so the destructive branch did not fire"
+                exit 1
+              fi
+
+              snapshot() {
+                find "$work" \( -path "$work/safix" -o -path "$work/safix.d" \) -prune -o -print | sort
+              }
+              snapshot > "$TMPDIR/before.txt"
+
+              sops-install-secrets -ignore-passwd manifest-safix.json
+
+              snapshot > "$TMPDIR/after.txt"
+              if ! diff -u "$TMPDIR/before.txt" "$TMPDIR/after.txt"; then
+                echo ""
+                echo "safix-installer-coexistence: a path outside safix's store was created or removed"
+                exit 1
+              fi
+
+              if [ ! -e foreign-preserved/sentinel ]; then
+                echo "safix-installer-coexistence: the foreign store's sentinel did not survive safix's run"
+                exit 1
+              fi
+              if ! diff -r "$TMPDIR/foreign-preserved.expected" foreign-preserved; then
+                echo "safix-installer-coexistence: the foreign store is not byte-identical after safix's run"
+                exit 1
+              fi
+
+              if [ ! -L "$work/safix" ]; then
+                echo "safix-installer-coexistence: safix's symlink path was not created as a symlink"
+                exit 1
+              fi
+              if [ "$(cat "$work/safix/token")" != safix-coexistence-fixture ]; then
+                echo "safix-installer-coexistence: the installed secret did not decrypt to the fixture plaintext"
+                exit 1
+              fi
 
               touch $out
             '';
