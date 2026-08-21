@@ -88,10 +88,10 @@ let
   # User scope only, and named here rather than in ./home.nix for the same
   # reason as the two above: a check can read a string off this file without
   # evaluating a module, and a message assembled inside a `throw` is one nothing
-  # can hold. It names the user scope literally because there is no system-scope
-  # counterpart — sops-nix's NixOS module defaults `sops.age.sshKeyPaths` to the
-  # ed25519 keys of `config.services.openssh.hostKeys`, so a system
-  # configuration that names no identity usually still has one.
+  # can hold. It names the user scope literally because the system scope's
+  # identity story is different twice over and has its own message below: there
+  # an identity is usually derivable from the host's ssh keys, and the refusal
+  # exists because nothing else would fire at all.
   noIdentityMessage =
     { cfg, resolved }:
     let
@@ -124,8 +124,10 @@ let
       arrival here.
 
       safix refuses first so that the refusal names these two options. The next
-      thing to refuse would be sops-nix's own key-source assertion, which names
-      its five and neither of safix's.
+      thing to refuse would be sops-nix's own key-source assertion, whose
+      condition tests four of its options, whose message names three, and whose
+      block's two assertions together name four distinct options — none of them
+      safix's.
     '';
   # Whether a consumer wrote a definition for an option, rather than the
   # option's own default standing in for one.

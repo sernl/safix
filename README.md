@@ -190,7 +190,7 @@ $ sops secrets/safix/shared/alice,deck/secrets.yaml
 ```
 
 Think of it as sharing with the host rather than with its owner: the machine's own service reads the value, and no person has to be logged in.
-The recipient is the key the host already decrypts with — sops-nix's NixOS module defaults `sops.age.sshKeyPaths` to the host's ed25519 keys, and `ssh-to-age` of that key is what goes here — so declaring a machine mints no identity and adds no enrollment step.
+The recipient is the age form of the host identity the system scope already decrypts with — safix derives which key that is from the ed25519 entries of `services.openssh.hostKeys`, excluding only keys inside safix's own secret store, and `ssh-to-age` of that key is what goes here — so declaring a machine mints no identity and adds no enrollment step.
 The hardware-recipient refusal `safix adduser` applies to a person does not transfer: it exists because a card needs a PIN and a touch once per file while an activation decrypts non-interactively, and a host identity decrypts non-interactively by nature.
 
 A machine's entries arrive in the profile that names it:
@@ -802,11 +802,13 @@ The resolver's refusals surface as safix's own evaluation errors, listing every 
 `safix.identity.keyFile` defaults to null, and that default is not a preference.
 `sops-install-secrets` treats a set-but-unreadable key file as fatal, and skips a missing ssh key path with a line to stderr, so a non-null default would abort activation on every machine that happens to lack the path.
 Both identity options are defined onto `sops.age.*` at normal priority, so a `mkDefault` elsewhere in your tree loses to safix and a plain definition conflicts loudly — the alternative would let a base module's XDG default silently replace the null and re-arm the abort.
-`sshKeyPaths` is defined only when you name it, so the system scope keeps sops-nix's own default of the host's ed25519 keys.
+At user scope `sshKeyPaths` is defined only when you name it.
+At system scope it is always defined: a named identity wins, and otherwise safix derives the ed25519 entries of `services.openssh.hostKeys` that lie outside its own store — its own rule with its own exclusion prefix, not the provisioner's default, whose exclusion names a store safix no longer writes.
+`safix.identity.deriveHostKeys = false` turns the derivation off, and `safix-installer-identity` holds every case against the built manifest rather than against an intermediate option.
 
 At user scope there is no such default to keep, and naming one of the two is therefore not optional.
 A profile whose declarations resolve and which names neither refuses at evaluation, with a message naming both options and stating why neither can be defaulted for a person.
-It refuses before sops-nix's own key-source assertion is reached, which is the whole reason it exists: that assertion names its own five options and neither of safix's.
+It refuses before sops-nix's own key-source assertion is reached, which is the whole reason it exists: that assertion's condition tests four of sops-nix's options, its message names three, and the block's two assertions together name four distinct options — none of them safix's.
 `safix-consumption-refusals` holds the refusal, and holds it off a profile evaluated without home-manager's assertion wrapper — a wrapped profile refuses either way, and reports that something refused rather than which module did.
 
 At user scope, safix installs `home.activation.safixIdentityPreflight`.
@@ -825,7 +827,37 @@ The identity it drives is shown to open a document it *is* a recipient of before
 
 The system scope installs no such guard, and that asymmetry is deliberate.
 No atomic refusal point at NixOS activation has been demonstrated, and safix does not document a guarantee that no code enforces.
-The failure is also rarer there, because sops-nix's system-scope default identity is the host key.
+The failure is also rarer there, because safix derives a system-scope identity from the host's ssh keys, excluding only the ones inside its own store — and where nothing is derivable, evaluation refuses in safix's own words, since the provisioner's own key-source assertion is conditional on a secrets option safix leaves empty and would never fire.
+Before decrypting, the installer itself checks each configured identity path and refuses naming the paths and the ordering options; `safix-installer-refusals` holds both refusals.
+
+### The installer the system scope owns
+
+At system scope safix builds its own installer manifest and runs `sops-install-secrets` against it, rather than assigning into `sops.secrets` and inheriting sops-nix's activation.
+`sops.secrets` stays empty, so the provisioner's activation entry, unit and assertions are inert and exactly one installer acts on the resolved set — `safix-installer-sole` holds that by scanning every activation step's text and every unit's `ExecStart` for invocations of the binary.
+The manifest is validated at build time by the same binary that will read it, in whichever checking mode `sops.validateSopsFiles` selects, and its field set is compared against the provisioner's own builder so a field sops-nix adds fails `safix-installer-manifest` on the commit that moves the pin rather than reaching a host.
+
+The store is safix's own: generations under `/run/safix.d`, the current one at `/run/safix`, both movable through `safix.installer.secretsMountPoint` and `safix.installer.symlinkPath`.
+An entry that declares no path parks at `/run/safix/<name>`, and the root and that default are held as one claim by `safix-installer-store`, because the installer symlinks any entry path that is not `<symlinkPath>/<name>` — a root moved without the default writes into the foreign store instead of colliding with it.
+Nothing outside safix's store is written, removed, or mounted over, and `safix-installer-coexistence` demonstrates both halves against the real binary in a build sandbox: pointed at an ordinary directory it removes what it finds — the branch a live mount turns into `EBUSY` — and pointed at safix's roots it leaves a foreign directory byte-identical.
+
+The installer registers as `system.activationScripts.safixInstallSecrets`, or as `systemd.services.safix-install-secrets` where systemd-sysusers or userborn manage users; the selection follows the host's own options, with `safix.installer.useSystemdActivation` as the override, and deliberately not `sops.useSystemdActivation`, which now governs an installer safix does not use.
+The name is what makes ordering expressible at all — two packages defining one `setupSecrets` step merge into a single activation node with no edge to state — and the ordering is yours to name, in whichever mechanism the host uses:
+
+```nix
+safix.installer.afterActivation = [ "setupSecrets" ];           # a clan host's activation step
+safix.installer.afterUnits = [ "age-decrypt-secrets.service" ]; # its unit, under sysusers/userborn
+```
+
+Naming nothing is supported and leaves the installer unordered, and safix reads no option of another secret-management framework to discover its installer, for the same reason it reads no consumer's user registry.
+`safix-installer-ordering` holds all three configurations, and `safix-installer-mechanism` holds the facts the whole arrangement rests on, read out of the provisioner's and the platform's own sources.
+
+Two refusals cover the identity.
+Where the resolution is non-empty and nothing is configured or derivable, evaluation fails naming `safix.identity.sshKeyPaths`, `safix.identity.keyFile` and `safix.identity.deriveHostKeys` — nothing else would refuse, because sops-nix's key-source assertion is conditional on its own secrets option, which safix leaves empty.
+Before decrypting, the installer checks each configured identity path for presence and readability and refuses naming each path and the two ordering options, since a foreign store that has not yet run is the usual cause; presence and readability are all it checked, and decryption is not.
+`safix-installer-refusals` holds both.
+
+The limit is stated rather than implied: this coexistence covers safix's own installer.
+A consumer who writes `sops.secrets` directly, beside safix, on a host that already runs another secret store still has the original collision, and safix neither detects nor repairs that.
 
 ## The bridge to clan
 

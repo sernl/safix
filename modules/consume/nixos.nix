@@ -17,11 +17,12 @@
 # where a refusal leaves the previous generation intact. Claiming one would be
 # documenting a guarantee that no code in this repository enforces.
 #
-# The failure the home-scope guard exists for is also rarer here. sops-nix
-# defaults `sops.age.sshKeyPaths` to the host's ed25519 keys, which exist on any
-# host that runs sshd, so a system configuration usually has an identity without
-# naming one — which is why `safix.identity.sshKeyPaths` is defined onto the
-# provisioner only when it is set.
+# The failure the home-scope guard exists for is also rarer here: safix derives
+# a system-scope identity from the host's ed25519 keys, excluding only the ones
+# inside its own store, so a host that runs sshd usually decrypts without naming
+# one — and where nothing is derivable, the resolution refuses at evaluation in
+# safix's own words, before the installer's own pre-decryption check refuses a
+# path that is not there yet.
 {
   config,
   options,

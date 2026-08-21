@@ -114,12 +114,12 @@ This is the only claim in the change that an evaluation cannot hold, because the
 
 ## 10. Documentation, and the three sentences that are currently false
 
-- [ ] 10.1 Rewrite `README.md:193` so it says the recipient is the age form of the host identity and that safix derives which key that is, rather than that the provisioner's default finds it
-- [ ] 10.2 Rewrite `README.md:805` and `README.md:828`, both of which state the system scope keeps the provisioner's host-key default, and say instead what safix derives and what it excludes
-- [ ] 10.3 Rewrite the header of `modules/consume/nixos.nix:19-23` and the note at `modules/consume/common.nix:92-94`, which make the same claim at the option, and while in that region correct `common.nix:126-128`, which says the provisioner's key-source assertion "names its five": the message at `modules/sops/default.nix:440` names three, its condition tests four, and the two assertions of that block together name four distinct options
-- [ ] 10.4 Document the installer: the two roots, the ordering options with the values a clan host needs, the derivation switch, and both refusals
-- [ ] 10.5 State the coexistence limit plainly — that this covers safix's installer, and that a consumer writing `sops.secrets` directly on such a host still collides
-- [ ] 10.6 Verify: every guarantee stated in the README names a check in this repository that holds it, and `rg -n '/run/secrets' README.md modules/` returns only the sentences that are about another store
+- [x] 10.1 Rewrite `README.md:193` so it says the recipient is the age form of the host identity and that safix derives which key that is, rather than that the provisioner's default finds it
+- [x] 10.2 Rewrite `README.md:805` and `README.md:828`, both of which state the system scope keeps the provisioner's host-key default, and say instead what safix derives and what it excludes
+- [x] 10.3 Rewrite the header of `modules/consume/nixos.nix:19-23` and the note at `modules/consume/common.nix:92-94`, which make the same claim at the option, and while in that region correct `common.nix:126-128`, which says the provisioner's key-source assertion "names its five": the message at `modules/sops/default.nix:440` names three, its condition tests four, and the two assertions of that block together name four distinct options
+- [x] 10.4 Document the installer: the two roots, the ordering options with the values a clan host needs, the derivation switch, and both refusals
+- [x] 10.5 State the coexistence limit plainly — that this covers safix's installer, and that a consumer writing `sops.secrets` directly on such a host still collides
+- [x] 10.6 Verify: every guarantee stated in the README names a check in this repository that holds it, and `rg -n '/run/secrets' README.md modules/` returns only the sentences that are about another store
 
 ## 11. Verification
 
