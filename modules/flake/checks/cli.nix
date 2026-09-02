@@ -245,6 +245,57 @@
 # `destination_is_safe` at a two-component path turns it red, which is what
 # shows the check this integration test relies on is live rather than
 # trivially satisfied by the fixed constant.
+# `safix-upload-unknown-machine` (task 1.4, first) holds the undeclared-name
+# refusal: no subprocess runs and no output directory is created before
+# `resolve_machine` returns. Reading `--identity` before resolving the machine
+# would leave a spurious `ssh-keygen` invocation in the recorded list even
+# though the run still refuses.
+# `safix-upload-no-recipient` (task 1.4, second) holds the null-recipient
+# refusal, distinct from the undeclared-name one, and — like the directory-mode
+# drill above — asserts it fires before any identity is read.
+# `safix-upload-not-a-machine` (task 1.4, third) holds design decision D6: a
+# declared person's name is refused with the identical undeclared-machine
+# message rather than a distinct one, so a message that grew a
+# person-specific branch would fail this check's exact-string assertion.
+# `safix-upload-directory` (tasks 2.1-2.3) holds the write itself: a matching
+# identity derives its recipient, confirms it against the declared one, and
+# lands at exactly the two paths 2.3 names, at 0600 and 0644, with no other
+# path under DIR — asserted by `std::fs::metadata` and a full directory
+# listing rather than by the two paths' presence alone.
+# `safix-upload-directory-needs-identity` (task 2.4) holds `--directory`
+# without `--identity` refusing before the filesystem is touched.
+# `safix-upload-directory-mismatch` (task 2.2) holds the ordinary mismatch
+# refusal, naming both recipients, before DIR is created.
+# `safix-upload-remote-match-force` (task 3.4) holds `--force` staying inert on
+# the match branch: given alongside a matching probe, the run still reports the
+# honest no-op and still opens no write-capable session, distinguishing an
+# override that is inert on a match from one that would have short-circuited
+# the comparison.
+# `safix-upload-remote-write` (task 3.3, second branch) holds the write path
+# when the probe presents no key: the recorded invocation order
+# (`ssh-keyscan`, `ssh-keygen`, `ssh-to-age`, `ssh`) and the `ssh` argv itself
+# — the destination, `BatchMode=yes`, and the wipe-then-extract sequence — are
+# asserted directly rather than inferred from success.
+# `safix-upload-remote-needs-identity` (task 3.3, second branch without
+# `--identity`) holds the same branch's refusal, with the probe
+# (`ssh-keyscan`) the only invocation recorded.
+# `safix-upload-remote-mismatch` (task 3.3, third branch without `--force`)
+# holds the default refusal on an unrelated presented key, naming both
+# recipients, with no write-capable session opened.
+# `safix-upload-remote-force` (task 3.3, third branch with `--force` and
+# `--identity`) holds the override reaching the transport.
+# `safix-upload-tarball-modes` (tasks 4.1-4.2, 4.7) holds the tarball's own
+# contents: both staged files at file mode 0400 and root ownership, read back
+# from the real archive with `tar -tvzf` rather than trusted from the writer
+# that built it.
+# `safix-upload-staging-cleanup` (task 4.5) holds the `Staging` root's
+# lifecycle on both the success path and a simulated transport failure
+# (`SAFIX_TRANSPORT_STUB_SSH_REFUSES=1`): created before the tarball is
+# written, gone after the run either way.
+# `safix-upload-help-scaffold` (tasks 1.3, 6.3) holds `safix -h` listing
+# `upload` in the scaffold's operator-facing order, against an insta snapshot.
+# `safix-upload-help-text` (tasks 6.1, 6.3) holds `safix upload -h` stating the
+# two write modes and the three named absences, against an insta snapshot.
 { ... }:
 {
   perSystem =
@@ -747,6 +798,126 @@
       checks.safix-audience-widened =
         mode "safix-audience-widened" "subjects"
           "a_widened_audience_is_re_wrapped_by_fix";
+
+      # An undeclared machine name is refused before any subprocess runs, with
+      # no output directory created (tasks 1.1, 1.4).
+      checks.safix-upload-unknown-machine =
+        mode "safix-upload-unknown-machine" "upload"
+          "an_undeclared_machine_is_refused_before_anything_else_runs";
+
+      # A declared machine with no recipient is refused distinctly, before any
+      # identity is read (task 1.4).
+      checks.safix-upload-no-recipient =
+        mode "safix-upload-no-recipient" "upload"
+          "a_declared_machine_with_no_recipient_is_refused_distinctly";
+
+      # A person's declared name is refused with the same message an
+      # undeclared machine gets, per D6 (task 1.4).
+      checks.safix-upload-not-a-machine =
+        mode "safix-upload-not-a-machine" "upload"
+          "a_persons_name_is_refused_the_same_way_as_an_undeclared_machine";
+
+      # `--directory` writes exactly the two host-identity files, at the
+      # declared paths and modes, and touches no network tool (tasks 2.1-2.3,
+      # 2.5).
+      checks.safix-upload-directory =
+        mode "safix-upload-directory" "upload"
+          "directory_mode_writes_the_matching_identity_at_the_declared_paths_and_modes";
+
+      # `--directory` without `--identity` refuses before touching the
+      # filesystem (task 2.4).
+      checks.safix-upload-directory-needs-identity =
+        mode "safix-upload-directory-needs-identity" "upload"
+          "directory_without_identity_is_refused_before_touching_the_filesystem";
+
+      # A supplied identity that derives to the wrong recipient is refused
+      # before DIR is created, naming both recipients (task 2.2).
+      checks.safix-upload-directory-mismatch =
+        mode "safix-upload-directory-mismatch" "upload"
+          "a_mismatched_identity_is_refused_before_directory_is_created_naming_both_recipients";
+
+      # 2.6, first drill: a recipient one character off the declared one still
+      # refuses.
+      checks.safix-upload-directory-drift-drill =
+        mode "safix-upload-directory-drift-drill" "upload"
+          "a_recipient_one_character_different_still_refuses";
+
+      # 2.6, second drill: a null-recipient machine refuses before any identity
+      # is read, even one that would otherwise derive to something plausible.
+      checks.safix-upload-directory-null-recipient-drill =
+        mode "safix-upload-directory-null-recipient-drill" "upload"
+          "a_null_recipient_machine_refuses_before_reading_any_identity";
+
+      # 3.6: a matching probe is an honest no-op that opens no write-capable
+      # session, asserted against the recorded invocation list rather than
+      # against file state alone — the claim this whole change exists for.
+      checks.safix-upload-remote-match =
+        mode "safix-upload-remote-match" "upload"
+          "a_matching_presented_key_is_an_honest_no_op_and_opens_no_session";
+
+      # 3.4: `--force` is inert on the match branch.
+      checks.safix-upload-remote-match-force =
+        mode "safix-upload-remote-match-force" "upload" "force_is_inert_on_a_match";
+
+      # 3.3, second branch: no key presented writes the given identity, with
+      # the recorded invocation order and the `ssh` argv both asserted.
+      checks.safix-upload-remote-write =
+        mode "safix-upload-remote-write" "upload" "no_key_presented_writes_given_identity";
+
+      # 3.3, second branch without `--identity`: refuses before opening a
+      # write-capable session.
+      checks.safix-upload-remote-needs-identity =
+        mode "safix-upload-remote-needs-identity" "upload"
+          "no_key_presented_without_identity_refuses_before_opening_a_session";
+
+      # 3.3, third branch without `--force`: refused by default, naming both
+      # recipients.
+      checks.safix-upload-remote-mismatch =
+        mode "safix-upload-remote-mismatch" "upload"
+          "a_different_presented_key_is_refused_by_default";
+
+      # 3.3, third branch with `--force` and `--identity`: the override reaches
+      # the transport.
+      checks.safix-upload-remote-force =
+        mode "safix-upload-remote-force" "upload"
+          "a_mismatched_presented_key_is_overridden_with_force_and_identity";
+
+      # 3.7: flipping one byte of the declared recipient turns 3.6's match into
+      # a mismatch, proving the branch follows the comparison.
+      checks.safix-upload-remote-flip-drill =
+        mode "safix-upload-remote-flip-drill" "upload"
+          "flipping_the_declared_recipient_turns_a_match_into_a_mismatch";
+
+      # 4.1-4.2, 4.7: the tarball's own contents — both files at mode 0400,
+      # root-owned — read back from the real archive.
+      checks.safix-upload-tarball-modes =
+        mode "safix-upload-tarball-modes" "upload"
+          "the_tarball_carries_the_declared_modes_and_root_ownership";
+
+      # 4.5: the staging root is created before the tarball is written and gone
+      # after both a success and a simulated transport failure.
+      checks.safix-upload-staging-cleanup =
+        mode "safix-upload-staging-cleanup" "upload"
+          "the_staging_root_is_gone_after_a_success_and_after_a_simulated_failure";
+
+      # 4.3-4.4, 4.6: the wipe-then-extract sequence names the fixed
+      # destination; the depth-safety constant it depends on is drilled at the
+      # unit level in `upload.rs` itself.
+      checks.safix-upload-destination =
+        mode "safix-upload-destination" "upload"
+          "the_wipe_then_extract_sequence_names_the_fixed_destination";
+
+      # 1.3, 6.3: `safix -h` lists `upload` in the scaffold's operator-facing
+      # order.
+      checks.safix-upload-help-scaffold =
+        mode "safix-upload-help-scaffold" "upload"
+          "safix_help_lists_upload_in_table_order_after_group";
+
+      # 6.1, 6.3: `safix upload -h` states the two write modes and the three
+      # named absences.
+      checks.safix-upload-help-text =
+        mode "safix-upload-help-text" "upload"
+          "safix_upload_help_states_the_two_modes_and_the_three_absences";
 
       # Holds the `--entry`/`SAFIX_ENTRY` evaluation path (safix-cli spec) and
       # `generate`'s flakeless refusal, over one fixture fleet declared once as

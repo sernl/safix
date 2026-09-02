@@ -74,6 +74,21 @@ let
     SAFIX_TEST_DISK_STAGING = "1";
   };
 
+  # `crates/safix/tests/upload.rs` is the first insta snapshot test under
+  # `crates/safix/tests/` rather than under `crates/safix/src/`, and a check's
+  # sandbox carries no source tree for insta's own workspace-root lookup to
+  # walk: `cargo metadata` fails outright with no cargo on `PATH`, and the
+  # `CARGO_MANIFEST_DIR` compiled in as its fallback names a build sandbox
+  # that no longer exists by check time. `INSTA_WORKSPACE_ROOT`, read at
+  # runtime ahead of both (`insta::env::get_cargo_workspace`), points here
+  # instead — a copy of just the snapshot directory a check might need, kept
+  # minimal rather than the whole repository, at the same path insta joins
+  # its own `file!()` onto: `<root>/crates/safix/tests/snapshots/`.
+  instaWorkspaceRoot = pkgs.runCommand "safix-insta-workspace-root" { } ''
+    mkdir -p $out/crates/safix/tests/snapshots
+    cp ${../../../crates/safix/tests/snapshots}/*.snap $out/crates/safix/tests/snapshots/
+  '';
+
   # One check that runs one test of the compiled suite, with something on `PATH`
   # that the rest of the suite has no reason to carry.
   #
@@ -103,6 +118,7 @@ let
           SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
           SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
           SAFIX_TEST_TRANSPORT_STUB = "${suite}/libexec/safix-transport-stub";
+          INSTA_WORKSPACE_ROOT = "${instaWorkspaceRoot}";
         }
         // stagingEnv;
       }
