@@ -46,6 +46,8 @@ pub enum Attribute {
     OnboardingHook,
     /// The consumer's enrollment invocation, or null when none is configured.
     EnrollHook,
+    /// The subject records: every declared machine, service and group.
+    Subjects,
 }
 
 impl Attribute {
@@ -65,6 +67,7 @@ impl Attribute {
             Self::Keepassxc => "safix.lib.keepassxc",
             Self::OnboardingHook => "safix.onboardingHook",
             Self::EnrollHook => "safix.enrollHook",
+            Self::Subjects => "safix.lib.subjects",
         }
     }
 
@@ -84,6 +87,7 @@ impl Attribute {
             Self::Keepassxc => "flake.safix.lib.keepassxc",
             Self::OnboardingHook => "flake.safix.onboardingHook",
             Self::EnrollHook => "flake.safix.enrollHook",
+            Self::Subjects => "flake.safix.lib.subjects",
         }
     }
 }

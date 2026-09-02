@@ -925,6 +925,58 @@ impl Keepassxc {
     }
 }
 
+/// One declared machine, as `flake.safix.lib.subjects.machines` projects it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MachineSubject {
+    /// The `flake.safix.users` or `flake.safix.organizations` entry this
+    /// machine belongs to, or none.
+    pub owner: Option<String>,
+    /// The tags this machine carries.
+    pub tags: Vec<String>,
+}
+
+/// One declared service, as `flake.safix.lib.subjects.services` projects it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceSubject {
+    /// The machines this service runs on.
+    pub machines: Vec<String>,
+    /// The `flake.safix.users` or `flake.safix.organizations` entry this
+    /// service belongs to, or none.
+    pub owner: Option<String>,
+    /// The unix account its landed entries belong to, or none.
+    pub user: Option<String>,
+    /// The unix group its landed entries belong to, or none.
+    pub group: Option<String>,
+}
+
+/// One declared group, as `flake.safix.lib.subjects.groups` projects it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSubject {
+    /// The subjects this group's audience expands to.
+    pub members: Vec<String>,
+}
+
+/// The subject records themselves, as the consumption modules read them —
+/// see `flake.safix.lib.subjects` in `modules/flake/safix/default.nix`.
+///
+/// `safix upload` is this crate's one reader: it looks a machine name up in
+/// [`Subjects::machines`] to tell a declared machine apart from an
+/// undeclared name or a person's, without consulting placements or
+/// recipients for that distinction — see `crates/safix-core/src/upload.rs`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Subjects {
+    /// Every declared machine, by name.
+    pub machines: BTreeMap<String, MachineSubject>,
+    /// Every declared service, by name.
+    pub services: BTreeMap<String, ServiceSubject>,
+    /// Every declared group, by name.
+    pub groups: BTreeMap<String, GroupSubject>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

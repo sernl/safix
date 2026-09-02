@@ -20,7 +20,7 @@ use crate::error::{Error, Result};
 use crate::git::Git;
 use crate::model::{
     Audiences, Bridge, Delegation, GeneratorPlan, GovernedFiles, Keepassxc, Placement, Placements,
-    Recipients,
+    Recipients, Subjects,
 };
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
@@ -40,6 +40,7 @@ pub struct Workspace {
     generator_plan: OnceLock<GeneratorPlan>,
     bridge: OnceLock<Bridge>,
     keepassxc: OnceLock<Keepassxc>,
+    subjects: OnceLock<Subjects>,
 }
 
 impl Workspace {
@@ -87,6 +88,7 @@ impl Workspace {
             generator_plan: OnceLock::new(),
             bridge: OnceLock::new(),
             keepassxc: OnceLock::new(),
+            subjects: OnceLock::new(),
         }
     }
 
@@ -206,6 +208,17 @@ impl Workspace {
     pub fn keepassxc(&self) -> Result<&Keepassxc> {
         cached(&self.keepassxc, || {
             self.nix.eval_json(&self.root, Attribute::Keepassxc)
+        })
+    }
+
+    /// The subject records: every declared machine, service and group.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn subjects(&self) -> Result<&Subjects> {
+        cached(&self.subjects, || {
+            self.nix.eval_json(&self.root, Attribute::Subjects)
         })
     }
 
