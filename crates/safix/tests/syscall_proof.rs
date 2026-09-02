@@ -173,8 +173,15 @@ mod linux {
             .iter_mut()
             .map(|(name, value)| (name.as_str(), value.as_str()))
             .collect();
-        let observed = trace(&down, safix(), &["import"], None, &borrowed, &[IMPORTED])
-            .unwrap_or_else(|reason| panic!("{reason}"));
+        let observed = trace(
+            &down,
+            safix(),
+            &["sync", "clan", "ntfy-token"],
+            None,
+            &borrowed,
+            &[IMPORTED],
+        )
+        .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
             down.value(ALICE_FILE, "api-token"),
@@ -195,8 +202,15 @@ mod linux {
             .iter_mut()
             .map(|(name, value)| (name.as_str(), value.as_str()))
             .collect();
-        let observed = trace(&up, safix(), &["export"], None, &borrowed, &[EXPORTED])
-            .unwrap_or_else(|reason| panic!("{reason}"));
+        let observed = trace(
+            &up,
+            safix(),
+            &["sync", "clan", "ntfy-token"],
+            None,
+            &borrowed,
+            &[EXPORTED],
+        )
+        .unwrap_or_else(|reason| panic!("{reason}"));
 
         assert_eq!(
             up.clan_holds(BRIDGE_MACHINE, BRIDGE_VAR).as_deref(),
