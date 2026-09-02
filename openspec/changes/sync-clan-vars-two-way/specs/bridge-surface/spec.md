@@ -12,7 +12,7 @@ Each relationship between a clan var and a safix entry SHALL be declared in the 
 
 #### Scenario: A run takes no endpoint arguments
 
-- **WHEN** any transfer verb's arguments are enumerated
+- **WHEN** `sync`'s arguments are enumerated
 - **THEN** none of them names a machine, an export key, a generator, a file, a user or an entry
 - **AND** the mappings a run acts on come from the declarations
 
@@ -46,13 +46,13 @@ A mapping's direction SHALL be one of three values — two naming a source and a
 #### Scenario: The reason is recorded where an author meets it
 
 - **WHEN** the direction option's documentation is read
-- **THEN** it states that the verb named export moves values out of clan in one tool and into clan in the other
+- **THEN** it states that clan's own `vars export` moves values out of clan, while a safix-to-clan mapping's convergence moves a value the opposite way, so a word one tool already uses for its own verb would mean the opposite thing if reused for this option
 - **AND** it states that a declaration is read without a tool in hand to be relative to
 - **AND** it states that two-way carries no such relativity, because it names neither a source nor a destination
 
 ### Requirement: Evaluation refuses every mapping mistake that is local to the consumer
 
-Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, which duplicates or contradicts another mapping, or whose clan-side fields do not match what its declared placement requires.
+Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, which duplicates or contradicts another mapping, whose clan-side fields do not match what its declared placement requires, or whose id is one the command line reserves as a target keyword.
 
 #### Scenario: An unresolvable safix side is refused
 
@@ -86,6 +86,12 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 
 - **WHEN** a mapping's placement is per-machine and no machine is declared, or its placement is per-export and no export key is declared, or a machine or an export key is declared for a placement that does not call for it
 - **THEN** evaluation refuses naming the mapping, its placement, and which field is missing or out of place
+
+#### Scenario: A mapping id reserved for a target keyword is refused
+
+- **WHEN** a mapping's id is `clan`, `keepassxc`, or `all`
+- **THEN** evaluation refuses, naming the mapping and the word it collides with
+- **AND** the reason given is that `sync` and `audit` read their first argument as a target keyword or a mapping name, never both, so no declared mapping may hold a word either verb reads as a target
 
 ### Requirement: The clan half is checked at run time and the asymmetry is stated
 

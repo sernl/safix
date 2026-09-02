@@ -1,44 +1,41 @@
 ## MODIFIED Requirements
 
-### Requirement: Two verbs move declared mappings, one per direction
+### Requirement: sync moves declared mappings, scoped by target and narrowed by direction
 
-The command SHALL provide a verb that acts on clan-to-safix mappings, a verb that acts on safix-to-clan mappings, and a verb that acts on two-way mappings, each acting on one named mapping or on all mappings of its direction.
+Amended while proposing `rename-transfer-verbs`: this requirement is `rename-transfer-verbs`'s renamed and rewritten successor to the base spec's "Two verbs move declared mappings, one per direction", which `import`/`export` refused a two-way-declared mapping under and a third verb `bridge` would have acted on.
+`rename-transfer-verbs` collapses `import`/`export` into `sync clan`'s own per-mapping direction convergence and a `--direction` filter; this change folds its own third verb into that same filter as a third accepted value, `two-way`, rather than adding a fourth CLI form.
+Substance is unchanged: a `two-way` mapping still converges by `bridge-sync`'s own rule, still refuses under `--direction clan-to-safix`/`--direction safix-to-clan` by naming its actual declared direction, and that refusal is now the same generic one every direction mismatch already gets from `rename-transfer-verbs`'s filter, with no `two-way`-specific wrong-verb wording left to carry.
 
-#### Scenario: Each verb acts on its own direction only
+The command SHALL provide a `sync` verb whose `clan` target acts on the mappings declared under `flake.safix.bridge.mappings`, each mapping converging in its own declared direction — `clan-to-safix`, `safix-to-clan`, or `two-way` — scoped to one or more named mappings or to every mapping of that target when none is named, and narrowed further by an optional `--direction` option naming one of the three declared direction values.
 
-- **WHEN** a verb runs
-- **THEN** it acts on mappings of its direction
-- **AND** it does not act on mappings of either other direction
+#### Scenario: Each mapping converges in its own declared direction
 
-#### Scenario: A run may be scoped or complete
+- **WHEN** `sync clan` runs
+- **THEN** each mapping acted on moves in the direction declared for it: a `clan-to-safix` or `safix-to-clan` mapping writes the side that lags, and a `two-way` mapping converges by the rule `bridge-sync` declares
+- **AND** no option or argument overrides a mapping's own declared direction
 
-- **WHEN** a verb is given a mapping's name
-- **THEN** it acts on that mapping alone
-- **AND** when given no mapping's name it acts on every mapping of its direction
+#### Scenario: A run may be scoped by naming mappings, or complete when none is named
 
-#### Scenario: A mapping named to the verb of the other direction is told which verb acts on it
+- **WHEN** `sync clan` is given one or more mapping names
+- **THEN** it acts on exactly those mappings, of any declared direction
+- **AND** when given none it acts on every mapping declared under the clan target
 
-- **WHEN** a verb is given the name of a mapping declared with a different direction
-- **THEN** it refuses naming the direction the mapping is declared with
-- **AND** it names the verb that does act on it
+#### Scenario: --direction narrows the run to mappings declared with that value
+
+- **WHEN** `sync clan --direction <value>` runs with no mapping named
+- **THEN** only mappings declared with that direction are acted on, `--direction two-way` narrowing to two-way mappings the same way the two one-way values narrow to theirs
+- **AND** a mapping declared with a different direction is left untouched, not refused
+
+#### Scenario: A named mapping outside the --direction filter is told its actual direction
+
+- **WHEN** `sync clan --direction <value>` is given the name of a mapping declared with a different direction
+- **THEN** it refuses naming the direction the mapping is actually declared with — one of `clan-to-safix`, `safix-to-clan`, or `two-way`
 - **AND** the refusal is distinct from the one for a name nothing declares
 
-#### Scenario: A two-way mapping named to import or export is refused by name
+#### Scenario: sync's help documents the clan target's forms
 
-- **WHEN** import or export is given the name of a mapping declared two-way
-- **THEN** it refuses naming two-way as the mapping's direction
-- **AND** it names bridge as the verb that acts on it
-
-#### Scenario: A one-way mapping named to bridge is refused by name
-
-- **WHEN** bridge is given the name of a mapping declared clan-to-safix or safix-to-clan
-- **THEN** it refuses naming that direction
-- **AND** it names import or export, whichever acts on it, as the verb that does
-
-#### Scenario: The verbs appear in the command's help
-
-- **WHEN** the command is asked for help with no verb
-- **THEN** all three verbs appear with their directions stated
+- **WHEN** the command is asked for help with `sync`
+- **THEN** the help text states the `clan` target, its mapping-name scoping, and the three `--direction` values it accepts, `two-way` among them
 
 ### Requirement: clan is the authority on its own store and is reached only through its command
 
@@ -72,7 +69,7 @@ When a mapping's placement is shared or per-export, the machine named on clan's 
 #### Scenario: An absent clan command refuses the whole run
 
 - **WHEN** clan's command is not available
-- **THEN** every verb refuses before transferring anything
+- **THEN** `sync`, for the clan target, refuses before transferring anything, whatever mix of directions the run would have acted on
 - **AND** the refusal states that clan is the authority on its own store
 - **AND** the run does not proceed with a subset of its mappings
 

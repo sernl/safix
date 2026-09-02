@@ -42,7 +42,7 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 - [ ] 5.1 Add `Clan::machines(&self) -> Result<Vec<String>>` invoking `clan machines list --flake <flake>`, piped stdout, parsed one name per line, beside `probe`/`register_user`/`generator_stale` (`clan.rs:126-138,240-269,295-317`)
 - [ ] 5.2 Add an addressing-search helper, memoized per run keyed on `(generator, file)`, trying each machine `machines()` returns against `clan vars get`/`set` in turn, using the existing `NO_SUCH_VAR` substring match to tell "wrong machine" apart from a genuine failure
-- [ ] 5.3 Wire the search into every read/write of a shared or per-export mapping's clan side, for both `import`/`export`/`bridge`; a per-machine mapping is unaffected and still uses its declared `machine` directly
+- [ ] 5.3 Wire the search into every read/write of a shared or per-export mapping's clan side, across every direction `sync`'s clan target converges, `two-way` included; a per-machine mapping is unaffected and still uses its declared `machine` directly
 - [ ] 5.4 Add `Error::ClanAddressUnresolved` naming the mapping, the placement, the generator and the file, raised when the search exhausts every machine `machines()` returned
 - [ ] 5.5 Test against `crate::clan`'s existing stub harness (`clan.rs:395-413`'s pattern): a stub `clan machines list` returning three names, one of which resolves the var; assert the search stops at the first success and does not try the remaining two
 - [ ] 5.6 Test the exhaustion case: a stub where no returned machine resolves the var; assert `ClanAddressUnresolved` and that every returned machine was tried exactly once
@@ -58,32 +58,33 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 - [ ] 6.6 Unit test the interruption case design.md's D8 names: a companion reflecting an older agreement, followed by a one-sided change on the side that matches the old agreement; assert the outcome is conflict, not a silent overwrite
 - [ ] 6.7 Verify: `cargo test -p safix-core bridge_sync::` green
 
-## 7. The `bridge` verb
+## 7. `two-way` in `sync clan`'s `--direction` filter
 
-- [ ] 7.1 Add `bridge_sync::converge` (import/export/bridge orchestration shape: `probe`, select mappings, decide then write in two passes so writes stay a single burst, mirroring `sync.rs::run`'s decide-then-write split at `sync.rs:272-307`)
-- [ ] 7.2 Extend `bridge::selected`'s wrong-verb refusal (`bridge.rs:191-221`) to three directions: a two-way mapping named to import/export names `bridge`; a one-way mapping named to `bridge` names import or export
-- [ ] 7.3 Register `bridge` in `crates/safix/src/main.rs`'s `VERBS` table and add `usage::BRIDGE`, following the existing entries' shape (`main.rs:147-166`)
-- [ ] 7.4 Wire the report: `bridge`'s `Outcome` carries `Unchanged | UpdatedTowardClan | UpdatedTowardSafix | Conflict | Refused(Error)`, distinct from `crate::bridge::Outcome`'s four and `crate::sync::Outcome`'s six, and its renderer prints the conflict remedy named in `bridge-sync`'s spec
-- [ ] 7.5 Integration test: `bridge <mapping>` on a two-way mapping named in the other direction's verb list refuses correctly in both directions; `import <mapping>`/`export <mapping>` on a two-way-declared mapping refuse naming `bridge`
-- [ ] 7.6 Verify: `cargo test -p safix` green for the new subcommand's dispatch and refusal tests; `safix -h` lists `bridge` (snapshot test following `main.rs:811-836`'s pattern)
+- [ ] 7.1 Add `bridge_sync::converge` (decide then write in two passes so writes stay a single burst, mirroring `sync.rs::run`'s decide-then-write split at `sync.rs:272-307`), reached from the same `sync` entry point `rename-transfer-verbs` gives the clan target
+- [ ] 7.2 Add `two-way` to `--direction`'s accepted values in `crates/safix/src/main.rs`'s option parsing (built by `rename-transfer-verbs`'s task 5.2) and to `crate::bridge::Direction`'s deserialization; confirm the existing generic filter-mismatch refusal (`rename-transfer-verbs`'s task 2.2) fires unmodified for a two-way mapping named under `--direction clan-to-safix`/`--direction safix-to-clan`, and for a one-way mapping named under `--direction two-way`
+- [ ] 7.3 Extend `usage::SYNC`'s clan-target help text with `two-way`'s meaning and the conflict remedy, alongside the two one-way directions `rename-transfer-verbs` already documents there
+- [ ] 7.4 Wire the report: the two-way convergence's `Outcome` carries `Unchanged | UpdatedTowardClan | UpdatedTowardSafix | Conflict | Refused(Error)`, distinct from `crate::bridge::Outcome`'s four and `crate::sync::Outcome`'s six, and its renderer prints `converged <mapping>` for a settled two-way write (per `rename-transfer-verbs`'s report-language decision) and the conflict remedy named in `bridge-sync`'s spec
+- [ ] 7.5 Integration test: `sync clan <mapping> --direction clan-to-safix` and `--direction safix-to-clan` on a two-way-declared mapping each refuse naming `two-way` as its actual direction; `sync clan <mapping> --direction two-way` on a one-way-declared mapping refuses the same way, naming that mapping's actual direction
+- [ ] 7.6 Verify: `cargo test -p safix` green for the extended `sync clan` dispatch and refusal tests; `safix sync -h` names `two-way` among `--direction`'s accepted values (snapshot test extending `rename-transfer-verbs`'s task 6.3)
 
 ## 8. `real_clan.rs`: the four outcome classes against a real clan
 
 - [ ] 8.1 Extend the `bridged()` fixture helper to accept a `direction` of `two-way` and a `placement`
-- [ ] 8.2 Test neither-moved: seed both sides equal, run `bridge`, assert unchanged and that clan's tree digest (`real_clan.rs:562-585`) is unchanged
-- [ ] 8.3 Test one-moved toward clan: change safix's side, run `bridge`, assert clan's var now matches and the companion updated
-- [ ] 8.4 Test one-moved toward safix: change clan's side via a direct `clan vars set` in the test harness (not through the runtime under test), run `bridge`, assert safix's entry now matches
-- [ ] 8.5 Test both-moved: change both sides independently, run `bridge`, assert conflict, nothing written on either side, and clan's tree digest unchanged
-- [ ] 8.6 Extend `the_runtime_reached_clans_store_only_through_clans_command` (`real_clan.rs:543-559`) to run `bridge` in its bridged-agreement sequence, so the whole-tree digest proof also covers the two-way path, not only import/audit/import
+- [ ] 8.2 Test neither-moved: seed both sides equal, run `sync clan --direction two-way`, assert unchanged and that clan's tree digest (`real_clan.rs:562-585`) is unchanged
+- [ ] 8.3 Test one-moved toward clan: change safix's side, run `sync clan --direction two-way`, assert clan's var now matches and the companion updated
+- [ ] 8.4 Test one-moved toward safix: change clan's side via a direct `clan vars set` in the test harness (not through the runtime under test), run `sync clan --direction two-way`, assert safix's entry now matches
+- [ ] 8.5 Test both-moved: change both sides independently, run `sync clan --direction two-way`, assert conflict, nothing written on either side, and clan's tree digest unchanged
+- [ ] 8.6 Extend `the_runtime_reached_clans_store_only_through_clans_command` (`real_clan.rs:543-559`) to run a two-way `sync clan` in its bridged-agreement sequence, so the whole-tree digest proof also covers the two-way path, not only the two one-way directions
 - [ ] 8.7 Test the stale-generator refusal on a two-way push, reusing `export_refuses_a_generator_that_declares_a_validation_and_has_never_run`'s fixture shape (`real_clan.rs:511-530`) with a two-way mapping instead of safix-to-clan
 - [ ] 8.8 Test the addressing-machine search against a real clan with a shared-placement generator, asserting the runtime never names a machine on the command line that the consumer did not have to declare
 - [ ] 8.9 Verify: `cargo test -p safix real_clan` green where a real clan is available; each test's `no_clan_here` fallback confirmed to skip rather than fail where it is not, following the existing pattern
+
 
 ## 9. Documentation
 
 - [ ] 9.1 Document `placement`/`export` on `clanSide` in `modules/flake/safix/bridge.nix`, stating the addressing-machine discovery and why `machine` is forbidden outside per-machine
 - [ ] 9.2 Document the companion entry's naming, its shared file/audience, and the reservation refusal beside `resolve.nix`'s minting logic
-- [ ] 9.3 Document the `bridge` verb in `usage::BRIDGE`, naming the four outcome classes and the conflict remedy
+- [ ] 9.3 Extend `usage::SYNC`'s clan-target help text with `two-way`'s four outcome classes and the conflict remedy, alongside the two one-way directions `rename-transfer-verbs` already documents there
 - [ ] 9.4 Verify: every guarantee stated in the new documentation names a check or test in this repository that holds it
 
 ## 10. Verification

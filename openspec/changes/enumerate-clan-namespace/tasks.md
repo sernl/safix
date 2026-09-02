@@ -23,7 +23,7 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 ## 3. `audit`'s `lingering` field
 
 - [ ] 3.1 Add `pub lingering: Vec<String>` to `audit::Report`, documented the way `sync::Report::lingering` is: information, not a finding, because no mode here deletes an entry either
-- [ ] 3.2 Compute the machines to enumerate as the distinct `mapping.clan.machine` values across `selected(workspace, only)`'s result, per design.md's D5 — not across every declared mapping unconditionally, so `audit <mapping>` narrows enumeration the same way it narrows comparison
+- [ ] 3.2 Compute the machines to enumerate as the distinct `mapping.clan.machine` values across `selected(workspace, only)`'s result, per design.md's D5 — not across every declared mapping unconditionally, so `audit clan <mapping>` narrows enumeration the same way it narrows comparison
 - [ ] 3.3 Compute the claimed set as `(machine, generator/file id)` pairs from every mapping in that same narrowed set, using `mapping.clan.machine`, `.generator`, and `.file` only — never `mapping.direction` — per design.md's D3
 - [ ] 3.4 For each distinct machine, call `Clan::list`, propagating `Error::ClanUnavailable` and `Error::ClanMachineListFailed` with `?` so either stops the whole run before any mapping is compared, per design.md's D6
 - [ ] 3.5 Format each unclaimed id as `format!("{machine} {id}")`, matching `audit::Finding::clan`'s existing `"<machine> <generator>/<file>"` shape, and collect into `lingering` sorted by machine then by id
@@ -36,22 +36,22 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 
 - [ ] 4.1 Add a lingering section to `crates/safix/src/render.rs`'s `audit` renderer, printed after the existing findings, naming each entry and stating that nothing was written; print nothing when `lingering` is empty, matching every other empty-case branch already in that file
 - [ ] 4.2 Update `crates/safix/src/usage.rs`'s `AUDIT` constant to state that the report also names clan vars no declared mapping accounts for, and that reporting them is not removing them
-- [ ] 4.3 Verify: a manual `safix audit` render (via a unit test constructing an `audit::Report` with a non-empty `lingering` and asserting on `render::audit`'s output) shows the new section and names no value
+- [ ] 4.3 Verify: a manual `safix audit clan` render (via a unit test constructing an `audit::Report` with a non-empty `lingering` and asserting on `render::audit`'s output) shows the new section and names no value
 
 ## 5. Hermetic test coverage
 
 - [ ] 5.1 Extend `crates/safix/tests/support/clan-stub.rs` to answer `["vars", "list", "--flake", _flake, machine]`, printing lines in the `<generator>/<file>: <state>` shape for whatever the stub's fixture has declared for that machine, and update its module doc comment's contract list to name the fourth verb
-- [ ] 5.2 Add a case where the stub's machine holds a var no fixture mapping names, and a test in `crates/safix/tests/audit.rs` asserting `safix audit`'s output names it under the new section
+- [ ] 5.2 Add a case where the stub's machine holds a var no fixture mapping names, and a test in `crates/safix/tests/audit.rs` asserting `safix audit clan`'s output names it under the new section
 - [ ] 5.3 Add a test asserting a machine with no unmapped vars produces an empty `lingering` and no new section in the rendered output
 - [ ] 5.4 Add a test asserting that removing a previously-declared mapping (simulated by two fixture runs, one with the mapping and one without, both against a stub that never forgets the var it once reported) causes the var to appear in the second run's lingering section, holding the "a removed mapping's var keeps appearing" scenario
 - [ ] 5.5 Add a test asserting `lingering`'s presence does not change `audit`'s exit code when every compared mapping agrees, holding the "lingering never changes the exit status" scenario
-- [ ] 5.6 Add a test asserting `audit <mapping>` (narrowed) enumerates only that mapping's machine, by giving the stub two machines and asserting the narrowed run's lingering section names only the one the given mapping declares, holding design.md's D5
+- [ ] 5.6 Add a test asserting `audit clan <mapping>` (narrowed) enumerates only that mapping's machine, by giving the stub two machines and asserting the narrowed run's lingering section names only the one the given mapping declares, holding design.md's D5
 - [ ] 5.7 Verify: `cargo test -p safix` passes, covering all of 5.1-5.6
 
 ## 6. Real-clan coverage
 
 - [ ] 6.1 In `modules/flake/checks/real-clan.nix`'s fixture, add a fourth generator or file that no bridge mapping in that check's fleet names, alongside the existing `ntfy`/`handover`/`scheduled` three, so the real clan built there has something for `Clan::list` to find and no mapping to claim it
-- [ ] 6.2 Add a test to `crates/safix/tests/real_clan.rs` asserting `safix audit` against the real clan reports the unmapped var under the new section, naming the real machine and the real generator/file the check declares (no fleet identifier — these are the check's own synthetic names)
+- [ ] 6.2 Add a test to `crates/safix/tests/real_clan.rs` asserting `safix audit clan` against the real clan reports the unmapped var under the new section, naming the real machine and the real generator/file the check declares (no fleet identifier — these are the check's own synthetic names)
 - [ ] 6.3 Add a test asserting that once a mapping for that var is declared and the fixture rebuilt, the same var stops appearing in `lingering` — holding that the scope is genuinely computed from current declarations and not cached across runs
 - [ ] 6.4 Severity drill: temporarily removing the claimed-set check in `audit.rs` (per 3.3's drill) and re-running 6.2 against the real clan must also turn red, confirming the hermetic drill in 3.8 is not answering a question only the stub can pose
 - [ ] 6.5 Verify: `nix build .#checks.x86_64-linux.safix-bridge-real-clan` green on Linux with clan-core in the closure, and its own absence-guard (per that file's existing discipline) still fires when `SAFIX_TEST_REAL_CLAN_SEED` is withheld

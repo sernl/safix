@@ -2,6 +2,10 @@
 
 Citations are read at the revisions named in `proposal.md`.
 
+Amended 2026-09-03 while proposing `rename-transfer-verbs`: vocabulary updated to the sync family; substance unchanged.
+`import`/`export`/`audit` become target-scoped forms of `sync`/`audit`; this change's own third verb, described below as `bridge` when this design was first written, folds into `sync clan`'s `--direction` option as a third value, `two-way`, rather than registering as a fourth CLI verb.
+Every decision below that named `bridge` as a verb, or `import`/`export` as the verbs a two-way mapping is refused under, is restated for the folded shape; the underlying mechanism — the companion entry, the four-outcome decision function, the write-after-value ordering, the inherited safix-to-clan write discipline — is exactly what it was.
+
 ## Context
 
 Today `bridge.nix` computes four evaluation-time refusals over declared mappings — an unresolvable safix side, a second producer, two mappings on one target, and a pair of endpoints declared with opposite directions — and refuses the last of those unconditionally, naming the reason: "which is a two-way synchronisation and has no conflict resolution" (`modules/flake/safix/bridge.nix:200`).
@@ -29,7 +33,7 @@ A general-purpose "ask clan what it has" cache or command; the addressing-machin
 
 `clan-to-safix` and `safix-to-clan` keep their meaning; `two-way` is added, naming neither a source nor a destination because the value may originate on either side.
 The old refusal — declaring one pair of endpoints as two mappings with opposite one-way directions — narrows rather than disappears: it is still wrong, now because the relationship has a single correct spelling and this is not it, rather than because no conflict resolution exists.
-`bridge-surface`'s "Evaluation refuses every mapping mistake that is local to the consumer" requirement carries both the narrowed refusal and a new scenario accepting the single-declaration form; its requirement header is kept unedited for archive continuity even though the scenario beneath it is renamed to state the new reason, the same discipline `bridge-transfer`'s "Two verbs move declared mappings, one per direction" requirement keeps under D9 below.
+`bridge-surface`'s "Evaluation refuses every mapping mistake that is local to the consumer" requirement carries both the narrowed refusal and a new scenario accepting the single-declaration form; its requirement header is kept unedited for archive continuity even though the scenario beneath it is renamed to state the new reason, the same discipline `bridge-transfer`'s "sync moves declared mappings, scoped by target and narrowed by direction" requirement keeps under D10 below (`rename-transfer-verbs`'s renamed and rewritten successor to what this design originally cited as "Two verbs move declared mappings, one per direction").
 
 ### D2. `ClanSide` gains a placement, and `machine` becomes conditional on it rather than always required
 
@@ -86,7 +90,7 @@ This is why the companion is written through `set::run_committing`, the same pat
 
 ### D7. The decision function mirrors `crate::sync::two_way`, adapted to `Reading` and `Secret`
 
-`bridge_sync::decide` (new, alongside `bridge::one_import`/`one_export`) reads `clan.read(...)` and `bridge::held_by_safix(...)`, reads the companion through the same read path a mapped entry uses, and reproduces `two_way`'s four-way match exactly (`sync.rs:447-479`): both absent is unchanged; exactly one absent is a bootstrap push or pull, remembered; both present and equal is unchanged; both present and unequal consults the companion — one side still agreeing is a converge toward the other, remembered; neither agreeing, or no companion yet, is a conflict, settled with nothing written.
+`bridge_sync::decide` (new, alongside `bridge.rs`'s existing one-way clan-to-safix and safix-to-clan write functions, whatever `rename-transfer-verbs` ends up naming them once it collapses `import`/`export` into `sync`) reads `clan.read(...)` and `bridge::held_by_safix(...)`, reads the companion through the same read path a mapped entry uses, and reproduces `two_way`'s four-way match exactly (`sync.rs:447-479`): both absent is unchanged; exactly one absent is a bootstrap push or pull, remembered; both present and equal is unchanged; both present and unequal consults the companion — one side still agreeing is a converge toward the other, remembered; neither agreeing, or no companion yet, is a conflict, settled with nothing written.
 `agrees`/`memory_of`/`FORMAT` (`sync.rs:483-511`) are the same shape reused with a distinct tag — `safix-bridge-sync-v1` rather than `safix-sync-v1` — so the two mechanisms' memories are never mistaken for one another if a consumer somehow points both at overlapping entries, and so a future change to one format tag does not silently reinterpret the other's records.
 
 ### D8. The four outcome classes, exactly
@@ -101,7 +105,7 @@ Either way the value lands before the agreement, per C7 and per D6's oracle reas
 
 **Both moved** (the two sides differ from the companion, or from each other with no companion recorded yet): outcome conflict.
 Nothing is written anywhere.
-The report names the mapping and the remedy: redeclare the mapping's direction as clan-to-safix or safix-to-clan, run the corresponding verb once — which never touches the companion, since only `bridge`'s converge path does — then revert the direction to two-way.
+The report names the mapping and the remedy: narrow a `sync clan` run to it with `--direction clan-to-safix` or `--direction safix-to-clan` and run once — which never touches the companion, since only the two-way convergence path does — then revert the mapping's declared direction to two-way.
 This mirrors `keepassxc-sync`'s own documented remedy exactly: switching a `two-way` mapping's declared mode and running `sync` once, which also never remembers (`sync.rs:394-397,409-412`, both one-way `Decision` arms pass `remember: false`), for the identical reason — forcing agreement by fiat should not be indistinguishable, in the record, from a genuine converging write.
 
 **No memory yet** is not a fifth class; it is the condition under which "both moved" and "one side never held a value" diverge in outcome.
@@ -109,17 +113,20 @@ A two-way mapping whose sides already agree, with no companion ever written, sta
 The first time the sides genuinely disagree with no companion recorded, the mapping is refused as a conflict rather than guessed at, exactly as `sync.rs`'s own documentation states for the keepassxc case (`sync.rs:36-38`): "a two-way mapping whose sides already agree before safix ever ran has no memory, so its first divergence is a conflict rather than a guess."
 The companion's first-ever write therefore only ever happens through a bootstrap push or pull (exactly one side ever having held a value) or through a tiebreak once a companion already exists — never through the "both moved, no memory" branch, which is deliberate: nothing here ever manufactures an agreement it did not observe.
 
-### D9. A two-way push inherits export's discipline verbatim, with no override
+### D9. A two-way push inherits sync's safix-to-clan discipline verbatim, with no override
 
-The comparison before a clan write and the stale-generator refusal are structural properties of `clan vars set` (unconditional write and commit, silent replacement of an unvalidated definition), not preferences of `one_export`'s implementation.
-A two-way push therefore calls the same comparison and the same `Clan::generator_stale` check `one_export` calls (`bridge.rs:352-376`), under the identical condition and the identical message, so a two-way mapping and a one-way export of the same generator are refused by the same sentence.
-No flag on `bridge` bypasses it, mirroring `bridge-transfer`'s existing "No option defeats the refusal" scenario for export.
+The comparison before a clan write and the stale-generator refusal are structural properties of `clan vars set` (unconditional write and commit, silent replacement of an unvalidated definition), not preferences of one particular direction's implementation.
+A two-way push therefore calls the same comparison and the same `Clan::generator_stale` check a safix-to-clan write calls (`bridge.rs:352-376`), under the identical condition and the identical message, so a two-way mapping and a one-way safix-to-clan write of the same generator are refused by the same sentence.
+No flag on `sync` bypasses it, mirroring `bridge-transfer`'s existing "No option defeats the refusal" scenario for the safix-to-clan direction.
 
-### D10. The third verb, `bridge`
+### D10. `two-way` folds into `sync clan`'s `--direction` filter; no fourth verb
 
-`import`/`export` are already relative-to-nothing verb names sitting inside the operator-facing category the CLI's own comment calls "bridge" (`crates/safix/src/main.rs:107-108`), alongside `set`/`edit` ("write"), `get`/`list` ("read"), and `sync` ("converge", for `keepassxc-sync`).
-The new verb reuses that category's own name, `bridge`, rather than inventing new vocabulary or extending `sync` — which already means something specific and different (a kdbx database, a different comparison shape, no generator-staleness concept at all) — or splitting the decision across `import`/`export` (rejected: it would let one verb write into the other's nominal direction on a two-way mapping, or require two invocations to fully converge one mapping, reintroducing the exact split-brain risk two-way sync exists to close).
-`bridge` lives beside `one_import`/`one_export` in `crates/safix-core/src/bridge.rs`, reusing `selected`'s wrong-verb refusal shape (`bridge.rs:191-221`) extended to three directions, and its own `Report`/`Outcome` types mirror `crate::sync::Report`/`Outcome` (`sync.rs:121-197`) rather than `crate::bridge::Outcome` (`bridge.rs:62-92`), because a two-way run has a fifth possible finding — conflict — the one-way runs do not.
+Amended while proposing `rename-transfer-verbs`: this design originally proposed a third verb, `bridge`, reusing the operator-facing category name the CLI's comment gave `import`/`export` (`crates/safix/src/main.rs:107-108`).
+`rename-transfer-verbs`, sequenced to land first, already collapses `import`/`export` into one `sync` verb whose `clan` target converges every declared mapping in its own direction and accepts an optional `--direction` filter over that same declared vocabulary.
+A third verb spelled `bridge` would sit beside a `sync` that already means "converge a declared relationship" for the `keepassxc` target, forcing an operator to remember which of two verbs converges which target's two-way relationship — the same drifting-operational-knowledge failure mode `rename-transfer-verbs`'s own design rejects `--filter`-shaped alternatives for.
+`two-way` becomes `--direction`'s third accepted value instead: `sync clan --direction two-way` (or a bare `sync clan`, or bare `sync`, each of which already converges every mapping in its own declared direction) reaches the identical convergence function.
+A two-way mapping named under `--direction clan-to-safix` or `--direction safix-to-clan` is refused by the same generic filter-mismatch refusal every direction mismatch already gets, naming `two-way` as the mapping's actual direction — no `bridge`-specific "wrong verb" wording survives, because there is no longer a second verb to be wrong about.
+The convergence function itself keeps its own name and home, `bridge_sync::decide`/`converge` in `crates/safix-core/src/bridge.rs`, reused by the `sync` entry point exactly as the one-way convergence functions are; its own `Report`/`Outcome` types still mirror `crate::sync::Report`/`Outcome` (`sync.rs:121-197`) rather than `crate::bridge::Outcome` (`bridge.rs:62-92`), because a two-way run has a fifth possible finding — conflict — the one-way runs do not.
 
 ### D11. `Secret` wraps the digest too, not only the value
 

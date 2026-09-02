@@ -3,6 +3,9 @@
 Revisions are as named in `proposal.md`.
 Every clan-core line anchor below was read at that revision, in `/home/sernl/ghq/git.clan.lol/clan/clan-core`.
 
+Amended 2026-09-03 while proposing `rename-transfer-verbs`: vocabulary updated to the sync family; substance unchanged.
+`audit` gains `clan` and `keepassxc` targets there; every invocation this design cites as bare `safix audit` or `audit <mapping>` becomes `safix audit clan` / `audit clan <mapping>`, since this change's own lingering report is the clan target's alone.
+
 ## Context
 
 `clan vars list <machine>` is `clan_cli/vars/list.py`, registered with no flag of its own beyond the global `--flake` (`clan_cli/cli.py:85-90`, the same flag `vars get`, `vars set` and `vars check` already take in `clan.rs`).
@@ -52,7 +55,7 @@ Calling `clan machines list` and enumerating every machine it returns would make
 So the set of machines enumerated is exactly `{ mapping.clan.machine for mapping in every currently declared mapping }`, drawn from `workspace.bridge()?.mappings` the same way `audit::selected` already does, and `clan machines list` is not called anywhere in this change.
 
 The consequence, stated rather than discovered later: a machine whose last mapping is removed is no longer named by anything safix declares, and so drops out of this enumeration along with it.
-Its vars do not become permanently invisible to the operator — `clan vars list <machine>` run by hand still shows them — but they stop being carried in `safix audit`'s report the same day the mapping that once named the machine is removed.
+Its vars do not become permanently invisible to the operator — `clan vars list <machine>` run by hand still shows them — but they stop being carried in `safix audit clan`'s report the same day the mapping that once named the machine is removed.
 This is recorded as a Risk below rather than solved, because solving it means declaring a machine independently of any mapping, which is a new piece of surface this change was not asked for and `bridge-surface` does not currently have.
 
 ### D3. What counts as "accounted for" is computed from the clan triple alone, never from direction or mode
@@ -75,7 +78,7 @@ A fourth thing to type and remember for a report that belongs beside the one `au
 
 `audit`'s existing `selected()` narrows to one mapping's comparison when `only` names it, and lingering is computed over the same narrowed set of mappings' machines rather than over every declared mapping regardless of `only`.
 This is the one place this design departs from `sync::lingering`'s literal shape, which always computes over the whole declared `Keepassxc` regardless of a sync run's own `only`.
-The reason for the departure is that clan's enumeration is a real subprocess call with a real, per-machine failure mode (D6), where keepassxc's is a single already-open database's own index; an operator who names one mapping to `audit` because clan is only reachable in some restricted way for that one machine should not have that narrowed request additionally require reaching every other machine the bridge happens to declare.
+The reason for the departure is that clan's enumeration is a real subprocess call with a real, per-machine failure mode (D6), where keepassxc's is a single already-open database's own index; an operator who names one mapping to `audit clan` because clan is only reachable in some restricted way for that one machine should not have that narrowed request additionally require reaching every other machine the bridge happens to declare.
 Naming no mapping restores the full behavior: every machine any declared mapping names is enumerated, exactly as an unnarrowed `sync` run enumerates the whole declared group.
 
 ### D6. A machine that cannot be listed stops the whole run, the same way an unreachable clan already does
@@ -93,16 +96,16 @@ This mirrors `keepassxc-sync`'s own explicit choice — "No mode SHALL delete an
 ## Risks / Trade-offs
 
 A machine whose last mapping is removed drops out of this report on the same day, per D2.
-Its vars are not lost and remain visible to `clan vars list` run by hand; what is lost is `safix audit` continuing to mention them.
+Its vars are not lost and remain visible to `clan vars list` run by hand; what is lost is `safix audit clan` continuing to mention them.
 Declaring a machine independently of any mapping would close this gap and is out of scope: `bridge-surface` has no such declaration today, and adding one is a larger surface than this change was asked to add.
 
 Enumeration cost scales with the number of distinct machines a bridge declares, one subprocess per machine per `audit` run, on top of the one subprocess per mapping `audit` already spends.
 For the fleet sizes this bridge is built for — mappings measured in the tens, not thousands — this is the same order of cost `audit` already pays, and no batching across machines is attempted.
 
 A machine-listing failure stopping the whole run (D6) means one broken machine can prevent `audit` from reporting on every other, otherwise-healthy mapping in the same run, including ones on unrelated machines.
-This is the accepted cost of not silently narrowing what "nothing lingers" claims; an operator in that state still has `audit <mapping>` to narrow past the broken machine, per D5.
+This is the accepted cost of not silently narrowing what "nothing lingers" claims; an operator in that state still has `audit clan <mapping>` to narrow past the broken machine, per D5.
 
 ## Migration Plan
 
 Additive to `audit`'s output and to `Clan`'s and `Error`'s public surface; no existing field, verb, or exit-status contract changes.
-A consumer parsing `safix audit`'s text output for its own tooling gains a new section when at least one machine has a lingering var; one does not appear when none does, matching every other empty-case rendering already in `render.rs`.
+A consumer parsing `safix audit clan`'s (or bare `safix audit`'s) text output for its own tooling gains a new section when at least one machine has a lingering var; one does not appear when none does, matching every other empty-case rendering already in `render.rs`.

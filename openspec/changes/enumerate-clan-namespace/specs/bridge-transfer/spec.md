@@ -3,6 +3,7 @@
 ### Requirement: clan is the authority on its own store and is reached only through its command
 
 Every read of a clan value, every write of one, and every enumeration of a machine's vars SHALL be performed by invoking clan's own command as a subprocess, and the runtime SHALL NOT read, write, decrypt, encrypt or parse clan's stored files.
+When a mapping's placement is shared or per-export, the machine named on clan's command line to address it SHALL itself be obtained by invoking clan's command, never from a second field a consumer declares.
 
 #### Scenario: Reading a clan value delegates
 
@@ -37,9 +38,21 @@ Every read of a clan value, every write of one, and every enumeration of a machi
 #### Scenario: An absent clan command refuses the whole run
 
 - **WHEN** clan's command is not available
-- **THEN** both verbs refuse before transferring anything
+- **THEN** `sync`, for the clan target, refuses before transferring anything, whatever mix of directions the run would have acted on
 - **AND** the refusal states that clan is the authority on its own store
 - **AND** the run does not proceed with a subset of its mappings
+
+#### Scenario: A shared or per-export mapping's address is discovered from clan, not declared twice
+
+- **WHEN** a mapping's placement is shared or per-export
+- **THEN** the runtime asks clan which machines it has, and tries them in turn against the mapping's generator until one resolves it
+- **AND** no option or field on the mapping names that machine
+
+#### Scenario: An unaddressable shared or export placement refuses naming the generator
+
+- **WHEN** no machine clan has resolves a shared or per-export mapping's generator
+- **THEN** the mapping is refused
+- **AND** the refusal names the mapping, the placement, the generator and the file, and states that no machine in clan's own fleet exposed it
 
 ## ADDED Requirements
 
@@ -72,3 +85,9 @@ No mode SHALL delete, export, or import a var by virtue of this report alone, an
 - **WHEN** a run finds one or more vars no mapping accounts for and every compared mapping agrees
 - **THEN** the audit still exits reporting agreement
 - **AND** the vars no mapping accounts for are reported alongside it as information
+
+#### Scenario: This is the clan target's own lingering report, alongside keepassxc's
+
+- **WHEN** `audit` runs bare or with `clan` as its target
+- **THEN** this requirement's lingering report is what appears for clan vars
+- **AND** naming `keepassxc` as the target instead surfaces `keepassxc-sync`'s own lingering report, which `rename-transfer-verbs` adds as that capability's parallel gap-fill

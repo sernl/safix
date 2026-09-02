@@ -26,7 +26,7 @@ Every mapping whose direction is two-way SHALL have a companion safix entry that
 
 ### Requirement: A two-way mapping converges toward whichever side changed since the last agreement
 
-`bridge` SHALL read both sides of every declared two-way mapping — or the one named — and: write nothing where the two sides already agree; write the side that has not moved to match the side that has, recording the new agreement, where exactly one side differs from the last-recorded agreement; write nothing and report a conflict where both sides differ from the last-recorded agreement or from each other with no agreement yet recorded; and, where exactly one side has never held a value, write that side from the other and record the agreement, treating that as ordinary convergence rather than a failure.
+`sync`, converging a mapping declared `two-way` under the clan target, SHALL read both sides of every declared two-way mapping — or the one named — and: write nothing where the two sides already agree; write the side that has not moved to match the side that has, recording the new agreement, where exactly one side differs from the last-recorded agreement; write nothing and report a conflict where both sides differ from the last-recorded agreement or from each other with no agreement yet recorded; and, where exactly one side has never held a value, write that side from the other and record the agreement, treating that as ordinary convergence rather than a failure.
 
 #### Scenario: Agreement writes nothing
 
@@ -44,7 +44,7 @@ Every mapping whose direction is two-way SHALL have a companion safix entry that
 
 - **WHEN** both sides' current values differ from the last-recorded agreement, or the two sides differ from each other and no agreement has ever been recorded
 - **THEN** nothing is written
-- **AND** the finding names the mapping and the two one-way remedies: redeclaring its direction as clan-to-safix or safix-to-clan and running the verb that acts on it once, before reverting the direction to two-way
+- **AND** the finding names the mapping and the two one-way remedies: narrowing a `sync clan` run to it with `--direction clan-to-safix` or `--direction safix-to-clan` and running once, before the mapping's declared direction reverts to two-way
 
 #### Scenario: One side has never held a value, and that is bootstrap rather than a failure
 
@@ -61,7 +61,7 @@ Every mapping whose direction is two-way SHALL have a companion safix entry that
 #### Scenario: A shared or export-scoped mapping's address is discovered from clan, not declared twice
 
 - **WHEN** a two-way mapping's placement is shared or per-export
-- **THEN** the machine used to reach it on clan's command line is discovered the same way `bridge-transfer` requires for import and export
+- **THEN** the machine used to reach it on clan's command line is discovered the same way `bridge-transfer` requires for every direction, one-way or two-way alike
 
 ### Requirement: The agreement is written after the value it describes, and nowhere a plaintext digest would be an oracle
 
@@ -85,23 +85,24 @@ A two-way convergence that writes a side SHALL write the agreement only after th
 - **THEN** neither is found
 - **AND** the reason is recorded for each: clan's store is reached only through its command, and a digest of a secret value committed in the clear is an offline-confirmable oracle for anyone holding the tree
 
-### Requirement: A two-way push into clan carries export's unconditional-write discipline, with no override
+### Requirement: A two-way push into clan carries sync's safix-to-clan discipline, with no override
 
-Writing a two-way mapping's clan side SHALL compare against clan's current value before writing, for the reason `bridge-transfer` already gives for export, and SHALL refuse when clan reports the generator's recorded validation stale, with no option that proceeds past that refusal.
+Writing a two-way mapping's clan side SHALL compare against clan's current value before writing, for the reason `bridge-transfer` already gives for its safix-to-clan direction, and SHALL refuse when clan reports the generator's recorded validation stale, with no option that proceeds past that refusal.
 
-#### Scenario: The comparison is asked of the same code path export uses
+#### Scenario: The comparison is asked of the same code path a safix-to-clan write uses
 
 - **WHEN** a two-way convergence decides to write clan's side
-- **THEN** it is refused under the identical condition, and with the identical message, an export of the same mapping would be refused under
+- **THEN** it is refused under the identical condition, and with the identical message, a safix-to-clan write of the same mapping would be refused under
 
 #### Scenario: No flag or mode defeats the stale-generator refusal
 
-- **WHEN** bridge's arguments are enumerated
+- **WHEN** `sync`'s arguments are enumerated
 - **THEN** none of them proceeds past a stale-generator refusal
 
 ### Requirement: The report names mappings and their outcome, never a value
 
-Each two-way mapping `bridge` acts on SHALL be reported as unchanged, updated toward safix, updated toward clan, conflict, or refused with its reason, and no value and no digest SHALL appear in any report, refusal, or commit message.
+Each two-way mapping `sync`'s clan target acts on SHALL be reported as unchanged, updated toward safix, updated toward clan, conflict, or refused with its reason, and no value and no digest SHALL appear in any report, refusal, or commit message.
+Rendered rather than structured, an `updated toward safix` outcome reads `pulled <mapping> ← clan`, an `updated toward clan` outcome reads `pushed <mapping> → clan`, and — because a two-way convergence names no source and no destination — its own outcome reads `converged <mapping>` rather than reusing either arrow, matching the rendering `rename-transfer-verbs` establishes for the two one-way directions.
 
 #### Scenario: The report is complete and value-free
 
