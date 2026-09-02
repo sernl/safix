@@ -8,7 +8,7 @@ What a secret is as a declaration: the entry vocabulary under `flake.safix.catal
 
 ### Requirement: Declarations are mergeable and may be scattered
 
-The catalogue SHALL be an attribute set option on a flake-parts module, so that declarations made in separate files merge into one record.
+The catalogue SHALL be an attribute set option merged by the nix module system, so that declarations made in separate files merge into one record, whether that merge happens through a flake-parts module a consumer's flake imports or through `lib.mkVault`'s `modules` argument.
 No file layout, naming scheme, or import order SHALL be required of a consumer.
 
 #### Scenario: One secret per file
@@ -21,7 +21,7 @@ No file layout, naming scheme, or import order SHALL be required of a consumer.
 
 - **WHEN** a consumer arranges its declaration files
 - **THEN** nothing in the package reads a path, a filename, or a directory structure to find them
-- **AND** the only requirement is that the modules are imported by the consumer's flake
+- **AND** the only requirement is that the modules reach the mechanism that merges them: a consumer's flake imports, or the `modules` argument to `lib.mkVault`
 
 #### Scenario: Two files declaring one name
 
