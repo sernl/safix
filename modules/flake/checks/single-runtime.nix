@@ -104,6 +104,23 @@
         # keeps a clean report meaning the mappings agree instead of meaning the
         # ones this operator could open agree.
         safix-bridge-audit = claim "safix-bridge-audit" "audit";
+
+        # The two-way convergence itself, over the stubbed clan: all four
+        # outcome classes together, because each is a window onto the same
+        # claim — `bridge_sync::converge` reads both sides against the last
+        # recorded agreement and never writes without having read first — and
+        # splitting them across attributes would leave an attribute asserting a
+        # fragment, the reasoning `safix-bridge-transfer` and `safix-bridge-audit`
+        # already apply above. Each outcome is held again on its own, with its
+        # own drill, by the `safix-bridge-sync-*` checks in `./cli.nix`.
+        #
+        # Recording the agreement before the value it describes has landed, or
+        # writing either when nothing converged, fails this on
+        # `neither_side_holding_anything_is_unchanged_and_writes_nothing` and on
+        # the two bootstrap tests' two-separate-commits assertions; picking a
+        # side by fiat instead of refusing when both moved fails it on
+        # `both_sides_holding_different_values_with_no_agreement_is_a_conflict`.
+        safix-bridge-sync-converge = claim "safix-bridge-sync-converge" "bridge_sync";
       }
       # The tmpfs rule, held against the kernel's own mount table rather than
       # against the probe that enforces it. The drill that exercises the refusal

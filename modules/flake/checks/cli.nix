@@ -208,6 +208,30 @@
 # instead: `ls -R -f` over a database holding nothing prints `[empty]` rather than
 # nothing, which the runtime has to skip and which no model would have revealed.
 #
+# ── the bridge-sync drills, all observed red during this change ──
+# Treating two absent sides as a conflict rather than as agreement fails
+# `safix-bridge-sync-unchanged` on the report and on the exit code, which a
+# run that converged nothing must leave at zero.
+# Picking a side by fiat in the "no agreement yet, sides disagree" branch,
+# rather than refusing, fails `safix-bridge-sync-conflict` — the run is
+# accepted where it must be refused, and safix's own side is overwritten.
+# Skipping the companion write in `push` fails `safix-bridge-sync-push`'s
+# "no commit landed" assertion, because the companion is the only commit a
+# push makes in this repository; the same drill, applied to `pull` instead,
+# fails `safix-bridge-sync-pull` on which commit `HEAD` names, since without
+# it the value's own write becomes the run's last commit.
+# Making `remembered_agreement` always answer `None` fails
+# `safix-bridge-sync-remembered`: a later divergence that should converge
+# using the recorded agreement is reported as a conflict instead, because
+# there is no agreement left for it to consult.
+# Skipping the stale-generator check in `push` fails
+# `safix-bridge-sync-stale-generator`, whose run is accepted and its value
+# written into clan where the refusal exists to prevent exactly that.
+# Having `Addressing::resolve` search no candidate at all — never calling
+# `clan machines list` — fails `safix-bridge-sync-shared-address` on
+# `ClanAddressUnresolved`, since the fixture's mapping declares no machine
+# for a fixed one to have come from instead.
+#
 # Dropping one of the four card-surface overrides from a run's environment fails
 # every enrollment check before a process is spawned, on the harness's own guard.
 # That drill was run deliberately and is the one whose failure mode is not a red
@@ -744,6 +768,55 @@
       checks.safix-sync-leftovers =
         mode "safix-sync-leftovers" "sync_path"
           "an_entry_no_mapping_declares_is_reported_and_never_removed";
+
+      # Neither side holding a value writes nothing anywhere: no clan write,
+      # no companion write, no commit.
+      checks.safix-bridge-sync-unchanged =
+        mode "safix-bridge-sync-unchanged" "bridge_sync"
+          "neither_side_holding_anything_is_unchanged_and_writes_nothing";
+
+      # A bootstrap push into clan lands the value through clan's own command
+      # and the companion afterward as this repository's own, single new
+      # commit — the companion holding a digest tagged `safix-bridge-sync-v1`
+      # rather than the plaintext value.
+      checks.safix-bridge-sync-push =
+        mode "safix-bridge-sync-push" "bridge_sync"
+          "safix_only_bootstraps_toward_clan_and_records_the_agreement_as_a_second_commit";
+
+      # A bootstrap pull lands the value as its own commit, and the agreement
+      # as a second, separate one afterward — the load-bearing order D8
+      # states, held against the repository's own commit history rather than
+      # against a reading of the code.
+      checks.safix-bridge-sync-pull =
+        mode "safix-bridge-sync-pull" "bridge_sync"
+          "clan_only_bootstraps_toward_safix_and_records_the_agreement_as_a_second_commit";
+
+      # Both sides moved with no agreement recorded is a conflict rather than
+      # a guess: nothing written on either side, and the finding names the
+      # mapping and the two one-way remedies.
+      checks.safix-bridge-sync-conflict =
+        mode "safix-bridge-sync-conflict" "bridge_sync"
+          "both_sides_holding_different_values_with_no_agreement_is_a_conflict";
+
+      # A later divergence converges using the agreement a prior bootstrap
+      # recorded, proving the companion's own write is read back by a later
+      # run rather than only ever written.
+      checks.safix-bridge-sync-remembered =
+        mode "safix-bridge-sync-remembered" "bridge_sync"
+          "a_later_divergence_converges_using_the_recorded_agreement";
+
+      # A two-way push into clan carries the identical stale-generator refusal
+      # a safix-to-clan write already has, under the identical condition.
+      checks.safix-bridge-sync-stale-generator =
+        mode "safix-bridge-sync-stale-generator" "bridge_sync"
+          "a_stale_generator_refuses_a_two_way_push_toward_clan";
+
+      # A shared placement's clan side is reached by a machine discovered
+      # from clan's own `machines list`, never one the mapping declares — its
+      # fixture carries no machine for a declared one to have come from.
+      checks.safix-bridge-sync-shared-address =
+        mode "safix-bridge-sync-shared-address" "bridge_sync"
+          "a_shared_placements_machine_is_discovered_from_clan";
 
       # The store's own command, driven for real against a database the check
       # creates. Every other sync check drives the model, which answers the vectors
