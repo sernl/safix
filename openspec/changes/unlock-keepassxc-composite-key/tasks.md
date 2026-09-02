@@ -4,17 +4,17 @@ Every `keepassxc-cli` behaviour cited in `design.md` was measured against versio
 
 ## 1. The declaration
 
-- [ ] 1.1 Add `flake.safix.keepassxc.yubikey` to `modules/flake/safix/options.nix`, a `nullOr` submodule with `slot` (`str`) and `serial` (`nullOr str`, default `null`), defaulting to `null`, documented per D1/D3 of `design.md`; verify with `nix eval .#flake.safix.keepassxc.yubikey --apply builtins.typeOf` (or the fixture-driven equivalent used elsewhere in this file) evaluating to a type rather than throwing
-- [ ] 1.2 Add `flake.safix.keepassxc.keyFile` to the same file, `nullOr str`, defaulting to `null`, documented per D2 of `design.md` — a string for a different reason than `database` is one, and the description states that reason rather than pointing at `database`'s
-- [ ] 1.3 Project both fields unchanged in `modules/flake/safix/default.nix:296-299`, alongside `database` and `group`; verify by evaluating `flake.safix.lib.keepassxc` over a fixture declaring both options and asserting the projected attribute set carries them byte-for-byte
-- [ ] 1.4 Verify: `nix eval` (or the portability check already proving `mkVault`'s mechanism) confirms a fixture declaring neither option still evaluates `flake.safix.keepassxc.yubikey` and `.keyFile` as `null`, so every existing declaration is unaffected
+- [x] 1.1 Add `flake.safix.keepassxc.yubikey` to `modules/flake/safix/options.nix`, a `nullOr` submodule with `slot` (`str`) and `serial` (`nullOr str`, default `null`), defaulting to `null`, documented per D1/D3 of `design.md`; verify with `nix eval .#flake.safix.keepassxc.yubikey --apply builtins.typeOf` (or the fixture-driven equivalent used elsewhere in this file) evaluating to a type rather than throwing
+- [x] 1.2 Add `flake.safix.keepassxc.keyFile` to the same file, `nullOr str`, defaulting to `null`, documented per D2 of `design.md` — a string for a different reason than `database` is one, and the description states that reason rather than pointing at `database`'s
+- [x] 1.3 Project both fields unchanged in `modules/flake/safix/default.nix:296-299`, alongside `database` and `group`; verify by evaluating `flake.safix.lib.keepassxc` over a fixture declaring both options and asserting the projected attribute set carries them byte-for-byte
+- [x] 1.4 Verify: `nix eval` (or the portability check already proving `mkVault`'s mechanism) confirms a fixture declaring neither option still evaluates `flake.safix.keepassxc.yubikey` and `.keyFile` as `null`, so every existing declaration is unaffected
 
 ## 2. The nix check
 
-- [ ] 2.1 In `modules/flake/checks/keepassxc.nix`, extend the fixture builder to accept `yubikey` and `keyFile`, and add a case asserting a declared `{ slot = "1"; serial = "12345678"; }` and a declared key-file path both reach the projection unchanged
-- [ ] 2.2 Assert that declaring `keyFile` as a nix path (rather than a string) is a type error at evaluation, mirroring however `database`'s string-not-path constraint is or would be asserted in this file, so the two options carry the same guarantee by the same mechanism
-- [ ] 2.3 Severity drill: loosening `keyFile`'s type to `nullOr (either str path)` turns 2.2 red
-- [ ] 2.4 Verify: `nix build .#checks.x86_64-linux.safix-keepassxc-mirror` (or whichever check name this file's suite uses) green, and the drill in 2.3 observed red before the type is restored
+- [x] 2.1 In `modules/flake/checks/keepassxc.nix`, extend the fixture builder to accept `yubikey` and `keyFile`, and add a case asserting a declared `{ slot = "1"; serial = "12345678"; }` and a declared key-file path both reach the projection unchanged
+- [x] 2.2 Assert that declaring `keyFile` as a nix path (rather than a string) is a type error at evaluation, mirroring however `database`'s string-not-path constraint is or would be asserted in this file, so the two options carry the same guarantee by the same mechanism
+- [x] 2.3 Severity drill: loosening `keyFile`'s type to `nullOr (either str path)` turns 2.2 red
+- [x] 2.4 Verify: `nix build .#checks.x86_64-linux.safix-keepassxc` (the actual check name; this file's suite is not `safix-keepassxc-mirror`) green, and the drill in 2.3 observed red before the type is restored
 
 ## 3. The Rust model
 

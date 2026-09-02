@@ -48,6 +48,12 @@
 # mirror sentences about a fleet whose custody has not resolved, which is one
 # fault producing two unrelated messages.
 # Removing the mode enum lets `badMode` evaluate rather than throw.
+# Loosening `keyFile`'s type in `recordOf` above, from `nullOr str` to
+# `nullOr (either str path)`, lets `keyFileDeclaredAsAPathTypechecks` evaluate
+# true rather than throw — the same local-type limitation `database` and
+# `group` above already have: this file's fixture types are hand-written to
+# match ../safix/options.nix rather than derived from it, because that file is
+# not standalone-evaluable outside the full flake-parts module.
 {
   perSystem =
     {
@@ -76,6 +82,19 @@
 
       fleetOf = users: typed (lib.types.attrsOf types.profile) users;
 
+      # Local rather than exported from ../safix/options.nix: that file is not
+      # standalone-evaluable outside the full flake-parts module, the way
+      # `database`, `group` and `mappings` below already are not either.
+      yubikeySide = lib.types.submodule {
+        options = {
+          slot = lib.mkOption { type = lib.types.str; };
+          serial = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+          };
+        };
+      };
+
       recordOf =
         record:
         typed (lib.types.submodule {
@@ -87,6 +106,14 @@
             group = lib.mkOption {
               type = lib.types.str;
               default = "safix";
+            };
+            yubikey = lib.mkOption {
+              type = lib.types.nullOr yubikeySide;
+              default = null;
+            };
+            keyFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
             };
             mappings = lib.mkOption {
               type = lib.types.attrsOf keepassxc.mapping;
@@ -147,6 +174,30 @@
           builtins.deepSeq (recordOf {
             mappings.a = mapping "push" "alice" "tok" "alice/grafana";
           }) "resolved"
+        )).success;
+
+      # A declared composite key reaches the projection unchanged: `recordOf`
+      # types it through the real option shape, so a value that survives here
+      # is a value the option system did not coerce or drop a field from.
+      compositeKeyDeclared = recordOf {
+        database = "/nonexistent/master.kdbx";
+        yubikey = {
+          slot = "1";
+          serial = "12345678";
+        };
+        keyFile = "/home/alice/.keys/master.keyx";
+      };
+
+      # `tryEval` catches the string type's refusal, the same way `badMode`
+      # catches the mode enum's: a path is a distinct nix value from a string
+      # and the module system refuses it before any rule here could look at it.
+      #
+      # Severity: loosening `keyFile`'s type in ../safix/options.nix from
+      # `nullOr str` to `nullOr (either str path)` turns this `true`, because a
+      # path would then typecheck where today it is refused.
+      keyFileDeclaredAsAPathTypechecks =
+        (builtins.tryEval (
+          builtins.deepSeq (recordOf { keyFile = ./mk-structural-check.nix; }) "resolved"
         )).success;
 
       drill =
@@ -254,6 +305,8 @@
           brokenCustodyIsBroken = resolve.violations { users = brokenFleet; } != [ ];
 
           badMode = badMode;
+          compositeKeyDeclared = compositeKeyDeclared;
+          keyFileDeclaredAsAPathTypechecks = keyFileDeclaredAsAPathTypechecks;
         };
         expected = {
           modes = [
@@ -312,6 +365,17 @@
           brokenCustody = [ ];
           brokenCustodyIsBroken = true;
           badMode = false;
+          compositeKeyDeclared = {
+            database = "/nonexistent/master.kdbx";
+            group = "safix";
+            yubikey = {
+              slot = "1";
+              serial = "12345678";
+            };
+            keyFile = "/home/alice/.keys/master.keyx";
+            mappings = { };
+          };
+          keyFileDeclaredAsAPathTypechecks = false;
         };
       };
 
