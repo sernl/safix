@@ -400,6 +400,13 @@ darwin cannot supply the memory-backed direction, so the check would assert the 
   No runtime behaviour changed; what changed is that the claim is now asserted by a check rather than recorded from a reading.
   `openspec/changes/clan-bridge/design.md` holds both findings under "Landing the real clan as a check".
 
+### audit clan reports clan vars no declared mapping accounts for
+
+`safix audit clan` gains a lingering report, in the same shape and under the same name as `audit keepassxc`'s own: clan vars, named `"<machine> <generator>/<file>"`, that no currently declared mapping's clan side accounts for.
+It is reported as information alongside the existing per-mapping findings, scoped to the machines the selected mappings currently name or resolve — a per-machine mapping's declared machine, or a shared mapping's addressing machine — never to a clan machine no declared mapping reaches, and it never changes `audit`'s exit status.
+`Clan` gains a fourth contract, `Clan::list`, invoking `clan vars list <machine>`; nothing here deletes, on either side of the boundary, and nothing new decrypts a secret var to build this list.
+A new `Error::ClanMachineListFailed` stops the whole run when one machine cannot be listed, before any mapping is compared, for the reason an unreachable clan already does.
+
 ## [0.2.0] — 2026-08-16
 
 `Cargo.toml` still reads `0.1.0`.

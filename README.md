@@ -997,6 +997,7 @@ The generator to write into is therefore one that declares no `validation`: a va
 It compares both sides of every declared mapping, or the ones named, in either direction, and changes nothing on either side of the boundary.
 A mapping agrees when both sides hold the same bytes, and also when neither side holds a value yet, which is a bridge nobody has bootstrapped rather than a disagreement.
 It is a finding when the two sides hold different values, when one side holds a value the other does not, or when the comparison could not be made — and each finding names the mapping, its two endpoints and the command that converges it, and never a value.
+Alongside those findings, it names every clan var on the machines those declarations name or resolve that no currently declared mapping accounts for — a mapping removed from the declarations does not delete the clan var it named, and this is how that stops being silent — reported as information, scoped to the machines currently in play, and never changing the exit status; nothing here removes one, a person does that, with clan's own command.
 
 It is a verb of its own rather than more rows in `check`, and the reason is what `check` is.
 `check` decrypts nothing, which is what lets one machine judge files belonging to people whose keys it does not have, and it needs no clan.
