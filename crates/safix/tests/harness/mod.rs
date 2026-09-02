@@ -749,6 +749,7 @@ impl Fixture {
     ) {
         let (machine, generator, file) = clan;
         let (user, name) = safix;
+        self.ensure_private_placement(user, name);
         self.bridge["clanFlake"] = json!(
             self.clan_flake
                 .clone()
@@ -768,6 +769,17 @@ impl Fixture {
         }));
         self.write_fixtures();
     }
+
+    /// Register a private placement for a mapping's safix side when this
+    /// fixture never seeded one, so a brand-new mapping name resolves
+    /// against a secret `flake.safix.users` actually holds rather than
+    /// refusing with "is not a secret ... holds".
+    fn ensure_private_placement(&mut self, user: &str, name: &str) {
+        if self.placements[user].get(name).is_none() {
+            let file = format!("secrets/safix/users/{user}/secrets.yaml");
+            self.placements[user][name] = placement(&file, name, "private", user);
+        }
+    }
     /// Declare one shared-placement bridge mapping: the clan side names a
     /// generator and a file but no machine, the way a `placement = "shared"`
     /// declaration resolves.
@@ -781,6 +793,7 @@ impl Fixture {
         let (generator, file) = clan;
 
         let (user, name) = safix;
+        self.ensure_private_placement(user, name);
         self.bridge["clanFlake"] = json!(
             self.clan_flake
                 .clone()

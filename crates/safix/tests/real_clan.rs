@@ -834,11 +834,22 @@ mod against_a_real_clan {
     /// reusing
     /// `a_safix_to_clan_run_refuses_a_generator_the_real_clan_calls_stale`'s
     /// own fixture shape with a two-way mapping instead.
+    ///
+    /// `MINTED` already holds a real value at clan build time, so the first
+    /// converge here bootstraps an agreement (a plain pull, since safix has
+    /// nothing yet) before either side is allowed to diverge: without it,
+    /// setting safix's side afterward would leave both sides holding
+    /// different values with no recorded agreement, which `judge` reads as
+    /// a conflict rather than a one-sided push, and the stale check inside
+    /// `push` would never be reached.
     #[test]
     fn a_two_way_push_refuses_a_generator_the_real_clan_calls_stale() {
         let Some((fixture, clan)) = bridged("two-way", "per-machine", MINTED) else {
             return no_clan_here("refusing a two-way push into a generator clan calls stale");
         };
+        bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("bootstrapping the initial agreement from the real clan");
+
         fixture
             .set("alice", "api-token", "CANARY-would-be-lost-two-way")
             .expect_success("seeding the source");
