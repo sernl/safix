@@ -977,3 +977,100 @@ fn flow(finding: &audit::Finding) -> (&String, &String) {
 fn converging(finding: &audit::Finding) -> String {
     format!("{PROGRAM} sync clan {}", finding.mapping)
 }
+
+/// What a two-way convergence did, one line per declared mapping and a
+/// closing count.
+///
+/// The shape [`transfer`] and [`sync`] both have, over
+/// [`safix_core::bridge::bridge_sync::Report`] instead: each line names the
+/// mapping and both endpoints, and a settled write prints `converged
+/// <mapping>` rather than an arrow, because a two-way convergence names no
+/// source and no destination \u{2014} the same wording `transfer`'s own dead
+/// `TwoWay` arm already carries, for the case that in practice never reaches
+/// it: a two-way mapping's outcome is reported through this function rather
+/// than through `transfer`'s. A mapping that needs a person \u{2014} a conflict or
+/// a refusal \u{2014} gets its paragraph under its line.
+#[must_use]
+pub fn bridge_sync(report: &safix_core::bridge::bridge_sync::Report) -> String {
+    use safix_core::bridge::bridge_sync::Outcome;
+
+    let mut out = String::new();
+    if report.converged.is_empty() {
+        out.push_str(PROGRAM);
+        out.push_str(": no two-way mapping is declared.\n");
+        return out;
+    }
+
+    for entry in &report.converged {
+        let line = if matches!(
+            entry.outcome,
+            Outcome::UpdatedTowardClan | Outcome::UpdatedTowardSafix
+        ) {
+            format!("{PROGRAM}: converged {}\n", entry.mapping)
+        } else {
+            format!(
+                "{PROGRAM}: {mapping}  {clan} <-> {safix}  {outcome}\n",
+                mapping = entry.mapping,
+                clan = entry.clan,
+                safix = entry.safix,
+                outcome = entry.outcome.as_str(),
+            )
+        };
+        out.push_str(&line);
+        push_bridge_sync_detail(&mut out, entry);
+    }
+
+    let tally = report.tally();
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s): {} converged, {} unchanged, {} conflict, {} refused.\n",
+        tally.updated_toward_clan + tally.updated_toward_safix,
+        tally.unchanged,
+        tally.conflict,
+        tally.refused,
+        total = report.converged.len(),
+    );
+    out.push_str(&closing);
+    out
+}
+
+/// The paragraph under a two-way mapping that needs a person.
+fn push_bridge_sync_detail(out: &mut String, entry: &safix_core::bridge::bridge_sync::Converged) {
+    use safix_core::bridge::bridge_sync::Outcome;
+
+    match &entry.outcome {
+        Outcome::Conflict => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} have both changed since the last agreement.",
+                    entry.safix, entry.clan
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written, and nothing here decides which of the two was meant:",
+            );
+            detail(
+                out,
+                "last-writer-wins over secrets rewards whichever clock lied best.",
+            );
+            remedy(out, "to keep safix's value, declare on this mapping:");
+            remedy(out, "    direction = \"safix-to-clan\";");
+            remedy(out, "to keep clan's, declare instead:");
+            remedy(out, "    direction = \"clan-to-safix\";");
+            remedy(out, &format!("then:  {PROGRAM} sync clan {}", entry.mapping));
+            remedy(out, "and put the direction back to two-way afterwards.");
+        }
+
+        Outcome::Refused(reason) => {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+            out.push('\n');
+        }
+
+        Outcome::Unchanged | Outcome::UpdatedTowardClan | Outcome::UpdatedTowardSafix => {}
+    }
+}
