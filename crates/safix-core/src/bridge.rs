@@ -627,7 +627,7 @@ pub fn commit_subject(mapping: &Mapping) -> String {
 pub mod bridge_sync {
     use super::{
         Addressing, Clan, Direction, Error, Held, Mapping, Progress, Reading, Result, Secret,
-        ValueSource, Workspace, endpoints, held_for, log, scratch, selected, set,
+        Workspace, endpoints, held_for, log, scratch, selected, set,
     };
 
     /// The tag the recorded agreement carries.
