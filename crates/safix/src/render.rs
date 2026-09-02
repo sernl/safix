@@ -607,6 +607,7 @@ fn push_clan_audit(out: &mut String, report: &audit::ClanReport) {
     for finding in &report.findings {
         push_disagreement(out, finding);
     }
+    push_clan_lingering(out, &report.lingering);
     if report.findings.is_empty() {
         out.push_str(&agreed(report.examined));
     } else {
@@ -616,6 +617,30 @@ fn push_clan_audit(out: &mut String, report: &audit::ClanReport) {
             report.examined,
         );
         out.push_str(&closing);
+    }
+}
+
+/// Clan vars no currently declared mapping's clan side accounts for.
+///
+/// Placed the same way [`push_lingering`] is: after the section's own
+/// findings and before its closing line. Unlike a keepassxc entry, a clan var
+/// has no companion counterpart to distinguish, so every entry renders the
+/// same way.
+fn push_clan_lingering(out: &mut String, entries: &[String]) {
+    for entry in entries {
+        out.push('\n');
+        detail(
+            out,
+            &format!("{entry} is a clan var and no declared mapping accounts for it."),
+        );
+        detail(
+            out,
+            "No mode deletes a clan var, so this is what a mapping that was removed",
+        );
+        detail(
+            out,
+            "leaves behind. A person removes it, with clan's own command.",
+        );
     }
 }
 
@@ -1084,5 +1109,29 @@ fn push_bridge_sync_detail(out: &mut String, entry: &safix_core::bridge::bridge_
         }
 
         Outcome::Unchanged | Outcome::UpdatedTowardClan | Outcome::UpdatedTowardSafix => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use safix_core::audit::{ClanReport, Report};
+
+    use super::*;
+
+    #[test]
+    fn a_clan_lingering_entry_renders_after_the_findings_and_names_no_value() {
+        let report = Report {
+            clan: Some(ClanReport {
+                examined: 1,
+                findings: Vec::new(),
+                lingering: vec!["meridian ntfy/orphan".into()],
+            }),
+            keepassxc: None,
+        };
+        let rendered = audit(&report);
+        assert!(rendered.contains(
+            "meridian ntfy/orphan is a clan var and no declared mapping accounts for it."
+        ));
+        assert!(rendered.contains("no disagreement. All 1 declared mapping(s) agree."));
     }
 }

@@ -77,6 +77,12 @@ values, when one side holds a value the other does not, or when the
 comparison could not be made, and each finding names the mapping, its two
 endpoints and the command that converges it: safix sync clan <mapping>.
 
+Clan vars no currently declared mapping's clan side accounts for are
+reported alongside as information \u{2014} lingering, in the same shape
+keepassxc's own report gives it \u{2014} scoped to the machines the selected
+mappings name or resolve, and never move the exit status. Nothing here
+removes one; a person does that, with clan's own command.
+
 \u{2500}\u{2500} the keepassxc target \u{2500}\u{2500}
 Both sides of each mapping are read and compared per its declared mode, and
 nothing is written. Each mapping's outcome is reported as agreeing, diverged,
