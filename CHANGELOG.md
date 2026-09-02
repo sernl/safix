@@ -19,6 +19,22 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### Two-way convergence across the clan boundary, and a placement a shared clan var can declare honestly
+
+**BREAKING**: `flake.safix.bridge.mappings.<id>.clan.machine` becomes `nullOr str`, required when `placement` is `per-machine` (the default, and every mapping declared before this change) and refused when `placement` is `shared`; a mapping that already names a machine needs no edit, and only a newly declared `shared` mapping ever leaves it null.
+
+`placement` (`shared | per-machine`) is new on `clanSide`, honestly expressing the two placements `clan vars get`/`set` can reach — `PerExport` is dropped rather than modelled, because neither of clan's own two contracts can resolve it through any machine, at the clan-core revision this fleet pins.
+
+`direction` gains a third value, `two-way`, folded into `sync clan`'s existing `--direction` filter rather than a fourth verb: `safix sync clan --direction two-way`, or a bare `sync clan`, converges a two-way mapping toward whichever side changed since the last agreement, and refuses to guess when both sides moved, naming the mapping and the two one-way remedies — narrowing a run to `--direction clan-to-safix` or `--direction safix-to-clan` and running once, before the mapping's declared direction reverts to two-way.
+
+Every two-way mapping mints a companion safix entry that records the last agreed value as a digest, sharing the mapped entry's file and audience and distinguished from it by the reserved suffix `-safix-bridge-sync-state`; evaluation refuses a hand-declared entry whose name collides with a companion's, naming the entry, the mapping, and the suffix.
+
+A shared mapping's machine is discovered from clan's own `machines list` rather than declared a second time: the runtime tries each returned machine against `clan vars get`/`set` in turn and stops at the first that resolves, refusing only once every machine has been tried and named none.
+
+A two-way push into clan carries the identical stale-generator refusal and pre-write comparison a `safix-to-clan` write already has, with no override; the two-producers rule that already refused a `clan-to-safix` mapping whose safix side is generator-produced now also refuses a `two-way` one for the identical reason, which is what makes a hand-simulated two-way relationship — two opposed one-way mappings over a generator-produced safix side — refused rather than merely redundant.
+
+`safix-bridge-sync-converge` and the per-outcome `safix-bridge-sync-unchanged`/`-push`/`-pull`/`-conflict`/`-remembered`/`-stale-generator`/`-shared-address` checks hold the convergence over the stubbed clan; `safix-bridge-real-clan` extends its own fixture with a fourth, shared generator and a real second machine that declares none of them, and now covers the four outcome classes, the two-way stale-generator refusal, and the addressing search's skip of a real, unrelated candidate.
+
 ### import and export retire into sync's clan target
 
 **BREAKING**: `import` and `export` no longer exist as subcommands, with no alias and no deprecation period.
