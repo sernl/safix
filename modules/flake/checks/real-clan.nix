@@ -181,10 +181,6 @@
                 validation = null;
                 share = true;
               };
-              orphan = generator {
-                value = "CANARY-never-claimed";
-                validation = null;
-              };
               # `everywhere` is declared identically on both machines below,
               # which is `enumerate-clan-namespace`'s own group-1 fixture: a
               # shared generator's var must appear with the identical id in
