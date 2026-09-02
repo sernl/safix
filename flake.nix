@@ -59,6 +59,22 @@
 
   outputs =
     inputs@{ flake-parts, sops-nix, ... }:
+    let
+      # One definition, two published names. sops-nix's own flake publishes both
+      # `homeManagerModules` and `homeModules` for one module value, so a
+      # consumer pinning either name reaches the same thing. A second copy of
+      # the attrset would be a second place for the `.safix`/`.default` split to
+      # drift out of step; a shared binding cannot.
+      homeModules = {
+        safix = ./modules/consume/home.nix;
+        default = {
+          imports = [
+            sops-nix.homeManagerModules.sops
+            ./modules/consume/home.nix
+          ];
+        };
+      };
+    in
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [
         # x86_64-darwin is absent because the pinned nixpkgs (26.11) dropped
@@ -73,8 +89,11 @@
         ./modules/flake/checks/cli.nix
         ./modules/flake/checks/consumption.nix
         ./modules/flake/checks/custody.nix
+        ./modules/flake/checks/entrypoints.nix
         ./modules/flake/checks/envelope.nix
+        ./modules/flake/checks/examples.nix
         ./modules/flake/checks/exported.nix
+        ./modules/flake/checks/gate-guard.nix
         ./modules/flake/checks/generators.nix
         ./modules/flake/checks/installer.nix
         ./modules/flake/checks/keepassxc.nix
@@ -85,7 +104,9 @@
         ./modules/flake/checks/real-clan.nix
         ./modules/flake/checks/single-runtime.nix
         ./modules/flake/checks/subjects.nix
+        ./modules/flake/checks/vault-projection.nix
         ./modules/flake/devshell.nix
+        ./modules/flake/lib.nix
         ./modules/flake/rust.nix
         ./modules/flake/safix
         ./modules/flake/treefmt.nix
@@ -102,19 +123,13 @@
         # arrive. Each ships twice, and the choice is made at import time because
         # `imports` cannot depend on an option: the `.default` forms import
         # sops-nix for a tree that has not got one, and the `.safix` forms import
-        # nothing, for a tree that pins its own revision. Importing two distinct
-        # copies of one declaring module is an evaluation error rather than a
-        # merge — `safix-module-collision` holds that fact — and no configuration
-        # can repair it after the fact.
-        homeModules = {
-          safix = ./modules/consume/home.nix;
-          default = {
-            imports = [
-              sops-nix.homeManagerModules.sops
-              ./modules/consume/home.nix
-            ];
-          };
-        };
+        # nothing, for a tree that pins its own revision — or has no flake at all,
+        # which is what makes the `.safix` forms importable by plain path.
+        # Importing two distinct copies of one declaring module is an evaluation
+        # error rather than a merge — `safix-module-collision` holds that fact —
+        # and no configuration can repair it after the fact.
+        inherit homeModules;
+        homeManagerModules = homeModules;
 
         nixosModules = {
           safix = ./modules/consume/nixos.nix;
