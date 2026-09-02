@@ -18,6 +18,33 @@ let
   bridge = import ./bridge.nix { inherit lib; };
   keepassxc = import ./keepassxc.nix { inherit lib; };
 
+  # The declared factors that unlock a database whose own composite key needs
+  # more than a password. Local to this file rather than exported from
+  # ./keepassxc.nix: nothing else in this option surface declares one, so there
+  # is no second documentation of the same pair to keep in sync with this one.
+  yubikeySide = lib.types.submodule {
+    options = {
+      slot = lib.mkOption {
+        type = lib.types.str;
+        example = "1";
+        description = ''
+          The YubiKey challenge-response slot the database's own composite key
+          reads, as keepassxc-cli's `-y` flag takes it.
+        '';
+      };
+
+      serial = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr lib.types.str;
+        example = "12345678";
+        description = ''
+          The card's serial number, disambiguating which connected YubiKey
+          answers the challenge, or null to accept whichever one does.
+        '';
+      };
+    };
+  };
+
   # One consumer bridges one clan. Two definitions of a scalar cannot both
   # survive into a list for `violationsOf` to count, so this refusal is a merge
   # that throws rather than a message in that family — it is the one bridge rule
@@ -285,6 +312,46 @@ in
           configuration of a consumer who does not use this at all; unset with
           mappings declared is refused when `safix sync` runs, naming this
           option.
+        '';
+      };
+
+      yubikey = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr yubikeySide;
+        example = {
+          slot = "1";
+          serial = "12345678";
+        };
+        description = ''
+          A YubiKey challenge-response slot the database's own composite key
+          requires to open, or null when the database opens on its password
+          alone.
+
+          `safix sync`'s read, write, group-creation and listing commands, and
+          `safix enroll --store-database`'s write, all carry the declared slot
+          alongside the single password prompt those commands already ask for.
+          Nothing here programs, reprograms or deletes the slot: reading it to
+          answer the database's own unlock challenge is the only operation any
+          command this declaration reaches performs.
+        '';
+      };
+
+      keyFile = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr lib.types.str;
+        example = "/home/alice/.keys/master.keyx";
+        description = ''
+          A key file the database's own composite key requires to open, as an
+          absolute path on the machine the verb runs on, or null when the
+          database opens on its password alone.
+
+          A string for a different reason than `database` is one above: a key
+          file is typically a few kilobytes, so copying it into the store would
+          not be expensive, but it would be wrong, because a key file is not the
+          encrypted thing but one of the secrets the encryption depends on. A
+          nix path interpolated into this declaration is copied into the
+          world-readable store on every evaluation, and here that copy would be
+          the very secret this option exists to keep out of it.
         '';
       };
 
