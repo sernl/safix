@@ -928,13 +928,13 @@
       # because neither evaluation resolves a flake input.
       #
       # ── what this holds ──
-      # All twelve `Attribute` spellings evaluate under `--file` exactly as
+      # All thirteen `Attribute` spellings evaluate under `--file` exactly as
       # they do under a flake target — the same strings, only how the target
       # is built differs (D4). `generatorPlan`, `bridge` and `keepassxc`
       # deserialize against the real `Generator`, `GeneratorFile`, `Mapping`,
       # `SyncMapping` and `PlanInput` structs with no `deny_unknown_fields`
       # rejection — reached through the real `safix` binary's own `generate`,
-      # `import` and `sync`, which is the residual measurement gap the
+      # `sync clan` and `sync`, which is the residual measurement gap the
       # proposal names. The same three attributes are byte-identical between
       # the two evaluation paths. `--entry` overrides a conflicting
       # `SAFIX_ENTRY`. The workspace root a write stages and commits into is
@@ -1106,16 +1106,16 @@
                     }
             ENTRY
 
-                    # 3.5: all twelve attribute spellings evaluate under --file exactly as
+                    # 3.5: all thirteen attribute spellings evaluate under --file exactly as
                     # they do against the flake target.
                     attrs=(
                       safix.lib.placements safix.lib.audiences safix.lib.governedFiles
                       safix.lib.recipients safix.lib.delegation safix.lib.policyText
                       safix.lib.generatorPlan safix.lib.nameRegex safix.lib.bridge
-                      safix.lib.keepassxc safix.onboardingHook safix.enrollHook
+                      safix.lib.keepassxc safix.lib.subjects safix.onboardingHook safix.enrollHook
                     )
                     formats=(
-                      --json --json --json --json --json --raw --json --raw --json --json --json --json
+                      --json --json --json --json --json --raw --json --raw --json --json --json --json --json
                     )
                     for i in "''${!attrs[@]}"; do
                       attr="''${attrs[$i]}"
@@ -1180,10 +1180,10 @@
                     esac
 
                     # 3.6 continued: bridge (Mapping) and keepassxc (SyncMapping)
-                    # deserialize too, reached through import and sync — each refuses
+                    # deserialize too, reached through sync clan and sync — each refuses
                     # afterwards for an unrelated reason (no clan, no terminal), which is
                     # not what this asserts.
-                    output="$("$safix" --entry "$entry" import 2>&1)" || true
+                    output="$("$safix" --entry "$entry" sync clan 2>&1)" || true
                     case "$output" in
                       *"evaluated to a shape this runtime does not read"*)
                         echo "bridge failed to deserialize against the real structs:" >&2
