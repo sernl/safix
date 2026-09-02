@@ -608,6 +608,685 @@ pub fn commit_subject(mapping: &Mapping) -> String {
     )
 }
 
+/// Converging a two-way mapping toward whichever side changed since the last
+/// recorded agreement.
+///
+/// [`decide`]/[`judge`] mirror [`crate::sync::two_way`] (`sync.rs:451-493`)
+/// exactly, adapted to [`Reading`] and [`Secret`] rather than a database read.
+/// `push`/`pull` reuse the identical write paths a one-way transfer already
+/// has — [`Addressing::write`] under the same stale-generator refusal
+/// [`one_export`] carries (D9), and [`set::run_committing`] under the same
+/// discipline [`one_import`] carries — and record the agreement afterward as
+/// its own, separate commit, never folded into the value's own.
+///
+/// See `openspec/changes/sync-clan-vars-two-way/design.md`'s D6\u{2013}D11 for
+/// why the agreement lives in a companion entry inside safix's own
+/// sops-encrypted store rather than anywhere else, and
+/// `specs/bridge-sync/spec.md` for the five outcome classes this module's
+/// [`Outcome`] carries.
+pub mod bridge_sync {
+    use super::{
+        Addressing, Clan, Direction, Error, Held, Mapping, Progress, Reading, Result, Secret,
+        ValueSource, Workspace, endpoints, held_for, log, scratch, selected, set,
+    };
+
+    /// The tag the recorded agreement carries.
+    ///
+    /// Distinct from [`crate::sync::FORMAT`] so the two mechanisms' memories
+    /// are never mistaken for one another if a consumer somehow points both
+    /// at overlapping entries, and so a future change to one format tag does
+    /// not silently reinterpret the other's records.
+    pub const FORMAT: &str = "safix-bridge-sync-v1";
+
+    /// The suffix safix reserves for a two-way mapping's companion entry.
+    ///
+    /// Matches `modules/flake/safix/bridge.nix`'s `stateSuffix` \u{2014} hyphenated
+    /// rather than [`crate::store::STATE_SUFFIX`]'s dot-prefixed form: a
+    /// companion here is a safix entry name, and `resolve.nix` refuses any
+    /// declared name outside `[a-z0-9][a-z0-9_-]*` before a dot-prefixed
+    /// reservation could ever collide with a hand declaration.
+    const COMPANION_SUFFIX: &str = "-safix-bridge-sync-state";
+
+    /// What happened to one two-way mapping.
+    ///
+    /// Five classes, exactly D8's. No `Debug`, for the reason
+    /// [`super::Outcome`] has none: nothing here holds a value, and keeping
+    /// it that way is easier than proving each future variant does not.
+    /// [`Self::Conflict`] carries no [`Error`]: a conflict is a finding the
+    /// decision function reaches rather than a failed write, so there is no
+    /// refusal for a `Code` table entry to attach to.
+    pub enum Outcome {
+        /// Both sides already held the same bytes, or neither held anything
+        /// at all. Nothing written, nothing committed, nothing remembered.
+        Unchanged,
+        /// clan now holds what safix held; the agreement is remembered.
+        UpdatedTowardClan,
+        /// safix now holds what clan held; the agreement is remembered.
+        UpdatedTowardSafix,
+        /// The two sides differ from the last-recorded agreement, or from
+        /// each other with none recorded yet. Nothing written.
+        Conflict,
+        /// This mapping was refused, and this is why.
+        Refused(Error),
+    }
+
+    impl Outcome {
+        /// The word a report prints for this outcome.
+        #[must_use]
+        pub const fn as_str(&self) -> &'static str {
+            match self {
+                Self::Unchanged => "unchanged",
+                Self::UpdatedTowardClan => "updated toward clan",
+                Self::UpdatedTowardSafix => "updated toward safix",
+                Self::Conflict => "conflict",
+                Self::Refused(_) => "refused",
+            }
+        }
+
+        /// Whether this outcome makes the run a failure.
+        #[must_use]
+        pub const fn is_failure(&self) -> bool {
+            matches!(self, Self::Conflict | Self::Refused(_))
+        }
+    }
+
+    /// One mapping's line in a convergence's report.
+    pub struct Converged {
+        /// The mapping's declared name.
+        pub mapping: String,
+        /// The clan endpoint, as `<machine> <generator>/<file>`.
+        pub clan: String,
+        /// The safix endpoint, as `<user>.<name>`.
+        pub safix: String,
+        /// What happened.
+        pub outcome: Outcome,
+    }
+
+    /// Everything one convergence judged.
+    pub struct Report {
+        /// One entry per two-way mapping acted on, in declaration order.
+        pub converged: Vec<Converged>,
+    }
+
+    impl Report {
+        /// Whether every mapping converged without a conflict or a refusal.
+        #[must_use]
+        pub fn is_clean(&self) -> bool {
+            !self
+                .converged
+                .iter()
+                .any(|entry| entry.outcome.is_failure())
+        }
+
+        /// How many mappings ended in each outcome.
+        #[must_use]
+        pub fn tally(&self) -> Tally {
+            let count = |wanted: &str| {
+                self.converged
+                    .iter()
+                    .filter(|entry| entry.outcome.as_str() == wanted)
+                    .count()
+            };
+            Tally {
+                unchanged: count(Outcome::Unchanged.as_str()),
+                updated_toward_clan: count(Outcome::UpdatedTowardClan.as_str()),
+                updated_toward_safix: count(Outcome::UpdatedTowardSafix.as_str()),
+                conflict: count(Outcome::Conflict.as_str()),
+                refused: count(Outcome::Refused(Error::ClanPipeMissing).as_str()),
+            }
+        }
+    }
+
+    /// The counts a convergence's closing line reports.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct Tally {
+        /// Mappings whose two sides already agreed.
+        pub unchanged: usize,
+        /// Mappings whose clan side was written.
+        pub updated_toward_clan: usize,
+        /// Mappings whose safix side was written.
+        pub updated_toward_safix: usize,
+        /// Mappings whose two sides disagree with nobody to decide.
+        pub conflict: usize,
+        /// Mappings refused.
+        pub refused: usize,
+    }
+
+    /// What a mapping's two current sides, and its remembered agreement, say
+    /// to do about it.
+    ///
+    /// No `Debug`, for the reason [`crate::sync::Decision`] has none: every
+    /// value held here is a secret, however briefly.
+    enum Decision {
+        /// Nothing to do.
+        Settled(Outcome),
+        /// Write this value into clan, and record the agreement.
+        Push { value: Secret, remember: bool },
+        /// Write this value into safix, and record the agreement.
+        Pull { value: Secret, remember: bool },
+    }
+
+    /// Read both sides of one two-way mapping, and the companion's memory
+    /// when they differ, and decide what to do about it.
+    ///
+    /// A read failure on either side is [`Outcome::Refused`] rather than a
+    /// `NotJudged` outcome: `bridge_sync::Outcome` has no unjudged variant,
+    /// per D8/D10's five classes.
+    fn decide(workspace: &Workspace, addressing: &Addressing<'_>, mapping: &Mapping) -> Decision {
+        let clan_value = match addressing.read(mapping) {
+            Ok(Reading::Present(value)) => Some(value),
+            Ok(Reading::AbsentAtSource) => None,
+            Err(reason) => return Decision::Settled(Outcome::Refused(reason)),
+        };
+        let safix_value = match held_for(workspace, mapping) {
+            Ok(held) => held,
+            Err(reason) => return Decision::Settled(Outcome::Refused(reason)),
+        };
+        let remembered = match (&safix_value, &clan_value) {
+            (Some(safix), Some(clan)) if !safix.equals(clan) => {
+                remembered_agreement(workspace, mapping)
+            }
+            _ => None,
+        };
+        judge(safix_value, clan_value, remembered)
+    }
+
+    /// The pure four-way decision, over values already read: mirrors
+    /// [`crate::sync::two_way`] exactly. Both absent is unchanged; exactly
+    /// one absent is a bootstrap push or pull, remembered; both present and
+    /// equal is unchanged; both present and unequal consults `remembered` \u{2014}
+    /// one side still agreeing is a converge toward the other, remembered;
+    /// neither agreeing, or no agreement recorded yet, is a conflict.
+    fn judge(safix: Option<Secret>, clan: Option<Secret>, remembered: Option<Secret>) -> Decision {
+        match (safix, clan) {
+            (None, None) => Decision::Settled(Outcome::Unchanged),
+            (Some(safix), None) => Decision::Push {
+                value: safix,
+                remember: true,
+            },
+            (None, Some(clan)) => Decision::Pull {
+                value: clan,
+                remember: true,
+            },
+            (Some(safix), Some(clan)) => {
+                if safix.equals(&clan) {
+                    return Decision::Settled(Outcome::Unchanged);
+                }
+                let Some(remembered) = remembered else {
+                    return Decision::Settled(Outcome::Conflict);
+                };
+                match (agrees(&remembered, &safix), agrees(&remembered, &clan)) {
+                    // safix is where the agreement left it, so clan is the
+                    // side that moved.
+                    (true, false) => Decision::Pull {
+                        value: clan,
+                        remember: true,
+                    },
+                    (false, true) => Decision::Push {
+                        value: safix,
+                        remember: true,
+                    },
+                    // Both moved, or neither matches an agreement this run
+                    // cannot account for. Either way nothing is written.
+                    _ => Decision::Settled(Outcome::Conflict),
+                }
+            }
+        }
+    }
+
+    /// The safix name a mapping's companion entry is declared under, beside
+    /// the mapped entry in the same document.
+    fn companion_name(mapping: &Mapping) -> String {
+        format!("{}{COMPANION_SUFFIX}", mapping.safix.name)
+    }
+
+    /// The agreement the companion entry remembers, as the bytes it holds.
+    ///
+    /// A companion that will not read is treated as absent rather than as a
+    /// refusal, mirroring [`crate::sync`]'s own `recorded` exactly: the
+    /// memory is safix's own bookkeeping, and a run that stopped over it
+    /// would refuse a mapping whose two sides it can see perfectly well.
+    fn remembered_agreement(workspace: &Workspace, mapping: &Mapping) -> Option<Secret> {
+        held_for_companion(workspace, mapping).ok().flatten()
+    }
+
+    /// The companion's own read, addressed the way [`held_for`] addresses
+    /// the mapped entry.
+    fn held_for_companion(workspace: &Workspace, mapping: &Mapping) -> Result<Option<Secret>> {
+        super::held_by_safix(
+            workspace,
+            &mapping.id,
+            &mapping.safix.user,
+            &companion_name(mapping),
+        )
+    }
+
+    /// Whether the remembered agreement is the one this value would have
+    /// recorded, compared as bytes against the line a converging write would
+    /// have written \u{2014} the same discipline [`crate::sync`]'s own `agrees`
+    /// has, for the same reason: a memory written under a tag this version
+    /// does not know matches neither side, so every path that consults it
+    /// reports a conflict rather than guessing.
+    fn agrees(remembered: &Secret, value: &Secret) -> bool {
+        let line = memory_of(value);
+        Secret::read_from(&mut line.as_bytes()).is_ok_and(|written| written.equals(remembered))
+    }
+
+    /// The line a converging write records the agreement as.
+    fn memory_of(value: &Secret) -> String {
+        format!("{FORMAT} {}", value.fingerprint())
+    }
+
+    /// The commit subject a two-way convergence's value write lands under,
+    /// for a caller that wants to assert it without running a convergence.
+    ///
+    /// Not [`super::commit_subject`]: [`Direction::verb`]'s own documentation
+    /// states that function is never called for a two-way mapping, because
+    /// two-way builds a commit subject of its own.
+    #[must_use]
+    pub fn commit_subject(mapping: &Mapping) -> String {
+        format!(
+            "chore(safix): converge {} for {}",
+            mapping.id, mapping.safix.user
+        )
+    }
+
+    /// The commit subject the companion's own write lands under \u{2014} always a
+    /// second, separate commit from [`commit_subject`]'s.
+    fn companion_commit_subject(mapping: &Mapping) -> String {
+        format!(
+            "chore(safix): remember the agreement for {} for {}",
+            mapping.id, mapping.safix.user
+        )
+    }
+
+    /// Write clan's side, and the companion's agreement afterward as its own,
+    /// separate write.
+    ///
+    /// The comparison that decides a write is happening at all already ran in
+    /// [`decide`]; what remains here is the stale-generator refusal
+    /// [`one_export`] has (D9), so a two-way push into clan is refused under
+    /// the identical condition and the identical message a safix-to-clan
+    /// write of the same mapping would be.
+    fn push(
+        workspace: &Workspace,
+        progress: &dyn Progress,
+        addressing: &Addressing<'_>,
+        mapping: &Mapping,
+        value: &Secret,
+        remember: bool,
+    ) -> Outcome {
+        match addressing.generator_stale(mapping) {
+            Ok(true) => {
+                let machine = match addressing.machine_for(mapping) {
+                    Ok(machine) => machine,
+                    Err(reason) => return Outcome::Refused(reason),
+                };
+                return Outcome::Refused(Error::GeneratorDefinitionDrifted {
+                    mapping: mapping.id.clone(),
+                    machine,
+                    generator: mapping.clan.generator.clone(),
+                });
+            }
+            Ok(false) => {}
+            Err(reason) => return Outcome::Refused(reason),
+        }
+
+        let (clan_address, safix_address) = endpoints(mapping);
+        log(
+            progress,
+            &format!("safix: {safix_address} -> {clan_address}"),
+        );
+
+        if let Err(reason) = addressing.write(mapping, value) {
+            return Outcome::Refused(reason);
+        }
+
+        if remember {
+            let line = memory_of(value);
+            if let Err(reason) = remember_agreement(workspace, progress, mapping, &line) {
+                return Outcome::Refused(reason);
+            }
+        }
+        Outcome::UpdatedTowardClan
+    }
+
+    /// Write safix's side through the ordinary write path, and the
+    /// companion's agreement afterward as its own, separate write.
+    fn pull(
+        workspace: &Workspace,
+        progress: &dyn Progress,
+        mapping: &Mapping,
+        value: Secret,
+        remember: bool,
+    ) -> Outcome {
+        let (clan_address, safix_address) = endpoints(mapping);
+        log(
+            progress,
+            &format!("safix: {clan_address} -> {safix_address}"),
+        );
+
+        // Computed from a second reading before the write below consumes it.
+        let line = memory_of(&value);
+
+        let status = set::run_committing(
+            workspace,
+            progress,
+            &mut Held(Some(value)),
+            &mapping.safix.user,
+            &mapping.safix.name,
+            &commit_subject(mapping),
+        );
+        match status {
+            Err(reason) => return Outcome::Refused(reason),
+            // sops refused and has said why on its own standard error, which
+            // is inherited. Reporting it as this mapping's refusal is what
+            // keeps the rest of the run going and the report honest about
+            // which mapping it was.
+            Ok(status) if status != 0 => {
+                let file = match workspace.resolve(&mapping.safix.user, &mapping.safix.name) {
+                    Ok(placement) => placement.file.clone(),
+                    Err(reason) => return Outcome::Refused(reason),
+                };
+                return Outcome::Refused(Error::SourceUnreadable {
+                    mapping: mapping.id.clone(),
+                    user: mapping.safix.user.clone(),
+                    name: mapping.safix.name.clone(),
+                    file,
+                });
+            }
+            Ok(_) => {}
+        }
+
+        if remember && let Err(reason) = remember_agreement(workspace, progress, mapping, &line) {
+            return Outcome::Refused(reason);
+        }
+        Outcome::UpdatedTowardSafix
+    }
+
+    /// Record the agreement, after the value it is about has landed, as its
+    /// own, separate commit.
+    ///
+    /// This order is load-bearing, per D8: a memory written first and not
+    /// followed by its value would say the two sides agreed on a value only
+    /// one of them holds, and the next run would read that as "the side
+    /// holding the new value never changed" and converge the other way \u{2014}
+    /// overwriting the new value with the old one.
+    fn remember_agreement(
+        workspace: &Workspace,
+        progress: &dyn Progress,
+        mapping: &Mapping,
+        line: &str,
+    ) -> Result<()> {
+        let recorded = Secret::read_from(&mut line.as_bytes())?;
+        let name = companion_name(mapping);
+        let status = set::run_committing(
+            workspace,
+            progress,
+            &mut Held(Some(recorded)),
+            &mapping.safix.user,
+            &name,
+            &companion_commit_subject(mapping),
+        )?;
+        if status != 0 {
+            let file = workspace.resolve(&mapping.safix.user, &name)?.file.clone();
+            return Err(Error::SourceUnreadable {
+                mapping: mapping.id.clone(),
+                user: mapping.safix.user.clone(),
+                name,
+                file,
+            });
+        }
+        Ok(())
+    }
+
+    /// Converge every declared two-way clan mapping, or the ones named.
+    ///
+    /// Reached from the same `sync clan` dispatch as [`super::sync`], with
+    /// the same `direction`/`only`: a two-way mapping named under a one-way
+    /// `--direction` filter, or a one-way mapping named under `--direction
+    /// two-way`, is refused by [`selected`]'s own generic mismatch refusal
+    /// before this function's own loop is reached \u{2014} the same refusal
+    /// [`super::sync`] raises for its own two directions.
+    ///
+    /// # Errors
+    ///
+    /// As [`super::sync`]'s: [`Error::NoClanFlake`],
+    /// [`Error::ClanUnavailable`], [`Error::UnknownMapping`] and
+    /// [`Error::MappingWrongDirection`].
+    pub fn converge(
+        workspace: &Workspace,
+        progress: &dyn Progress,
+        direction: Option<Direction>,
+        only: &[String],
+    ) -> Result<Report> {
+        scratch::set_floor(workspace.root());
+        let _guard = scratch::Guard;
+
+        let mappings: Vec<&Mapping> = selected(workspace, direction, only)?
+            .into_iter()
+            .filter(|mapping| mapping.direction == Direction::TwoWay)
+            .collect();
+        if mappings.is_empty() {
+            return Ok(Report {
+                converged: Vec::new(),
+            });
+        }
+
+        let flake = workspace
+            .bridge()?
+            .clan_flake
+            .clone()
+            .ok_or(Error::NoClanFlake)?;
+        let clan = Clan::new(flake);
+        clan.probe()?;
+        let addressing = Addressing::new(&clan);
+
+        let mut decided: Vec<(&Mapping, Decision)> = Vec::with_capacity(mappings.len());
+        for mapping in mappings {
+            decided.push((mapping, decide(workspace, &addressing, mapping)));
+        }
+
+        let mut converged = Vec::with_capacity(decided.len());
+        for (mapping, decision) in decided {
+            let outcome = match decision {
+                Decision::Settled(outcome) => outcome,
+                Decision::Push { value, remember } => {
+                    push(workspace, progress, &addressing, mapping, &value, remember)
+                }
+                Decision::Pull { value, remember } => {
+                    pull(workspace, progress, mapping, value, remember)
+                }
+            };
+            let (clan_side, safix_side) = endpoints(mapping);
+            converged.push(Converged {
+                mapping: mapping.id.clone(),
+                clan: clan_side,
+                safix: safix_side,
+                outcome,
+            });
+            if scratch::interrupted().is_some() {
+                break;
+            }
+        }
+
+        Ok(Report { converged })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// A [`Secret`] built from a literal, for a fixture that never
+        /// touches a stream.
+        fn secret(bytes: &str) -> Secret {
+            Secret::read_from(&mut bytes.as_bytes()).expect("a fixture value")
+        }
+
+        /// The agreement line a converging write of `value` would have
+        /// recorded, as a [`Secret`] \u{2014} what a companion read would hand
+        /// back after such a write.
+        fn agreement_of(value: &str) -> Secret {
+            secret(&memory_of(&secret(value)))
+        }
+
+        #[test]
+        fn neither_side_holding_anything_is_unchanged() {
+            assert!(matches!(
+                judge(None, None, None),
+                Decision::Settled(Outcome::Unchanged)
+            ));
+        }
+
+        #[test]
+        fn a_side_that_has_never_held_a_value_is_bootstrap_not_a_failure() {
+            match judge(Some(secret("alpha")), None, None) {
+                Decision::Push { remember, .. } => assert!(remember),
+                other => unreachable!("safix-only became {other:?}", other = describe(&other)),
+            }
+            match judge(None, Some(secret("alpha")), None) {
+                Decision::Pull { remember, .. } => assert!(remember),
+                other => unreachable!("clan-only became {other:?}", other = describe(&other)),
+            }
+        }
+
+        #[test]
+        fn agreeing_values_are_unchanged_whatever_the_companion_says() {
+            assert!(matches!(
+                judge(Some(secret("alpha")), Some(secret("alpha")), None),
+                Decision::Settled(Outcome::Unchanged)
+            ));
+            assert!(matches!(
+                judge(
+                    Some(secret("alpha")),
+                    Some(secret("alpha")),
+                    Some(secret("unrelated companion bytes")),
+                ),
+                Decision::Settled(Outcome::Unchanged)
+            ));
+        }
+
+        #[test]
+        fn disagreeing_with_no_agreement_recorded_yet_is_a_conflict() {
+            assert!(matches!(
+                judge(Some(secret("alpha")), Some(secret("beta")), None),
+                Decision::Settled(Outcome::Conflict)
+            ));
+        }
+
+        #[test]
+        fn one_side_moved_since_the_agreement_converges_toward_it() {
+            let remembered = agreement_of("alpha");
+            match judge(Some(secret("beta")), Some(secret("alpha")), Some(remembered)) {
+                Decision::Push { remember, .. } => assert!(remember),
+                other => unreachable!("safix-moved became {other:?}", other = describe(&other)),
+            }
+
+            let remembered = agreement_of("alpha");
+            match judge(Some(secret("alpha")), Some(secret("gamma")), Some(remembered)) {
+                Decision::Pull { remember, .. } => assert!(remember),
+                other => unreachable!("clan-moved became {other:?}", other = describe(&other)),
+            }
+        }
+
+        #[test]
+        fn both_sides_moving_since_the_agreement_is_a_conflict_not_a_guess() {
+            let remembered = agreement_of("alpha");
+            assert!(matches!(
+                judge(
+                    Some(secret("beta")),
+                    Some(secret("gamma")),
+                    Some(remembered),
+                ),
+                Decision::Settled(Outcome::Conflict)
+            ));
+        }
+
+        /// The interruption case design.md's D8 names: a companion write
+        /// interrupted after the value landed leaves the companion holding
+        /// an agreement older than either side's current bytes. Both sides
+        /// here already differ from the stale companion \u{2014} one because it
+        /// is what an interrupted push already landed, the other because it
+        /// changed again afterward \u{2014} so this exercises the same conflict
+        /// arm as `both_sides_moving_since_the_agreement_is_a_conflict_not_a_guess`
+        /// through the branch where one side coincides with what the
+        /// interrupted write produced rather than with a value neither side
+        /// has ever held, proving the stale agreement is never silently
+        /// trusted as still describing the side that looks unchanged since
+        /// it.
+        #[test]
+        fn a_stale_companion_from_an_interrupted_write_never_resolves_the_next_divergence_by_a_guess()
+         {
+            let remembered = agreement_of("original");
+            let landed = secret("landed-by-the-interrupted-push");
+            let further_edit = secret("edited-again-after-the-interruption");
+
+            assert!(matches!(
+                judge(Some(further_edit), Some(landed), Some(remembered)),
+                Decision::Settled(Outcome::Conflict)
+            ));
+        }
+
+        #[test]
+        fn every_outcome_has_a_word_and_only_conflict_and_refused_fail_the_run() {
+            let outcomes = [
+                (Outcome::Unchanged, "unchanged", false),
+                (Outcome::UpdatedTowardClan, "updated toward clan", false),
+                (Outcome::UpdatedTowardSafix, "updated toward safix", false),
+                (Outcome::Conflict, "conflict", true),
+                (Outcome::Refused(Error::ClanPipeMissing), "refused", true),
+            ];
+            for (outcome, word, failure) in outcomes {
+                assert_eq!(outcome.as_str(), word);
+                assert_eq!(outcome.is_failure(), failure, "{word} fails the run");
+            }
+        }
+
+        #[test]
+        fn the_memory_carries_a_format_tag_distinct_from_syncs_own() {
+            let value = secret("fixture");
+            let line = memory_of(&value);
+            assert!(line.starts_with("safix-bridge-sync-v1 "));
+            assert_ne!(FORMAT, crate::sync::FORMAT);
+        }
+
+        #[test]
+        fn the_companion_name_carries_the_hyphenated_suffix() {
+            let bridge: crate::model::Bridge = serde_json::from_str(
+                r#"{
+                  "clanFlake": ".",
+                  "mappings": [
+                    {
+                      "id": "tok",
+                      "direction": "two-way",
+                      "clan": {
+                        "placement": "per-machine",
+                        "machine": "meridian",
+                        "generator": "ntfy",
+                        "file": "token"
+                      },
+                      "safix": { "user": "alice", "name": "tok" }
+                    }
+                  ]
+                }"#,
+            )
+            .expect("a fixture bridge");
+            let mapping = bridge.named("tok").expect("the fixture mapping");
+            assert_eq!(companion_name(mapping), "tok-safix-bridge-sync-state");
+        }
+
+        /// A `Decision` printed for an `unreachable!` message, since it has
+        /// no `Debug` of its own \u{2014} see the type's own doc comment.
+        fn describe(decision: &Decision) -> &'static str {
+            match decision {
+                Decision::Settled(outcome) => outcome.as_str(),
+                Decision::Push { .. } => "push",
+                Decision::Pull { .. } => "pull",
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
