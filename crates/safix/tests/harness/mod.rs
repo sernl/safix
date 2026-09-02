@@ -269,6 +269,12 @@ pub struct Fixture {
     /// A machine belongs here beside a person: it holds a key, so a report that
     /// found its stanza can name it.
     subjects: Value,
+    /// The subject records `flake.safix.lib.subjects` projects — every
+    /// declared machine, service and group — which `upload` reads to tell a
+    /// declared machine apart from an undeclared name or a person's. Distinct
+    /// from [`Fixture::subjects`] above: that one is the recipients map, this
+    /// one is the record set `safix upload` looks a machine name up in.
+    subject_records: Value,
     /// The managers each organization declares, the consent each managed person
     /// declares, and each group's membership with the organizations covering it.
     /// `subjects` is not held here: [`Fixture::write_fixtures`] derives it the way
@@ -358,6 +364,7 @@ impl Fixture {
             // has to be silent about an empty mirror rather than refuse.
             keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
             subjects: json!({ "alice": [alice.clone()], "bob": [bob.clone()] }),
+            subject_records: json!({ "machines": {}, "services": {}, "groups": {} }),
             // What a fleet that has never heard of delegation evaluates to, and
             // every test that declares none drives it: the verbs have to consult
             // nothing for a target no delegation covers, which is the whole of the
@@ -484,6 +491,18 @@ impl Fixture {
     /// its machines'.
     pub fn declare_subject(&mut self, subject: &str, keys: &[&str]) {
         self.subjects[subject] = json!(keys);
+        self.write_fixtures();
+    }
+
+    /// Declare a machine in `flake.safix.lib.subjects.machines`, the record set
+    /// `safix upload` resolves a name against, and — when `recipient` is given —
+    /// its recipient in the same map [`Fixture::declare_subject`] writes,
+    /// exactly as `modules/flake/safix/default.nix`'s own `recipients`
+    /// projection carries an empty list for a machine with none.
+    pub fn declare_machine(&mut self, machine: &str, recipient: Option<&str>) {
+        self.subject_records["machines"][machine] = json!({ "owner": null, "tags": [] });
+        let keys: Vec<&str> = recipient.into_iter().collect();
+        self.subjects[machine] = json!(keys);
         self.write_fixtures();
     }
 
@@ -1018,6 +1037,7 @@ impl Fixture {
         write_json(&self.work.join("bridge.json"), &self.bridge);
         write_json(&self.work.join("keepassxc.json"), &self.keepassxc);
         write_json(&self.work.join("recipients.json"), &self.subjects);
+        write_json(&self.work.join("subjects-lib.json"), &self.subject_records);
         write_json(&self.work.join("governed.json"), &governed);
 
         // The subject name space, derived here the way `resolve.nix` derives it:
@@ -1538,6 +1558,10 @@ impl Fixture {
             .env(
                 "SAFIX_FIXTURE_ENROLL_HOOK",
                 self.work.join("enroll-hook.json"),
+            )
+            .env(
+                "SAFIX_FIXTURE_SUBJECTS",
+                self.work.join("subjects-lib.json"),
             )
             .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"))
             // The two the developer's own shell almost certainly sets. A test
