@@ -954,7 +954,9 @@ mod against_a_real_clan {
         for generator in [MINTED, EMPTY, SCHEDULED, ORPHAN] {
             let id = format!("{generator}/token");
             assert!(
-                lines.iter().any(|line| line.starts_with(&format!("{id}: "))),
+                lines
+                    .iter()
+                    .any(|line| line.starts_with(&format!("{id}: "))),
                 "vars list named nothing for {id:?}"
             );
         }
