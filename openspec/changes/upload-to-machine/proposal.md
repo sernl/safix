@@ -27,9 +27,9 @@ This change adds the verb the sentence's reasoning does not cover, and narrows w
 - An honest no-op: when the target already presents an ed25519 host key that derives to the machine's declared recipient, remote mode writes nothing and reports that the machine already has what it needs, rather than performing a transfer that would either overwrite a live host's own key or silently do nothing while claiming success.
 - `--identity PATH` supplies the private key material the operator harvested or minted; the command mints no machine identity itself, and refuses when the supplied key's derived recipient does not match the machine's declared one, so a pre-seed run cannot silently seed the wrong key.
 - Refusals for an undeclared machine, a declared machine with no recipient, and a write that has no `--identity` to write.
-- **BREAKING** (narrowing, not additive): `safix-cli`'s "Absent verbs" requirement stops stating that no upload verb exists; it states instead what the verb is scoped to, so the sentence stays true.
+- **BREAKING** (narrowing, not additive): `safix-cli`'s "Retired and reserved verbs are recorded rather than left mysterious" requirement (`rename-transfer-verbs`'s successor to "Absent verbs are recorded rather than left mysterious") stops stating that no upload verb exists; it states instead what the verb is scoped to, so the sentence stays true.
 
-Not in scope: a `safix upload` mode for person identities — one-unlock-bootstrap owns bootstrapping a person's own first identity, and this verb parses a machine name only, refusing a person's name the way it refuses an undeclared machine.
+Not in scope: a `safix upload` mode for person identities — this verb parses a machine name only, refusing a person's name the way it refuses an undeclared machine; bootstrapping a person's own first identity is separate, deferred design work outside this repository (the dotfiles repository's `one-unlock-bootstrap` design, `CHANGELOG.md:169`).
 Not in scope: a systemd-credentials delivery path for the same material — the operator has deferred that feature entire; this change records it as a named non-goal and states the one-sentence extension point rather than building toward it.
 Not in scope: any deploy or rebuild verb — safix is pull-model, so a provisioned machine's own next `nixos-rebuild switch` (or equivalent) is what activates the closure that already carries its ciphertext, and this change adds no verb that triggers one.
 Not in scope: any change to `secret-installation` or `consumer-integration`'s requirements — both are read below and neither needs a requirement changed; see design.md's Context for why the boundary holds.
@@ -42,13 +42,17 @@ Not in scope: any change to `secret-installation` or `consumer-integration`'s re
 
 ### Modified Capabilities
 
-- `safix-cli`: the "Absent verbs" requirement's recorded absence of an upload verb is no longer true as stated and is narrowed to what remains true — no verb exists for ongoing secret delivery, because activation already delivers what it would.
+- `safix-cli`: `rename-transfer-verbs`'s "Retired and reserved verbs are recorded rather than left mysterious" requirement's recorded absence of an upload verb is no longer true as stated and is narrowed to what remains true — no verb exists for ongoing secret delivery, because activation already delivers what it would.
 - `plaintext-staging`: its one requirement scoping staged plaintext to "generation or editing" gains a third occasion — the transient tarball remote mode assembles before streaming it over ssh — and a scenario stating that a destination the operator named on the command line, `--directory DIR` among them, is not staging and is not held to the memory-backed rule.
 
 ## Impact
 
 Affected code (rust crate, `crates/safix-core/src` and `crates/safix/src`): a new `upload` module in `safix-core` (machine resolution, the two write modes, the presented-identity probe, the transport), a new `upload_command` dispatch arm in `crates/safix/src/main.rs` beside the other custody-touching verbs, and a new entry in `crates/safix/src/usage.rs`'s scaffold table.
 
-Affected checks: a new check group proving the honest no-op cannot become a silent write (the severity property this change cares most about), the recipient-mismatch refusal, the path-depth safety on the fixed pre-seed destination, and the plaintext-staging scenario distinguishing an operator-named destination from a staging root.
+Affected checks: no new `modules/flake/checks/*.nix` file, because this change adds no nix option; `crates/safix/tests/upload.rs`'s integration tests are wired one per claim through `modules/flake/checks/cli.nix`'s `mode` helper — the honest no-op that cannot become a silent write (the severity property this change cares most about), the recipient-mismatch refusal, the path-depth safety on the fixed pre-seed destination, and the plaintext-staging scenario distinguishing an operator-named destination from a staging root — each with its own perturbation drill recorded in that file's ledger.
+
+Sequencing: this change is written to apply after `rename-transfer-verbs`, for a spec-level reason rather than a scheduling preference.
+`rename-transfer-verbs` REMOVES `safix-cli`'s "Absent verbs are recorded rather than left mysterious" requirement and ADDS "Retired and reserved verbs are recorded rather than left mysterious" in its place, and this change's own `safix-cli` delta MODIFIES that successor requirement rather than the one `rename-transfer-verbs` removes.
+Both changes also edit the same `crates/safix/src/usage.rs` block — `rename-transfer-verbs` task 5.3 rewrites it first, and this change's task 6.2 narrows the sentence it writes there — so landing `rename-transfer-verbs` first means this change's diff to that block is written against its post-rewrite shape once, rather than against a moving target.
 
 No machine on any fleet this package has shipped to has ever been provisioned through this verb; every claim above was read from the cited sources rather than measured against a deployment.
