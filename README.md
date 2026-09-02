@@ -3,7 +3,7 @@
 safix is built for its operator's own fleet; that use case, not general adoption, decides its opinions.
 
 safix is a custody-first secrets manager for nix.
-Secrets are declared as flake-parts module options, the encrypted file each secret lives in is derived from the audience that can read it rather than authored by hand, and the `.sops.yaml` recipient policy is generated from those same declarations.
+Secrets are declared as attribute set options merged by the nix module system, the encrypted file each secret lives in is derived from the audience that can read it rather than authored by hand, and the `.sops.yaml` recipient policy is generated from those same declarations.
 It is tied to no framework and serves NixOS and home-manager alike through sops-nix.
 
 Its headline opinion: declarations may be scattered anywhere across your tree, one per file, because they are mergeable attrsets — but ciphertext placement is never scattered, because the audience picks the file.
@@ -58,6 +58,8 @@ The fourth is the user scope's alone: sops-nix's NixOS module defaults its age i
 See [Establishing secrets in a profile](#establishing-secrets-in-a-profile) for the rest of the surface, including which of the two module forms to import.
 
 Declarations merge, so the flake block above can live in its own file imported alongside a hundred others; safix reads no path, no filename and no directory structure to find them.
+
+Flake-parts is one way to reach that merge, not the only one: a consumer with no flake-parts import, or no flake at all, reaches the identical projection through `flake.lib.mkVault` — see [Without flake-parts, or without a flake](#without-flake-parts-or-without-a-flake).
 
 ## The one mental model
 
@@ -772,6 +774,9 @@ That refusal sits in the resolver rather than in either module, so a direct `saf
 Each module ships twice.
 `homeModules.default` and `nixosModules.default` import sops-nix along with safix, for a tree that has not got it.
 `homeModules.safix` and `nixosModules.safix` declare the same namespace and import nothing, for a tree that already imports sops-nix at a revision of its own.
+`homeManagerModules` is a published alias of `homeModules` — one definition, two names, matching sops-nix's own `flake.nix` — so `homeManagerModules.safix` and `homeManagerModules.default` are the identical values `homeModules.safix` and `homeModules.default` are.
+Only the `.safix` forms are importable with genuinely no flake anywhere in the importing tree: neither's import list names anything under `inputs.sops-nix`, unlike the `.default` forms, which do.
+`safix-module-entrypoints` holds both facts, and evaluates `modules/consume/home.nix` and `modules/consume/nixos.nix` bare, with no flake input in scope at all, to prove each still declares `options.safix.lib` on its own — which is what makes the `.safix` forms importable with no flake at all rather than merely no flake-parts.
 
 Import the second if you already import sops-nix anywhere in that profile, because importing two distinct copies of one option-declaring module is not a merge and not a warning:
 
@@ -859,6 +864,53 @@ Before decrypting, the installer checks each configured identity path for presen
 The limit is stated rather than implied: this coexistence covers safix's own installer.
 A consumer who writes `sops.secrets` directly, beside safix, on a host that already runs another secret store still has the original collision, and safix neither detects nor repairs that.
 
+## Without flake-parts, or without a flake
+
+Everything above assumes a flake-parts consumer.
+safix's evaluation rests on two narrower things: the nix module system, which a bare `lib.evalModules` call satisfies with no flake-parts machinery anywhere, and — for the twelve attributes under `safix.lib.*` and `safix.*` the command reads, and fourteen of its fifteen verbs — a nix expression to evaluate, which does not have to be a flake output.
+
+`flake.lib.mkVault` is the entrypoint for the first of those.
+It is a function of the form `{ modules, root } -> projection`, published at a new top-level `flake.lib.mkVault` rather than inside `flake.safix.lib` — the latter is a resolved value with a fixed shape, not a namespace a function can live inside without changing what every existing reader of it sees.
+Calling it evaluates `modules` together with safix's own resolver module through `lib.evalModules`, with `root` handed to `_module.args.self` unchanged, and returns exactly the value a flake-parts consumer's `flake.safix.lib` holds for the same declarations.
+`safix-vault-projection` proves that by declaring one fleet twice — once as `flake.safix.*` under `flakeModules.default`, once through `mkVault`'s `modules` — and comparing the two projections field for field.
+`root` is read only as a path to concatenate, never inspected for where it came from, so it need not be a flake input; the check itself calls `mkVault` with `root = ""`.
+Declarations passed through `modules` scatter and merge exactly as a flake-parts `imports` list would, because both end at the same `lib.evalModules` call: the same check declares one catalogue entry across two fixture modules and asserts it resolves identically to the same declaration in one, in either module order.
+A module in `modules` that declares an option outside `flake.safix` is refused — by the module system's own undeclared-option check rather than by `namespace.nix`'s scan, which only covers the flake-parts path — and `safix-vault-projection` holds that refusal too, naming the option.
+
+`mkVault` returns only the `.lib` half.
+`onboardingHook` and `enrollHook` are siblings of `flake.safix`, not fields inside `flake.safix.lib`, and a flake-parts consumer's own `flake.safix.lib` never carried them either, so a consumer who wants either hook available to a flakeless CLI declares it directly in the entry file, beside the `lib` field `mkVault` returns:
+
+```nix
+{
+  safix = {
+    lib = (import <safix>).lib.mkVault { modules = [ ./secrets.nix ]; root = ./.; };
+    onboardingHook = null; # or a literal shell fragment, set here directly
+    enrollHook = null;
+  };
+}
+```
+
+`safix-vault-projection` asserts the returned value carries neither key.
+
+`mkVault` is itself a flake output, so reaching it still starts from a flake reference, even though nothing built with it needs one afterward.
+A flake-parts consumer already has `inputs.safix` to read it from; a flakeless entry file has no `inputs` at all, so `examples/plain-nix/entry.nix` reaches it through `builtins.getFlake`, pointed at this repository's own path in that example and at something like `github:you/safix` for a consumer elsewhere.
+A pinned fetch such as `builtins.fetchTarball` or `builtins.fetchGit` naming a revision explicitly is the alternative to `builtins.getFlake` for a tree that would rather not depend on the flake registry for this one lookup.
+
+`--entry <file>`, and its environment form `SAFIX_ENTRY`, are the second narrowing, in the command rather than in nix.
+Given either, the runtime evaluates `nix eval --file <entry> <attribute>` in place of `<root>#<attribute>` — two arguments where a flake target is one, but the same attribute string in the last position either way, so the twelve `safix.lib.*`/`safix.*` spellings this runtime reads are unchanged by which form it runs.
+Both are read as a leading global option ahead of any subcommand, alongside a global `--nixpkgs <flake-ref>` and its environment form `SAFIX_NIXPKGS`; where a flag and its environment variable disagree, the flag wins.
+Root discovery does not move: `Workspace::discover` still finds the repository through git, unaffected by `--entry`, and an entry file need not live inside the repository a run stages and commits into.
+`safix-cli` evaluates a fixture entry file through all twelve attribute spellings, both under `--file` and against a flake target, asserting each succeeds either way, and separately asserts the three structured attributes — `generatorPlan`, `bridge`, `keepassxc` — resolve byte-identical between the two; it also asserts `--entry` overriding a conflicting `SAFIX_ENTRY`, and the workspace root staying git-discovered even when the entry file lives outside it.
+
+Fourteen of safix's fifteen verbs — `list`, `get`, `set`, `edit`, `fix`, `check`, `import`, `export`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group` — read only nix values through those twelve attributes and behave identically under `--entry` as under a flake.
+`generate` is the exception, and states why at evaluation rather than leaving it to be discovered: its sandbox resolves its own tools through `nix shell --inputs-from`, which needs a flake, so running it under `--entry` (or `SAFIX_ENTRY`) with neither `--nixpkgs` nor `SAFIX_NIXPKGS` declared refuses before the first fragment runs, naming both remedies — drop `--entry` and run against the declaring flake, or add `--nixpkgs <flake-ref>` (or `SAFIX_NIXPKGS`), which the sandbox then resolves `nixpkgs#<attribute>` against directly instead of through `--inputs-from`.
+A user with an empty generator order is unaffected either way, because the refusal sits after the existing empty-order return, not before it.
+`safix-cli` holds the refusal's presence, its absence for an empty-order user, and both remedies named in its message.
+
+`examples/plain-nix/` is a working copy of the recipe above: `entry.nix` fetches `mkVault` and assembles the attrset the CLI reads, `fleet.nix` declares the fleet passed through `mkVault`'s `modules`, and `hooks.nix` declares the two hooks beside it, all reachable with `safix --entry examples/plain-nix/entry.nix list`.
+`examples/dendritic/` declares the identical fleet again, behind `flakeModules.default` in an ordinary flake-parts flake with one declaration per file.
+`modules/flake/checks/examples.nix` evaluates both and asserts they resolve the same fleet field for field, so copy `plain-nix` if your tree has no flake at all or a flake that does not use flake-parts, and `dendritic` if it already does; `examples/README.md` indexes both in more detail.
+
 ## The bridge to clan
 
 If your fleet also runs [clan](https://clan.lol), values can move between clan's vars and safix's entries in either direction.
@@ -890,7 +942,7 @@ The cost is that a consumer without clan-cli cannot import either — which is a
 
 **Both verbs converge.**
 Each reads both sides and compares before writing either, so a mapping whose two sides agree is not written and not committed and a second run changes nothing.
-On the export side that comparison is load-bearing rather than an optimisation: clan's write is unconditional and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run would commit in the clan repository for every mapping.
+On the export side that comparison is essential rather than an optimisation: clan's write is unconditional and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run would commit in the clan repository for every mapping.
 
 An imported value goes through the same path a hand-typed one takes, so it acquires the recipient-drift refusal, the staged write and the rename, and lands as its own commit naming the mapping and the direction and never the value.
 
