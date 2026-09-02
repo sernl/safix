@@ -54,4 +54,4 @@ Every `keepassxc-cli` behaviour cited in `design.md` was measured against versio
 - [x] 7.1 `openspec validate unlock-keepassxc-composite-key --strict`
 - [x] 7.2 `openspec validate --all --strict`
 - [x] 7.3 `cargo test` (whole workspace) green, confirming no other suite regressed from the `Keepassxc`/`Database`/`Transport::PasswordStore` shape changes (log: `logs/cargo-test-workspace-20260903-074055.log`, `cargo test --locked --workspace` run unscoped on the merged epic tip, 33 test binaries all `ok`, 0 failed)
-- [ ] 7.4 `nix flake check` green — deferred for the same reason: the subagent contract prohibits `nix flake check`; the scoped checks (`safix-keepassxc`, `safix-keepassxc-drill`, `safix-vault-projection`, `safix-examples`) were built instead
+- [x] 7.4 `nix flake check` green (log: `logs/8.4-nix-flake-check-retry-20260903-074704.log`, `nix flake check --keep-going --print-build-logs`, "all checks passed!", including `safix-keepassxc`, `safix-keepassxc-drill`, `safix-vault-projection`, and `safix-examples`)
