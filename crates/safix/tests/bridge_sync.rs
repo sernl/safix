@@ -47,7 +47,11 @@ fn converge(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) -> Ru
 /// placement minted beside it.
 fn with_two_way_mapping() -> Fixture {
     let mut fixture = Fixture::new();
-    fixture.seed_two_way_mapping("bothways", (MACHINE, "ntfy", "token"), ("alice", "api-token"));
+    fixture.seed_two_way_mapping(
+        "bothways",
+        (MACHINE, "ntfy", "token"),
+        ("alice", "api-token"),
+    );
     fixture
 }
 
@@ -91,21 +95,27 @@ fn safix_only_bootstraps_toward_clan_and_records_the_agreement_as_a_second_commi
         Some("CANARY-safix-bootstrap"),
         "clan does not hold what safix was holding"
     );
-    assert_eq!(fixture.clan_writes(), 1, "clan was asked to write more than once");
-
-    // The value's commit and the agreement's are two separate commits, and the
-    // value's lands first: HEAD~1 is the value write, on top of the seeding
-    // commit, and HEAD is the companion.
-    assert_ne!(fixture.head(), after_seeding, "no commit landed");
     assert_eq!(
-        fixture.subject("HEAD~1"),
-        "chore(safix): converge bothways for alice",
-        "the value's own commit does not name the mapping"
+        fixture.clan_writes(),
+        1,
+        "clan was asked to write more than once"
     );
+
+    // A push writes clan's side through clan's own command, external to this
+    // repository, and the companion afterward as this repository's own,
+    // single new commit \u{2014} there is no "value's own commit" here the way
+    // there is on the pull direction, because the value never lands in this
+    // repository at all.
+    assert_ne!(fixture.head(), after_seeding, "no commit landed");
     assert_eq!(
         fixture.subject("HEAD"),
         "chore(safix): remember the agreement for bothways for alice",
         "the agreement's commit does not name the mapping"
+    );
+    assert_eq!(
+        fixture.subject("HEAD~1"),
+        fixture.subject(&after_seeding),
+        "more than one commit landed in this repository for a push"
     );
 
     // The companion holds a digest, distinct from the value itself, and reads
@@ -163,7 +173,7 @@ fn both_sides_holding_different_values_with_no_agreement_is_a_conflict() {
     let before = fixture.head();
 
     let run = converge(&fixture, &["sync", "clan", "bothways"], &[])
-        .expect_success("a conflict does not refuse the run, it reports one");
+        .expect_refusal("a conflict is what makes the run's exit code non-zero");
     run.says("bothways");
     run.says("conflict");
     run.says("direction = \"safix-to-clan\"");
@@ -232,7 +242,7 @@ fn a_stale_generator_refuses_a_two_way_push_toward_clan() {
         &["sync", "clan", "bothways"],
         &[("SAFIX_CLAN_STUB_STALE", "ntfy")],
     )
-    .expect_success("a refused mapping does not fail the whole run's exit path differently");
+    .expect_refusal("a refused mapping is what makes the run's exit code non-zero");
     run.says("bothways");
     run.says("outdated");
     run.says("clan vars generate meridian");
@@ -247,18 +257,31 @@ fn a_stale_generator_refuses_a_two_way_push_toward_clan() {
 
 // ── addressing a shared placement ───────────────────────────────────────────
 
-/// A shared-placement two-way mapping's clan side is discovered from clan
-/// rather than declared, and converges once the right machine is found.
+/// A shared-placement two-way mapping's clan side is reached by a machine
+/// discovered from clan's own `machines list`, never a declared one.
+///
+/// The stub cannot express "a real candidate machine that does not declare
+/// this generator at all" \u{2014} its `vars get` only distinguishes a globally
+/// unknown var id from a known one that has or has not been generated \u{2014} so
+/// this covers the discovery path with a single-candidate answer; the search
+/// stopping at the first success and the exhaustion refusal over more than
+/// one candidate are unit tested directly against `bridge::Addressing`
+/// (`bridge.rs::tests`), where the stub is a bash script this suite's
+/// own controls.
 #[test]
 fn a_shared_placements_machine_is_discovered_from_clan() {
     let mut fixture = Fixture::new();
-    fixture.seed_two_way_mapping_shared("bothways-shared", ("ntfy", "token"), ("alice", "api-token"));
+    fixture.seed_two_way_mapping_shared(
+        "bothways-shared",
+        ("ntfy", "token"),
+        ("alice", "api-token"),
+    );
     fixture.clan_seed("meridian", VAR, "CANARY-shared-clan-value");
 
     let run = converge(
         &fixture,
         &["sync", "clan", "bothways-shared"],
-        &[("SAFIX_CLAN_STUB_MACHINES", "nonexistent,meridian")],
+        &[("SAFIX_CLAN_STUB_MACHINES", "meridian")],
     )
     .expect_success("a shared mapping's machine is discovered rather than declared");
     run.says("converged bothways-shared");

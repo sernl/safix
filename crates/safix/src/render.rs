@@ -1030,7 +1030,9 @@ pub fn bridge_sync(report: &safix_core::bridge::bridge_sync::Report) -> String {
     let tally = report.tally();
     let closing = format!(
         "{PROGRAM}: {total} mapping(s): {} converged, {} unchanged, {} conflict, {} refused.\n",
-        tally.updated_toward_clan.saturating_add(tally.updated_toward_safix),
+        tally
+            .updated_toward_clan
+            .saturating_add(tally.updated_toward_safix),
         tally.unchanged,
         tally.conflict,
         tally.refused,
@@ -1066,7 +1068,10 @@ fn push_bridge_sync_detail(out: &mut String, entry: &safix_core::bridge::bridge_
             remedy(out, "    direction = \"safix-to-clan\";");
             remedy(out, "to keep clan's, declare instead:");
             remedy(out, "    direction = \"clan-to-safix\";");
-            remedy(out, &format!("then:  {PROGRAM} sync clan {}", entry.mapping));
+            remedy(
+                out,
+                &format!("then:  {PROGRAM} sync clan {}", entry.mapping),
+            );
             remedy(out, "and put the direction back to two-way afterwards.");
         }
 
