@@ -117,6 +117,6 @@ The command's help SHALL state that it targets machines and not people, that a s
 #### Scenario: The three absences are readable without reading the source
 
 - **WHEN** `safix upload -h` is read
-- **THEN** it states that person identities are one-unlock-bootstrap's territory and not reachable here
+- **THEN** it states that this command provisions machines and not people, refusing a person's name the way it refuses an undeclared machine
 - **AND** it states that the material lands as plain files today and names no systemd-credentials mode
 - **AND** it states that the machine's own next rebuild activates what was written, because this command does not
