@@ -1007,16 +1007,13 @@ So the verb that needs them carries them, `check` keeps both of its properties, 
 **A `two-way` mapping converges toward whichever side changed, and never guesses.**
 `direction = "two-way"` declares a standing relationship rather than a one-off transfer: `sync clan --direction two-way`, or a bare `sync clan`, reads both sides against the last agreement it remembers and writes the side that has not moved to match the one that has.
 When both sides have moved since the last agreement, or neither side has ever agreed and the two now disagree, nothing is written and the finding names the mapping and the two one-way remedies — narrow the run to `--direction clan-to-safix` or `--direction safix-to-clan`, run it once, then declare the mapping `two-way` again.
-`safix-bridge-sync-unchanged`, `-push`, `-pull` and `-conflict` hold those outcomes over the stubbed clan; `safix-bridge-real-clan` holds the same reachable classes against the real command.
 
 That memory is a digest, held the way `keepassxc-to-safix`'s own memory is: recorded only after the value it describes has landed, in a companion entry minted beside the mapped one, sharing its file and its audience, and never in clan's own store or in the plaintext definitions tree.
-The companion's name is the mapped entry's plus `-safix-bridge-sync-state`, and evaluation refuses a hand-declared entry that collides with it, naming the entry, the mapping, and the suffix — held by `safix-bridge-sync` and its drill, `safix-bridge-sync-drill`.
-`safix-bridge-sync-push` and `-pull` hold the load-bearing order — the value lands before the agreement — against the repository's own commit history, and `safix-bridge-sync-remembered` holds a later divergence reading that agreement back rather than only ever writing it.
+The companion's name is the mapped entry's plus `-safix-bridge-sync-state`, and evaluation refuses a hand-declared entry that collides with it, naming the entry, the mapping, and the suffix.
 
 **A `shared` placement is addressed by asking clan, never by declaring a second field.**
 `placement = "shared"` (default `"per-machine"`) says the clan side is one var no machine owns exclusively, so `machine` is refused rather than required; the runtime discovers which machine to reach it through by trying each name `clan machines list` returns until one resolves, and refuses only once every one of them has failed.
-`safix-bridge-sync-shared-address` holds the discovery over the stubbed clan; `safix-bridge-real-clan` holds it against a real second machine that genuinely does not declare the generator, which is the property a stub cannot establish for itself.
-A two-way push still carries the identical stale-generator refusal a `safix-to-clan` write already has, with no override — held by `safix-bridge-sync-stale-generator` and, against the real command, by `safix-bridge-real-clan`.
+A two-way push still carries the identical stale-generator refusal a `safix-to-clan` write already has, with no override.
 
 ## The mirror in your password database
 
