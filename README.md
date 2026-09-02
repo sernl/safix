@@ -892,9 +892,9 @@ A module in `modules` that declares an option outside `flake.safix` is refused �
 
 `safix-vault-projection` asserts the returned value carries neither key.
 
-`mkVault` is itself a flake output, so reaching it still starts from a flake reference, even though nothing built with it needs one afterward.
-A flake-parts consumer already has `inputs.safix` to read it from; a flakeless entry file has no `inputs` at all, so `examples/plain-nix/entry.nix` reaches it through `builtins.getFlake`, pointed at this repository's own path in that example and at something like `github:you/safix` for a consumer elsewhere.
-A pinned fetch such as `builtins.fetchTarball` or `builtins.fetchGit` naming a revision explicitly is the alternative to `builtins.getFlake` for a tree that would rather not depend on the flake registry for this one lookup.
+`mkVault` is defined once, in `lib/default.nix`, as a plain function of `{ lib }: { modules, root }: projection`, so reaching it needs no flake reference at all — only a `lib`.
+`modules/flake/lib.nix` republishes that same definition at `flake.lib.mkVault`, unchanged, for a flake-parts consumer who already has `inputs.safix` to read it from.
+A flakeless entry file has no `inputs`, so it imports `lib/default.nix` directly and supplies `lib` itself, the same way any other non-flake nix expression does: `examples/plain-nix/entry.nix` gets its `lib` from `NIX_PATH` via `(import <nixpkgs> { }).lib`, and a consumer elsewhere can pin the same file with `builtins.fetchTarball` or `builtins.fetchGit` naming a revision explicitly, rather than depending on the flake registry for this one lookup.
 
 `--entry <file>`, and its environment form `SAFIX_ENTRY`, are the second narrowing, in the command rather than in nix.
 Given either, the runtime evaluates `nix eval --file <entry> <attribute>` in place of `<root>#<attribute>` — two arguments where a flake target is one, but the same attribute string in the last position either way, so the twelve `safix.lib.*`/`safix.*` spellings this runtime reads are unchanged by which form it runs.
