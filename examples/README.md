@@ -18,7 +18,7 @@ $ safix --entry examples/plain-nix/entry.nix list
 ```
 
 or export `SAFIX_ENTRY=examples/plain-nix/entry.nix` and drop the flag from every subsequent invocation.
-Fourteen of safix's fifteen verbs behave identically under `--entry`; `generate` additionally needs `--nixpkgs <flake-ref>` or `SAFIX_NIXPKGS`, because the generator sandbox resolves its tools through a flake regardless of how the declarations themselves were reached.
+Twelve of safix's thirteen verbs behave identically under `--entry`; `generate` additionally needs `--nixpkgs <flake-ref>` or `SAFIX_NIXPKGS`, because the generator sandbox resolves its tools through a flake regardless of how the declarations themselves were reached.
 
 Copy this one if your tree has no flake at all, or if it has a flake that does not use flake-parts.
 

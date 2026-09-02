@@ -593,10 +593,8 @@ $ safix set NAME   # write one value (hidden prompt, confirmed, committed)
 $ printf '%s' "$TOKEN" | safix set NAME   # the same write, scripted
 $ safix get NAME   # read one value to stdout
 $ safix generate   # mint whatever has a recipe
-$ safix import     # pull declared clan vars into safix
-$ safix export     # push declared safix values into clan
 $ safix audit      # report which declared mappings' two sides disagree
-$ safix sync       # converge declared entries with your password database
+$ safix sync       # converge declared clan and keepassxc relationships
 $ safix keygen     # run by a person on their machine: mint their identity
 $ safix adduser    # run by the operator: scaffold a person
 $ safix enroll     # a hardware key, from a blank card to a proven recovery identity
@@ -613,8 +611,8 @@ What the piped form drops is the confirmation, and only where there is nobody to
 
 `upload` does not exist here, and `safix --help` records why: activation already delivers what an upload would.
 
-`import` and `export` are not a plaintext dump and restore.
-They move one declared mapping at a time across the clan boundary — see "The bridge to clan" below — and nothing here writes a plaintext tree, because such a tree outlives the migration that justified it.
+`sync`'s `clan` target is not a plaintext dump and restore.
+It moves one declared mapping at a time across the clan boundary — see "The bridge to clan" below — and nothing here writes a plaintext tree, because such a tree outlives the migration that justified it.
 
 ## Onboarding a person, end to end
 
@@ -903,7 +901,7 @@ Both are read as a leading global option ahead of any subcommand, alongside a gl
 Root discovery does not move: `Workspace::discover` still finds the repository through git, unaffected by `--entry`, and an entry file need not live inside the repository a run stages and commits into.
 `safix-cli` evaluates a fixture entry file through all twelve attribute spellings, both under `--file` and against a flake target, asserting each succeeds either way, and separately asserts the three structured attributes — `generatorPlan`, `bridge`, `keepassxc` — resolve byte-identical between the two; it also asserts `--entry` overriding a conflicting `SAFIX_ENTRY`, and the workspace root staying git-discovered even when the entry file lives outside it.
 
-Fourteen of safix's fifteen verbs — `list`, `get`, `set`, `edit`, `fix`, `check`, `import`, `export`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group` — read only nix values through those twelve attributes and behave identically under `--entry` as under a flake.
+Twelve of safix's thirteen verbs — `list`, `get`, `set`, `edit`, `fix`, `check`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group` — read only nix values through those twelve attributes and behave identically under `--entry` as under a flake.
 `generate` is the exception, and states why at evaluation rather than leaving it to be discovered: its sandbox resolves its own tools through `nix shell --inputs-from`, which needs a flake, so running it under `--entry` (or `SAFIX_ENTRY`) with neither `--nixpkgs` nor `SAFIX_NIXPKGS` declared refuses before the first fragment runs, naming both remedies — drop `--entry` and run against the declaring flake, or add `--nixpkgs <flake-ref>` (or `SAFIX_NIXPKGS`), which the sandbox then resolves `nixpkgs#<attribute>` against directly instead of through `--inputs-from`.
 A user with an empty generator order is unaffected either way, because the refusal sits after the existing empty-order return, not before it.
 `safix-cli` holds the refusal's presence, its absence for an empty-order user, and both remedies named in its message.
@@ -929,40 +927,39 @@ The relationship is declared rather than passed as arguments, because a bridge i
 }
 ```
 
-Then `safix import` moves every `clan-to-safix` mapping and `safix export` every `safix-to-clan` one; naming a mapping narrows the run to it.
+Then `safix sync clan` converges every declared mapping, each moving in its own declared direction — `clan-to-safix` and `safix-to-clan` mixed freely in the same run; naming one or more mappings after `clan` narrows the run to them, and `--direction clan-to-safix` or `--direction safix-to-clan` narrows it to mappings declared with that value instead.
 
-Direction is written as its endpoints rather than as `import` or `export`, and that is not pedantry.
-`clan vars export` moves values *out of* clan; `safix export` moves them *into* clan.
-Both words are correct relative to the tool that says them, and a declaration is read by someone with no tool in hand to be relative to.
-The verbs stay `import` and `export` because they sit on safix's own command line, where safix is the frame every other verb already assumes.
+Direction is written as its endpoints rather than as a verb, and that is not pedantry.
+`clan vars export` moves values *out of* clan; a `safix-to-clan` mapping's convergence moves a value the opposite way, so a word one tool already uses for its own verb would mean the opposite thing if reused here.
+Both are correct relative to the tool that moves them, and a declaration is read by someone with no tool in hand to be relative to, so the endpoints are named instead.
 
 **clan stays the authority on its own store.**
 Every read is `clan vars get` and every write is `clan vars set`, run as subprocesses with the value on a pipe.
 safix reads, writes, encrypts, decrypts and parses none of clan's stored files, in either direction, so the bridge works over `sops`, `age`, `password-store` and whatever clan adds, with no code here.
-The cost is that a consumer without clan-cli cannot import either — which is arguably correct, since a consumer with no clan has nothing to import from.
+The cost is that a consumer without clan-cli cannot reach clan's side of the bridge at all — which is arguably correct, since a consumer with no clan has no clan-side value to reach.
 
-**Both verbs converge.**
-Each reads both sides and compares before writing either, so a mapping whose two sides agree is not written and not committed and a second run changes nothing.
-On the export side that comparison is essential rather than an optimisation: clan's write is unconditional and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run would commit in the clan repository for every mapping.
+**Every run compares before it writes.**
+Each mapping is read on both sides and compared before either is written, so a mapping whose two sides agree is not written and not committed and a second run changes nothing.
+On the safix-to-clan direction that comparison is essential rather than an optimisation: clan's write is unconditional and a re-encrypting backend produces fresh ciphertext for an unchanged value, so without it every run would commit in the clan repository for every mapping.
 
-An imported value goes through the same path a hand-typed one takes, so it acquires the recipient-drift refusal, the staged write and the rename, and lands as its own commit naming the mapping and the direction and never the value.
+A value moving clan-to-safix goes through the same path a hand-typed one takes, so it acquires the recipient-drift refusal, the staged write and the rename, and lands as its own commit naming the mapping and the direction and never the value.
 
-Half of every mapping lives in another flake, so evaluation refuses only what is local to you: an unresolvable safix side, an import target a generator also produces, two mappings writing one target, one pair of endpoints declared in both directions, and mappings with no `clanFlake` to reach.
+Half of every mapping lives in another flake, so evaluation refuses only what is local to you: an unresolvable safix side, a clan-to-safix mapping writing into a value a generator also produces, two mappings writing one target, one pair of endpoints declared in both directions, and mappings with no `clanFlake` to reach.
 It claims nothing about the clan side.
 A clan side that does not resolve is refused when a transfer reaches it, in clan's own words, naming the machine, the generator and the file.
 
-Two refusals belong to export alone.
-A source entry that holds no value is refused rather than exported as nothing — a question evaluation cannot answer, because an entry declares where a value lives rather than that one is there.
-And a mapping whose clan-side generator clan already considers outdated is refused, because clan records a validation per generator and its next routine `clan vars generate` would replace whatever was exported without saying so.
-There is no option that exports anyway: safix has nowhere to record that a var is externally supplied, so the flag would turn a refusal into a silent loss.
+**Two refusals belong to the safix-to-clan direction alone.**
+A source entry that holds no value is refused rather than written into clan as nothing — a question evaluation cannot answer, because an entry declares where a value lives rather than that one is there.
+And a mapping whose clan-side generator clan already considers outdated is refused, because clan records a validation per generator and its next routine `clan vars generate` would replace whatever was written without saying so.
+There is no option that writes anyway: safix has nowhere to record that a var is externally supplied, so the flag would turn a refusal into a silent loss.
 The refusal names both remedies — bring clan's side back into agreement, or declare the mapping `clan-to-safix`, which is the right shape when clan's generator is the producer.
 
 That second refusal reaches further than it may look, and the reach is correct.
-clan records a validation for a generator only when the generator declares `validation`, and it calls one whose declared validation has nothing recorded beside it outdated — so a generator that declares a validation and has never run is refused at its *first* export, because it has not run and will, and the run would replace whatever was exported.
-The generator to export into is therefore one that declares no `validation`: a var clan holds a place for and nothing else.
+clan records a validation for a generator only when the generator declares `validation`, and it calls one whose declared validation has nothing recorded beside it outdated — so a generator that declares a validation and has never run is refused at its *first* safix-to-clan write, because it has not run and will, and the run would replace whatever was written.
+The generator to write into is therefore one that declares no `validation`: a var clan holds a place for and nothing else.
 
-**`safix audit` is the report over the same declarations.**
-It compares both sides of every declared mapping, or the one named in either direction, and changes nothing on either side of the boundary.
+**`safix audit clan` is the report over the same declarations.**
+It compares both sides of every declared mapping, or the ones named, in either direction, and changes nothing on either side of the boundary.
 A mapping agrees when both sides hold the same bytes, and also when neither side holds a value yet, which is a bridge nobody has bootstrapped rather than a disagreement.
 It is a finding when the two sides hold different values, when one side holds a value the other does not, or when the comparison could not be made — and each finding names the mapping, its two endpoints and the command that converges it, and never a value.
 
@@ -974,7 +971,7 @@ So the verb that needs them carries them, `check` keeps both of its properties, 
 ## The mirror in your password database
 
 Some secrets are read by tools and some are also read by a person — typed into a web login, a phone, another machine's prompt.
-`safix sync` ends the drift between the two, one declared mapping at a time.
+`safix sync keepassxc` ends the drift between the two, one declared mapping at a time.
 
 ```nix
 {
@@ -991,7 +988,7 @@ Some secrets are read by tools and some are also read by a person — typed into
 }
 ```
 
-Then `safix sync` converges every mapping and `safix sync grafana` narrows the run to one.
+Then `safix sync keepassxc` converges every mapping declared here, and naming one or more mappings after it — `safix sync keepassxc grafana` — narrows the run to them.
 
 **The mode is declared, not passed.**
 `safix-to-keepassxc` makes the database follow safix and reports the database-side edit it overwrote.
@@ -1025,6 +1022,11 @@ The session's secret service is not a second way in, and the reason is worth sta
 `safix enroll --mirror-to-store` does use it, and correctly — that entry is safix's own and is addressed by an attribute, so the exposed group is the right home for it.
 
 `sync` manages no keyring: no database is created, no database key is changed, and no hardware slot is touched under any flag.
+
+**`safix audit keepassxc` compares without writing.**
+It reads both sides of every declared mapping, or the ones named, per its declared mode, and changes nothing in the database or in safix's own files.
+Each mapping is reported as agreeing, diverged, or unjudgeable, and a diverged mapping's own remedy is named: `safix sync keepassxc <mapping>`.
+Entries under the declared group that no mapping declares are reported alongside as lingering information, in the same shape `sync`'s own report already gives it, and never move the exit status.
 
 ## The checks safix hands you
 
@@ -1112,7 +1114,7 @@ The narrowing is the runner's and lives in the workflow: a Mac that can apply a 
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.
-It implements all twelve subcommands: the read paths `list`, `get`, `check` and `audit`, the write paths `set`, `edit` and `fix`, the generator graph behind `generate`, the bridge pair `import` and `export`, and the two that touch custody itself, `keygen` and `adduser`.
+It implements all thirteen subcommands: the read paths `list`, `get`, `check` and `audit`, the write paths `set`, `edit` and `fix`, the generator graph behind `generate`, `sync`'s two targets converging the clan bridge and the password-database mirror, and the three that touch custody itself, `keygen`, `adduser` and `enroll`, plus `group` for editing a group's declared membership.
 The nix half was never in scope and did not move; what was replaced is a shell runtime and two python helpers, all three now deleted.
 
 The port ran behind a differential harness comparing every subcommand against the shell runtime; the five places the two differ are recorded as decisions in the changelog's "Known differences".
