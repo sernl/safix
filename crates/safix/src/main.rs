@@ -584,6 +584,7 @@ fn parse_dispatch(
                 direction = Some(match value.as_str() {
                     "clan-to-safix" => Direction::ClanToSafix,
                     "safix-to-clan" => Direction::SafixToClan,
+                    "two-way" => Direction::TwoWay,
                     _ => return Err(Refusal::Usage { form }),
                 });
                 rest = after;
@@ -674,6 +675,15 @@ fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         let run = bridge::sync(&workspace, &Terminal, dispatch.direction, &dispatch.names)?;
         refused |= run.refused();
         out.push_str(&render::transfer(&run));
+
+        let converged = bridge::bridge_sync::converge(
+            &workspace,
+            &Terminal,
+            dispatch.direction,
+            &dispatch.names,
+        )?;
+        refused |= !converged.is_clean();
+        out.push_str(&render::bridge_sync(&converged));
     }
     if matches!(dispatch.target, None | Some(bridge::Target::Keepassxc)) {
         let report = sync::run(

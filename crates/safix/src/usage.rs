@@ -116,12 +116,12 @@ one spelling for everything.
 \u{2500}\u{2500} the clan target \u{2500}\u{2500}
 Moves values across the boundary to or from clan, one declared mapping at a
 time \u{2014} see flake.safix.bridge.mappings. Each mapping converges in its own
-declared direction, clan-to-safix and safix-to-clan mixed freely in the same
-run; --direction clan-to-safix or --direction safix-to-clan narrows the run
-to mappings declared with that value, without overriding any mapping's own
-direction. import and export do not exist here: sync clan replaces both,
-converging every direction a run reaches in the one invocation that used to
-take two.
+declared direction, clan-to-safix, safix-to-clan and two-way mixed freely in
+the same run; --direction clan-to-safix, --direction safix-to-clan or
+--direction two-way narrows the run to mappings declared with that value,
+without overriding any mapping's own direction. import and export do not
+exist here: sync clan replaces both, converging every direction a run reaches
+in the one invocation that used to take two.
 
 The value is read or written by running clan's own command, on a pipe. safix
 reads, writes and parses none of clan's stored files, in either direction, so
@@ -138,7 +138,9 @@ Two refusals are the safix-to-clan direction's own. A source entry that
 holds no value is refused rather than exported as nothing. A mapping whose
 clan-side generator clan already considers outdated is refused, because
 clan's next routine generation would replace whatever was written without
-saying so; there is no option that writes anyway.
+saying so; there is no option that writes anyway. A two-way mapping's push
+toward clan carries the identical refusal, under the identical condition,
+with no option that bypasses it either.
 
 Each clan-target mapping is reported as unchanged, updated, absent at
 source, or refused. An updated mapping's line names its direction as an
@@ -146,6 +148,33 @@ arrow \u{2014} pulled \u{2190} clan or pushed \u{2192} clan. Absent at source is
 failure: a clan var that has not been generated yet is the ordinary state
 during bootstrap. A refused mapping does not stop the others, and the run
 exits non-zero.
+
+\u{2500}\u{2500} two-way, across the clan boundary \u{2500}\u{2500}
+A two-way mapping remembers the last state both sides agreed on, in a
+companion entry it mints beside the mapped one, inside safix's own
+sops-encrypted store \u{2014} never in clan's, and never in a plaintext, committed
+file. When exactly one side has moved since \u{2014} including a side that has
+never held a value, which converges rather than refuses \u{2014} the other
+converges to it and the agreement is recorded. When both have moved, or the
+two disagree and nothing has ever been recorded, nothing is written and the
+finding names the mapping and its remedy: narrow a sync clan run to it with
+--direction clan-to-safix or --direction safix-to-clan and run once, then put
+the mapping's declared direction back to two-way. Forcing a resolution this
+way never remembers the agreement, which is deliberate \u{2014} the same reason
+keepassxc-sync's own two-way mode gives.
+
+Each converged two-way mapping is reported as unchanged or converged \u{2014}
+converged names no source and no destination, because a two-way convergence
+is neither. A conflict or a refusal gets its own paragraph naming the remedy.
+The companion's name is the mapped entry's plus -safix-bridge-sync-state,
+distinct from keepassxc-sync's dot-prefixed suffix because a companion here
+is a safix entry name rather than a database path; evaluation refuses a
+hand-declared entry that collides with one.
+
+A shared-placement mapping's clan side names no machine in its declaration.
+The machine that answers for it on clan's command line is discovered at run
+time by asking clan which machines it has, the same way for every direction,
+one-way or two-way alike.
 
 \u{2500}\u{2500} the keepassxc target: the four modes \u{2500}\u{2500}
 The mode is declared per mapping, not passed here: a remembered flag on a verb is
