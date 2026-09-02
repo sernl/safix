@@ -744,6 +744,7 @@ impl Fixture {
         safix: (&str, &str),
     ) {
         let (generator, file) = clan;
+
         let (user, name) = safix;
         self.bridge["clanFlake"] = json!(
             self.clan_flake
@@ -817,6 +818,19 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Remove a previously declared bridge mapping by id, as if it had never
+    /// been declared this run.
+    ///
+    /// The fixture's own way of simulating a mapping removed from the
+    /// declarations between two runs against the same clan: nothing here
+    /// touches the stubbed clan's own store, only the declarations the next
+    /// run reads.
+    pub fn forget_mapping(&mut self, id: &str) {
+        if let Some(mappings) = self.bridge["mappings"].as_array_mut() {
+            mappings.retain(|mapping| mapping["id"] != json!(id));
+        }
+        self.write_fixtures();
+    }
     /// Declare one keepassxc mapping, as `flake.safix.lib.keepassxc` resolves it.
     ///
     /// The shape is the one `modules/flake/safix/default.nix` projects: the

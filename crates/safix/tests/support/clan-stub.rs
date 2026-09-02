@@ -96,10 +96,10 @@ fn main() -> ! {
     record("argv", &arguments.join(" "));
 
     match words.as_slice() {
+        ["machines", "list", "--flake", _flake] => machines(),
         ["vars", "get", "--flake", _flake, machine, id] => get(machine, id),
         ["vars", "list", "--flake", _flake, machine] => list(machine),
         ["vars", "set", "--flake", _flake, machine, id] => set(machine, id),
-        ["machines", "list", "--flake", _flake] => machines(),
         [
             "vars",
             "check",

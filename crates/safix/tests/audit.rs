@@ -364,6 +364,143 @@ fn an_undeclared_mapping_name_is_refused_naming_the_declared_ones() {
     refused.says("ntfy-token");
 }
 
+// ── the clan target: vars no mapping claims (lingering) ────────────────────
+
+/// A var the stub's machine holds that no fixture mapping names is reported
+/// under the lingering section, and the audit is not refused for finding it.
+#[test]
+fn a_var_no_mapping_names_is_reported_lingering() {
+    let fixture = with_mapping("clan-to-safix");
+    fixture.clan_seed(MACHINE, "handover/note", "CANARY-orphan");
+
+    audit(&fixture, &["audit", "clan"], &[])
+        .says(&format!("{MACHINE} handover/note"))
+        .says("no declared mapping accounts for it");
+    audit(&fixture, &["audit", "clan"], &[]).silent_about("CANARY-orphan");
+}
+
+/// Severity drill: a machine holding both a claimed var and an unclaimed one
+/// names only the unclaimed one as lingering.
+///
+/// Dropping the claimed-set computation would also name the claimed one —
+/// this is the test task 3.8 names, observed red before the claimed set was
+/// checked and green after.
+#[test]
+fn only_the_unclaimed_var_on_a_machine_is_named_lingering() {
+    let fixture = with_mapping("clan-to-safix");
+    fixture.clan_seed(MACHINE, VAR, "CANARY-claimed");
+    fixture.clan_seed(MACHINE, "handover/note", "CANARY-unclaimed");
+
+    let report = audit(&fixture, &["audit", "clan"], &[]);
+    report.says(&format!("{MACHINE} handover/note"));
+    assert!(
+        !report
+            .combined()
+            .contains(&format!("{MACHINE} {VAR} is a clan var")),
+        "the claimed var was wrongly reported as lingering\n{}",
+        report.combined()
+    );
+}
+
+/// A machine with no unmapped vars produces an empty lingering section: the
+/// declared mapping's own var is claimed, and nothing else was ever seeded.
+#[test]
+fn a_machine_with_no_unmapped_vars_has_no_lingering_section() {
+    let fixture = with_mapping("clan-to-safix");
+    fixture.clan_seed(MACHINE, VAR, "CANARY-agrees");
+    fixture
+        .set("alice", "api-token", "CANARY-agrees")
+        .expect_success("seeding the safix side to agree with clan's");
+
+    audit(&fixture, &["audit", "clan"], &[])
+        .expect_success("an agreeing mapping with nothing lingering")
+        .says("no disagreement. All 1 declared mapping(s) agree.")
+        .silent_about("no declared mapping accounts for it");
+}
+
+/// Lingering's presence does not change the exit code when every compared
+/// mapping agrees: the exit status answers only whether the mappings agreed.
+#[test]
+fn lingering_does_not_change_the_exit_code_when_every_mapping_agrees() {
+    let fixture = with_mapping("clan-to-safix");
+    fixture.clan_seed(MACHINE, VAR, "CANARY-agrees");
+    fixture
+        .set("alice", "api-token", "CANARY-agrees")
+        .expect_success("seeding the safix side to agree with clan's");
+    fixture.clan_seed(MACHINE, "handover/note", "CANARY-orphan");
+
+    audit(&fixture, &["audit", "clan"], &[])
+        .expect_success("a lingering var alone must not refuse the run")
+        .says("no declared mapping accounts for it");
+}
+
+/// A mapping's var keeps appearing in the lingering section after the
+/// mapping that declared it is removed, across two runs against the same
+/// clan — the stub never forgets a var it once reported, so this is a claim
+/// about current declarations rather than about clan's own memory.
+#[test]
+fn a_removed_mappings_var_keeps_appearing_in_a_later_run() {
+    let mut fixture = with_mapping("clan-to-safix");
+    fixture.seed_mapping(
+        "handover-note",
+        "clan-to-safix",
+        (MACHINE, "handover", "note"),
+        ("alice", "handover-note"),
+    );
+    fixture.clan_seed(MACHINE, VAR, "CANARY-ntfy");
+    fixture.clan_seed(MACHINE, "handover/note", "CANARY-handover");
+
+    // Both mappings claim their own var on the first run: nothing lingers.
+    audit(&fixture, &["audit", "clan"], &[]).silent_about("no declared mapping accounts for it");
+
+    // ntfy-token is removed from the declarations; handover-note still names
+    // the same machine, so the machine stays enumerated and ntfy/token's
+    // leftover value is now unclaimed.
+    fixture.forget_mapping("ntfy-token");
+    audit(&fixture, &["audit", "clan"], &[])
+        .says(&format!("{MACHINE} {VAR}"))
+        .says("no declared mapping accounts for it");
+}
+
+/// A narrowed `audit clan <mapping>` enumerates only the machine that named
+/// mapping declares or resolves, per design.md's D5 — a lingering var on a
+/// machine no named mapping reaches is not reported.
+#[test]
+fn a_narrowed_audit_clan_enumerates_only_the_named_mappings_machine() {
+    const OTHER_MACHINE: &str = "helios";
+    let mut fixture = with_mapping("clan-to-safix");
+    fixture.seed_mapping(
+        "handover-note",
+        "clan-to-safix",
+        (OTHER_MACHINE, "handover", "note"),
+        ("alice", "handover-note"),
+    );
+    fixture.clan_seed(MACHINE, "shift/log", "CANARY-meridian-orphan");
+    fixture.clan_seed(OTHER_MACHINE, "shift/log", "CANARY-helios-orphan");
+
+    audit(&fixture, &["audit", "clan", "ntfy-token"], &[])
+        .says(&format!("{MACHINE} shift/log"))
+        .silent_about(&format!("{OTHER_MACHINE} shift/log"));
+}
+
+/// A shared-placement mapping's var is claimed by id alone: the same
+/// generator/file id exists on two machines, and neither copy is reported as
+/// lingering, whichever one the addressing search resolves to and enumerates.
+#[test]
+fn a_shared_mappings_var_is_claimed_by_id_alone_across_machines() {
+    let mut fixture = Fixture::new();
+    fixture.seed_shared_mapping(
+        "shift-log",
+        "clan-to-safix",
+        ("shift", "log"),
+        ("alice", "shift-log"),
+    );
+    fixture.clan_seed("helios", "shift/log", "CANARY-helios");
+    fixture.clan_seed("meridian", "shift/log", "CANARY-meridian");
+
+    audit(&fixture, &["audit", "clan"], &[]).silent_about("no declared mapping accounts for it");
+}
+
 // ── the keepassxc target: compare-only, lingering, no writes ──────────────
 
 /// `audit keepassxc` compares both sides of a diverged mapping and writes

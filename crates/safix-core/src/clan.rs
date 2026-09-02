@@ -526,8 +526,17 @@ mod tests {
     /// at a name that does not exist" is not enough to exercise its parsing.
     fn stub_script(label: &str, contents: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        // A timestamp rather than only the process id: two tests in this
+        // module share a process, and a stale directory left by an earlier,
+        // differently-timed run of the same binary can otherwise still be
+        // executing when this run tries to overwrite it, failing with
+        // `ETXTBSY` rather than a clean write.
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
         let directory = std::env::temp_dir().join(format!(
-            "safix-clan-list-test-{label}-{}",
+            "safix-clan-list-test-{label}-{}-{nanos}",
             std::process::id()
         ));
         std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
@@ -536,6 +545,27 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("the stub script can be made executable");
         path
+    }
+
+    /// [`Clan::list`], retried past a transient `ETXTBSY`.
+    ///
+    /// This suite runs hundreds of tests concurrently, many of them spawning
+    /// subprocesses of their own; under that load a script this test just
+    /// wrote and `chmod`ed can be reported busy for a moment by the kernel
+    /// before it settles, which is a property of running many `fork`/`exec`
+    /// calls at once rather than of `Clan::list` or of the script itself.
+    fn list_past_transient_busy(clan: &Clan, machine: &str) -> Result<Vec<String>> {
+        for _ in 0..49 {
+            match clan.list(machine) {
+                Err(Error::ClanUnavailable { cause, .. })
+                    if cause.kind() == std::io::ErrorKind::ExecutableFileBusy =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                other => return other,
+            }
+        }
+        clan.list(machine)
     }
 
     #[test]
@@ -548,7 +578,7 @@ mod tests {
             program: program.clone(),
             flake: ".".into(),
         };
-        let ids = clan.list("meridian").expect("the stub exits successfully");
+        let ids = list_past_transient_busy(&clan, "meridian").expect("the stub exits successfully");
         assert_eq!(
             ids,
             vec!["ntfy/token".to_owned(), "handover/note".to_owned()]
@@ -563,7 +593,8 @@ mod tests {
             program: program.clone(),
             flake: ".".into(),
         };
-        let refusal = clan.list("meridian").expect_err("the stub exits non-zero");
+        let refusal =
+            list_past_transient_busy(&clan, "meridian").expect_err("the stub exits non-zero");
         assert!(matches!(refusal, Error::ClanMachineListFailed { .. }));
         if let Error::ClanMachineListFailed { machine, output } = refusal {
             assert_eq!(machine, "meridian");
