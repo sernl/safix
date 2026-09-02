@@ -316,6 +316,45 @@ impl Clan {
         Ok(String::from_utf8_lossy(&finished.stderr).contains(OUTDATED_VALIDATION))
     }
 
+    /// Every machine name clan's own fleet declares, sorted.
+    ///
+    /// Used only to discover the machine that addresses a shared mapping: a
+    /// caller tries each name in turn against [`Self::read`]/[`Self::write`]
+    /// until one resolves, rather than building a second copy of clan's own
+    /// registry.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ClanUnavailable`] when the binary cannot be run, and
+    /// [`Error::ClanMachinesListFailed`] carrying clan's own message when it
+    /// refuses.
+    pub fn machines(&self) -> Result<Vec<String>> {
+        let finished = Command::new(&self.program)
+            .arg("machines")
+            .arg("list")
+            .arg("--flake")
+            .arg(&self.flake)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|cause| Error::ClanUnavailable {
+                program: self.program(),
+                cause,
+            })?;
+
+        if !finished.status.success() {
+            return Err(Error::ClanMachinesListFailed {
+                output: trimmed(&String::from_utf8_lossy(&finished.stderr)),
+            });
+        }
+
+        Ok(String::from_utf8_lossy(&finished.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// One value written into clan, on a pipe.
     ///
     /// # Errors

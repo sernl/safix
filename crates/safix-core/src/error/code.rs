@@ -189,6 +189,8 @@ refusal_codes! {
     UnknownSubject => "safix::unknown_subject",
     NoGroupDeclaration => "safix::no_group_declaration",
     ScaffoldOutOfScope => "safix::scaffold_out_of_scope",
+    ClanMachinesListFailed => "safix::clan_machines_list_failed",
+    ClanAddressUnresolved => "safix::clan_address_unresolved",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

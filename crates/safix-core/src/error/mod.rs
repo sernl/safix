@@ -1303,6 +1303,29 @@ pub enum Error {
         /// Every manager the organizations it names declare, in name order.
         managers: Vec<String>,
     },
+
+    /// clan's own `machines list` failed while searching for the machine
+    /// that addresses a shared mapping.
+    #[error("{}", prose::clan_machines_list_failed(output))]
+    ClanMachinesListFailed {
+        /// clan's own standard error, verbatim.
+        output: String,
+    },
+
+    /// No machine in clan's own fleet resolves a shared mapping's generator.
+    ///
+    /// Raised only after every machine `Clan::machines` returned was tried
+    /// and refused with clan's own "no such var", which is what tells "this
+    /// machine does not see this generator" apart from a genuine failure.
+    #[error("{}", prose::clan_address_unresolved(mapping, generator, file))]
+    ClanAddressUnresolved {
+        /// The mapping whose shared placement could not be addressed.
+        mapping: String,
+        /// The generator that was searched for.
+        generator: String,
+        /// The file that was searched for.
+        file: String,
+    },
 }
 
 /// The result type this crate returns.

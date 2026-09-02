@@ -883,3 +883,34 @@ pub(super) fn scaffold_out_of_scope(
         crate::delegation::BOUNDARY
     )
 }
+
+/// clan refused to list its machines, addressing a shared mapping.
+pub(super) fn clan_machines_list_failed(output: &str) -> String {
+    format!(
+        "clan refused to list its machines.\n\
+        \n\
+        clan said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// No machine clan has resolves a shared mapping's generator.
+pub(super) fn clan_address_unresolved(mapping: &str, generator: &str, file: &str) -> String {
+    format!(
+        "no machine in clan's own fleet resolves the mapping '{mapping}'.\n\
+        \n\
+        \x20   placement   shared\n\
+        \x20   generator   {generator}\n\
+        \x20   file        {file}\n\
+        \n\
+        The machine that addresses a shared var on clan's command line is\n\
+        discovered by asking clan which machines it has and trying each in turn,\n\
+        rather than declared, so there is no second field on the mapping to check\n\
+        against clan's own list.\n\
+        \n\
+        Check the generator and file against what any machine in the fleet sees:\n\
+        \n\
+        \x20   clan vars list <machine>"
+    )
+}

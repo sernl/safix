@@ -616,6 +616,14 @@ mod tests {
                 }),
                 managers: vec!["alice".into()],
             },
+            Code::ClanMachinesListFailed => Error::ClanMachinesListFailed {
+                output: "Error: Could not list machines".into(),
+            },
+            Code::ClanAddressUnresolved => Error::ClanAddressUnresolved {
+                mapping: "ntfy-token".into(),
+                generator: "ntfy".into(),
+                file: "token".into(),
+            },
         }
     }
 

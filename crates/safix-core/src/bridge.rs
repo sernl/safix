@@ -51,6 +51,9 @@
 //! second pair of its own. A report about a transfer that judged agreement
 //! differently from the transfer would be a report about nothing.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use crate::clan::{Clan, Reading};
 use crate::error::{Error, Result};
 use crate::model::{Direction, Mapping};
@@ -198,6 +201,108 @@ impl ValueSource for Held {
     }
 }
 
+/// Discovers and memoizes the machine that addresses a mapping's clan side.
+///
+/// A per-machine mapping already declares its machine and never searches. A
+/// shared mapping's machine is discovered by trying each name
+/// [`Clan::machines`] returns in turn against [`Clan::read`], using the
+/// [`Error::ClanVarUnknown`] clan raises for "wrong machine" to tell it apart
+/// from a genuine failure, and stopping at the first that resolves. The
+/// result is memoized per `(generator, file)`, so mappings sharing one clan
+/// var search once rather than once per mapping.
+pub(crate) struct Addressing<'c> {
+    clan: &'c Clan,
+    cache: RefCell<HashMap<(String, String), String>>,
+}
+
+impl<'c> Addressing<'c> {
+    pub(crate) fn new(clan: &'c Clan) -> Self {
+        Self {
+            clan,
+            cache: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Read a mapping's clan side, discovering and caching its addressing
+    /// machine first when its placement is shared.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Clan::read`] raises, and [`Error::ClanAddressUnresolved`]
+    /// for a shared mapping no machine [`Clan::machines`] returned resolves.
+    pub(crate) fn read(&self, mapping: &Mapping) -> Result<Reading> {
+        let (machine, already_read) = self.resolve(mapping)?;
+        match already_read {
+            Some(reading) => Ok(reading),
+            None => self.clan.read(
+                &mapping.id,
+                &machine,
+                &mapping.clan.generator,
+                &mapping.clan.file,
+            ),
+        }
+    }
+
+    /// The machine that addresses this mapping's clan side.
+    pub(crate) fn machine_for(&self, mapping: &Mapping) -> Result<String> {
+        self.resolve(mapping).map(|(machine, _)| machine)
+    }
+
+    /// Write this mapping's clan side, addressed the same way [`Self::read`]
+    /// is.
+    pub(crate) fn write(&self, mapping: &Mapping, value: &Secret) -> Result<()> {
+        let machine = self.machine_for(mapping)?;
+        self.clan.write(
+            &mapping.id,
+            &machine,
+            &mapping.clan.generator,
+            &mapping.clan.file,
+            value,
+        )
+    }
+
+    /// Whether clan considers this mapping's generator stale, addressed the
+    /// same way [`Self::read`] is.
+    pub(crate) fn generator_stale(&self, mapping: &Mapping) -> Result<bool> {
+        let machine = self.machine_for(mapping)?;
+        self.clan.generator_stale(&machine, &mapping.clan.generator)
+    }
+
+    /// The machine that addresses this mapping, and the reading a shared
+    /// mapping's search already performed while finding it — `None` when the
+    /// machine came from the mapping's own declaration or the cache, and
+    /// nothing has been read yet.
+    fn resolve(&self, mapping: &Mapping) -> Result<(String, Option<Reading>)> {
+        if let Some(machine) = &mapping.clan.machine {
+            return Ok((machine.clone(), None));
+        }
+        let key = (mapping.clan.generator.clone(), mapping.clan.file.clone());
+        if let Some(machine) = self.cache.borrow().get(&key).cloned() {
+            return Ok((machine, None));
+        }
+        for candidate in self.clan.machines()? {
+            match self.clan.read(
+                &mapping.id,
+                &candidate,
+                &mapping.clan.generator,
+                &mapping.clan.file,
+            ) {
+                Ok(reading) => {
+                    self.cache.borrow_mut().insert(key, candidate.clone());
+                    return Ok((candidate, Some(reading)));
+                }
+                Err(Error::ClanVarUnknown { .. }) => {}
+                Err(other) => return Err(other),
+            }
+        }
+        Err(Error::ClanAddressUnresolved {
+            mapping: mapping.id.clone(),
+            generator: mapping.clan.generator.clone(),
+            file: mapping.clan.file.clone(),
+        })
+    }
+}
+
 /// Converge every declared clan mapping, or the ones named, each moving in its
 /// own declared direction.
 ///
@@ -221,7 +326,7 @@ pub fn sync(
     let _guard = scratch::Guard;
 
     let mappings = selected(workspace, direction, only)?;
-    if mappings.is_empty() {
+    if mappings.iter().all(|m| m.direction == Direction::TwoWay) {
         return Ok(Run {
             transferred: Vec::new(),
         });
@@ -234,12 +339,17 @@ pub fn sync(
         .ok_or(Error::NoClanFlake)?;
     let clan = Clan::new(flake);
     clan.probe()?;
+    let addressing = Addressing::new(&clan);
 
     let mut transferred = Vec::with_capacity(mappings.len());
     for mapping in mappings {
         let outcome = match mapping.direction {
-            Direction::ClanToSafix => one_import(workspace, progress, &clan, mapping),
-            Direction::SafixToClan => one_export(workspace, progress, &clan, mapping),
+            Direction::ClanToSafix => one_import(workspace, progress, &addressing, mapping),
+            Direction::SafixToClan => one_export(workspace, progress, &addressing, mapping),
+            // Converged by `bridge_sync::converge`, reached separately from
+            // the same `sync clan` dispatch; this run reports only the two
+            // one-way directions.
+            Direction::TwoWay => continue,
         };
         let (clan_side, safix_side) = endpoints(mapping);
         transferred.push(Transferred {
@@ -306,15 +416,10 @@ pub(crate) fn selected<'a>(
 fn one_import(
     workspace: &Workspace,
     progress: &dyn Progress,
-    clan: &Clan,
+    addressing: &Addressing<'_>,
     mapping: &Mapping,
 ) -> Result<Outcome> {
-    let incoming = match clan.read(
-        &mapping.id,
-        &mapping.clan.machine,
-        &mapping.clan.generator,
-        &mapping.clan.file,
-    )? {
+    let incoming = match addressing.read(mapping)? {
         Reading::Present(value) => value,
         Reading::AbsentAtSource => return Ok(Outcome::AbsentAtSource),
     };
@@ -325,15 +430,10 @@ fn one_import(
         return Ok(Outcome::Unchanged);
     }
 
+    let (clan_address, safix_address) = endpoints(mapping);
     log(
         progress,
-        &format!(
-            "safix: {} {} -> flake.safix.users.{}.{}",
-            mapping.clan.machine,
-            Clan::var_id(&mapping.clan.generator, &mapping.clan.file),
-            mapping.safix.user,
-            mapping.safix.name,
-        ),
+        &format!("safix: {clan_address} -> {safix_address}"),
     );
 
     let status = set::run_committing(
@@ -368,7 +468,7 @@ fn one_import(
 fn one_export(
     workspace: &Workspace,
     progress: &dyn Progress,
-    clan: &Clan,
+    addressing: &Addressing<'_>,
     mapping: &Mapping,
 ) -> Result<Outcome> {
     let placement = workspace.resolve(&mapping.safix.user, &mapping.safix.name)?;
@@ -388,12 +488,8 @@ fn one_export(
     // The comparison that makes a run converge. See the module note: without it
     // every run commits in the clan repository for every mapping, because clan's
     // write is unconditional and its backend re-encrypts.
-    if let Reading::Present(held) = clan.read(
-        &mapping.id,
-        &mapping.clan.machine,
-        &mapping.clan.generator,
-        &mapping.clan.file,
-    )? && held.equals(&outgoing)
+    if let Reading::Present(held) = addressing.read(mapping)?
+        && held.equals(&outgoing)
     {
         return Ok(Outcome::Unchanged);
     }
@@ -403,32 +499,21 @@ fn one_export(
     // generation to discard and nothing for this refusal to prevent; refusing
     // there would refuse a no-op and would make a second run of a stale mapping
     // report differently from the first.
-    if clan.generator_stale(&mapping.clan.machine, &mapping.clan.generator)? {
+    if addressing.generator_stale(mapping)? {
         return Ok(Outcome::Refused(Error::GeneratorDefinitionDrifted {
             mapping: mapping.id.clone(),
-            machine: mapping.clan.machine.clone(),
+            machine: addressing.machine_for(mapping)?,
             generator: mapping.clan.generator.clone(),
         }));
     }
 
+    let (clan_address, safix_address) = endpoints(mapping);
     log(
         progress,
-        &format!(
-            "safix: flake.safix.users.{}.{} -> {} {}",
-            mapping.safix.user,
-            mapping.safix.name,
-            mapping.clan.machine,
-            Clan::var_id(&mapping.clan.generator, &mapping.clan.file),
-        ),
+        &format!("safix: {safix_address} -> {clan_address}"),
     );
 
-    clan.write(
-        &mapping.id,
-        &mapping.clan.machine,
-        &mapping.clan.generator,
-        &mapping.clan.file,
-        &outgoing,
-    )?;
+    addressing.write(mapping, &outgoing)?;
 
     // No commit here, and that is not an omission. Nothing in this repository
     // changed: the value went into clan's, and `clan vars set` committed it
@@ -442,11 +527,15 @@ fn one_export(
 /// One function rather than a pair of `format!` calls in each report: the
 /// transfer's report and the audit's name the same two endpoints, and a
 /// difference between them would be a difference with nothing behind it.
+///
+/// A shared mapping's clan side names `shared` rather than a machine: no
+/// machine is declared for one, and the machine an addressing search
+/// discovers at run time is not part of the mapping's own declared identity.
 pub(crate) fn endpoints(mapping: &Mapping) -> (String, String) {
+    let owner = mapping.clan.machine.as_deref().unwrap_or("shared");
     (
         format!(
-            "{} {}",
-            mapping.clan.machine,
+            "{owner} {}",
             Clan::var_id(&mapping.clan.generator, &mapping.clan.file)
         ),
         format!("{}.{}", mapping.safix.user, mapping.safix.name),

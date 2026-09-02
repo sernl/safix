@@ -506,12 +506,19 @@ pub fn transfer(run: &safix_core::bridge::Run) -> String {
                 safix_core::model::Direction::SafixToClan => {
                     format!("pushed {} \u{2192} clan", entry.mapping)
                 }
+                // Never reached: `bridge::sync` reports a two-way mapping's
+                // outcome through `bridge::bridge_sync::converge` and its own
+                // `Run`, never through this one. Kept exhaustive rather than
+                // guarded, so a future caller that did put one here would get
+                // sensible text instead of a compile error pointing nowhere.
+                safix_core::model::Direction::TwoWay => format!("converged {}", entry.mapping),
             };
             format!("{PROGRAM}: {arrow}\n")
         } else {
             let (from, to) = match entry.direction {
-                safix_core::model::Direction::ClanToSafix => (&entry.clan, &entry.safix),
                 safix_core::model::Direction::SafixToClan => (&entry.safix, &entry.clan),
+                safix_core::model::Direction::ClanToSafix
+                | safix_core::model::Direction::TwoWay => (&entry.clan, &entry.safix),
             };
             format!(
                 "{PROGRAM}: {mapping}  {from} -> {to}  {outcome}\n",
@@ -698,6 +705,19 @@ fn agreed(examined: usize) -> String {
 /// One mapping's paragraph, by what was found about it.
 fn push_disagreement(out: &mut String, finding: &audit::Finding) {
     match &finding.disagreement {
+        Disagreement::Values if finding.direction == Direction::TwoWay => {
+            let (from, to) = flow(finding);
+            headline(
+                out,
+                &format!(
+                    "flake.safix.bridge.mappings.{mapping} is two-way, and {from} and {to} hold \
+                     different values.",
+                    mapping = finding.mapping,
+                ),
+            );
+            remedy(out, &converging(finding));
+        }
+
         Disagreement::Values => {
             let (from, to) = flow(finding);
             headline(
@@ -938,10 +958,14 @@ fn push_sync_detail(out: &mut String, entry: &safix_core::sync::Converged) {
 }
 
 /// A mapping's two endpoints in the order its value moves between them.
+///
+/// A two-way mapping has no fixed order: `push_disagreement`'s own two-way
+/// wording never says "from X to Y", so which of the pair lands in `from` and
+/// which in `to` is unobserved here — clan first is arbitrary but consistent.
 fn flow(finding: &audit::Finding) -> (&String, &String) {
     match finding.direction {
-        Direction::ClanToSafix => (&finding.clan, &finding.safix),
         Direction::SafixToClan => (&finding.safix, &finding.clan),
+        Direction::ClanToSafix | Direction::TwoWay => (&finding.clan, &finding.safix),
     }
 }
 

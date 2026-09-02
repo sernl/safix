@@ -1,0 +1,20 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::clan_address_unresolved
+
+  × no machine in clan's own fleet resolves the mapping 'ntfy-token'.
+  │ 
+  │     placement   shared
+  │     generator   ntfy
+  │     file        token
+  │ 
+  │ The machine that addresses a shared var on clan's command line is
+  │ discovered by asking clan which machines it has and trying each in turn,
+  │ rather than declared, so there is no second field on the mapping to check
+  │ against clan's own list.
+  │ 
+  │ Check the generator and file against what any machine in the fleet sees:
+  │ 
+  │     clan vars list <machine>

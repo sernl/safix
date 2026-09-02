@@ -611,18 +611,22 @@ impl Delegation {
 /// Which way a mapping's value moves, written as its endpoints.
 ///
 /// Not `import` and `export`: `clan vars export` moves values out of clan and
-/// `safix export` moves them in, so a direction spelled with either word means
-/// opposite things depending on which tool the reader has in mind. The verbs
-/// stay relative because they sit on safix's own command line; the declaration
-/// does not, because it is read without a tool in hand to be relative to.
+/// a safix-to-clan mapping's convergence moves a value the opposite way, so a
+/// direction spelled with either word means opposite things depending on
+/// which tool the reader has in mind. `two-way` names neither a source nor a
+/// destination, because the value may originate on either side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Direction {
-    /// clan holds the value and safix receives it. `safix import` acts on these.
+    /// clan holds the value and safix receives it.
     #[serde(rename = "clan-to-safix")]
     ClanToSafix,
-    /// safix holds the value and clan receives it. `safix export` acts on these.
+    /// safix holds the value and clan receives it.
     #[serde(rename = "safix-to-clan")]
     SafixToClan,
+    /// Neither side is a fixed source or destination: the value converges
+    /// toward whichever side changed since the last recorded agreement.
+    #[serde(rename = "two-way")]
+    TwoWay,
 }
 
 impl Direction {
@@ -632,15 +636,22 @@ impl Direction {
         match self {
             Self::ClanToSafix => "clan-to-safix",
             Self::SafixToClan => "safix-to-clan",
+            Self::TwoWay => "two-way",
         }
     }
 
     /// The verb that acts on mappings of this direction.
+    ///
+    /// `two-way` has no verb of its own to report: [`crate::bridge::commit_subject`]
+    /// is never called for a two-way mapping, which builds its own
+    /// direction-neutral commit subject instead. The arm exists only because
+    /// the match must be exhaustive.
     #[must_use]
     pub const fn verb(self) -> &'static str {
         match self {
             Self::ClanToSafix => "import",
             Self::SafixToClan => "export",
+            Self::TwoWay => "sync",
         }
     }
 }
@@ -651,12 +662,44 @@ impl std::fmt::Display for Direction {
     }
 }
 
+/// Which of clan's own placements a var is declared under.
+///
+/// clan's placement is a three-way sum — `Shared`, `PerMachine`, `PerExport`
+/// — of which `clan vars get`/`set` can resolve only the first two through a
+/// machine: `get_machine_generators` never constructs a `PerExport`
+/// placement for any machine it is asked about, so a `PerExport` var is
+/// unreachable through the two contracts this runtime uses regardless of
+/// what a mapping declared. Only the two placements safix can actually
+/// address are represented here.
+///
+/// Named apart from [`Placement`], which is safix's own per-entry file/key/
+/// public shape: the two are unrelated concepts that happen to share a
+/// domain (secret custody) but not a vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ClanPlacement {
+    /// One generator declares the var once for the whole fleet. The machine
+    /// that addresses it on clan's command line is discovered at run time
+    /// rather than declared.
+    #[serde(rename = "shared")]
+    Shared,
+    /// The var belongs to exactly one machine, named by [`ClanSide::machine`].
+    #[serde(rename = "per-machine")]
+    PerMachine,
+}
+
 /// The clan half of a mapping: the triple clan's own command line takes.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClanSide {
+    /// Which of clan's own placements the var is declared under.
+    pub placement: ClanPlacement,
     /// The clan machine the var belongs to.
-    pub machine: String,
+    ///
+    /// `Some` when [`Self::placement`] is [`ClanPlacement::PerMachine`], and
+    /// `None` when it is [`ClanPlacement::Shared`]: a shared var is not owned
+    /// by any one machine, so evaluation refuses a mapping that declares one
+    /// anyway.
+    pub machine: Option<String>,
     /// The clan generator that declares the var.
     pub generator: String,
     /// The file that generator declares, named as clan names it.
@@ -1231,6 +1274,50 @@ mod tests {
         let found = recipients.holders_of(&["age1b".into(), "age1stray".into()]);
         assert_eq!(found.named, ["bob"]);
         assert_eq!(found.orphaned, ["age1stray"]);
+    }
+
+    #[test]
+    fn a_shared_mapping_deserializes_with_a_null_machine_and_a_per_machine_one_with_a_declared_one()
+    {
+        let bridge: Bridge = serde_json::from_str(
+            r#"{
+              "clanFlake": ".",
+              "mappings": [
+                {
+                  "id": "shared-rel",
+                  "direction": "two-way",
+                  "clan": {
+                    "placement": "shared",
+                    "machine": null,
+                    "generator": "ntfy",
+                    "file": "token"
+                  },
+                  "safix": { "user": "alice", "name": "ntfy-token" }
+                },
+                {
+                  "id": "per-machine-rel",
+                  "direction": "clan-to-safix",
+                  "clan": {
+                    "placement": "per-machine",
+                    "machine": "meridian",
+                    "generator": "wg",
+                    "file": "private"
+                  },
+                  "safix": { "user": "bob", "name": "wg-key" }
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let shared = bridge.named("shared-rel").unwrap();
+        assert_eq!(shared.clan.placement, ClanPlacement::Shared);
+        assert_eq!(shared.clan.machine, None);
+        assert_eq!(shared.direction, Direction::TwoWay);
+
+        let per_machine = bridge.named("per-machine-rel").unwrap();
+        assert_eq!(per_machine.clan.placement, ClanPlacement::PerMachine);
+        assert_eq!(per_machine.clan.machine.as_deref(), Some("meridian"));
     }
 }
 

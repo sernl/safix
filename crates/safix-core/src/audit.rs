@@ -44,7 +44,7 @@
 //! [`Secret::equals`](crate::Secret::equals) over two values that are zeroed
 //! when it returns, and what leaves it is whether they agreed.
 
-use crate::bridge::{self, Target};
+use crate::bridge::{self, Addressing, Target};
 use crate::clan::{Clan, Reading};
 use crate::enroll;
 use crate::enroll::custody::DatabasePassword;
@@ -283,10 +283,11 @@ fn run_clan(
         .ok_or(Error::NoClanFlake)?;
     let clan = Clan::new(flake);
     clan.probe()?;
+    let addressing = Addressing::new(&clan);
 
     let mut findings = Vec::new();
     for mapping in &mappings {
-        let Some(disagreement) = compare(workspace, &clan, mapping) else {
+        let Some(disagreement) = compare(workspace, &addressing, mapping) else {
             continue;
         };
         let (clan_side, safix_side) = bridge::endpoints(mapping);
@@ -397,13 +398,20 @@ fn compare_keepassxc(
 /// a value for is one nothing has minted yet, and reporting it would report
 /// every mapping of a bridge that has not been bootstrapped, under a remedy
 /// this report cannot name.
-fn compare(workspace: &Workspace, clan: &Clan, mapping: &Mapping) -> Option<Disagreement> {
-    let theirs = match clan.read(
-        &mapping.id,
-        &mapping.clan.machine,
-        &mapping.clan.generator,
-        &mapping.clan.file,
-    ) {
+///
+/// A two-way mapping's one-sided state is bootstrap rather than a finding as
+/// well, matching `bridge_sync`'s own convergence semantics exactly: exactly
+/// one side ever having held a value is the ordinary first run of a two-way
+/// mapping, not a divergence a person has to resolve. A one-way mapping's
+/// one-sided state stays a finding, because its verb moves in one direction
+/// only and a destination nothing has written to is a state `sync` resolves,
+/// not a bootstrap it enacts unasked.
+fn compare(
+    workspace: &Workspace,
+    addressing: &Addressing<'_>,
+    mapping: &Mapping,
+) -> Option<Disagreement> {
+    let theirs = match addressing.read(mapping) {
         Ok(Reading::Present(value)) => Some(value),
         Ok(Reading::AbsentAtSource) => None,
         Err(reason) => return Some(Disagreement::Unjudgeable(reason)),
@@ -418,6 +426,7 @@ fn compare(workspace: &Workspace, clan: &Clan, mapping: &Mapping) -> Option<Disa
     match (theirs, ours) {
         (Some(theirs), Some(ours)) if ours.equals(&theirs) => None,
         (Some(_), Some(_)) => Some(Disagreement::Values),
+        (Some(_), None) | (None, Some(_)) if mapping.direction == Direction::TwoWay => None,
         (Some(_), None) => Some(Disagreement::OneSided(Side::Clan)),
         (None, Some(_)) => Some(Disagreement::OneSided(Side::Safix)),
         (None, None) => None,

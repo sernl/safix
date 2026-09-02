@@ -32,18 +32,18 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 4. The rust model: `ClanPlacement`, and the widened `ClanSide`
 
-- [ ] 4.1 Add `ClanPlacement` to `crates/safix-core/src/model.rs` (`Shared | PerMachine`, `#[serde(rename = "shared" | "per-machine")]`), named apart from the existing `Placement` struct at `:147`
-- [ ] 4.2 Change `ClanSide.machine` to `Option<String>`, add `ClanSide.placement: ClanPlacement`, keeping `#[serde(deny_unknown_fields)]`
-- [ ] 4.3 Add new `Error` variants: the placement/machine mismatch is nix-side only and needs no rust variant; add `ClanAddressUnresolved` (no machine in the fleet resolves a shared mapping), `SyncConflict` (both sides moved), and any variant `bridge_sync`'s comparison-and-write path needs that `bridge.rs` does not already have
-- [ ] 4.4 Unit test: `Placements`/`Bridge` deserialize a fixture JSON carrying `placement: "shared"` with `machine: null`, and one carrying `placement: "per-machine"` with `machine` set, matching the shape 4.1/4.2 emit
-- [ ] 4.5 Verify: `cargo test -p safix-core model::` green
+- [x] 4.1 Add `ClanPlacement` to `crates/safix-core/src/model.rs` (`Shared | PerMachine`, `#[serde(rename = "shared" | "per-machine")]`), named apart from the existing `Placement` struct at `:147`
+- [x] 4.2 Change `ClanSide.machine` to `Option<String>`, add `ClanSide.placement: ClanPlacement`, keeping `#[serde(deny_unknown_fields)]`
+- [x] 4.3 Add new `Error` variants: the placement/machine mismatch is nix-side only and needs no rust variant; added `ClanAddressUnresolved` (no machine in the fleet resolves a shared mapping) and `ClanMachinesListFailed` (the `clan machines list` subprocess itself refuses). `SyncConflict` was NOT added: `bridge_sync::Outcome::Conflict` carries no `Error`, mirroring `sync::Outcome::Conflict`'s own precedent exactly (a conflict is a finding the decision function reaches, not a failed write), so no refusal exists for a code table entry to attach to
+- [x] 4.4 Unit test: `Placements`/`Bridge` deserialize a fixture JSON carrying `placement: "shared"` with `machine: null`, and one carrying `placement: "per-machine"` with `machine` set, matching the shape 4.1/4.2 emit
+- [x] 4.5 Verify: `cargo test -p safix-core model::` green
 
 ## 5. `Clan::machines` and addressing-machine discovery
 
-- [ ] 5.1 Add `Clan::machines(&self) -> Result<Vec<String>>` invoking `clan machines list --flake <flake>`, piped stdout, parsed one name per line, beside `probe`/`register_user`/`generator_stale` (`clan.rs:126-138,240-269,295-317`)
-- [ ] 5.2 Add an addressing-search helper, memoized per run keyed on `(generator, file)`, trying each machine `machines()` returns against `clan vars get`/`set` in turn, using the existing `NO_SUCH_VAR` substring match to tell "wrong machine" apart from a genuine failure
-- [ ] 5.3 Wire the search into every read/write of a shared mapping's clan side, across every direction `sync`'s clan target converges, `two-way` included; a per-machine mapping is unaffected and still uses its declared `machine` directly
-- [ ] 5.4 Add `Error::ClanAddressUnresolved` naming the mapping, the placement, the generator and the file, raised when the search exhausts every machine `machines()` returned
+- [x] 5.1 Add `Clan::machines(&self) -> Result<Vec<String>>` invoking `clan machines list --flake <flake>`, piped stdout, parsed one name per line, beside `probe`/`register_user`/`generator_stale`
+- [x] 5.2 Add an addressing-search helper (`bridge::Addressing`, memoized per run keyed on `(generator, file)`), trying each machine `machines()` returns against `clan vars get` in turn, using the existing `NO_SUCH_VAR`-derived `Error::ClanVarUnknown` to tell "wrong machine" apart from a genuine failure
+- [x] 5.3 Wire the search into every read/write of a shared mapping's clan side: `bridge::one_import`/`one_export` and `audit::compare` now go through `Addressing` rather than `Clan` directly; a per-machine mapping is unaffected and still uses its declared `machine` directly (`Addressing::resolve`'s first branch)
+- [x] 5.4 Add `Error::ClanAddressUnresolved` naming the mapping, the generator and the file, raised when the search exhausts every machine `machines()` returned
 - [ ] 5.5 Test against `crate::clan`'s existing stub harness (`clan.rs:395-413`'s pattern): a stub `clan machines list` returning three names, one of which resolves the var; assert the search stops at the first success and does not try the remaining two
 - [ ] 5.6 Test the exhaustion case: a stub where no returned machine resolves the var; assert `ClanAddressUnresolved` and that every returned machine was tried exactly once
 - [ ] 5.7 Verify: `cargo test -p safix-core clan::` green
