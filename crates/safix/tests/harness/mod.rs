@@ -2109,7 +2109,7 @@ fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
     }
 }
 
-/// Refuse a sync run that has not been pointed at the store stub.
+/// Refuse a sync or audit run that has not been pointed at the store stub.
 ///
 /// The counterpart of [`refuse_a_real_card`], and it exists for the same reason
 /// with a different loss at the end of it. The machines this suite is developed on
@@ -2118,13 +2118,22 @@ fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
 /// run whose database is anywhere but the fixture's own scratch directory is
 /// refused here, loudly, before a process is spawned.
 ///
+/// `sync` and `audit` both reach the keepassxc target — bare, or named — so both
+/// are guarded the same way; `sync clan` and `audit clan` never touch a database
+/// at all, real or fixture, and are exempt.
+///
 /// Both halves are checked, because either one alone would let the accident
 /// through: the override has to name the stub, and the database the fixture
 /// declares has to be under the scratch directory. A test that builds its
 /// environment any way other than [`Fixture::store_env`] fails on the first, and
 /// one that declares a database of its own fails on the second.
 fn refuse_a_real_database(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
-    if arguments.first() != Some(&"sync") {
+    let touches_keepassxc = match arguments.first() {
+        Some(&"sync") | Some(&"audit") => arguments.get(1) != Some(&"clan"),
+        _ => false,
+    } && !arguments.contains(&"-h")
+        && !arguments.contains(&"--help");
+    if !touches_keepassxc {
         return;
     }
     let named = extra

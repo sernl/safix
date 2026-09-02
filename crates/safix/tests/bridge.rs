@@ -34,7 +34,7 @@ const VAR: &str = "ntfy/token";
 /// The machine they name.
 const MACHINE: &str = "meridian";
 
-/// One run of a bridge verb, with the stubbed clan in place.
+/// One run of `sync clan`, with the stubbed clan in place.
 fn bridge(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) -> Run {
     let mut environment = fixture.clan_env();
     environment.extend(
@@ -61,30 +61,51 @@ fn with_mapping(direction: &str) -> Fixture {
     fixture
 }
 
+/// A fixture carrying two mappings, one of each direction, so a run over both
+/// is a run over more than one mapping's worth of state.
+fn with_both_directions() -> Fixture {
+    let mut fixture = Fixture::new();
+    fixture.seed_mapping(
+        "down",
+        "clan-to-safix",
+        (MACHINE, "ntfy", "token"),
+        ("alice", "api-token"),
+    );
+    fixture.seed_mapping(
+        "up",
+        "safix-to-clan",
+        (MACHINE, "mail", "password"),
+        ("alice", "mail-password"),
+    );
+    fixture
+}
+
 // ── clan to safix ──────────────────────────────────────────────────────────
 
 /// A value clan holds reaches safix, lands in the declared file, and commits.
 ///
-/// The end-to-end claim for the import direction, asserted against literals on
-/// both sides: the bytes clan was holding are the bytes the key decrypts to
-/// afterwards, and the commit names the mapping rather than the value.
+/// The end-to-end claim for the clan-to-safix direction, asserted against
+/// literals on both sides: the bytes clan was holding are the bytes the key
+/// decrypts to afterwards, and the commit names the mapping rather than the
+/// value.
 #[test]
-fn import_moves_a_clan_value_into_the_declared_entry_and_commits_it() {
+fn a_clan_to_safix_mapping_moves_a_clan_value_into_the_declared_entry_and_commits_it() {
     let fixture = with_mapping("clan-to-safix");
     fixture.clan_seed(MACHINE, VAR, "CANARY-from-clan");
     let before = fixture.head();
 
-    let run = bridge(&fixture, &["import"], &[]).expect_success("importing a declared mapping");
+    let run =
+        bridge(&fixture, &["sync", "clan"], &[]).expect_success("converging a declared mapping");
     run.says("ntfy-token");
-    run.says("updated");
+    run.says("pulled ntfy-token");
     run.silent_about("CANARY-from-clan");
 
     assert_eq!(
         fixture.value(ALICE_FILE, "api-token"),
         "CANARY-from-clan",
-        "the imported value is not what clan was holding"
+        "the converged value is not what clan was holding"
     );
-    assert_ne!(fixture.head(), before, "the import committed nothing");
+    assert_ne!(fixture.head(), before, "the run committed nothing");
     let subject = fixture.subject("HEAD");
     assert_eq!(
         subject, "chore(safix): import ntfy-token for alice",
@@ -96,32 +117,31 @@ fn import_moves_a_clan_value_into_the_declared_entry_and_commits_it() {
     );
 }
 
-/// A second import immediately after a first writes nothing and commits
-/// nothing.
+/// A second run immediately after a first writes nothing and commits nothing.
 ///
 /// Convergence, asserted rather than claimed. The comparison happens before the
 /// write in both directions; here it saves a commit, and the assertion is that
 /// the history did not move.
 #[test]
-fn a_second_import_writes_nothing_and_commits_nothing() {
+fn a_second_run_over_the_same_mapping_writes_nothing_and_commits_nothing() {
     let fixture = with_mapping("clan-to-safix");
     fixture.clan_seed(MACHINE, VAR, "CANARY-from-clan");
 
-    bridge(&fixture, &["import"], &[]).expect_success("the first import");
+    bridge(&fixture, &["sync", "clan"], &[]).expect_success("the first run");
     let settled = fixture.head();
     let document = fixture.read(ALICE_FILE);
 
-    let again = bridge(&fixture, &["import"], &[]).expect_success("the second import");
+    let again = bridge(&fixture, &["sync", "clan"], &[]).expect_success("the second run");
     again.says("unchanged");
     // The tally rather than the word: the closing line names every outcome, so
     // "the report does not contain 'updated'" would be false for a report that
     // says zero of them.
     again.says("0 updated, 1 unchanged");
-    assert_eq!(fixture.head(), settled, "the second import committed");
+    assert_eq!(fixture.head(), settled, "the second run committed");
     assert_eq!(
         fixture.read(ALICE_FILE),
         document,
-        "the second import rewrote the file, which re-encrypts it for no reason"
+        "the second run rewrote the file, which re-encrypts it for no reason"
     );
 }
 
@@ -131,7 +151,7 @@ fn an_ungenerated_clan_var_is_reported_and_the_run_continues() {
     let fixture = with_mapping("clan-to-safix");
     let before = fixture.head();
 
-    let run = bridge(&fixture, &["import"], &[])
+    let run = bridge(&fixture, &["sync", "clan"], &[])
         .expect_success("a mapping whose source holds nothing yet");
     run.says("absent at source");
     assert_eq!(fixture.head(), before, "an absent source produced a commit");
@@ -140,10 +160,10 @@ fn an_ungenerated_clan_var_is_reported_and_the_run_continues() {
 /// The safix-side write is the hand-set write, drift refusal included.
 ///
 /// Driven through a drifted fixture rather than by inspecting the call, which is
-/// the only way to establish that the imported value takes the refusal rather
+/// the only way to establish that the converged value takes the refusal rather
 /// than that the code appears to route through something that would.
 #[test]
-fn an_import_into_a_drifted_file_is_refused_before_anything_lands() {
+fn converging_into_a_drifted_file_is_refused_before_anything_lands() {
     let fixture = with_mapping("clan-to-safix");
     let stranger = fixture.new_recipient();
     fixture.clan_seed(MACHINE, VAR, "CANARY-into-drift");
@@ -159,14 +179,15 @@ fn an_import_into_a_drifted_file_is_refused_before_anything_lands() {
     let before = fixture.head();
     let document = fixture.read(ALICE_FILE);
 
-    let run = bridge(&fixture, &["import"], &[]).expect_refusal("importing into a drifted file");
+    let run =
+        bridge(&fixture, &["sync", "clan"], &[]).expect_refusal("converging into a drifted file");
     run.says(&stranger);
     run.silent_about("CANARY-into-drift");
-    assert_eq!(fixture.head(), before, "the refused import committed");
+    assert_eq!(fixture.head(), before, "the refused run committed");
     assert_eq!(
         fixture.read(ALICE_FILE),
         document,
-        "the refused import wrote the file"
+        "the refused run wrote the file"
     );
 }
 
@@ -174,16 +195,17 @@ fn an_import_into_a_drifted_file_is_refused_before_anything_lands() {
 
 /// A value safix holds reaches clan, through clan's own command.
 #[test]
-fn export_moves_a_safix_value_into_clan_through_clans_own_command() {
+fn a_safix_to_clan_mapping_moves_a_safix_value_into_clan_through_clans_own_command() {
     let fixture = with_mapping("safix-to-clan");
     fixture
         .set("alice", "api-token", "CANARY-from-safix")
         .expect_success("seeding the source");
     let before = fixture.head();
 
-    let run = bridge(&fixture, &["export"], &[]).expect_success("exporting a declared mapping");
+    let run =
+        bridge(&fixture, &["sync", "clan"], &[]).expect_success("converging a declared mapping");
     run.says("ntfy-token");
-    run.says("updated");
+    run.says("pushed ntfy-token");
     run.silent_about("CANARY-from-safix");
 
     assert_eq!(
@@ -199,12 +221,12 @@ fn export_moves_a_safix_value_into_clan_through_clans_own_command() {
     assert_eq!(
         fixture.head(),
         before,
-        "the export committed in this repository, where nothing changed"
+        "the run committed in this repository, where nothing changed"
     );
 }
 
-/// A second export writes nothing, which is the whole reason the comparison
-/// precedes the write.
+/// A second run over the same mapping writes nothing, which is the whole reason
+/// the comparison precedes the write.
 ///
 /// clan's write is unconditional and commits what it wrote, and its `age`
 /// backend re-encrypts an unchanged value into fresh ciphertext. Without the
@@ -212,63 +234,68 @@ fn export_moves_a_safix_value_into_clan_through_clans_own_command() {
 /// increment a commit in the clan repository whose diff decrypts to what it
 /// decrypted to before.
 #[test]
-fn a_second_export_does_not_ask_clan_to_write_again() {
+fn a_second_run_does_not_ask_clan_to_write_again() {
     let fixture = with_mapping("safix-to-clan");
     fixture
         .set("alice", "api-token", "CANARY-from-safix")
         .expect_success("seeding the source");
 
-    bridge(&fixture, &["export"], &[]).expect_success("the first export");
+    bridge(&fixture, &["sync", "clan"], &[]).expect_success("the first run");
     assert_eq!(
         fixture.clan_writes(),
         1,
-        "the first export did not write once"
+        "the first run did not write once"
     );
 
-    let again = bridge(&fixture, &["export"], &[]).expect_success("the second export");
+    let again = bridge(&fixture, &["sync", "clan"], &[]).expect_success("the second run");
     again.says("unchanged");
     assert_eq!(
         fixture.clan_writes(),
         1,
-        "the second export asked clan to write again, so every run would commit in clan's repository"
+        "the second run asked clan to write again, so every run would commit in clan's repository"
     );
 }
 
-/// An export whose source holds no value is refused, naming both remedies.
+/// A source with no value is refused, naming both remedies.
 ///
 /// The runtime sibling of a refusal evaluation cannot make: an entry declares
 /// where a value lives rather than that one is there, so this is answerable only
 /// when something reads the file.
 #[test]
-fn an_export_whose_source_holds_no_value_is_refused() {
+fn a_source_with_no_value_is_refused() {
     let fixture = with_mapping("safix-to-clan");
 
-    let run = bridge(&fixture, &["export"], &[]).expect_refusal("exporting an entry with no value");
+    let run = bridge(&fixture, &["sync", "clan"], &[])
+        .expect_refusal("converging an entry with no value");
     run.says("holds no value yet");
     run.says("safix set alice api-token");
     run.says("safix generate alice api-token");
     assert_eq!(
         fixture.clan_writes(),
         0,
-        "a refused export still asked clan to write"
+        "a refused mapping still asked clan to write"
     );
 }
 
-/// An export into a generator clan already considers stale is refused.
+/// A mapping into a generator clan already considers stale is refused.
 ///
 /// Confirmed against the real clan before it was written here: changing a
 /// generator's definition makes `clan vars check` report an outdated
 /// invalidation hash while `clan vars get` keeps returning the old value, which
 /// is exactly the silent replacement this refusal prevents.
 #[test]
-fn an_export_into_a_stale_generator_is_refused_and_names_both_remedies() {
+fn a_mapping_into_a_stale_generator_is_refused_and_names_both_remedies() {
     let fixture = with_mapping("safix-to-clan");
     fixture
         .set("alice", "api-token", "CANARY-would-be-lost")
         .expect_success("seeding the source");
 
-    let run = bridge(&fixture, &["export"], &[("SAFIX_CLAN_STUB_STALE", "ntfy")])
-        .expect_refusal("exporting into a stale generator");
+    let run = bridge(
+        &fixture,
+        &["sync", "clan"],
+        &[("SAFIX_CLAN_STUB_STALE", "ntfy")],
+    )
+    .expect_refusal("converging into a stale generator");
 
     run.says("outdated");
     run.says("clan vars generate meridian");
@@ -280,6 +307,94 @@ fn an_export_into_a_stale_generator_is_refused_and_names_both_remedies() {
         0,
         "the stale-generator refusal still wrote into clan"
     );
+}
+
+// ── one run, both directions ──────────────────────────────────────────────
+
+/// A `sync clan` run with no target and no `--direction` converges every
+/// declared mapping in its own declared direction, in one invocation.
+///
+/// The headline claim of the target-scoped grammar: what used to take two
+/// commands, `import` and `export`, now happens in one.
+#[test]
+fn sync_clan_converges_both_directions_in_one_run() {
+    let fixture = with_both_directions();
+    fixture.clan_seed(MACHINE, "ntfy/token", "CANARY-down");
+    fixture
+        .set("alice", "mail-password", "CANARY-up")
+        .expect_success("seeding the safix-to-clan source");
+
+    let run = bridge(&fixture, &["sync", "clan"], &[])
+        .expect_success("converging both directions in one run");
+    run.says("pulled down");
+    run.says("pushed up");
+    run.says("2 mapping(s): 2 updated");
+
+    assert_eq!(
+        fixture.value(ALICE_FILE, "api-token"),
+        "CANARY-down",
+        "the clan-to-safix mapping did not converge"
+    );
+    assert_eq!(
+        fixture.clan_holds(MACHINE, "mail/password").as_deref(),
+        Some("CANARY-up"),
+        "the safix-to-clan mapping did not converge"
+    );
+}
+
+/// `--direction` narrows the run to mappings declared with that value, leaving
+/// the other direction's mappings untouched rather than refusing them.
+#[test]
+fn direction_narrows_the_run_to_mappings_declared_with_that_value() {
+    let fixture = with_both_directions();
+    fixture.clan_seed(MACHINE, "ntfy/token", "CANARY-down");
+    fixture
+        .set("alice", "mail-password", "CANARY-up")
+        .expect_success("seeding the safix-to-clan source");
+
+    let run = bridge(
+        &fixture,
+        &["sync", "clan", "--direction", "clan-to-safix"],
+        &[],
+    )
+    .expect_success("narrowing to clan-to-safix");
+    run.says("pulled down");
+    run.says("1 mapping(s): 1 updated");
+    assert_eq!(
+        fixture.clan_writes(),
+        0,
+        "the safix-to-clan mapping was written despite the --direction filter"
+    );
+}
+
+/// A named mapping outside the `--direction` filter is told its actual
+/// direction, distinct from an unknown-mapping refusal.
+#[test]
+fn a_named_mapping_outside_the_direction_filter_is_told_its_actual_direction() {
+    let fixture = with_both_directions();
+
+    let run = bridge(
+        &fixture,
+        &["sync", "clan", "up", "--direction", "clan-to-safix"],
+        &[],
+    )
+    .expect_refusal("naming a safix-to-clan mapping under a clan-to-safix filter");
+    run.says("'up' is declared safix-to-clan, not clan-to-safix");
+    run.says("--direction safix-to-clan");
+}
+
+/// Naming more than one mapping converges exactly those, in one run.
+#[test]
+fn multiple_named_mappings_converge_in_one_run() {
+    let fixture = with_both_directions();
+    fixture.clan_seed(MACHINE, "ntfy/token", "CANARY-down");
+    fixture
+        .set("alice", "mail-password", "CANARY-up")
+        .expect_success("seeding the safix-to-clan source");
+
+    let run = bridge(&fixture, &["sync", "clan", "down", "up"], &[])
+        .expect_success("naming both mappings");
+    run.says("2 mapping(s): 2 updated");
 }
 
 // ── the boundary itself ────────────────────────────────────────────────────
@@ -297,7 +412,7 @@ fn the_clan_read_happened_on_a_pipe_and_not_a_terminal() {
     let fixture = with_mapping("clan-to-safix");
     fixture.clan_seed(MACHINE, VAR, "CANARY-raw-bytes");
 
-    bridge(&fixture, &["import"], &[]).expect_success("importing a declared mapping");
+    bridge(&fixture, &["sync", "clan"], &[]).expect_success("converging a declared mapping");
 
     let seen = fixture.clan_recorded("isatty");
     assert!(!seen.is_empty(), "clan's read was never reached");
@@ -321,12 +436,12 @@ fn the_clan_read_happened_on_a_pipe_and_not_a_terminal() {
 fn no_value_reaches_clans_argument_vector_in_either_direction() {
     let down = with_mapping("clan-to-safix");
     down.clan_seed(MACHINE, VAR, "CANARY-argv-down");
-    bridge(&down, &["import"], &[]).expect_success("the import");
+    bridge(&down, &["sync", "clan"], &[]).expect_success("the clan-to-safix run");
 
     let up = with_mapping("safix-to-clan");
     up.set("alice", "api-token", "CANARY-argv-up")
         .expect_success("seeding the source");
-    bridge(&up, &["export"], &[]).expect_success("the export");
+    bridge(&up, &["sync", "clan"], &[]).expect_success("the safix-to-clan run");
 
     for (fixture, value) in [(&down, "CANARY-argv-down"), (&up, "CANARY-argv-up")] {
         let argv = fixture.clan_recorded("argv");
@@ -350,17 +465,17 @@ fn no_value_reaches_clans_argument_vector_in_either_direction() {
 /// quietly did half its mappings would report "unchanged" for the half it never
 /// looked at, which is worse than a run that does none.
 #[test]
-fn an_absent_clan_refuses_both_verbs_before_anything_is_transferred() {
-    for (direction, verb) in [("clan-to-safix", "import"), ("safix-to-clan", "export")] {
+fn an_absent_clan_refuses_the_run_before_anything_is_transferred() {
+    for direction in ["clan-to-safix", "safix-to-clan"] {
         let fixture = with_mapping(direction);
         let before = fixture.head();
 
         let run = bridge(
             &fixture,
-            &[verb],
+            &["sync", "clan"],
             &[("SAFIX_CLAN", "safix-no-such-clan-command")],
         )
-        .expect_refusal("a transfer with no clan installed");
+        .expect_refusal("a run with no clan installed");
 
         run.says("clan is the authority on its own store");
         assert_eq!(
@@ -385,8 +500,12 @@ fn an_absent_clan_refuses_both_verbs_before_anything_is_transferred() {
 fn a_clan_side_that_does_not_resolve_is_refused_naming_all_three_names() {
     let fixture = with_mapping("clan-to-safix");
 
-    let run = bridge(&fixture, &["import"], &[("SAFIX_CLAN_STUB_UNKNOWN", VAR)])
-        .expect_refusal("a mapping clan has no var for");
+    let run = bridge(
+        &fixture,
+        &["sync", "clan"],
+        &[("SAFIX_CLAN_STUB_UNKNOWN", VAR)],
+    )
+    .expect_refusal("a mapping clan has no var for");
     run.says("meridian");
     run.says("ntfy");
     run.says("token");
@@ -399,8 +518,12 @@ fn a_clan_side_that_does_not_resolve_is_refused_naming_all_three_names() {
 fn clans_own_refusal_is_carried_rather_than_reworded() {
     let fixture = with_mapping("clan-to-safix");
 
-    let run = bridge(&fixture, &["import"], &[("SAFIX_CLAN_STUB_REFUSES", VAR)])
-        .expect_refusal("a clan that refused for a reason of its own");
+    let run = bridge(
+        &fixture,
+        &["sync", "clan"],
+        &[("SAFIX_CLAN_STUB_REFUSES", VAR)],
+    )
+    .expect_refusal("a clan that refused for a reason of its own");
 
     run.says("for a reason of its own");
     run.says("ntfy-token");
@@ -411,71 +534,33 @@ fn clans_own_refusal_is_carried_rather_than_reworded() {
 fn an_undeclared_mapping_name_is_refused_naming_the_declared_ones() {
     let fixture = with_mapping("clan-to-safix");
 
-    let run = bridge(&fixture, &["import", "ntfy-tokne"], &[])
+    let run = bridge(&fixture, &["sync", "clan", "ntfy-tokne"], &[])
         .expect_refusal("a mapping name nothing declares");
     run.says("'ntfy-tokne' is not a declared mapping");
     run.says("ntfy-token");
-}
-
-/// A mapping named to the verb that does not act on it is refused as that,
-/// rather than as an unknown name.
-///
-/// The operator has spelled the mapping correctly and asked the wrong verb, and
-/// a message saying "not a declared mapping" about a mapping three lines above
-/// in their own file would send them looking for a typo that is not there.
-#[test]
-fn a_mapping_named_to_the_wrong_verb_is_told_which_verb_acts_on_it() {
-    let fixture = with_mapping("safix-to-clan");
-
-    let run = bridge(&fixture, &["import", "ntfy-token"], &[])
-        .expect_refusal("an export mapping named to import");
-    run.says("declared safix-to-clan");
-    run.says("safix export ntfy-token");
-}
-
-/// A verb acts on its own direction and not the other's.
-#[test]
-fn each_verb_acts_on_its_own_direction_alone() {
-    let fixture = with_mapping("safix-to-clan");
-    fixture
-        .set("alice", "api-token", "CANARY-not-imported")
-        .expect_success("seeding the source");
-
-    let run = bridge(&fixture, &["import"], &[]).expect_success("importing with no import mapping");
-    run.says("no mapping is declared for this direction");
-    assert_eq!(
-        fixture.clan_writes(),
-        0,
-        "the import verb wrote through an export mapping"
-    );
 }
 
 /// A consumer who has never heard of clan is not refused for having no bridge.
 #[test]
 fn an_empty_bridge_is_silent_rather_than_refused() {
     let fixture = Fixture::new();
-    for verb in ["import", "export"] {
-        let run = bridge(&fixture, &[verb], &[]).expect_success("a verb over an empty bridge");
-        run.says("no mapping is declared for this direction");
-    }
+    let run = bridge(&fixture, &["sync", "clan"], &[])
+        .expect_success("a run over an empty bridge");
+    run.says("no mapping is declared");
 }
 
-/// Both verbs appear in the command's help, with their directions stated.
+/// `sync` appears in the command's help, and its own help names both
+/// directions and the clan target's grammar.
 #[test]
-fn both_verbs_appear_in_the_help_with_their_directions() {
+fn sync_appears_in_the_help_with_both_directions() {
     let fixture = Fixture::new();
     let scaffold = fixture.run(&["--help"]).expect_success("the general help");
-    scaffold.says("safix import");
-    scaffold.says("safix export");
-    scaffold.says("clan-to-safix");
-    scaffold.says("safix-to-clan");
+    scaffold.says("safix sync");
 
-    fixture
-        .run(&["import", "-h"])
-        .expect_success("the import help")
-        .says("clan-to-safix");
-    fixture
-        .run(&["export", "-h"])
-        .expect_success("the export help")
-        .says("safix-to-clan");
+    let help = fixture
+        .run(&["sync", "-h"])
+        .expect_success("the sync help");
+    help.says("clan-to-safix");
+    help.says("safix-to-clan");
+    help.says("--direction");
 }
