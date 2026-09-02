@@ -933,6 +933,10 @@ Direction is written as its endpoints rather than as a verb, and that is not ped
 `clan vars export` moves values *out of* clan; a `safix-to-clan` mapping's convergence moves a value the opposite way, so a word one tool already uses for its own verb would mean the opposite thing if reused here.
 Both are correct relative to the tool that moves them, and a declaration is read by someone with no tool in hand to be relative to, so the endpoints are named instead.
 
+`import` and `export` no longer exist as safix's own verbs, and the two absences are not the same kind.
+`export` is retired permanently: the operation clan's own word names, a bulk plaintext dump, is the one safix's design refuses to build on either side of the boundary.
+`import` is reserved rather than retired, for a future, unbuilt feature — ingesting a value from an external plaintext source one entry at a time, analogous to clan's own `import-sops` — and `safix --help` records the reservation, so the absence reads as a decision rather than an oversight.
+
 **clan stays the authority on its own store.**
 Every read is `clan vars get` and every write is `clan vars set`, run as subprocesses with the value on a pipe.
 safix reads, writes, encrypts, decrypts and parses none of clan's stored files, in either direction, so the bridge works over `sops`, `age`, `password-store` and whatever clan adds, with no code here.
