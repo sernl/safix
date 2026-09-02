@@ -19,6 +19,27 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### import and export retire into sync's clan target
+
+**BREAKING**: `import` and `export` no longer exist as subcommands, with no alias and no deprecation period.
+`sync` gains a `clan` target: `safix sync clan [<mapping>...]` converges every declared bridge mapping, or the ones named, each moving in its own declared direction — `safix-to-clan` and `clan-to-safix` mappings converge in the same run, where reaching both previously took two commands.
+A new `--direction clan-to-safix|safix-to-clan` option narrows a `sync clan` run to mappings declared with that value, replacing what running `import` alone or `export` alone used to mean; `pull`/`push` are not offered as spellings, because a direction word whose meaning depends on which tool is speaking is exactly what this bridge already refuses.
+
+`sync` also gains a `keepassxc` target: `safix sync keepassxc [<mapping>...]` is exactly the pre-existing `safix sync [<mapping>...]`, renamed to make room for the clan target beside it.
+Bare `safix sync` with no target and no mapping name converges every declared relationship on every target, each in its own declared direction or mode; there is no `all` target, because a second spelling for the same run invites the two to drift.
+
+`audit` gains the same two targets: `safix audit clan [<mapping>...]` is the pre-existing `audit`, renamed; `safix audit keepassxc [<mapping>...]` is new, a read-only comparison of the keepassxc mirror that writes nothing and reports lingering database entries the same way `sync`'s own report already does.
+Bare `safix audit` compares every target.
+
+Mapping names become variadic on both verbs, on both targets: `sync`/`audit` accept zero or more names after a target, where each of `import`, `export` and the pre-existing `audit`/`sync` accepted at most one.
+A target argument is required before any mapping name, because a mapping id may be declared under both `flake.safix.bridge.mappings` and `flake.safix.keepassxc.mappings` without conflict, and a bare name would be ambiguous exactly when the two collide.
+The mapping ids `clan`, `keepassxc` and `all` are refused at evaluation, in both mapping namespaces, so the first word after `sync` or `audit` is always unambiguously a target keyword or a mapping name, never both.
+
+`keygen` gains `--show`: prints the operator's own public recipient, derived from the identity already minted on this machine, and mints nothing; it refuses, naming plain `keygen` as the remedy, when no identity exists yet.
+
+`import` is retired with a recorded reservation rather than a silent removal: the word is reserved for a future, unbuilt feature — ingesting a value from an external plaintext source one entry at a time, analogous to clan's own `import-sops`, plaintext only in memory and never written to a tree — and `safix --help` records the reservation so the absence reads as a decision rather than an oversight.
+`export` is retired permanently, with no reservation: the operation clan's own word names, a bulk plaintext dump, is the one safix's design refuses to build on either side of the boundary.
+
 ### keepassxc's password database may declare a composite key
 
 `flake.safix.keepassxc.yubikey` and `flake.safix.keepassxc.keyFile` declare a YubiKey challenge-response slot, a key file, or both, for a database whose own composite key requires more than a password.

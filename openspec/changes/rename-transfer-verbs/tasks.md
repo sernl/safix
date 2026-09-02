@@ -39,10 +39,10 @@
 
 ## 7. Documentation
 
-- [ ] 7.1 Rewrite `README.md`'s "The bridge to clan" section (`safix import`/`safix export` worked example and prose, roughly lines 590-970 as read on this branch) for `sync clan`, `--direction`, and the import-reserved/export-retired note; verify by reading the rewritten section against the archived spec's requirement text for factual match.
-- [ ] 7.2 Rewrite `README.md`'s "Mirroring into your password database" section for `sync keepassxc` and the new `audit keepassxc` verb; verify the same way.
-- [ ] 7.3 Update `README.md`'s two verb-count sentences (roughly lines 905 and 1114 as read on this branch) to the post-removal verb count and list; verify with a text search for `import`/`export` in `README.md` returning no remaining verb-name usage outside historical narrative about the rust rewrite (if any survives, confirm it is genuinely historical).
-- [ ] 7.4 Add a `CHANGELOG.md` entry naming the retired verbs, `import`'s reservation, and the one-run-two-directions behavior change; verify by reading the entry against `proposal.md`'s **BREAKING** marker for completeness.
+- [x] 7.1 Rewrite `README.md`'s "The bridge to clan" section (`safix import`/`safix export` worked example and prose, roughly lines 590-970 as read on this branch) for `sync clan`, `--direction`, and the import-reserved/export-retired note; verify by reading the rewritten section against the archived spec's requirement text for factual match.
+- [x] 7.2 Rewrite `README.md`'s "Mirroring into your password database" section for `sync keepassxc` and the new `audit keepassxc` verb; verify the same way.
+- [x] 7.3 Update `README.md`'s two verb-count sentences (roughly lines 905 and 1114 as read on this branch) to the post-removal verb count and list; verify with a text search for `import`/`export` in `README.md` returning no remaining verb-name usage outside historical narrative about the rust rewrite (if any survives, confirm it is genuinely historical).
+- [x] 7.4 Add a `CHANGELOG.md` entry naming the retired verbs, `import`'s reservation, and the one-run-two-directions behavior change; verify by reading the entry against `proposal.md`'s **BREAKING** marker for completeness.
 
 ## 8. Verification sweep
 
