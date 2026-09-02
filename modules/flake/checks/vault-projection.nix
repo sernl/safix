@@ -4,14 +4,21 @@
 # `imports` does, and design D4's boundary between what it returns and what
 # an entry file declares beside it.
 #
-# ── two mechanisms, one fleet ──
+# ── three mechanisms, one fleet ──
 # Mechanism A evaluates the real `../safix` module directly with the fleet
 # declared as `flake.safix.*`, mirroring `portability.nix:76-83`'s own
 # construction — the shape a flake-parts consumer's own module gets merged
 # into. Mechanism B extracts `mkVault` from the actual published
 # `modules/flake/lib.nix`, through its own `lib.evalModules` call, rather
 # than a second copy of D1's formula, so what this check exercises is the
-# function a consumer calls.
+# function a consumer calls. Mechanism C imports `../../../lib` directly —
+# the plain, flake-agnostic file `modules/flake/lib.nix` republishes rather
+# than redefines — so mechanism B and mechanism C resolve identically by
+# construction whenever the publisher stays thin. `routesAgree` below holds
+# that; because `vaultProjection` (mechanism B) is what most other
+# assertions in this file already use as ground truth, its own severity
+# drill diverges `plainImportMkVault` (mechanism C) alone, which is what
+# `routesAgree` reads and nothing else in this file does.
 #
 # `flake.safix.lib` carries seven fields that are resolver accessors bound to
 # the registry — `resolveSet`, `resolveNames`, `materialize`, `publicValue`,
@@ -91,6 +98,20 @@ let
   vaultProjection =
     fleet:
     mkVault {
+      modules = [ { flake.safix = fleet; } ];
+      root = "";
+    };
+
+  # Mechanism C: the plain import route `modules/flake/lib.nix` republishes
+  # rather than redefines. `../../../lib` is the same `lib/default.nix`
+  # `config.flake.lib.mkVault` (mechanism B, above) delegates to, so
+  # `routesAgree` below holds by construction; a divergence can only come
+  # from `modules/flake/lib.nix` no longer delegating to this file.
+  plainImportMkVault = (import ../../../lib { inherit lib; }).mkVault;
+
+  plainImportProjection =
+    fleet:
+    plainImportMkVault {
       modules = [ { flake.safix = fleet; } ];
       root = "";
     };
@@ -238,6 +259,12 @@ in
             onboardingHook = vaultProjection fleet ? onboardingHook;
             enrollHook = vaultProjection fleet ? enrollHook;
           };
+
+          # Two-routes-agree — the published route (`config.flake.lib.mkVault`,
+          # extracted via mechanism B above) and the plain-import route
+          # (`import ../../../lib { inherit lib; }`, mechanism C) resolve the
+          # same fleet to the same data fields.
+          routesAgree = dataFieldsOf (vaultProjection fleet) == dataFieldsOf (plainImportProjection fleet);
         };
         expected = {
           fixtureIsReal = {
@@ -258,6 +285,7 @@ in
             onboardingHook = false;
             enrollHook = false;
           };
+          routesAgree = true;
         };
       };
     in
