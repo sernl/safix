@@ -215,6 +215,36 @@
 # in a reader holding master identities, so a run that reached it would provision
 # a live card irreversibly. The guard is structural for that reason rather than a
 # convention to be remembered.
+#
+# ── the upload drills ──
+# `safix-upload-remote-match`'s claim is the one this whole change exists for
+# (task 3.6): that a matching probe opens no write-capable session, asserted
+# against the transport stub's own recorded role list rather than against file
+# state alone — a bug that opened a session and happened to write nothing would
+# still pass a check that only looked at the filesystem. Recording `ssh` in
+# `transport_invocations()` when `Host::write` runs and never on the match
+# branch of `write_remote` is what a regression there turns red on.
+# `safix-upload-remote-flip-drill` (task 3.7) is the same claim's other half:
+# flipping one byte of the declared recipient in the fixture, with the same
+# presented key `safix-upload-remote-match` used, turns the honest no-op into a
+# refusal — proving the branch follows the comparison rather than a
+# fixture-specific shortcut a stub could satisfy by coincidence.
+# `safix-upload-directory-drift-drill` (task 2.6, first) derives an identity one
+# byte off the declared recipient under this suite's own conversion and asserts
+# the write still refuses; comparing with anything looser than exact string
+# equality — a prefix match, a truncated comparison — passes it and fails this.
+# `safix-upload-directory-null-recipient-drill` (task 2.6, second) is ordering
+# rather than comparison: a null-recipient machine refuses before an identity
+# with an otherwise-matching derivation is ever read, asserted by the transport
+# stub recording no invocation at all — reordering `resolve_machine` after the
+# identity read would leave a spurious `ssh-keygen`/`ssh-to-age` pair in that
+# list even though the run still refuses.
+# `safix-upload-destination`'s own depth-safety constant is drilled at the unit
+# level, in `crates/safix-core/src/upload.rs`'s
+# `upload::tests::a_shallow_destination_fails_the_depth_safety`: pointing
+# `destination_is_safe` at a two-component path turns it red, which is what
+# shows the check this integration test relies on is live rather than
+# trivially satisfied by the fixed constant.
 { ... }:
 {
   perSystem =
