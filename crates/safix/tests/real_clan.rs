@@ -905,6 +905,143 @@ mod against_a_real_clan {
         );
     }
 
+    // ── the clan-side facts this design rests on ──────────────────────────
+
+    /// A clan copied for this test with no bridge mapping declared against it
+    /// at all — the group-1 assertions below are about `clan vars list` itself,
+    /// not about any mapping's claim over what it lists.
+    fn unmapped() -> Option<(Fixture, Clan)> {
+        let fixture = Fixture::new();
+        let clan = Clan::copied(&fixture)?;
+        Some((fixture, clan))
+    }
+
+    /// `clan vars list` emits one sorted `<generator>/<file>: <state>` line per
+    /// var the machine's own configuration declares (design.md's Context,
+    /// citing `clan_cli/vars/list.py:9-13` for the sort and
+    /// `clan_lib/vars/var.py:79-88` for the `id: state` shape) — held against
+    /// the real command rather than assumed from reading it, which is the fact
+    /// `Clan::list`'s parser (`clan.rs:492-496`) depends on.
+    #[test]
+    fn clan_vars_list_emits_sorted_generator_slash_file_colon_state_lines() {
+        let Some((_fixture, clan)) = unmapped() else {
+            return no_clan_here("the sorted id-colon-state line shape");
+        };
+        let finished = clan.run(&["list", MACHINE]);
+        assert!(
+            finished.status.success(),
+            "vars list refused: {}",
+            String::from_utf8_lossy(&finished.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&finished.stdout).into_owned();
+        let lines: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
+        assert!(!lines.is_empty(), "vars list reported no lines at all");
+
+        for line in &lines {
+            let (id, _state) = line
+                .split_once(": ")
+                .unwrap_or_else(|| panic!("line {line:?} is not `<generator>/<file>: <state>`"));
+            assert!(
+                id.split_once('/').is_some(),
+                "id {id:?} is not `<generator>/<file>`"
+            );
+        }
+
+        let mut sorted = lines.clone();
+        sorted.sort_unstable();
+        assert_eq!(lines, sorted, "vars list's own lines were not sorted");
+
+        for generator in [MINTED, EMPTY, SCHEDULED, ORPHAN] {
+            let id = format!("{generator}/token");
+            assert!(
+                lines.iter().any(|line| line.starts_with(&format!("{id}: "))),
+                "vars list named nothing for {id:?}"
+            );
+        }
+    }
+
+    /// A secret var's listed state is the masked literal, and answering that
+    /// needs no age identity at all — design.md's D1: the secret branch of
+    /// `Var.__str__` (`clan_lib/vars/var.py:79-88`) never reads `self.value`,
+    /// so listing a machine's namespace never decrypts anything.
+    #[test]
+    fn a_secret_vars_listed_state_is_masked_and_needs_no_age_identity() {
+        let Some((fixture, clan)) = unmapped() else {
+            return no_clan_here("the masked state of a listed secret var without an identity");
+        };
+        let mut command = std::process::Command::new(&clan.command);
+        command
+            .arg("vars")
+            .arg("list")
+            .arg("--flake")
+            .arg(&clan.flake)
+            .arg(MACHINE)
+            .env("SAFIX_CLAN", &clan.command)
+            // Deliberately absent, per design.md's D1: a path nothing decrypts
+            // with is enough to prove `list` never asks for one.
+            .env("AGE_KEYFILE", fixture.work.join("no-such-identity.txt"))
+            .env("CLAN_TEST_FLAKE_CACHE", clan.flake.join(".flake-cache"));
+        let finished = command.output().expect("could not run clan");
+        assert!(
+            finished.status.success(),
+            "vars list refused with no age identity to decrypt with: {}",
+            String::from_utf8_lossy(&finished.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&finished.stdout).into_owned();
+        let line = stdout
+            .lines()
+            .find(|line| line.starts_with(&format!("{MINTED}/token: ")))
+            .unwrap_or_else(|| panic!("vars list named nothing for {MINTED}/token"));
+        assert_eq!(
+            line,
+            format!("{MINTED}/token: ********"),
+            "a generated secret var's listed state was not the masked literal"
+        );
+        assert!(
+            stdout.find(FROM_CLAN).is_none(),
+            "vars list's own output disclosed the value the mask exists to hide"
+        );
+    }
+
+    /// `vars list` takes the same global `--flake` flag, in the same position,
+    /// `clan.rs`'s existing `get`/`set`/`check` calls already build it in
+    /// (`clan.rs:173-179` for `read`, `:385-391` for `write`, `:306-313` for
+    /// `generator_stale`, `:470-475` for `list` itself) — exercised here by
+    /// reproducing `Clan::list`'s own argument vector against the real parser,
+    /// rather than only citing `clan_cli/cli.py:85-91` as read.
+    #[test]
+    fn clan_vars_list_takes_flake_in_the_same_position_get_set_and_check_do() {
+        let Some((_fixture, clan)) = unmapped() else {
+            return no_clan_here("--flake's position in vars list's own argument vector");
+        };
+        let mut command = std::process::Command::new(&clan.command);
+        command
+            .arg("vars")
+            .arg("list")
+            .arg("--flake")
+            .arg(&clan.flake)
+            .arg(MACHINE);
+        for (name, value) in clan.environment() {
+            command.env(name, value);
+        }
+        let finished = command.output().expect("could not run clan");
+        assert!(
+            finished.status.success(),
+            "vars list refused --flake in the position get/set/check already use: {}",
+            String::from_utf8_lossy(&finished.stderr)
+        );
+        assert!(
+            stdout_not_empty(&finished.stdout),
+            "vars list produced no output despite succeeding"
+        );
+    }
+
+    /// Whether a `vars list` run produced any output at all, trimmed the way
+    /// every other whitespace check in this module already is.
+    fn stdout_not_empty(stdout: &[u8]) -> bool {
+        !String::from_utf8_lossy(stdout).trim().is_empty()
+    }
+
     /// Every path under a tree, with its bytes, as one sorted listing.
     fn digest(tree: &Path) -> String {
         let mut lines: Vec<String> = Vec::new();
