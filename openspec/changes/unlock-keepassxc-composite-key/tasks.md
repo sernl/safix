@@ -18,10 +18,10 @@ Every `keepassxc-cli` behaviour cited in `design.md` was measured against versio
 
 ## 3. The Rust model
 
-- [ ] 3.1 Add `pub struct Yubikey { pub slot: String, pub serial: Option<String> }` to `crates/safix-core/src/model.rs`, `#[derive(Debug, Clone, Deserialize)]` with `#[serde(deny_unknown_fields)]`, beside `KdbxSide` and `SyncMapping`
-- [ ] 3.2 Add `yubikey: Option<Yubikey>` and `key_file: Option<String>` fields to `Keepassxc` (`model.rs:827-835`), keeping `#[serde(deny_unknown_fields)]` in force
-- [ ] 3.3 Extend the existing `Keepassxc`/`SyncMapping` deserialize test (or add one beside it) asserting a literal JSON payload naming both fields deserializes field-for-field, and a payload naming neither deserializes with both `None`, matching the measured-facts discipline the shared program contract already applies to the other seven struct shapes
-- [ ] 3.4 Verify: `cargo test -p safix-core model::` green
+- [x] 3.1 Add `pub struct Yubikey { pub slot: String, pub serial: Option<String> }` to `crates/safix-core/src/model.rs`, `#[derive(Debug, Clone, Deserialize)]` with `#[serde(deny_unknown_fields)]`, beside `KdbxSide` and `SyncMapping`
+- [x] 3.2 Add `yubikey: Option<Yubikey>` and `key_file: Option<String>` fields to `Keepassxc` (`model.rs:827-835`), keeping `#[serde(deny_unknown_fields)]` in force
+- [x] 3.3 Extend the existing `Keepassxc`/`SyncMapping` deserialize test (or add one beside it) asserting a literal JSON payload naming both fields deserializes field-for-field, and a payload naming neither deserializes with both `None`, matching the measured-facts discipline the shared program contract already applies to the other seven struct shapes
+- [x] 3.4 Verify: `cargo test -p safix-core model::` green
 
 ## 4. The four sync argument-vector constructors
 

@@ -821,7 +821,20 @@ pub struct SyncMapping {
     pub kdbx: KdbxSide,
 }
 
-/// The declared mirror: the database, the group, and every mapping under it.
+/// A YubiKey challenge-response slot a database's own composite key requires
+/// to open, and the card serial that disambiguates it when more than one is
+/// connected.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Yubikey {
+    /// The slot number, as keepassxc-cli's `-y` flag takes it.
+    pub slot: String,
+    /// The card's serial number, or none to accept whichever card answers.
+    pub serial: Option<String>,
+}
+
+/// The declared mirror: the database, the group, every mapping under it, and
+/// the composite-key factors the database itself requires to open.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Keepassxc {
@@ -830,6 +843,14 @@ pub struct Keepassxc {
     pub database: Option<String>,
     /// The group every mapping's entry path is relative to.
     pub group: String,
+    /// A YubiKey challenge-response slot the database requires to open, or
+    /// none when the database opens on its password alone.
+    pub yubikey: Option<Yubikey>,
+    /// A key file the database requires to open, as an absolute path on the
+    /// machine the verb runs on, or none when the database opens on its
+    /// password alone.
+    #[serde(rename = "keyFile")]
+    pub key_file: Option<String>,
     /// Every mapping, in the order the attribute names sort.
     pub mappings: Vec<SyncMapping>,
 }
@@ -1118,6 +1139,8 @@ mod tests {
         let mirror: Keepassxc = serde_json::from_str(MIRROR).unwrap();
         assert_eq!(mirror.database.as_deref(), Some("/keys/master.kdbx"));
         assert_eq!(mirror.declared(), ["grafana", "router"]);
+        assert!(mirror.yubikey.is_none());
+        assert!(mirror.key_file.is_none());
 
         let grafana = mirror.named("grafana").unwrap();
         assert_eq!(grafana.mode, Mode::SafixToKeepassxc);
@@ -1128,6 +1151,30 @@ mod tests {
         assert_eq!(router.mode, Mode::TwoWay);
         assert!(router.kdbx.username.is_none());
         assert!(mirror.named("absent").is_none());
+    }
+
+    /// A declared composite key deserializes field-for-field, and a mirror
+    /// naming neither factor reads both as `None` — asserted at [`MIRROR`]
+    /// above, which declares neither.
+    #[test]
+    fn a_declared_composite_key_deserializes_field_for_field() {
+        let with_factors = r#"{
+          "database": "/keys/master.kdbx",
+          "group": "safix",
+          "yubikey": { "slot": "1", "serial": "12345678" },
+          "keyFile": "/home/alice/.keys/master.keyx",
+          "mappings": []
+        }"#;
+        let mirror: Keepassxc = serde_json::from_str(with_factors).unwrap();
+        let yubikey = mirror.yubikey.as_ref().unwrap();
+        assert_eq!(yubikey.slot, "1");
+        assert_eq!(yubikey.serial.as_deref(), Some("12345678"));
+        assert_eq!(mirror.key_file.as_deref(), Some("/home/alice/.keys/master.keyx"));
+
+        let bare_slot = r#"{"slot": "2", "serial": null}"#;
+        let yubikey: Yubikey = serde_json::from_str(bare_slot).unwrap();
+        assert_eq!(yubikey.slot, "2");
+        assert!(yubikey.serial.is_none());
     }
 
     /// A consumer who has never heard of this evaluates exactly this.
