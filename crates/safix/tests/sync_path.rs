@@ -269,7 +269,7 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
 
     fixture.store_seed("safix/alice/pulled", "kdbx-pulled");
     fixture
-        .run_sync(&["sync", "pull"], UNLOCK, &extra)
+        .run_sync(&["sync", "keepassxc", "pull"], UNLOCK, &extra)
         .expect_success("pulling one mapping");
 
     assert_eq!(
@@ -440,7 +440,7 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
 
     // A mapping nothing declares.
     let unknown = fixture
-        .run_sync(&["sync", "typo"], UNLOCK, &extra)
+        .run_sync(&["sync", "keepassxc", "typo"], UNLOCK, &extra)
         .expect_refusal("a mapping nothing declares");
     unknown.says("is not a declared mapping");
     unknown.says("push");
@@ -458,7 +458,7 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
         .run_with(&["set", "alice", "push-me"], "trailing-newline\n")
         .expect_success("seeding a value with a trailing newline");
     let spans = fixture
-        .run_sync(&["sync", "push"], UNLOCK, &extra)
+        .run_sync(&["sync", "keepassxc", "push"], UNLOCK, &extra)
         .expect_refusal("a value the store's command cannot carry");
     spans.says("carries a newline");
     spans.says("printf '%s'");
