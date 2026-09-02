@@ -815,6 +815,16 @@ fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     }
 
     let workspace = workspace()?;
+    // D4 of unlock-keepassxc-composite-key's design.md: `--store-database`
+    // names a database independently of `flake.safix.keepassxc.database`, on
+    // the same file by a different route, so the declared composite-key
+    // factors are read off `workspace.keepassxc()` and applied here rather
+    // than through a second declaration on this flag.
+    if options.mirror.database.is_some() {
+        let mirror = workspace.keepassxc()?;
+        options.mirror.yubikey.clone_from(&mirror.yubikey);
+        options.mirror.key_file.clone_from(&mirror.key_file);
+    }
     let user = match positional.as_slice() {
         [] => workspace.default_user()?,
         [user] => user.clone(),

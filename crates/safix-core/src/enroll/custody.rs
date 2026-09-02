@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
+use crate::model::Yubikey;
 use crate::secret::Secret;
 
 /// The environment variable that replaces the secret-service tool, for checks.
@@ -63,6 +64,12 @@ pub enum Transport {
     PasswordStore {
         /// The database file the entry is added to.
         database: PathBuf,
+        /// A `YubiKey` challenge-response slot the database requires to open,
+        /// or none when it opens on its password alone.
+        yubikey: Option<Yubikey>,
+        /// A key file the database requires to open, or none when it opens
+        /// on its password alone.
+        key_file: Option<String>,
     },
     /// Nowhere. The mirror is optional and this is what it not happening looks
     /// like, with the reason the report carries.
@@ -79,6 +86,12 @@ pub struct Wish {
     pub mirror: bool,
     /// The database the store's own command is pointed at, when one was named.
     pub database: Option<PathBuf>,
+    /// A `YubiKey` challenge-response slot the named database requires to open,
+    /// or none when it opens on its password alone.
+    pub yubikey: Option<Yubikey>,
+    /// A key file the named database requires to open, or none when it opens
+    /// on its password alone.
+    pub key_file: Option<String>,
 }
 
 /// Which transport a wish resolves to.
@@ -98,6 +111,8 @@ pub fn choose(wish: &Wish, service_reachable: bool) -> Transport {
     match &wish.database {
         Some(database) => Transport::PasswordStore {
             database: database.clone(),
+            yubikey: wish.yubikey.clone(),
+            key_file: wish.key_file.clone(),
         },
         None => Transport::Skipped {
             reason: "the session's secret service did not answer and no database was named",
@@ -181,15 +196,23 @@ pub fn secret_tool_arguments(user: &str, serial: &str) -> Vec<String> {
 ///
 /// `--password-prompt` is what makes the entry's password arrive on standard
 /// input instead of in argv, which is the whole reason this transport is shaped
-/// the way it is.
+/// the way it is. The composite-key factors, when the database declares any,
+/// use the same helper [`crate::store`] gives its own four constructors: one
+/// definition, because this function opens the identical database by a
+/// different route rather than a second one free to drift from it.
 #[must_use]
-pub fn keepassxc_arguments(database: &Path, serial: &str) -> Vec<String> {
-    vec![
-        "add".to_owned(),
-        "--password-prompt".to_owned(),
-        database.display().to_string(),
-        entry_name(serial),
-    ]
+pub fn keepassxc_arguments(
+    database: &Path,
+    serial: &str,
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = vec!["add".to_owned()];
+    arguments.extend(crate::store::composite_key_arguments(yubikey, key_file));
+    arguments.push("--password-prompt".to_owned());
+    arguments.push(database.display().to_string());
+    arguments.push(entry_name(serial));
+    arguments
 }
 
 /// Write the credentials through the chosen transport.
@@ -217,9 +240,14 @@ pub fn write(
                 &[credentials],
             )
         }
-        Transport::PasswordStore { database } => {
+        Transport::PasswordStore {
+            database,
+            yubikey,
+            key_file,
+        } => {
             let unlock = password.database_password(database)?;
-            let arguments = keepassxc_arguments(database, serial);
+            let arguments =
+                keepassxc_arguments(database, serial, yubikey.as_ref(), key_file.as_deref());
             feed(
                 &keepassxc_cli(),
                 &arguments,
@@ -349,6 +377,8 @@ mod tests {
         let wish = Wish {
             mirror: true,
             database: Some(PathBuf::from("/keys/master.kdbx")),
+            yubikey: None,
+            key_file: None,
         };
         assert_eq!(choose(&wish, true), Transport::SecretService);
     }
@@ -358,11 +388,39 @@ mod tests {
         let wish = Wish {
             mirror: true,
             database: Some(PathBuf::from("/keys/master.kdbx")),
+            yubikey: None,
+            key_file: None,
         };
         assert_eq!(
             choose(&wish, false),
             Transport::PasswordStore {
-                database: PathBuf::from("/keys/master.kdbx")
+                database: PathBuf::from("/keys/master.kdbx"),
+                yubikey: None,
+                key_file: None,
+            }
+        );
+    }
+
+    /// The wish's declared factors reach the transport `choose` resolves to,
+    /// the same way its database does.
+    #[test]
+    fn a_silent_service_carries_the_wish_s_declared_factors_into_the_transport() {
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: Some("12345678".to_owned()),
+        };
+        let wish = Wish {
+            mirror: true,
+            database: Some(PathBuf::from("/keys/master.kdbx")),
+            yubikey: Some(yubikey.clone()),
+            key_file: Some("/keys/master.key".to_owned()),
+        };
+        assert_eq!(
+            choose(&wish, false),
+            Transport::PasswordStore {
+                database: PathBuf::from("/keys/master.kdbx"),
+                yubikey: Some(yubikey),
+                key_file: Some("/keys/master.key".to_owned()),
             }
         );
     }
@@ -372,6 +430,8 @@ mod tests {
         let wish = Wish {
             mirror: true,
             database: None,
+            yubikey: None,
+            key_file: None,
         };
         let chosen = choose(&wish, false);
         match chosen {
@@ -386,7 +446,8 @@ mod tests {
     #[test]
     fn neither_transports_argument_vector_can_carry_a_credential() {
         let service = secret_tool_arguments("alice", "12345678").join(" ");
-        let store = keepassxc_arguments(Path::new("/keys/master.kdbx"), "12345678").join(" ");
+        let store =
+            keepassxc_arguments(Path::new("/keys/master.kdbx"), "12345678", None, None).join(" ");
         for shown in [&service, &store] {
             assert!(shown.contains("12345678"), "the serial is public: {shown}");
             assert!(
@@ -398,6 +459,26 @@ mod tests {
             service.starts_with("store --label=safix: PIV access for alice's YubiKey 12345678")
         );
         assert!(store.contains("add --password-prompt /keys/master.kdbx"));
+
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: None,
+        };
+        let factored = keepassxc_arguments(
+            Path::new("/keys/master.kdbx"),
+            "12345678",
+            Some(&yubikey),
+            Some("/keys/master.key"),
+        )
+        .join(" ");
+        assert!(
+            factored
+                .starts_with("add -y 1 -k /keys/master.key --password-prompt /keys/master.kdbx")
+        );
+        assert!(
+            !factored.contains("--password="),
+            "a password reached argv: {factored}"
+        );
     }
 
     #[test]

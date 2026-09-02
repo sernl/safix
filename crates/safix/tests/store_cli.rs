@@ -201,10 +201,17 @@ fn installed() -> bool {
 fn vectors(entry: &str) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
     let database = Path::new("DATABASE");
     (
-        safix_core::store::listing_arguments(database),
-        safix_core::store::group_arguments(database, "safix"),
-        safix_core::store::write_arguments(database, entry, Some("alice@example.com"), false),
-        safix_core::store::read_arguments(database, entry),
+        safix_core::store::listing_arguments(database, None, None),
+        safix_core::store::group_arguments(database, "safix", None, None),
+        safix_core::store::write_arguments(
+            database,
+            entry,
+            Some("alice@example.com"),
+            false,
+            None,
+            None,
+        ),
+        safix_core::store::read_arguments(database, entry, None, None),
     )
 }
 
@@ -241,7 +248,8 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
 
     // A group must exist before an entry can be added under it, and `mkdir`
     // creates one level: the nested group is refused until its parent is there.
-    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
+    let nested =
+        safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice", None, None);
     let too_deep = scratch.run(&words(&nested), &format!("{UNLOCK}\n"));
     assert!(
         !too_deep.status,
@@ -301,7 +309,8 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
     // refuses — which is why the runtime chooses between them by the listing.
     let again = scratch.run(&words(&write), &format!("{UNLOCK}\nsomething-else"));
     assert!(!again.status, "add created an entry that already exists");
-    let edit = safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true);
+    let edit =
+        safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true, None, None);
     assert!(
         scratch
             .run(&words(&edit), &format!("{UNLOCK}\nthe-second-value"))
@@ -323,7 +332,8 @@ fn a_wrong_password_and_an_absent_entry_are_both_refusals_and_a_newline_is_lost(
     };
     let entry = "safix/alice/grafana";
     let (_, group, write, read) = vectors(entry);
-    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
+    let nested =
+        safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice", None, None);
     assert!(scratch.run(&words(&group), &format!("{UNLOCK}\n")).status);
     assert!(scratch.run(&words(&nested), &format!("{UNLOCK}\n")).status);
 
@@ -347,7 +357,8 @@ fn a_wrong_password_and_an_absent_entry_are_both_refusals_and_a_newline_is_lost(
     // it. This is the measurement the runtime's refusal exists for — the refusal
     // is asserted in `sync_path.rs`, and what is asserted here is that the
     // constraint it defends is real.
-    let edit = safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true);
+    let edit =
+        safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true, None, None);
     assert!(
         scratch
             .run(&words(&edit), &format!("{UNLOCK}\nfirst\nsecond"))

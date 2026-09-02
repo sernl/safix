@@ -100,7 +100,7 @@ pub struct Database {
     program: PathBuf,
     path: PathBuf,
     key: Secret,
-    /// A YubiKey challenge-response slot the database requires to open, or
+    /// A `YubiKey` challenge-response slot the database requires to open, or
     /// none when the database opens on its password alone.
     yubikey: Option<Yubikey>,
     /// A key file the database requires to open, or none when the database

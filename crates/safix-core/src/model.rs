@@ -821,7 +821,7 @@ pub struct SyncMapping {
     pub kdbx: KdbxSide,
 }
 
-/// A YubiKey challenge-response slot a database's own composite key requires
+/// A `YubiKey` challenge-response slot a database's own composite key requires
 /// to open, and the card serial that disambiguates it when more than one is
 /// connected.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -843,7 +843,7 @@ pub struct Keepassxc {
     pub database: Option<String>,
     /// The group every mapping's entry path is relative to.
     pub group: String,
-    /// A YubiKey challenge-response slot the database requires to open, or
+    /// A `YubiKey` challenge-response slot the database requires to open, or
     /// none when the database opens on its password alone.
     pub yubikey: Option<Yubikey>,
     /// A key file the database requires to open, as an absolute path on the

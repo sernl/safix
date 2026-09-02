@@ -365,14 +365,14 @@ fn secret_tool(arguments: &[String]) -> ! {
 /// A password store that records the two values it read from standard input.
 ///
 /// Two shapes, and the first is matched exactly rather than parsed. `safix
-/// enroll --store-database` writes one entry through the four words below, and
-/// what that path's checks read is the two values it fed; a general parser would
-/// answer the same vector but would let a change to enrollment's own invocation
-/// pass unnoticed. Everything `safix sync` sends goes through the small database
-/// model after it.
+/// enroll --store-database` writes one entry through the words [`enroll_write`]
+/// recognizes, and what that path's checks read is the two values it fed; a
+/// general parser would answer the same vector but would let a change to
+/// enrollment's own invocation pass unnoticed. Everything `safix sync` sends
+/// goes through the small database model after it.
 fn keepassxc(arguments: &[String]) -> ! {
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
-    if let ["add", "--password-prompt", database, entry] = words.as_slice() {
+    if let Some((database, entry)) = enroll_write(&words) {
         let fed = drained();
         let mut lines = fed.split(|byte| *byte == b'\n');
         let unlock = lines.next().unwrap_or_default().to_vec();
@@ -383,6 +383,25 @@ fn keepassxc(arguments: &[String]) -> ! {
         std::process::exit(0);
     }
     database_model(&words);
+}
+
+/// Whether this argv is `safix enroll --store-database`'s one-shot write, and
+/// if so, the database and the entry it names.
+///
+/// Matched by shape rather than parsed: `add`, an optional `-y <slot[:serial]>`
+/// and an optional `-k <path>` in either order, then `--password-prompt`, the
+/// database, and the entry — the exact shape `custody::keepassxc_arguments`
+/// builds. A general parser would answer the same vector but would let a
+/// change to that function's own argument order pass unnoticed here.
+fn enroll_write<'a>(words: &[&'a str]) -> Option<(&'a str, &'a str)> {
+    let mut rest = words.strip_prefix(["add"].as_slice())?;
+    while let ["-y" | "-k", _value, tail @ ..] = rest {
+        rest = tail;
+    }
+    match rest {
+        ["--password-prompt", database, entry] => Some((database, entry)),
+        _ => None,
+    }
 }
 
 /// Where the modelled database keeps its groups.

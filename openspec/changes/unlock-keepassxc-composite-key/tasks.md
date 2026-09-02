@@ -35,12 +35,12 @@ Every `keepassxc-cli` behaviour cited in `design.md` was measured against versio
 
 ## 5. The enrollment mirror
 
-- [ ] 5.1 Extend `keepassxc_arguments` (`custody.rs:186-193`) with the same two parameters and the same helper from 4.1 (moved to a shared location both modules can reach, or duplicated with a comment cross-referencing the other copy — pick one and record which and why in the commit)
-- [ ] 5.2 Extend `Transport::PasswordStore` (`custody.rs:63-66`) to carry `yubikey: Option<Yubikey>` and `key_file: Option<String>`, and thread them through `choose` (`custody.rs:89-106`) and `write` (`custody.rs:202-231`) to the extended `keepassxc_arguments`
-- [ ] 5.3 In `crates/safix/src/main.rs`'s `enroll_command`, after `Workspace::discover()` (`main.rs:762`), read `workspace.keepassxc()` and populate the `Transport::PasswordStore` factors from its `yubikey`/`key_file` fields whenever `--store-database` was named, recording D4 of `design.md`'s assumption (same file, different route) as a comment at the call site
-- [ ] 5.4 Extend `custody.rs`'s existing `keepassxc_arguments`/`write` tests (around `custody.rs:397-400`) with a factor-bearing case pinning the new literal
-- [ ] 5.5 Extend `crates/safix/tests/support/card-stubs.rs`'s `keepassxc` stub dispatcher (`card-stubs.rs:373-375`) to match argv carrying the new flags, so a fixture exercising `--mirror-to-store` with declared factors runs against the stub rather than falling through to an unmatched-argv panic
-- [ ] 5.6 Verify: `cargo test -p safix-core enroll::custody::` and the relevant `crates/safix/tests/enrollment.rs` cases green
+- [x] 5.1 Extend `keepassxc_arguments` (`custody.rs:186-193`) with the same two parameters and the same helper from 4.1: one definition (`store::composite_key_arguments`, `pub(crate)`) in `store.rs` beside the four constructors, called from `custody.rs` rather than duplicated — the driver that owns the keepassxc-cli argv shape owns the splice, and `store.rs` already had to know that shape for its own four constructors
+- [x] 5.2 Extend `Transport::PasswordStore` (`custody.rs:63-66`) to carry `yubikey: Option<Yubikey>` and `key_file: Option<String>`, and thread them through `choose` (`custody.rs:89-106`) and `write` (`custody.rs:202-231`) to the extended `keepassxc_arguments`
+- [x] 5.3 In `crates/safix/src/main.rs`'s `enroll_command`, after this file's own `workspace()` call (actual anchor `main.rs:817`; the task's `Workspace::discover()` at `:762` was stale — `enroll_command` calls the module's `workspace()` wrapper, not `Workspace::discover` directly), read `workspace.keepassxc()` and populate the `Transport::PasswordStore` factors from its `yubikey`/`key_file` fields whenever `--store-database` was named, recording D4 of `design.md`'s assumption (same file, different route) as a comment at the call site
+- [x] 5.4 Extend `custody.rs`'s existing `keepassxc_arguments`/`write` tests (around `custody.rs:397-400`) with a factor-bearing case pinning the new literal
+- [x] 5.5 Extend `crates/safix/tests/support/card-stubs.rs`'s `keepassxc` stub dispatcher (`card-stubs.rs:373-375`) to match argv carrying the new flags: the prior exact-array match could not accommodate the optional `-y`/`-k` pair, so it is now a dedicated shape-matching helper (`enroll_write`) that strips an optional `-y <v>`/`-k <v>` prefix before the fixed `--password-prompt <db> <entry>` tail, preserving the file's own "matched exactly rather than parsed" discipline rather than loosening it into a general parser
+- [x] 5.6 Verify: `cargo test -p safix-core enroll::custody::` and the relevant `crates/safix/tests/enrollment.rs` cases green
 
 ## 6. Documentation
 
