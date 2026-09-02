@@ -73,9 +73,10 @@ const STALE: &str = "SAFIX_CLAN_STUB_STALE";
 /// A var id whose read or write fails the way any other clan refusal does.
 const REFUSES: &str = "SAFIX_CLAN_STUB_REFUSES";
 
-/// Every machine name `machines list` answers with, comma-separated, in
-/// order. Absent or empty answers none, which is a fleet a shared-placement
-/// search always exhausts.
+/// A comma-separated override for `machines list`'s answer, tried before the
+/// directory scan below. How a test names a candidate that should be tried
+/// and hold nothing for the var in question, rather than one `clan_seed` has
+/// already made non-empty for it.
 const MACHINES: &str = "SAFIX_CLAN_STUB_MACHINES";
 
 fn main() -> ! {
@@ -190,10 +191,34 @@ fn set(machine: &str, id: &str) -> ! {
     std::process::exit(0);
 }
 
-/// Every machine name the fleet has, one per line.
+/// Every machine name the fleet has, one per line, sorted.
+///
+/// Read off `spool/store/`'s own subdirectories rather than a variable of its
+/// own: `Fixture::clan_seed` and `set` both create one under that root the
+/// moment either touches a machine, so a machine becomes a candidate the same
+/// way it becomes readable \u{2014} no second fixture surface to keep in step with
+/// the first. A machine present here for one var and absent for another is
+/// exactly the "candidate, but does not hold this one" state an addressing
+/// search has to tell apart from "unknown machine" \u{2014} both answer `Couldn't
+/// find var` on a `get` of a var that machine's directory does not carry.
 fn machines() -> ! {
-    let list = named(MACHINES).unwrap_or_default();
-    for name in list.split(',').filter(|name| !name.is_empty()) {
+    if let Some(list) = named(MACHINES) {
+        for name in list.split(',').filter(|name| !name.is_empty()) {
+            println!("{name}");
+        }
+        std::process::exit(0);
+    }
+
+    let base = spool().join("store");
+    let mut names: Vec<String> = std::fs::read_dir(&base)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    for name in names {
         println!("{name}");
     }
     std::process::exit(0);
