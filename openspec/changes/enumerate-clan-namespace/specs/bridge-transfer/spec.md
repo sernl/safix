@@ -58,13 +58,13 @@ When a mapping's placement is shared or per-export, the machine named on clan's 
 
 ### Requirement: The audit reports clan vars no declared mapping accounts for
 
-For every machine named by a currently declared mapping, the audit verb SHALL enumerate the vars clan's own command reports for that machine, and SHALL report as information each one whose id no currently declared mapping's clan side names — including a var whose only mapping has since been removed from the declarations.
-This enumeration SHALL be scoped to machines named by a currently declared mapping and SHALL NOT extend to a clan machine that no declared mapping names.
+For every machine this capability enumerates for a currently declared mapping — the machine a per-machine-placement mapping declares, or the addressing machine discovered for a shared-placement mapping — the audit verb SHALL enumerate the vars clan's own command reports for that machine, and SHALL report as information each one whose id no currently declared mapping's clan side claims — including a var whose only mapping has since been removed from the declarations.
+This enumeration SHALL be scoped to machines enumerated for a currently declared mapping and SHALL NOT extend to a clan machine that no declared mapping names or resolves.
 No mode SHALL delete, export, or import a var by virtue of this report alone, and this report SHALL NOT change the audit's exit status, which continues to answer only whether every compared mapping agreed.
 
 #### Scenario: A var no mapping names is reported
 
-- **WHEN** a machine named by a declared mapping holds a var that no currently declared mapping's clan side names
+- **WHEN** a machine enumerated for a declared mapping holds a var that no currently declared mapping's clan side claims
 - **THEN** the audit reports it naming the machine and the var
 - **AND** nothing is written on either side of the boundary
 
@@ -74,11 +74,17 @@ No mode SHALL delete, export, or import a var by virtue of this report alone, an
 - **THEN** the next audit reports that var among the ones no mapping names
 - **AND** the var is not deleted, exported, or imported by the audit
 
-#### Scenario: Enumeration is scoped to the machines the bridge currently names
+#### Scenario: Enumeration is scoped to the machines the bridge currently names or resolves
 
 - **WHEN** the audit enumerates clan vars
-- **THEN** it considers only machines named by a currently declared mapping
-- **AND** it does not enumerate a clan machine that no declared mapping names, even when clan manages one
+- **THEN** it considers only machines enumerated for a currently declared mapping
+- **AND** it does not enumerate a clan machine that no declared mapping names or resolves, even when clan manages one
+
+#### Scenario: A per-export-placement mapping is invisible to this report, structurally
+
+- **WHEN** a currently declared mapping's placement is per-export
+- **THEN** its clan side is not enumerated and not compared against any machine's listing
+- **AND** the reason recorded is that `clan vars list` cannot surface a per-export-placed var for any machine, not that this report chooses to skip it
 
 #### Scenario: Lingering never changes the exit status
 
