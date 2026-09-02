@@ -819,29 +819,26 @@ mod against_a_real_clan {
         );
     }
 
-    /// A two-way push into a generator that declares a validation and has
-    /// never run is refused, reusing
-    /// `a_safix_to_clan_run_refuses_a_generator_that_declares_a_validation_and_has_never_run`'s
-    /// own fixture shape (`SCHEDULED`) with a two-way mapping instead: a
-    /// generator that already holds a clan-side value, such as `MINTED`,
-    /// would make a two-way run with a competing safix value a genuine
-    /// both-sides-moved conflict rather than a push that reaches the
-    /// stale-generator check at all.
+    /// A two-way push into a generator the real clan calls stale is refused
+    /// by the identical condition a safix-to-clan write already carries,
+    /// reusing
+    /// `a_safix_to_clan_run_refuses_a_generator_the_real_clan_calls_stale`'s
+    /// own fixture shape with a two-way mapping instead.
     #[test]
-    fn a_two_way_push_refuses_a_generator_that_has_never_run() {
-        let Some((fixture, clan)) = bridged("two-way", "per-machine", SCHEDULED) else {
-            return no_clan_here("refusing a two-way push into a generator that has never run");
+    fn a_two_way_push_refuses_a_generator_the_real_clan_calls_stale() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", MINTED) else {
+            return no_clan_here("refusing a two-way push into a generator clan calls stale");
         };
         fixture
-            .set("alice", "api-token", "CANARY-would-be-replaced-two-way")
+            .set("alice", "api-token", "CANARY-would-be-lost-two-way")
             .expect_success("seeding the source");
+        clan.invalidate(MINTED);
         let settled = clan.head();
 
         let run = bridge(&fixture, &clan, &["sync", "clan"])
-            .expect_refusal("converging a two-way push into a generator that has never run");
+            .expect_refusal("converging a two-way push into a generator clan calls stale");
         run.says("outdated");
-        run.says(SCHEDULED);
-        run.silent_about("CANARY-would-be-replaced-two-way");
+        run.silent_about("CANARY-would-be-lost-two-way");
 
         assert_eq!(
             clan.head(),
@@ -872,7 +869,6 @@ mod against_a_real_clan {
             "the shared mapping did not converge through the discovered machine"
         );
     }
-
     /// Nothing safix ran opened a file the real clan placed.
     ///
     /// The prohibition decision one states, held against the clan that has real
@@ -892,7 +888,7 @@ mod against_a_real_clan {
         fixture.seed_two_way_mapping(
             "handover-token",
             (MACHINE, EMPTY, "token"),
-            ("alice", "mail-password"),
+            ("alice", "handover-token"),
         );
         bridge(&fixture, &clan, &["sync", "clan"]).expect_success(
             "bringing the two sides into step, including the two-way mapping's own convergence",
