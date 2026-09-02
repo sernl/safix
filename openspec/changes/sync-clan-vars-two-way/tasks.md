@@ -60,12 +60,12 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 7. `two-way` in `sync clan`'s `--direction` filter
 
-- [ ] 7.1 Add `bridge_sync::converge` (decide then write in two passes so writes stay a single burst, mirroring `sync.rs::run`'s decide-then-write split at `sync.rs:272-307`), reached from the same `sync` entry point `rename-transfer-verbs` gives the clan target
-- [ ] 7.2 Add `two-way` to `--direction`'s accepted values in `crates/safix/src/main.rs`'s option parsing (built by `rename-transfer-verbs`'s task 5.2) and to `crate::bridge::Direction`'s deserialization; confirm the existing generic filter-mismatch refusal (`rename-transfer-verbs`'s task 2.2) fires unmodified for a two-way mapping named under `--direction clan-to-safix`/`--direction safix-to-clan`, and for a one-way mapping named under `--direction two-way`
-- [ ] 7.3 Extend `usage::SYNC`'s clan-target help text with `two-way`'s meaning and the conflict remedy, alongside the two one-way directions `rename-transfer-verbs` already documents there
-- [ ] 7.4 Wire the report: the two-way convergence's `Outcome` carries `Unchanged | UpdatedTowardClan | UpdatedTowardSafix | Conflict | Refused(Error)`, distinct from `crate::bridge::Outcome`'s four and `crate::sync::Outcome`'s six, and its renderer prints `converged <mapping>` for a settled two-way write (per `rename-transfer-verbs`'s report-language decision) and the conflict remedy named in `bridge-sync`'s spec
-- [ ] 7.5 Integration test: `sync clan <mapping> --direction clan-to-safix` and `--direction safix-to-clan` on a two-way-declared mapping each refuse naming `two-way` as its actual direction; `sync clan <mapping> --direction two-way` on a one-way-declared mapping refuses the same way, naming that mapping's actual direction
-- [ ] 7.6 Verify: `cargo test -p safix` green for the extended `sync clan` dispatch and refusal tests; `safix sync -h` names `two-way` among `--direction`'s accepted values (snapshot test extending `rename-transfer-verbs`'s task 6.3)
+- [x] 7.1 Added `bridge_sync::converge`, decide-then-write in two passes, reached from `main.rs::sync_command` alongside `bridge::sync` for the clan target on the same `direction`/`only`
+- [x] 7.2 Added `two-way` to `--direction`'s accepted values in `main.rs`'s parser and to `Direction`'s deserialization (already landed in group 4); the generic filter-mismatch refusal fires unmodified in both directions (`tests/bridge.rs::a_two_way_mapping_and_a_one_way_filter_are_told_apart_in_both_directions`)
+- [x] 7.3 Extended `usage::SYNC`'s clan-target section with `two-way`, its four-outcome summary, the companion's hyphenated suffix, and the addressing-machine discovery sentence
+- [x] 7.4 Wired the report: `bridge_sync::Outcome` carries the five classes; `render::bridge_sync` prints `converged <mapping>` for both settled-write outcomes (T5: both `UpdatedTowardClan`/`UpdatedTowardSafix` render identically, no arrow, per task 7.4's own literal phrasing and the bridge-sync spec's "Requirement: The report names mappings and their outcome" paragraph — the spec wins, applied as written) and the conflict remedy naming the two one-way `--direction` overrides plus the nix-declaration edit D8/keepassxc-sync precedent requires
+- [x] 7.5 Integration tests: direction-filter mismatch both ways (`tests/bridge.rs`), and `tests/bridge_sync.rs` (new target) covers all four outcome classes, the stale-generator refusal, the two-separate-commits ordering, and shared-placement discovery over the stubbed clan
+- [x] 7.6 Verify: `cargo test -p safix` green (`bridge` 21/21, `bridge_sync` 7/7); `safix sync -h` names `two-way` (`sync_appears_in_the_help_with_all_three_directions`)
 
 ## 8. `real_clan.rs`: the four outcome classes against a real clan
 
@@ -82,9 +82,9 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 9. Documentation
 
-- [ ] 9.1 Document `placement` on `clanSide` in `modules/flake/safix/bridge.nix`, stating the addressing-machine discovery and why `machine` is forbidden outside per-machine
-- [ ] 9.2 Document the companion entry's naming, its shared file/audience, and the reservation refusal beside `resolve.nix`'s minting logic
-- [ ] 9.3 Extend `usage::SYNC`'s clan-target help text with `two-way`'s four outcome classes and the conflict remedy, alongside the two one-way directions `rename-transfer-verbs` already documents there
+- [x] 9.1 Already satisfied: `placement`'s and `machine`'s own `description`s in `modules/flake/safix/bridge.nix` (group 1) state the addressing-machine discovery and the shared/per-machine consistency rule; confirmed against the literal task text
+- [x] 9.2 Already satisfied: the `stateSuffix`/`companionOf`/`companionsOf` comment block in `bridge.nix` (group 3) documents the naming, the shared file/audience, and the reservation refusal; not literally beside `resolve.nix` (the minting itself lives in `bridge.nix`, by group 3's own design decision) but adjacent to the minting logic it describes
+- [x] 9.3 Done in group 7.3: `usage::SYNC`'s `\u{2500}\u{2500} two-way, across the clan boundary \u{2500}\u{2500}` section names the unchanged/converge/conflict outcomes, the remedy, and the companion's naming and discovery
 - [ ] 9.4 Verify: every guarantee stated in the new documentation names a check or test in this repository that holds it
 
 ## 10. Verification
