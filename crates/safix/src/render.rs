@@ -1023,7 +1023,7 @@ pub fn bridge_sync(report: &safix_core::bridge::bridge_sync::Report) -> String {
     let tally = report.tally();
     let closing = format!(
         "{PROGRAM}: {total} mapping(s): {} converged, {} unchanged, {} conflict, {} refused.\n",
-        tally.updated_toward_clan + tally.updated_toward_safix,
+        tally.updated_toward_clan.saturating_add(tally.updated_toward_safix),
         tally.unchanged,
         tally.conflict,
         tally.refused,
