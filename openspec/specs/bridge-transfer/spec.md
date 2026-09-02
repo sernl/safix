@@ -6,34 +6,6 @@ Moving a value across the boundary: the two verbs, the delegation that keeps cla
 
 ## Requirements
 
-### Requirement: Two verbs move declared mappings, one per direction
-
-The command SHALL provide a verb that acts on clan-to-safix mappings and a verb that acts on safix-to-clan mappings, each acting on one named mapping or on all mappings of its direction.
-
-#### Scenario: Each verb acts on its own direction only
-
-- **WHEN** a verb runs
-- **THEN** it acts on mappings of its direction
-- **AND** it does not act on mappings of the other
-
-#### Scenario: A run may be scoped or complete
-
-- **WHEN** a verb is given a mapping's name
-- **THEN** it acts on that mapping alone
-- **AND** when given no mapping's name it acts on every mapping of its direction
-
-#### Scenario: A mapping named to the verb of the other direction is told which verb acts on it
-
-- **WHEN** a verb is given the name of a mapping declared in the other direction
-- **THEN** it refuses naming the direction the mapping is declared with
-- **AND** it names the verb that does act on it
-- **AND** the refusal is distinct from the one for a name nothing declares
-
-#### Scenario: The verbs appear in the command's help
-
-- **WHEN** the command is asked for help with no verb
-- **THEN** both verbs appear with their directions stated
-
 ### Requirement: clan is the authority on its own store and is reached only through its command
 
 Every read of a clan value and every write of one SHALL be performed by invoking clan's own command as a subprocess, and the runtime SHALL NOT read, write, decrypt, encrypt or parse clan's stored files.
@@ -65,7 +37,7 @@ Every read of a clan value and every write of one SHALL be performed by invoking
 #### Scenario: An absent clan command refuses the whole run
 
 - **WHEN** clan's command is not available
-- **THEN** both verbs refuse before transferring anything
+- **THEN** `sync`, for the clan target, refuses before transferring anything
 - **AND** the refusal states that clan is the authority on its own store
 - **AND** the run does not proceed with a subset of its mappings
 
@@ -92,7 +64,7 @@ A value entering safix SHALL be written by the same path a hand-supplied value t
 
 ### Requirement: A transfer compares before it writes, and an agreeing mapping is left alone
 
-Both verbs SHALL read both sides of a mapping and compare them before writing either, and SHALL write nothing and commit nothing when the two agree.
+`sync`, for the clan target, SHALL read both sides of a mapping and compare them before writing either, and SHALL write nothing and commit nothing when the two agree.
 
 #### Scenario: An agreeing mapping writes nothing
 
@@ -101,13 +73,13 @@ Both verbs SHALL read both sides of a mapping and compare them before writing ei
 
 #### Scenario: The comparison precedes the export write for a stated reason
 
-- **WHEN** the export path is documented
+- **WHEN** the safix-to-clan write path is documented
 - **THEN** it records that clan's write command writes unconditionally and that a backend re-encrypting an unchanged value produces fresh ciphertext
 - **AND** it states that without the comparison every run would commit in the clan repository for every mapping
 
 #### Scenario: A second run changes nothing
 
-- **WHEN** a verb runs twice with nothing else intervening
+- **WHEN** `sync clan` runs twice with nothing else intervening
 - **THEN** the second run writes nothing and commits nothing
 
 #### Scenario: A value the operator cannot read is refused rather than transferred
@@ -116,13 +88,13 @@ Both verbs SHALL read both sides of a mapping and compare them before writing ei
 - **THEN** the mapping is refused
 - **AND** the reason given is that a value that cannot be read cannot be verified
 
-### Requirement: An export refuses a source that holds no value
+### Requirement: sync toward clan refuses a source that holds no value
 
-The export verb SHALL refuse a mapping whose source key is absent from the source file, and the refusal SHALL name the two ways a value gets there.
+`sync`, for the clan target's safix-to-clan direction, SHALL refuse a mapping whose source key is absent from the source file, and the refusal SHALL name the two ways a value gets there.
 
 #### Scenario: An unwritten source refuses rather than exporting nothing
 
-- **WHEN** an export reaches a mapping whose source key is not in the source file
+- **WHEN** `sync clan` reaches a safix-to-clan mapping whose source key is not in the source file
 - **THEN** the mapping is refused
 - **AND** the refusal names the entry and the file that would have held it
 - **AND** it names setting the value by hand and generating it as the two remedies
@@ -133,13 +105,13 @@ The export verb SHALL refuse a mapping whose source key is absent from the sourc
 - **THEN** evaluation produces no message about it
 - **AND** the reason is that an entry declares where a value lives rather than that one is there
 
-### Requirement: An export refuses when clan already considers the generator stale
+### Requirement: sync toward clan refuses when clan already considers the generator stale
 
-The export verb SHALL refuse a mapping whose clan-side generator has a recorded validation that no longer matches its definition, before writing anything, and SHALL provide no option to proceed.
+`sync`, for the clan target's safix-to-clan direction, SHALL refuse a mapping whose clan-side generator has a recorded validation that no longer matches its definition, before writing anything, and SHALL provide no option to proceed.
 
 #### Scenario: A stale generator refuses before the write
 
-- **WHEN** an export reaches a mapping whose clan-side generator clan reports as having an outdated validation
+- **WHEN** `sync clan` reaches a safix-to-clan mapping whose clan-side generator clan reports as having an outdated validation
 - **THEN** the mapping is refused and nothing is written into clan
 - **AND** the refusal names the machine and the generator
 
@@ -157,7 +129,7 @@ The export verb SHALL refuse a mapping whose clan-side generator has a recorded 
 
 #### Scenario: No option defeats the refusal
 
-- **WHEN** the export verb's arguments are enumerated
+- **WHEN** `sync`'s arguments are enumerated
 - **THEN** none of them proceeds past this refusal
 
 ### Requirement: A run reports each mapping's outcome as one of four states
@@ -210,7 +182,7 @@ A transfer SHALL commit each mapping separately, naming the mapping, and SHALL N
 
 ### Requirement: Divergence after a transfer is reported by the audit verb
 
-The audit verb SHALL report each mapping whose two sides no longer agree, and the export direction's report SHALL name the condition under which an exported value is silently discarded.
+The audit verb SHALL report each mapping whose two sides no longer agree, and the safix-to-clan direction's report SHALL name the condition under which a value written toward clan is silently discarded.
 
 #### Scenario: A diverged mapping is a finding
 
@@ -220,8 +192,8 @@ The audit verb SHALL report each mapping whose two sides no longer agree, and th
 
 #### Scenario: The silent-discard condition is named
 
-- **WHEN** the export direction's documentation is read
-- **THEN** it states that changing the clan-side generator's definition invalidates clan's recorded validation and that clan's next routine generation then replaces the exported value
+- **WHEN** the safix-to-clan direction's documentation is read
+- **THEN** it states that changing the clan-side generator's definition invalidates clan's recorded validation and that clan's next routine generation then replaces the value `sync` wrote toward clan
 - **AND** it states that this is why the audit performs this comparison
 
 #### Scenario: The runtime does not write clan's validation record
@@ -229,3 +201,42 @@ The audit verb SHALL report each mapping whose two sides no longer agree, and th
 - **WHEN** the runtime is searched for a write of clan's validation record
 - **THEN** none is found
 - **AND** the reason is recorded: it would mean writing clan's store directly, and the value written would be a function of clan's own definition
+
+#### Scenario: This comparison is the clan target of audit
+
+- **WHEN** `audit` is invoked bare or with `clan` as its target
+- **THEN** this requirement's comparison is what runs, over the mappings declared under `flake.safix.bridge.mappings`
+- **AND** naming `keepassxc` as the target instead runs `keepassxc-sync`'s own comparison, not this one
+
+### Requirement: sync moves declared mappings, scoped by target and narrowed by direction
+
+The command SHALL provide a `sync` verb whose `clan` target acts on the mappings declared under `flake.safix.bridge.mappings`, each mapping converging in its own declared direction, scoped to one or more named mappings or to every mapping of that target when none is named, and narrowed further by an optional `--direction` option naming one of the declared direction values.
+
+#### Scenario: Each mapping converges in its own declared direction
+
+- **WHEN** `sync clan` runs
+- **THEN** each mapping acted on moves in the direction declared for it
+- **AND** no option or argument overrides a mapping's own declared direction
+
+#### Scenario: A run may be scoped by naming mappings, or complete when none is named
+
+- **WHEN** `sync clan` is given one or more mapping names
+- **THEN** it acts on exactly those mappings
+- **AND** when given none it acts on every mapping declared under the clan target
+
+#### Scenario: --direction narrows the run to mappings declared with that value
+
+- **WHEN** `sync clan --direction <value>` runs with no mapping named
+- **THEN** only mappings declared with that direction are acted on
+- **AND** a mapping declared with a different direction is left untouched, not refused
+
+#### Scenario: A named mapping outside the --direction filter is told its actual direction
+
+- **WHEN** `sync clan --direction <value>` is given the name of a mapping declared with a different direction
+- **THEN** it refuses naming the direction the mapping is actually declared with
+- **AND** the refusal is distinct from the one for a name nothing declares
+
+#### Scenario: sync's help documents the clan target's forms
+
+- **WHEN** the command is asked for help with `sync`
+- **THEN** the help text states the `clan` target, its mapping-name scoping, and the `--direction` values it accepts

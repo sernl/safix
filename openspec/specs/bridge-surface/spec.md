@@ -51,12 +51,12 @@ A mapping's direction SHALL be one of two values naming the source and the desti
 #### Scenario: The reason is recorded where an author meets it
 
 - **WHEN** the direction option's documentation is read
-- **THEN** it states that the verb named export moves values out of clan in one tool and into clan in the other
+- **THEN** it states that clan's own `vars export` moves values out of clan, while a safix-to-clan mapping's convergence moves a value the opposite way, so a word one tool already uses for its own verb would mean the opposite thing if reused for this option
 - **AND** it states that a declaration is read without a tool in hand to be relative to
 
 ### Requirement: Evaluation refuses every mapping mistake that is local to the consumer
 
-Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, or which duplicates or contradicts another mapping.
+Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target has a second producer, which duplicates or contradicts another mapping, or whose id is one the command line reserves as a target keyword.
 
 #### Scenario: An unresolvable safix side is refused
 
@@ -79,6 +79,12 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 - **WHEN** one pair of endpoints appears in two mappings with opposite directions
 - **THEN** evaluation refuses
 - **AND** the refusal states that this is a two-way synchronisation with no conflict resolution
+
+#### Scenario: A mapping id reserved for a target keyword is refused
+
+- **WHEN** a mapping's id is `clan`, `keepassxc`, or `all`
+- **THEN** evaluation refuses, naming the mapping and the word it collides with
+- **AND** the reason given is that `sync` and `audit` read their first argument as a target keyword or a mapping name, never both, so no declared mapping may hold a word either verb reads as a target
 
 ### Requirement: Whether an entry holds a value is not an evaluation question
 

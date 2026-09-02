@@ -134,21 +134,12 @@ Subcommands that write values SHALL be structurally unable to grant anyone the a
 - **THEN** the person's declarations are empty, so no audience includes them and no rule is emitted for them yet
 - **AND** the output names the sequence that gives them their first secret
 
-### Requirement: Absent verbs are recorded rather than left mysterious
+#### Scenario: --show prints the operator's own public recipient and mints nothing
 
-The command's help SHALL state which verbs from the tool this package replaces do not exist here, and why.
-Where a verb of the same name exists with different semantics, the help SHALL state what the verb is not, so the absence of the other tool's semantics stays on the record.
-
-#### Scenario: The recorded absences
-
-- **WHEN** the help text is read
-- **THEN** it states that no upload verb exists because activation already delivers what it would
-
-#### Scenario: The same names, different semantics
-
-- **WHEN** the help for `import` or `export` is read
-- **THEN** it states that each moves declared mappings across the clan boundary, one mapping at a time
-- **AND** states that neither is a plaintext dump or restore, because a plaintext export tree outlives the migration that justified it
+- **WHEN** `keygen --show` runs
+- **THEN** it prints the public recipient derived from the identity already minted on this machine
+- **AND** it mints no identity, appends nothing to the keys file, and writes nothing
+- **AND** when no identity exists yet on this machine, it refuses, naming plain `keygen` as the remedy
 
 ### Requirement: check reports a value minted under a definition that has changed
 
@@ -235,3 +226,20 @@ Both SHALL honour the delegation records over groups the organization's silo dec
 - **WHEN** alice runs `safix group remove oncall bob`
 - **THEN** the edit lands and the verb prints that bob has seen what the group could read and rotation is the remedy
 - **AND** the next `check` reports the shrink as the revocation it is
+
+### Requirement: Retired and reserved verbs are recorded rather than left mysterious
+
+The command's help SHALL state which verbs from the tool this package replaces do not exist here, and why.
+Where a word this package's own vocabulary once used is retired outright, the help SHALL say so; where one is reserved for a feature not yet built, the help SHALL say that instead, so a reservation is never mistaken for an oversight.
+
+#### Scenario: The recorded absences
+
+- **WHEN** the help text is read
+- **THEN** it states that no upload verb exists because activation already delivers what it would
+- **AND** it states that no export verb exists, naming clan's own `export` as the bulk plaintext dump safix's design refuses to build on either side of the boundary
+
+#### Scenario: A reserved absence is told apart from a retired one
+
+- **WHEN** the help for `import` is read
+- **THEN** it states that `import` is reserved for a future, unbuilt feature — ingesting a value from an external plaintext source one entry at a time — rather than retired outright
+- **AND** it states that this is distinct from `export`'s retirement, which is permanent
