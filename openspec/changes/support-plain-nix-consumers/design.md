@@ -154,6 +154,31 @@ Separately, and still worth having: the regression guard on `consumption.nix:428
 Nothing today would fail red if a future edit moved a home-manager consumption check inside that file's `isLinux` block by habit, alongside `safix-consumption-system` — the file's own header comment states the split, and a comment is not what `tasks.md`'s own discipline accepts as the final form of a claim it can hold.
 That check is not a fix for anything broken; it is insurance against the file drifting into the state the shared contract's original wording described.
 
+### D10. `mkVault` is defined in a plain importable file, and the flake output publishes that definition
+
+Added during apply, after the operator reviewed the applied result.
+
+D1 settled where `mkVault` is published and answered it correctly for a flake-parts consumer and for a non-flake-parts flake.
+It did not answer it for a consumer with no flake at all, and the gap only became visible once `examples/plain-nix/entry.nix` existed: a file whose own header states that no flake appears in its evaluation was reaching `mkVault` through `builtins.getFlake`.
+That is not a documentation problem to be worded around.
+This change's own first Goal is that a consumer with no flake at all can read every one of the fourteen non-generator verbs, and an entrypoint reachable only through a flake reference does not meet it.
+
+So the function moves to `lib/default.nix`, a plain file taking `{ lib }` and returning `{ mkVault = …; }`, and `modules/flake/lib.nix` keeps its option declaration and its documentation while defining the value as `(import ../../lib { inherit lib; }).mkVault`.
+One definition, two publication routes.
+A second copy of the body in the flake-parts module would be a second place for the two to disagree; a shared definition cannot drift, and the check holds that they agree rather than trusting it.
+
+`lib` is a required argument rather than one defaulting to `<nixpkgs>`.
+Every realistic flakeless consumer already has one: a NixOS module and a home-manager module each receive `lib`, and a bare entry file takes `(import <nixpkgs> { }).lib`, which is the idiom sops-nix's own non-flake form already asks of a consumer when it needs `<sops-nix>` on `NIX_PATH`.
+A library that silently reaches for an ambient `<nixpkgs>` decides the consumer's nixpkgs for them and hides that it did.
+
+The payoff is larger than the ergonomics.
+`modules/flake/checks/examples.nix` previously read `examples/plain-nix/fleet.nix` through `config.flake.lib.mkVault` and deliberately did not execute the entry file, because `builtins.getFlake` inside a network-less build sandbox would need this flake's whole transitive input closure registered.
+With the plain import that obstacle is gone, so the check evaluates the real `entry.nix` with `NIX_PATH` supplying nixpkgs.
+The example stops being verified by proxy and becomes verified as written, which is the difference between an example that is known to work and one that is known to have been checked against something adjacent to it.
+
+**Alternative rejected: leave it as a flake output and document the `builtins.getFlake` step.**
+It reads as a smaller change and it is the wrong one. The whole claim this change makes is that safix's evaluation half needs neither flake-parts nor a flake, and an entrypoint that needs a flake reference to obtain leaves a flake in the path of the very consumer the claim is about. Documenting the workaround would have made the README honest about a surface that was not.
+
 ## Risks / Trade-offs
 
 Two flake-only mechanisms move to being consumer-choosable rather than absolute, and each is a place a consumer can now get a working evaluation that silently diverges from what a flake would have produced, if they choose badly.

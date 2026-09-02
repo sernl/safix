@@ -100,3 +100,17 @@ An example that is not evaluated is documentation that rots, so every example he
 - [x] 8.6 Severity drill: changing one field in `examples/dendritic`'s fleet without changing `examples/plain-nix`'s turns `safix-examples` red on that field, which is the evidence the two are actually compared rather than merely both evaluated
 - [x] 8.7 Audit `README.md` and `examples/README.md` for AI-writing patterns and remove them, per the `unslop` skill's detection list; state what was removed rather than asserting the prose is clean
 - [x] 8.8 Verify: `nix build .#checks.x86_64-linux.safix-examples` green, the drill in 8.6 observed, and every example reachable from `examples/README.md`
+
+## 9. The projection function without a flake reference
+
+Added at the operator's request after reviewing the applied result, and designed as D10.
+D1 answered where `mkVault` is published for a flake-bearing consumer and left the flakeless one reaching it through `builtins.getFlake`, which contradicts this change's own first Goal.
+
+- [x] 9.1 Add `lib/default.nix`, a plain file taking `{ lib }` and returning `{ mkVault = { modules, root }: …; }`, with safix's resolver module reached as `../modules/flake/safix`, verified by `nix eval --file lib/default.nix --apply 'f: builtins.isFunction (f { lib = (import <nixpkgs> {}).lib; }).mkVault'`
+- [x] 9.2 Redefine `modules/flake/lib.nix`'s value as `(import ../../lib { inherit lib; }).mkVault`, keeping its option declaration and its documentation and holding one definition rather than two, verified by `nix eval .#lib.mkVault --apply builtins.isFunction` still returning true
+- [x] 9.3 Extend `safix-vault-projection` with the two-routes-agree assertion: the projection from the plain import and the projection from `config.flake.lib.mkVault`, over one fleet, are the same value field for field
+- [x] 9.4 Severity drill: make the two routes disagree by a temporary local edit and observe `safix-vault-projection` redden on that field alone, then revert, which is the evidence the agreement is measured rather than assumed
+- [x] 9.5 Convert `examples/plain-nix/entry.nix` off `builtins.getFlake` to the plain import, taking its `lib` from `<nixpkgs>`, and correct its header comment so the no-flake claim it already makes becomes true rather than aspirational
+- [x] 9.6 Upgrade `modules/flake/checks/examples.nix` to evaluate the real `entry.nix` with `NIX_PATH` supplying nixpkgs, rather than reading `fleet.nix` through `config.flake.lib.mkVault` as a proxy, and update the header comment that records why the proxy was necessary
+- [x] 9.7 Correct the README paragraph in "Without flake-parts, or without a flake" that states `mkVault` is a flake output and therefore needs a flake reference to obtain
+- [x] 9.8 Verify: `nix eval --file examples/plain-nix/entry.nix safix.lib.placements --json` resolves with no flake reference anywhere in the expression, and `nix build .#checks.x86_64-linux.safix-vault-projection`, `.#checks.x86_64-linux.safix-examples`, and `.#checks.x86_64-linux.treefmt` all green

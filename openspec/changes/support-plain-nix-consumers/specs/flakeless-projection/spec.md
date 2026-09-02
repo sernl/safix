@@ -48,3 +48,20 @@ A value `mkVault` returns SHALL be usable wherever a consumption module's `safix
 - **WHEN** `mkVault`'s return value is inspected
 - **THEN** it carries no `onboardingHook` or `enrollHook` field, because those are sibling options of `flake.safix`, not of `flake.safix.lib`, and a flake-parts consumer's `flake.safix.lib` never carried them either
 - **AND** a consumer who wants either hook available to a flakeless CLI entry file declares it directly in that file, beside the `lib` field, rather than through `mkVault`
+
+### Requirement: The projection function is obtainable without a flake reference
+
+`mkVault` SHALL be defined once in a plain nix file importable by path, taking the nix library as an explicit argument, and the flake output SHALL publish that same definition rather than a second copy of it.
+A consumer with no flake anywhere in its evaluation SHALL be able to obtain `mkVault` by importing that file, and SHALL NOT be required to name a flake reference to reach it.
+
+#### Scenario: The two publication routes are one definition
+
+- **WHEN** the projection obtained by importing the plain file is compared with the projection obtained from the flake output, over one fleet
+- **THEN** the two are the same value, field for field
+- **AND** they cannot drift, because the flake output is defined as the plain file's own function rather than as a second copy of its body
+
+#### Scenario: An entry file reaches the function with no flake
+
+- **WHEN** a nix expression with no flake in its evaluation imports the plain file by path and supplies the nix library
+- **THEN** it obtains `mkVault` and every attribute the command reads resolves off the result
+- **AND** no flake reference of any kind is named, including `builtins.getFlake`
