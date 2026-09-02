@@ -371,3 +371,61 @@ fn a_wrong_password_and_an_absent_entry_are_both_refusals_and_a_newline_is_lost(
         "a value carrying a newline survived the command, so the refusal defends nothing"
     );
 }
+
+/// A fixed password, for the one test here that opens the database through
+/// [`safix_core::store::Database`] rather than by driving the command's own
+/// argument vectors directly.
+struct FixedPassword;
+
+impl safix_core::enroll::custody::DatabasePassword for FixedPassword {
+    fn database_password(&mut self, _database: &Path) -> safix_core::Result<safix_core::Secret> {
+        safix_core::Secret::read_from(&mut format!("{UNLOCK}\n").as_bytes())
+    }
+}
+
+/// `audit`'s keepassxc target opens the database and reads each mapping's
+/// entry, and never writes: `Database::open` and `Database::read` are its own
+/// primitives, exercised here against the real command rather than the model
+/// `sync_path.rs` drives, reading an entry that holds a value and one that
+/// does not.
+#[test]
+fn database_open_and_read_answer_a_compare_only_pass_against_a_real_database() {
+    let Some(scratch) = Scratch::new("audit-read-only") else {
+        eprintln!(
+            "keepassxc-cli is not installed here, so nothing was established about \
+             audit's read-only pass against the real command."
+        );
+        return;
+    };
+    let entry = "safix/alice/grafana";
+    let (_, group, write, _) = vectors(entry);
+    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
+    assert!(scratch.run(&words(&group), &format!("{UNLOCK}\n")).status);
+    assert!(scratch.run(&words(&nested), &format!("{UNLOCK}\n")).status);
+    let value = "CANARY-real-database-value";
+    assert!(
+        scratch
+            .run(&words(&write), &format!("{UNLOCK}\n{value}"))
+            .status
+    );
+
+    let database = safix_core::store::Database::open(scratch.database(), &mut FixedPassword)
+        .expect("Database::open refused a database this test just created");
+
+    let held = database
+        .read(entry)
+        .expect("Database::read refused an entry this test just wrote");
+    let expected = safix_core::Secret::read_from(&mut value.as_bytes()).expect("a fixture value");
+    assert!(
+        held.is_some_and(|secret| secret.equals(&expected)),
+        "the value read back through Database::read is not what audit would compare against"
+    );
+
+    let absent = database
+        .read("safix/alice/nowhere")
+        .expect("Database::read refused an entry the listing says is not there");
+    assert!(
+        absent.is_none(),
+        "an entry the listing does not carry read back as present"
+    );
+}
