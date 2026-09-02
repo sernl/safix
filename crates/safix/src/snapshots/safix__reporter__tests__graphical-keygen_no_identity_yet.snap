@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::keygen_no_identity_yet
+
+  × /home/alice/.config/sops/age/keys.txt holds no identity yet, so there is
+  │ no public recipient to
+  │ show.
+  │ 
+  │ Mint one first:
+  │ 
+  │     safix keygen

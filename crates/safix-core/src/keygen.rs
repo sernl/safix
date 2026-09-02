@@ -37,6 +37,11 @@ pub const KEY_FILE_VARIABLE: &str = "SAFIX_AGE_KEY_FILE";
 /// The line `age-keygen` writes its public half on.
 const PUBLIC_KEY_PREFIX: &str = "Public key: ";
 
+/// The prefix `age-keygen` writes on the comment line preceding each identity
+/// it appends to the file, distinct from [`PUBLIC_KEY_PREFIX`], which is what
+/// it writes to standard error instead.
+const PUBLIC_KEY_COMMENT_PREFIX: &str = "# public key: ";
+
 /// Mint an identity for this user and append it to their identity file.
 ///
 /// # Errors
@@ -80,6 +85,36 @@ pub fn run(
     })?;
 
     progress.write(&epilogue(user, &keyfile.display().to_string(), &public));
+    Ok(())
+}
+
+/// Print the public recipient already minted on this machine, and mint
+/// nothing.
+///
+/// Reads the last identity's comment line out of the identity file directly,
+/// rather than re-deriving it: `age-keygen` writes that comment ahead of every
+/// identity it appends, and the most recently appended one is the one this
+/// machine's own `recipient` is minted from.
+///
+/// # Errors
+///
+/// [`Error::KeygenNoIdentityYet`] when no identity has been minted on this
+/// machine yet, naming plain `keygen` as the remedy.
+pub fn show(progress: &dyn Progress) -> Result<()> {
+    let keyfile = identity_file();
+    let no_identity_yet = || Error::KeygenNoIdentityYet {
+        file: keyfile.display().to_string(),
+    };
+    let text = std::fs::read_to_string(&keyfile).map_err(|_| no_identity_yet())?;
+    let public = text
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(PUBLIC_KEY_COMMENT_PREFIX))
+        .ok_or_else(no_identity_yet)?;
+
+    let mut printed = public.as_bytes().to_vec();
+    printed.push(b'\n');
+    progress.write_output(&printed);
     Ok(())
 }
 

@@ -308,9 +308,18 @@ mod tests {
             },
             Code::MappingWrongDirection => Error::MappingWrongDirection {
                 mapping: "ntfy-token".into(),
-                direction: "safix-to-clan",
-                verb: "export",
-                asked: "import",
+                actual: "safix-to-clan",
+                filter: "clan-to-safix",
+            },
+            Code::ReservedMappingWord => Error::ReservedMappingWord {
+                word: "keepassxc".into(),
+            },
+            Code::MappingNameNeedsTarget => Error::MappingNameNeedsTarget {
+                verb: "sync",
+                name: "ntfy-token".into(),
+            },
+            Code::DirectionOnWrongTarget => Error::DirectionOnWrongTarget {
+                target: "the keepassxc target",
             },
             Code::SourceHasNoValue => Error::SourceHasNoValue {
                 mapping: "ntfy-token".into(),
@@ -450,6 +459,9 @@ mod tests {
             Code::KeygenForSomeoneElse => Error::KeygenForSomeoneElse { user: "bob".into() },
             Code::KeygenFailed => Error::KeygenFailed,
             Code::KeygenNoPublicKey => Error::KeygenNoPublicKey {
+                file: "/home/alice/.config/sops/age/keys.txt".into(),
+            },
+            Code::KeygenNoIdentityYet => Error::KeygenNoIdentityYet {
                 file: "/home/alice/.config/sops/age/keys.txt".into(),
             },
             Code::BadUserName => Error::BadUserName {

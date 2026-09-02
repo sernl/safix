@@ -5,14 +5,21 @@
 //! and this module is what acts on them. [`crate::clan`] is how the far side is
 //! reached; nothing here touches a file clan placed.
 //!
-//! # Both verbs read both sides before writing either
+//! # One run, every direction a mapping declares
+//!
+//! [`sync`] is the clan target's entry point: it converges every declared
+//! mapping, or the ones named, each moving in its own declared direction in the
+//! same run. An optional `--direction` filter narrows which mappings a run acts
+//! on; it never overrides a mapping's own declared direction.
+//!
+//! # Both directions read both sides before writing either
 //!
 //! For `clan-to-safix` the comparison saves a commit. For `safix-to-clan` it is
 //! load-bearing rather than an optimisation, and the reason is a property of
 //! clan rather than a preference of ours: `clan vars set` writes
 //! unconditionally and commits what it wrote, and a re-encrypting backend — this
 //! fleet's is `age` — produces fresh ciphertext for an unchanged value. Without
-//! the read-first comparison every `safix export` run would produce a commit in
+//! the read-first comparison every safix-to-clan write would produce a commit in
 //! the clan repository for every mapping, forever, each one a diff of ciphertext
 //! that decrypts to what it decrypted to before.
 //!
@@ -53,6 +60,30 @@ use crate::secret::Secret;
 use crate::set::{self, ValueSource};
 use crate::sops::document;
 use crate::workspace::Workspace;
+
+/// Which of `sync`'s and `audit`'s two targets a run acts on, or both when
+/// neither is named.
+///
+/// `safix-cli`'s dispatch grammar is what owns the "bare means every target"
+/// and "a target keyword narrows" rules; this is the value that grammar
+/// resolves to once the command line has been read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// `flake.safix.bridge.mappings`.
+    Clan,
+    /// `flake.safix.keepassxc.mappings`.
+    Keepassxc,
+}
+
+/// The three words `sync` and `audit` read as a target keyword rather than a
+/// mapping name.
+///
+/// Evaluation refuses a declared mapping id spelled one of these — see
+/// `modules/flake/safix/bridge.nix`'s and `keepassxc.nix`'s own `reservedId` —
+/// so a name reaching this far that still matches one is not a declared
+/// mapping at all; it is the target-keyword role showing up where a mapping
+/// name was expected.
+pub const RESERVED_MAPPING_WORDS: [&str; 3] = ["clan", "keepassxc", "all"];
 
 /// What happened to one mapping.
 ///
@@ -95,7 +126,7 @@ impl Outcome {
 pub struct Transferred {
     /// The mapping's declared name.
     pub mapping: String,
-    /// Which way it moves.
+    /// Which way it moved.
     pub direction: Direction,
     /// The clan endpoint, as `<machine> <generator>/<file>`.
     pub clan: String,
@@ -167,64 +198,24 @@ impl ValueSource for Held {
     }
 }
 
-/// Move every `clan-to-safix` mapping, or the one named.
+/// Converge every declared clan mapping, or the ones named, each moving in its
+/// own declared direction.
+///
+/// `direction` narrows the run to mappings declared with that value; it never
+/// overrides a mapping's own declared direction, and a mapping named while it
+/// does not match is refused as such rather than acted on.
 ///
 /// # Errors
 ///
 /// [`Error::NoClanFlake`] when no clan is declared, [`Error::ClanUnavailable`]
-/// when clan's command cannot be run, [`Error::UnknownMapping`] and
-/// [`Error::MappingWrongDirection`] when the named mapping is not one of this
-/// direction's, and whatever evaluating the declarations failed with.
-pub fn import(workspace: &Workspace, progress: &dyn Progress, only: Option<&str>) -> Result<Run> {
-    run(workspace, progress, Direction::ClanToSafix, only)
-}
-
-/// Move every `safix-to-clan` mapping, or the one named.
-///
-/// # Errors
-///
-/// The same run-level refusals [`import`] raises.
-pub fn export(workspace: &Workspace, progress: &dyn Progress, only: Option<&str>) -> Result<Run> {
-    run(workspace, progress, Direction::SafixToClan, only)
-}
-
-/// The mappings one invocation acts on, refusing before any of them is touched.
-///
-/// A name that is declared in the other direction is refused as such rather than
-/// as an unknown name: the operator has spelled the mapping correctly and asked
-/// the wrong verb, and a message saying "not a declared mapping" about a mapping
-/// sitting three lines above in their own file would be actively misleading.
-fn selected<'a>(
-    workspace: &'a Workspace,
-    direction: Direction,
-    only: Option<&str>,
-) -> Result<Vec<&'a Mapping>> {
-    let bridge = workspace.bridge()?;
-    let Some(id) = only else {
-        return Ok(bridge.of(direction).collect());
-    };
-
-    let mapping = bridge.named(id).ok_or_else(|| Error::UnknownMapping {
-        mapping: id.to_owned(),
-        declared: bridge.declared(),
-    })?;
-
-    if mapping.direction != direction {
-        return Err(Error::MappingWrongDirection {
-            mapping: id.to_owned(),
-            direction: mapping.direction.as_str(),
-            verb: mapping.direction.verb(),
-            asked: direction.verb(),
-        });
-    }
-    Ok(vec![mapping])
-}
-
-fn run(
+/// when clan's command cannot be run, [`Error::UnknownMapping`] when a named
+/// mapping is not declared, and [`Error::MappingWrongDirection`] when a named
+/// mapping does not match the `--direction` filter given.
+pub fn sync(
     workspace: &Workspace,
     progress: &dyn Progress,
-    direction: Direction,
-    only: Option<&str>,
+    direction: Option<Direction>,
+    only: &[String],
 ) -> Result<Run> {
     scratch::set_floor(workspace.root());
     let _guard = scratch::Guard;
@@ -246,14 +237,14 @@ fn run(
 
     let mut transferred = Vec::with_capacity(mappings.len());
     for mapping in mappings {
-        let outcome = match direction {
+        let outcome = match mapping.direction {
             Direction::ClanToSafix => one_import(workspace, progress, &clan, mapping),
             Direction::SafixToClan => one_export(workspace, progress, &clan, mapping),
         };
         let (clan_side, safix_side) = endpoints(mapping);
         transferred.push(Transferred {
             mapping: mapping.id.clone(),
-            direction,
+            direction: mapping.direction,
             clan: clan_side,
             safix: safix_side,
             outcome: outcome.unwrap_or_else(Outcome::Refused),
@@ -264,6 +255,51 @@ fn run(
     }
 
     Ok(Run { transferred })
+}
+
+/// The mappings one invocation acts on, refusing before any of them is touched.
+///
+/// An empty `only` is every mapping of `direction`, or every declared mapping
+/// when `direction` is also absent. A named mapping declared with a different
+/// direction than `direction` filters for is refused as such rather than as an
+/// unknown name: the operator has spelled the mapping correctly, and a message
+/// saying "not a declared mapping" about a mapping sitting three lines above in
+/// their own file would be actively misleading.
+///
+/// `pub(crate)` rather than private: [`crate::audit`]'s clan target reuses this
+/// exact selection so that scoping a comparison and scoping a write cannot
+/// answer "which mappings" differently.
+pub(crate) fn selected<'a>(
+    workspace: &'a Workspace,
+    direction: Option<Direction>,
+    only: &[String],
+) -> Result<Vec<&'a Mapping>> {
+    let bridge = workspace.bridge()?;
+    if only.is_empty() {
+        return Ok(match direction {
+            Some(direction) => bridge.of(direction).collect(),
+            None => bridge.mappings.iter().collect(),
+        });
+    }
+
+    let mut mappings = Vec::with_capacity(only.len());
+    for id in only {
+        let mapping = bridge.named(id).ok_or_else(|| Error::UnknownMapping {
+            mapping: id.clone(),
+            declared: bridge.declared(),
+        })?;
+        if let Some(direction) = direction
+            && mapping.direction != direction
+        {
+            return Err(Error::MappingWrongDirection {
+                mapping: id.clone(),
+                actual: mapping.direction.as_str(),
+                filter: direction.as_str(),
+            });
+        }
+        mappings.push(mapping);
+    }
+    Ok(mappings)
 }
 
 /// clan holds the value; safix receives it through the hand-set write path.
@@ -471,7 +507,7 @@ pub(crate) fn held_for(workspace: &Workspace, mapping: &Mapping) -> Result<Optio
     )
 }
 
-/// The commit subject an imported mapping lands under, for a caller that wants
+/// The commit subject a written mapping lands under, for a caller that wants
 /// to assert it without running a transfer.
 #[must_use]
 pub fn commit_subject(mapping: &Mapping) -> String {

@@ -223,12 +223,12 @@ enum Decision {
     Pull { value: Secret, remember: bool },
 }
 
-/// Converge every declared mapping, or the one named.
+/// Converge every declared mapping, or the ones named.
 ///
 /// # Errors
 ///
 /// [`Error::NoStoreDatabase`] when mappings are declared and no database is,
-/// [`Error::UnknownSyncMapping`] when the named mapping is not one that is
+/// [`Error::UnknownSyncMapping`] when a named mapping is not one that is
 /// declared, [`Error::StoreLocked`] when there is no terminal to ask for the
 /// database's password on, [`Error::DatabaseUnreadable`] when it will not open,
 /// and whatever evaluating the declarations failed with. Each of those stops the
@@ -241,7 +241,7 @@ pub fn run(
     workspace: &Workspace,
     progress: &dyn Progress,
     password: &mut dyn DatabasePassword,
-    only: Option<&str>,
+    only: &[String],
 ) -> Result<Report> {
     scratch::set_floor(workspace.root());
     let _guard = scratch::Guard;
@@ -332,15 +332,23 @@ pub fn run(
 }
 
 /// The mappings one run acts on, refusing before any of them is touched.
-fn selected<'a>(mirror: &'a Keepassxc, only: Option<&str>) -> Result<Vec<&'a SyncMapping>> {
-    let Some(id) = only else {
+///
+/// `pub(crate)` rather than private: [`crate::audit`]'s keepassxc target reuses
+/// this exact selection so that scoping a comparison and scoping a write cannot
+/// answer "which mappings" differently.
+pub(crate) fn selected<'a>(mirror: &'a Keepassxc, only: &[String]) -> Result<Vec<&'a SyncMapping>> {
+    if only.is_empty() {
         return Ok(mirror.mappings.iter().collect());
-    };
-    let mapping = mirror.named(id).ok_or_else(|| Error::UnknownSyncMapping {
-        mapping: id.to_owned(),
-        declared: mirror.declared(),
-    })?;
-    Ok(vec![mapping])
+    }
+    let mut mappings = Vec::with_capacity(only.len());
+    for id in only {
+        let mapping = mirror.named(id).ok_or_else(|| Error::UnknownSyncMapping {
+            mapping: id.clone(),
+            declared: mirror.declared(),
+        })?;
+        mappings.push(mapping);
+    }
+    Ok(mappings)
 }
 
 /// Entries under the declared group that no declared mapping accounts for.
@@ -348,7 +356,11 @@ fn selected<'a>(mirror: &'a Keepassxc, only: Option<&str>) -> Result<Vec<&'a Syn
 /// Every mapping accounts for its own entry and for the companion beside it, so a
 /// companion whose mapping is gone lingers exactly as its entry does — which is
 /// the point of computing this from the listing rather than from the mappings.
-fn lingering(database: &Database, mirror: &Keepassxc) -> Vec<String> {
+///
+/// `pub(crate)` rather than private: [`crate::audit`]'s keepassxc target reports
+/// the identical list, over a database it opened itself, rather than a second
+/// computation of it.
+pub(crate) fn lingering(database: &Database, mirror: &Keepassxc) -> Vec<String> {
     let mut claimed: Vec<String> = Vec::new();
     for mapping in &mirror.mappings {
         let entry = mirror.entry_of(mapping);
@@ -695,7 +707,7 @@ mod tests {
     #[test]
     fn a_named_mapping_nothing_declares_is_refused_naming_what_is_declared() {
         let mirror = mirror("two-way");
-        let refusal = selected(&mirror, Some("grafana-typo")).expect_err("no such mapping");
+        let refusal = selected(&mirror, &["grafana-typo".to_owned()]).expect_err("no such mapping");
         match refusal {
             Error::UnknownSyncMapping { mapping, declared } => {
                 assert_eq!(mapping, "grafana-typo");

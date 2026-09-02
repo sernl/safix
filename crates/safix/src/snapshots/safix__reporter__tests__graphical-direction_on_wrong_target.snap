@@ -1,0 +1,12 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::direction_on_wrong_target
+
+  × --direction is refused on the keepassxc target.
+  │ 
+  │ Only the clan target accepts --direction, because a keepassxc mapping
+  │ declares a mode rather than a direction, and a mode narrows a run by
+  │ being named rather than by a run-time flag. Drop --direction, or name
+  │ the clan target instead.

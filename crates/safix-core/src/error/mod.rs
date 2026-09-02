@@ -280,21 +280,63 @@ pub enum Error {
         declared: Vec<String>,
     },
 
-    /// A verb was given a mapping declared for the other direction.
+    /// A named mapping is declared with a direction the `--direction` filter
+    /// given to `sync clan` or `audit clan` does not accept.
     ///
     /// Separate from [`Error::UnknownMapping`] because the mapping is declared
-    /// and the operator has named it correctly: what is wrong is which verb
-    /// they asked, and the message can say so and name the other one.
-    #[error("{}", prose::mapping_wrong_direction(mapping, direction, verb, asked))]
+    /// and the operator has named it correctly: what does not match is the
+    /// `--direction` filter, and the message can say so and name the mapping's
+    /// actual direction.
+    #[error("{}", prose::mapping_wrong_direction(mapping, actual, filter))]
     MappingWrongDirection {
         /// The mapping that was named.
         mapping: String,
-        /// The direction it is declared with.
-        direction: &'static str,
-        /// The verb that acts on that direction.
+        /// The direction it is actually declared with.
+        actual: &'static str,
+        /// The `--direction` value the run was filtered to.
+        filter: &'static str,
+    },
+
+    /// A word `sync` or `audit` reads as a target keyword was given where a
+    /// mapping name belongs.
+    ///
+    /// Evaluation refuses a declared mapping id spelled one of these three
+    /// words, so a name reaching this far that still matches one cannot be a
+    /// declared mapping under any target — it is the target-keyword role
+    /// showing up a second time, after a target has already been named.
+    #[error("{}", prose::reserved_mapping_word(word))]
+    ReservedMappingWord {
+        /// The word that was given.
+        word: String,
+    },
+
+    /// A mapping name was given to `sync` or `audit` before any target was
+    /// named.
+    ///
+    /// Refused rather than guessed: a mapping id may be declared under both
+    /// `clan`'s and `keepassxc`'s namespaces without conflict, so guessing
+    /// which one a bare name belongs to would be ambiguous exactly when it
+    /// matters.
+    #[error("{}", prose::mapping_name_needs_target(verb, name))]
+    MappingNameNeedsTarget {
+        /// Which verb was asked, `sync` or `audit`.
         verb: &'static str,
-        /// The verb that was asked.
-        asked: &'static str,
+        /// The word that was read as an attempted mapping name.
+        name: String,
+    },
+
+    /// `--direction` was given to a target other than `clan`.
+    ///
+    /// A keepassxc mapping declares a mode rather than a direction, and a mode
+    /// narrows a run by being named rather than by a run-time flag — the same
+    /// reason `bridge-surface` already gives for refusing `pull`/`push` as a
+    /// mapping's declared direction applies a second time to the flag that
+    /// mirrors it.
+    #[error("{}", prose::direction_on_wrong_target(target))]
+    DirectionOnWrongTarget {
+        /// What `--direction` was given alongside, named the way the refusal
+        /// reads.
+        target: &'static str,
     },
 
     /// An export's source entry holds no value.
@@ -824,6 +866,15 @@ pub enum Error {
     #[error("age-keygen wrote no public key; check {file} before re-running")]
     KeygenNoPublicKey {
         /// The identity file it was appending to.
+        file: String,
+    },
+
+    /// `keygen --show` was asked and no identity has been minted on this
+    /// machine yet.
+    #[error("{}", prose::keygen_no_identity_yet(file))]
+    KeygenNoIdentityYet {
+        /// The identity file that holds no identity yet, so no public-key
+        /// comment could be found in it.
         file: String,
     },
 

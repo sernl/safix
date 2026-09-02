@@ -50,7 +50,7 @@ use std::sync::OnceLock;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
-    keygen, nix::Nix, set, sync,
+    keygen, model::Direction, nix::Nix, set, sync,
 };
 
 use reporter::Refusal;
@@ -145,16 +145,6 @@ const VERBS: &[Verb] = &[
         name: "fix",
         help: usage::FIX,
         run: fix_command,
-    },
-    Verb {
-        name: "import",
-        help: usage::IMPORT,
-        run: import_command,
-    },
-    Verb {
-        name: "export",
-        help: usage::EXPORT,
-        run: export_command,
     },
     Verb {
         name: "audit",
@@ -537,75 +527,118 @@ fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(abort::exit_code(status))
 }
 
-/// Declared clan-to-safix mappings, moved into safix.
-fn import_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    transfer(arguments, "import [<mapping>]", bridge::import)
+/// The target, mapping names and `--direction` filter `sync` and `audit`
+/// share one grammar for.
+struct Dispatch {
+    /// `clan`, `keepassxc`, or absent for every target.
+    target: Option<bridge::Target>,
+    /// Every mapping name given after the target, in the order given.
+    names: Vec<String>,
+    /// `--direction`'s value, when given.
+    direction: Option<Direction>,
 }
 
-/// Declared safix-to-clan mappings, moved into clan.
-fn export_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    transfer(arguments, "export [<mapping>]", bridge::export)
-}
-
-/// The two transfer verbs, which differ in nothing but the direction they act
-/// on.
+/// Parse `sync`'s and `audit`'s shared dispatch grammar:
+/// `[<target>] [<mapping>...] [--direction <value>]`.
 ///
-/// No mapping named means every mapping of that direction, rather than an
-/// `--all` flag. The flag would be the only way to spell "do the thing this verb
-/// is for", and a verb whose bare form does nothing is a verb an operator has to
-/// remember a flag for; the narrowing case is the one that takes an argument.
-fn transfer(
-    arguments: &[String],
+/// `verb` names which of the two is asking, for the "a mapping name needs a
+/// target" refusal's own remedy, which names both forms; `form` is the usage
+/// line an unrecognised option or a malformed `--direction` value is refused
+/// with.
+fn parse_dispatch(
+    verb: &'static str,
     form: &'static str,
-    act: fn(&Workspace, &dyn Progress, Option<&str>) -> safix_core::Result<bridge::Run>,
-) -> Result<ExitCode, Refusal> {
-    let only = match arguments {
-        [] => None,
-        [option] if option.starts_with('-') => {
-            return Err(Refusal::UnknownOption {
-                option: option.clone(),
-            });
-        }
-        [mapping] => Some(mapping.clone()),
-        _ => return Err(Refusal::Usage { form }),
+    arguments: &[String],
+) -> Result<Dispatch, Refusal> {
+    let mut rest = arguments;
+    let target = match rest.first().map(String::as_str) {
+        Some("clan") => Some(bridge::Target::Clan),
+        Some("keepassxc") => Some(bridge::Target::Keepassxc),
+        _ => None,
     };
+    if target.is_some()
+        && let Some((_, tail)) = rest.split_first()
+    {
+        rest = tail;
+    }
 
-    let workspace = workspace()?;
-    let outcome = act(&workspace, &Terminal, only.as_deref())?;
-    eprint!("{}", render::transfer(&outcome));
+    let mut names = Vec::new();
+    let mut direction = None;
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            "--direction" => {
+                let Some((value, after)) = tail.split_first() else {
+                    return Err(Refusal::OptionNeedsValue {
+                        option: "--direction".to_owned(),
+                    });
+                };
+                direction = Some(match value.as_str() {
+                    "clan-to-safix" => Direction::ClanToSafix,
+                    "safix-to-clan" => Direction::SafixToClan,
+                    _ => return Err(Refusal::Usage { form }),
+                });
+                rest = after;
+            }
+            option if option.starts_with('-') => {
+                return Err(Refusal::UnknownOption {
+                    option: option.to_owned(),
+                });
+            }
+            name if target.is_none() => {
+                return Err(Error::MappingNameNeedsTarget {
+                    verb,
+                    name: name.to_owned(),
+                }
+                .into());
+            }
+            name if bridge::RESERVED_MAPPING_WORDS.contains(&name) => {
+                return Err(Error::ReservedMappingWord {
+                    word: name.to_owned(),
+                }
+                .into());
+            }
+            name => {
+                names.push(name.to_owned());
+                rest = tail;
+            }
+        }
+    }
 
-    Ok(if outcome.refused() {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
+    if direction.is_some() && target != Some(bridge::Target::Clan) {
+        return Err(Error::DirectionOnWrongTarget {
+            target: match target {
+                Some(bridge::Target::Keepassxc) => "the keepassxc target",
+                _ => "every target, with none named",
+            },
+        }
+        .into());
+    }
+
+    Ok(Dispatch {
+        target,
+        names,
+        direction,
     })
 }
 
-/// The bridge report.
+/// The bridge report, over the named target or both, narrowed by mapping
+/// names and, for the clan target, `--direction`.
 ///
 /// A verb rather than rows in `check`, and the exit codes are `check`'s: zero
-/// when every declared mapping's two sides agree, one when any of them does
-/// not. The narrowing argument is the transfer verbs' own, so an operator who
-/// can name a mapping to `export` can name it here — and to either direction's,
-/// because comparing a mapping is the same act whichever way its value moves.
+/// when every compared mapping's two sides agree, one when any of them does
+/// not. `lingering` entries never move the exit status, on either target.
 fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let only = match arguments {
-        [] => None,
-        [option] if option.starts_with('-') => {
-            return Err(Refusal::UnknownOption {
-                option: option.clone(),
-            });
-        }
-        [mapping] => Some(mapping.clone()),
-        _ => {
-            return Err(Refusal::Usage {
-                form: "audit [<mapping>]",
-            });
-        }
-    };
+    const FORM: &str = "audit [clan|keepassxc] [<mapping>...] [--direction <value>]";
+    let dispatch = parse_dispatch("audit", FORM, arguments)?;
 
     let workspace = workspace()?;
-    let report = audit::run(&workspace, only.as_deref())?;
+    let report = audit::run(
+        &workspace,
+        &mut prompt::Prompted,
+        dispatch.target,
+        dispatch.direction,
+        &dispatch.names,
+    )?;
     eprint!("{}", render::audit(&report));
 
     Ok(if report.is_clean() {
@@ -615,46 +648,58 @@ fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     })
 }
 
-/// The mirror, converged per mapping.
+/// The two targets `sync` converges, over the named one or both, narrowed by
+/// mapping names and, for the clan target, `--direction`.
 ///
-/// The narrowing argument is the bridge verbs' own, and the exit codes are
-/// `audit`'s: zero when every declared mapping converged, one when any mapping
-/// conflicts, is refused, or could not be judged.
+/// The exit code is zero when every mapping on every target the run scoped to
+/// converged without a conflict, a refusal, or an unjudgeable side.
 fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let only = match arguments {
-        [] => None,
-        [option] if option.starts_with('-') => {
-            return Err(Refusal::UnknownOption {
-                option: option.clone(),
-            });
-        }
-        [mapping] => Some(mapping.clone()),
-        _ => {
-            return Err(Refusal::Usage {
-                form: "sync [<mapping>]",
-            });
-        }
-    };
+    const FORM: &str = "sync [clan|keepassxc] [<mapping>...] [--direction <value>]";
+    let dispatch = parse_dispatch("sync", FORM, arguments)?;
 
     let workspace = workspace()?;
-    let report = sync::run(
-        &workspace,
-        &Terminal,
-        &mut prompt::Prompted,
-        only.as_deref(),
-    )?;
-    eprint!("{}", render::sync(&report));
+    let mut out = String::new();
+    let mut refused = false;
 
-    Ok(if report.is_clean() {
-        ExitCode::SUCCESS
-    } else {
+    if matches!(dispatch.target, None | Some(bridge::Target::Clan)) {
+        let run = bridge::sync(&workspace, &Terminal, dispatch.direction, &dispatch.names)?;
+        refused |= run.refused();
+        out.push_str(&render::transfer(&run));
+    }
+    if matches!(dispatch.target, None | Some(bridge::Target::Keepassxc)) {
+        let report = sync::run(
+            &workspace,
+            &Terminal,
+            &mut prompt::Prompted,
+            &dispatch.names,
+        )?;
+        refused |= !report.is_clean();
+        out.push_str(&render::sync(&report));
+    }
+
+    eprint!("{out}");
+    Ok(if refused {
         ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     })
 }
 
-/// An age identity for a person who has none.
+/// An age identity for a person who has none, or their own public recipient
+/// with `--show`.
 fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "keygen [--for-someone-else] [<user>]";
+    const FORM: &str = "keygen [--for-someone-else] [<user>] | keygen --show";
+
+    if let [first, rest @ ..] = arguments
+        && first == "--show"
+    {
+        if !rest.is_empty() {
+            return Err(Refusal::Usage { form: FORM });
+        }
+        keygen::show(&Terminal)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let (for_someone_else, rest) = match arguments.split_first() {
         Some((first, tail)) if first == "--for-someone-else" => (true, tail),
         _ => (false, arguments),

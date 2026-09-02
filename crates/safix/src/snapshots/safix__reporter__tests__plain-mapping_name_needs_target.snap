@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: 'ntfy-token' was read as a mapping name, and no target was named first.
+
+A mapping name may follow clan or keepassxc on sync, never neither: a
+mapping id may be declared under both targets' namespaces, so guessing
+which one a bare name belongs to would be ambiguous exactly when it
+matters. Name a target first:
+
+    safix sync clan ntfy-token
+    safix sync keepassxc ntfy-token

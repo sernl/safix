@@ -1,0 +1,12 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::reserved_mapping_word
+
+  × 'keepassxc' is a target keyword, not a mapping name.
+  │ 
+  │ sync and audit read clan and keepassxc as target keywords, never as
+  │ mapping names — no declared mapping may be named either, or 'all'.
+  │ Name the mapping you meant, or drop it to act on every mapping of the
+  │ target already named.

@@ -57,94 +57,97 @@ read every value in the file, and re-wrapping the data key does not unread it;
 revoking means a new value, which is `generate --regenerate` or `sops <file>`.
 ";
 
-/// `safix import -h`.
-pub const IMPORT: &str = "\
-safix import [<mapping>]
-
-Move every clan-to-safix mapping declared in flake.safix.bridge.mappings, or the
-one named, from clan into safix. With no mapping named it acts on all of them.
-
-The value is read by running clan's own command and arrives on a pipe. safix
-reads, writes and parses none of clan's stored files, in either direction, so
-the bridge works whatever backend that clan uses.
-
-Both sides are read and compared before either is written. A mapping whose two
-sides already agree is not written and not committed, so a second run
-immediately after a first writes nothing. Each mapping that is written goes
-through the same path `set` uses — the same recipient-drift refusal, the same
-staged write and rename — and lands as its own commit naming the mapping.
-
-Each mapping is reported as unchanged, updated, absent at source, or refused.
-Absent at source is not a failure: a clan var that has not been generated yet is
-the ordinary state during bootstrap. A refused mapping does not stop the others,
-and the run exits non-zero.
-";
-
-/// `safix export -h`.
-pub const EXPORT: &str = "\
-safix export [<mapping>]
-
-Move every safix-to-clan mapping declared in flake.safix.bridge.mappings, or the
-one named, from safix into clan. With no mapping named it acts on all of them.
-
-The value is written by running clan's own command with the value on its
-standard input. Nothing here writes into clan's store directly, and clan commits
-what it wrote, in its own repository.
-
-Both sides are read and compared before either is written, and here the
-comparison is load-bearing rather than an optimisation: clan's write is
-unconditional and a re-encrypting backend produces fresh ciphertext for an
-unchanged value, so without it every run would commit in the clan repository for
-every mapping.
-
-Two refusals are this direction's own. A source entry that holds no value is
-refused rather than exported as nothing. A mapping whose clan-side generator
-clan already considers outdated is refused, because clan's next routine
-generation would replace whatever was exported without saying so; there is no
-option that exports anyway.
-";
-
 /// `safix audit -h`.
 pub const AUDIT: &str = "\
-safix audit [<mapping>]
+safix audit [clan|keepassxc] [<mapping>...] [--direction <value>]
 
-Compare both sides of every declared mapping, or the one named, and change
-nothing. Exits non-zero when any mapping's two sides disagree, and each finding
-names the mapping, its two endpoints and the command that converges it.
+Compare declared mappings and change nothing. With no target it compares both
+clan and keepassxc; naming one narrows to that target's own mappings, and
+mapping names after it narrow further, to as many as are named \u{2014} with none
+named it acts on every mapping of the target chosen. --direction narrows the
+clan target to mappings declared with that value; it is refused on
+keepassxc, whose mappings declare a mode instead of a direction.
 
-A mapping agrees when both sides hold the same bytes, and also when neither side
-holds a value yet — that is a bridge nothing has bootstrapped rather than a
-disagreement. It is a finding when the two sides hold different values, when one
-side holds a value the other does not, or when the comparison could not be made.
+\u{2500}\u{2500} the clan target \u{2500}\u{2500}
+Both sides of each mapping are read and compared, and nothing is written. A
+mapping agrees when both sides hold the same bytes, and also when neither
+side holds a value yet \u{2014} that is a bridge nothing has bootstrapped rather
+than a disagreement. It is a finding when the two sides hold different
+values, when one side holds a value the other does not, or when the
+comparison could not be made, and each finding names the mapping, its two
+endpoints and the command that converges it: safix sync clan <mapping>.
 
-This is a verb of its own rather than four more rows in `check`, and the reason
-is what `check` is. `check` decrypts nothing, which is what lets one machine
-judge files belonging to people whose keys it does not have, and it needs no
-clan. This comparison needs both of those powers: it decrypts the safix side of
-each mapping, and it runs clan's own command once per mapping. Carrying them
-here is what keeps both of `check`'s properties unconditionally true.
+\u{2500}\u{2500} the keepassxc target \u{2500}\u{2500}
+Both sides of each mapping are read and compared per its declared mode, and
+nothing is written. Each mapping's outcome is reported as agreeing, diverged,
+or unjudgeable, and the remedy for a diverged mapping is safix sync
+keepassxc <mapping>. Entries under the declared group that no mapping
+declares are reported alongside as information \u{2014} lingering, in the same
+shape sync's own report gives it \u{2014} and never move the exit status.
 
-So it requires clan exactly as `import` and `export` do, and refuses the whole
-run before any mapping is compared when clan cannot be run.
+\u{2500}\u{2500} why this is a verb of its own and not four more rows in `check` \u{2500}\u{2500}
+`check` decrypts nothing, which is what lets one machine judge files
+belonging to people whose keys it does not have, and it needs no clan and no
+password database. This comparison needs both of those powers on the clan
+target and the database's own password on the keepassxc target. Carrying
+them here is what keeps both of `check`'s properties unconditionally true.
 
-A mapping this operator cannot decrypt is reported as one that could not be
-judged rather than skipped. A report that dropped those would be a report about
-who ran it, and a clean one would mean `what I could see agrees` while reading
-as `the mappings agree`.
+A mapping this operator cannot decrypt, or a database entry the store's own
+command refuses over, is reported as one that could not be judged rather
+than skipped. A report that dropped those would be a report about who ran
+it, and a clean one would mean `what I could see agrees` while reading as
+`the mappings agree`.
 
-Nothing here writes, in either repository. No value, and no digest of one,
+Nothing here writes, on either target. No value, and no digest of one,
 reaches the report.
 ";
 
 /// `safix sync -h`.
 pub const SYNC: &str = "\
-safix sync [<mapping>]
+safix sync [clan|keepassxc] [<mapping>...] [--direction <value>]
 
-Converge every mapping declared in flake.safix.keepassxc.mappings, or the one
-named, between a safix entry and an entry in your password database. With no
-mapping named it acts on all of them.
+Converge declared relationships. With no target it converges every mapping
+on both clan and keepassxc, each in its own declared direction or mode;
+naming one target narrows to its own mappings, and mapping names after it
+narrow further, to as many as are named \u{2014} with none named it acts on every
+mapping of the target chosen. There is no all target: the bare form is the
+one spelling for everything.
 
-\u{2500}\u{2500} the four modes \u{2500}\u{2500}
+\u{2500}\u{2500} the clan target \u{2500}\u{2500}
+Moves values across the boundary to or from clan, one declared mapping at a
+time \u{2014} see flake.safix.bridge.mappings. Each mapping converges in its own
+declared direction, clan-to-safix and safix-to-clan mixed freely in the same
+run; --direction clan-to-safix or --direction safix-to-clan narrows the run
+to mappings declared with that value, without overriding any mapping's own
+direction. import and export do not exist here: sync clan replaces both,
+converging every direction a run reaches in the one invocation that used to
+take two.
+
+The value is read or written by running clan's own command, on a pipe. safix
+reads, writes and parses none of clan's stored files, in either direction, so
+the bridge works whatever backend clan uses.
+
+Both sides are read and compared before either is written. A mapping whose
+two sides already agree is not written and not committed, so a second run
+immediately after a first writes nothing; on the safix-to-clan direction the
+comparison is load-bearing rather than an optimisation, because clan's write
+is unconditional and a re-encrypting backend produces fresh ciphertext for
+an unchanged value.
+
+Two refusals are the safix-to-clan direction's own. A source entry that
+holds no value is refused rather than exported as nothing. A mapping whose
+clan-side generator clan already considers outdated is refused, because
+clan's next routine generation would replace whatever was written without
+saying so; there is no option that writes anyway.
+
+Each clan-target mapping is reported as unchanged, updated, absent at
+source, or refused. An updated mapping's line names its direction as an
+arrow \u{2014} pulled \u{2190} clan or pushed \u{2192} clan. Absent at source is not a
+failure: a clan var that has not been generated yet is the ordinary state
+during bootstrap. A refused mapping does not stop the others, and the run
+exits non-zero.
+
+\u{2500}\u{2500} the keepassxc target: the four modes \u{2500}\u{2500}
 The mode is declared per mapping, not passed here: a remembered flag on a verb is
 exactly the drifting operational knowledge a declaration exists to end.
 
@@ -220,11 +223,11 @@ command reads an entry's password as one line, so what would land is the bytes
 before the first newline. Nothing here strips the byte for you \u{2014} a mirror that
 silently trims a value lies about what it holds. `printf` where `echo` minted it.
 
-Each mapping is reported as unchanged, updated, pulled, conflict, refused, or not
-judged, and every declared mapping appears whatever happened to it. A mapping
-whose safix side did not decrypt is reported rather than skipped, because a report
-that dropped those would be a report about who ran it. The run exits non-zero
-when any mapping conflicts, is refused, or could not be judged.
+Each keepassxc-target mapping is reported as unchanged, updated, pulled, conflict,
+refused, or not judged, and every declared mapping appears whatever happened to
+it. A mapping whose safix side did not decrypt is reported rather than skipped,
+because a report that dropped those would be a report about who ran it. The run
+exits non-zero when any mapping conflicts, is refused, or could not be judged.
 ";
 
 /// `safix get -h`.
@@ -382,6 +385,7 @@ neither is a value.
 
 pub const KEYGEN: &str = "\
 safix keygen [--for-someone-else] [<user>]
+safix keygen --show
 
 Mint an age identity and append it to ${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt,
 then print the public half and what to do with it. The private half is never
@@ -397,6 +401,12 @@ custody this package rests on, so it takes an explicit --for-someone-else.
 
 An existing ssh key works instead: `ssh-to-age < ~/.ssh/id_ed25519.pub` prints
 the age recipient for it, and sops.age.sshKeyPaths names the private half.
+
+\u{2500}\u{2500} --show \u{2500}\u{2500}
+Prints the public recipient derived from the identity already minted on this
+machine, and mints nothing: no identity, no line appended to keys.txt, no
+write of any kind. Refused, naming plain keygen as the remedy, when no
+identity has been minted here yet.
 ";
 
 /// `safix adduser -h`.
@@ -630,11 +640,10 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                                                     mint values from generators
   safix check    [<user>]                           report drift, change nothing
   safix fix      [--yes]                            converge policy and ciphertext
-  safix import   [<mapping>]                        clan-to-safix declared mappings
-  safix export   [<mapping>]                        safix-to-clan declared mappings
-  safix audit    [<mapping>]                        report bridge drift, change nothing
-  safix sync     [<mapping>]                        converge declared keepassxc mappings
-  safix keygen   [--for-someone-else] [<user>]      an age identity for a person
+  safix audit    [clan|keepassxc] [<mapping>...]    report bridge or mirror drift
+  safix sync     [clan|keepassxc] [<mapping>...]    converge declared relationships
+  safix keygen   [--for-someone-else] [<user>] | --show
+                                                    an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
   safix group    add|remove <group> <subject>       edit a group's membership
@@ -645,7 +654,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                           flake reference instead of the declaring one
 
 SAFIX_ENTRY and SAFIX_NIXPKGS set the same two, and --entry and --nixpkgs win
-when both a flag and its variable are given. Fourteen of the fifteen
+when both a flag and its variable are given. Twelve of the thirteen
 subcommands behave identically under --entry as against a flake; generate is
 the exception and refuses under --entry with neither --nixpkgs nor
 SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
@@ -682,32 +691,44 @@ evaluation refuses structure rather than people, and no delegation record places
 key in any audience. A person no organization manages is scaffolded by whoever can
 commit, exactly as before.
 
-\u{2500}\u{2500} what import and export are, and are not \u{2500}\u{2500}
-These two move values across the clan boundary, one declared mapping at a time.
-They are not a plaintext dump and restore. Writing every value out as a tree
-serves migrating between backends, and that tree outlives the migration that
-made it, on a disk \u{2014} which is the shape this command exists to avoid. There
-is nothing here that writes one.
+\u{2500}\u{2500} what sync's clan target is, and is not \u{2500}\u{2500}
+`sync clan` moves values across the clan boundary, one declared mapping at a
+time, each in its own declared direction. It is not a plaintext dump and
+restore: clan's own `vars export` writes a machine's whole vars folder to
+plaintext on disk, and that tree outlives the migration that justified it,
+on a disk \u{2014} the shape this command exists to avoid. There is nothing here
+that writes one.
 
-`safix audit` is the report over the same declarations: it compares both sides
-of each mapping and writes nothing. It is separate from `check` because it needs
-what `check` refuses \u{2014} a decryption of the safix side, and a clan.
+`safix audit` is the report over the same declarations: it compares both
+sides of every mapping, on either target, and writes nothing. It is separate
+from `check` because it needs what `check` refuses \u{2014} a decryption of the
+safix side, and either clan or the password database's own password.
 
-\u{2500}\u{2500} what sync is, and how it differs from those two \u{2500}\u{2500}
-`safix sync` converges declared safix entries with entries in your password
-database, which is where a credential a person types goes. Each mapping declares
-its own mode \u{2014} one-way in either direction, two-way, or backup \u{2014} so one run
-can push some entries and pull others. No mode deletes anything on either side.
+\u{2500}\u{2500} what sync's keepassxc target is, and how it differs from the clan target \u{2500}\u{2500}
+`sync keepassxc` converges declared safix entries with entries in your
+password database, which is where a credential a person types goes. Each
+mapping declares its own mode \u{2014} one-way in either direction, two-way, or
+backup \u{2014} so one run can push some entries and pull others. No mode deletes
+anything on either side.
 
-It is not a second bridge with a different far end. The clan verbs move values
-between two tools that both hold them for programs; this one ends the drift
-between a value a program reads and the same value a person reads, and its report
-is its own rather than more rows in `check`.
+It is not a second bridge with a different far end. The clan target moves
+values between two tools that both hold them for programs; this target ends
+the drift between a value a program reads and the same value a person reads.
+Its report is the same `audit`/`sync` verbs' own, over the second target,
+rather than more rows in `check`.
 
-\u{2500}\u{2500} one verb that does not exist here, and why \u{2500}\u{2500}
+\u{2500}\u{2500} verbs retired, reserved, or never built, and why \u{2500}\u{2500}
   upload   a tool that pushes generated values to a machine over ssh exists
            because the machine does not evaluate the flake holding them. A
            profile served from this repository does: activation is what delivers
            a value, through sops-nix reading the committed file. There is
            nothing for an upload to do that a rebuild does not already do.
+  export   retired permanently. clan's own vars export writes a machine's whole
+           vars folder to plaintext on disk, which is the bulk dump safix's
+           design refuses to build on either side of the boundary; sync clan
+           moves one declared mapping at a time, encrypted, and always did.
+  import   reserved rather than retired: a future, unbuilt feature \u{2014} ingesting
+           a value from an external plaintext source one entry at a time,
+           analogous to clan's own import-sops \u{2014} may use this word later.
+           There is no scaffold and no partial parser for it yet.
 ";

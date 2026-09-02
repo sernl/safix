@@ -118,6 +118,18 @@ pub(super) fn keygen_for_someone_else(user: &str) -> String {
     )
 }
 
+/// `--show` was asked and no identity has been minted on this machine yet.
+pub(super) fn keygen_no_identity_yet(file: &str) -> String {
+    format!(
+        "{file} holds no identity yet, so there is no public recipient to\n\
+        show.\n\
+        \n\
+        Mint one first:\n\
+        \n\
+        \x20   safix keygen"
+    )
+}
+
 /// A name outside the alphabet a path and a `path_regex` are built from.
 pub(super) fn bad_user_name(name: &str, pattern: &str) -> String {
     format!(
@@ -301,21 +313,55 @@ pub(super) fn unknown_sync_mapping(mapping: &str, declared: &str) -> String {
     )
 }
 
-/// A mapping named to the verb that does not act on it.
-pub(super) fn mapping_wrong_direction(
-    mapping: &str,
-    direction: &str,
-    verb: &str,
-    asked: &str,
-) -> String {
+/// A named mapping is declared with a direction the `--direction` filter does
+/// not accept.
+pub(super) fn mapping_wrong_direction(mapping: &str, actual: &str, filter: &str) -> String {
     format!(
-        "the mapping '{mapping}' is declared {direction}, which 'safix {verb}' acts on.\n\
+        "the mapping '{mapping}' is declared {actual}, not {filter}.\n\
         \n\
-        'safix {asked}' acts on the other direction. Either run\n\
+        --direction {filter} narrows the run to mappings declared with that\n\
+        value; '{mapping}' is declared {actual} instead. Drop --direction to\n\
+        act on it, or narrow to its own direction with --direction {actual}."
+    )
+}
+
+/// A word `sync` and `audit` read as a target keyword was given where a
+/// mapping name belongs.
+pub(super) fn reserved_mapping_word(word: &str) -> String {
+    format!(
+        "'{word}' is a target keyword, not a mapping name.\n\
         \n\
-        \x20   safix {verb} {mapping}\n\
+        sync and audit read clan and keepassxc as target keywords, never as\n\
+        mapping names — no declared mapping may be named either, or 'all'.\n\
+        Name the mapping you meant, or drop it to act on every mapping of the\n\
+        target already named."
+    )
+}
+
+/// A mapping name was given to `sync` or `audit` before any target was named.
+pub(super) fn mapping_name_needs_target(verb: &str, name: &str) -> String {
+    format!(
+        "'{name}' was read as a mapping name, and no target was named first.\n\
         \n\
-        or change the mapping's direction if it is declared the wrong way round."
+        A mapping name may follow clan or keepassxc on {verb}, never neither: a\n\
+        mapping id may be declared under both targets' namespaces, so guessing\n\
+        which one a bare name belongs to would be ambiguous exactly when it\n\
+        matters. Name a target first:\n\
+        \n\
+        \x20   safix {verb} clan {name}\n\
+        \x20   safix {verb} keepassxc {name}"
+    )
+}
+
+/// `--direction` was given to a target other than `clan`.
+pub(super) fn direction_on_wrong_target(target: &str) -> String {
+    format!(
+        "--direction is refused on {target}.\n\
+        \n\
+        Only the clan target accepts --direction, because a keepassxc mapping\n\
+        declares a mode rather than a direction, and a mode narrows a run by\n\
+        being named rather than by a run-time flag. Drop --direction, or name\n\
+        the clan target instead."
     )
 }
 

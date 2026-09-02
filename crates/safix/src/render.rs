@@ -478,10 +478,12 @@ pub fn listing(
 
 /// What a transfer run did, one line per mapping and a closing count.
 ///
-/// Each line names the mapping, the direction, both endpoints and the outcome.
-/// None of them names a value, and the arrow points the way the value moves so
-/// that a report of a mixed run reads without the reader holding the
-/// declarations open.
+/// Each line names the mapping and the outcome. An `updated` mapping's line
+/// names its direction as an arrow instead of the outcome word, because the
+/// direction is the fact a reader of a mixed run needs and the word alone
+/// does not carry it; `unchanged`, `absent at source` and `refused` render as
+/// a bare outcome word, because none of the three is a write a reader needs
+/// an arrow to understand.
 ///
 /// A refused mapping's reason is printed under its line rather than only
 /// counted, because a run that says "refused" and not why is a run the operator
@@ -490,21 +492,33 @@ pub fn listing(
 pub fn transfer(run: &safix_core::bridge::Run) -> String {
     let mut out = String::new();
     if run.transferred.is_empty() {
-        let empty = format!("{PROGRAM}: no mapping is declared for this direction.\n");
-        out.push_str(&empty);
+        out.push_str(PROGRAM);
+        out.push_str(": no mapping is declared.\n");
         return out;
     }
 
     for entry in &run.transferred {
-        let (from, to) = match entry.direction {
-            safix_core::model::Direction::ClanToSafix => (&entry.clan, &entry.safix),
-            safix_core::model::Direction::SafixToClan => (&entry.safix, &entry.clan),
+        let line = if matches!(entry.outcome, safix_core::bridge::Outcome::Updated) {
+            let arrow = match entry.direction {
+                safix_core::model::Direction::ClanToSafix => {
+                    format!("pulled {} \u{2190} clan", entry.mapping)
+                }
+                safix_core::model::Direction::SafixToClan => {
+                    format!("pushed {} \u{2192} clan", entry.mapping)
+                }
+            };
+            format!("{PROGRAM}: {arrow}\n")
+        } else {
+            let (from, to) = match entry.direction {
+                safix_core::model::Direction::ClanToSafix => (&entry.clan, &entry.safix),
+                safix_core::model::Direction::SafixToClan => (&entry.safix, &entry.clan),
+            };
+            format!(
+                "{PROGRAM}: {mapping}  {from} -> {to}  {outcome}\n",
+                mapping = entry.mapping,
+                outcome = entry.outcome.as_str(),
+            )
         };
-        let line = format!(
-            "{PROGRAM}: {mapping}  {from} -> {to}  {outcome}\n",
-            mapping = entry.mapping,
-            outcome = entry.outcome.as_str(),
-        );
         out.push_str(&line);
         if let safix_core::bridge::Outcome::Refused(reason) = &entry.outcome {
             out.push('\n');
@@ -530,18 +544,61 @@ pub fn transfer(run: &safix_core::bridge::Run) -> String {
     out
 }
 
-/// What an audit found, one paragraph per mapping whose two sides disagree.
+/// Entries under a declared group that no declared mapping accounts for, in
+/// the shape both `sync`'s and `audit`'s keepassxc reports give it.
+fn push_lingering(out: &mut String, entries: &[String]) {
+    for entry in entries {
+        out.push('\n');
+        if safix_core::store::is_companion(entry) {
+            detail(
+                out,
+                &format!("{entry} is safix's own record of a two-way agreement, and the"),
+            );
+            detail(
+                out,
+                "mapping it belonged to is no longer declared. It holds no value \u{2014} only a",
+            );
+            detail(out, "digest of one \u{2014} and removing it is safe.");
+        } else {
+            detail(
+                out,
+                &format!("{entry} is in the group and no mapping declares it."),
+            );
+            detail(
+                out,
+                "No mode deletes an entry, so this is what a mapping that was removed",
+            );
+            detail(out, "leaves behind.");
+        }
+        detail(out, "Nothing here will remove it; a person does that.");
+    }
+}
+
+/// What an audit found, over whichever target or targets the run scoped to.
 ///
 /// The shape is [`report`]'s, because this is the same kind of report over a
 /// different question: a finding is a blank line and a headline, the lines
 /// explaining it are indented two spaces, and the command that converges it is
 /// indented four. Every headline names the mapping and its two endpoints, and
-/// none of them names a value.
+/// none of them names a value. The two target sections print one after the
+/// other, each with its own closing line, because [`audit::Report`] carries
+/// them as two independent sections rather than one merged list.
 #[must_use]
 pub fn audit(report: &audit::Report) -> String {
     let mut out = String::new();
+    if let Some(clan) = &report.clan {
+        push_clan_audit(&mut out, clan);
+    }
+    if let Some(keepassxc) = &report.keepassxc {
+        push_keepassxc_audit(&mut out, keepassxc);
+    }
+    out
+}
+
+/// The clan target's section of an audit report.
+fn push_clan_audit(out: &mut String, report: &audit::ClanReport) {
     for finding in &report.findings {
-        push_disagreement(&mut out, finding);
+        push_disagreement(out, finding);
     }
     if report.findings.is_empty() {
         out.push_str(&agreed(report.examined));
@@ -553,7 +610,75 @@ pub fn audit(report: &audit::Report) -> String {
         );
         out.push_str(&closing);
     }
-    out
+}
+
+/// The keepassxc target's section of an audit report.
+///
+/// One line per compared mapping — agreeing included, the way [`sync`]'s own
+/// report lists every mapping rather than only the ones that need a person —
+/// because a keepassxc mapping's outcome is one of exactly three words rather
+/// than the clan target's open-ended disagreement, and a report that named
+/// all three is as short as one that named only two of them.
+fn push_keepassxc_audit(out: &mut String, report: &audit::KeepassxcReport) {
+    use audit::KeepassxcOutcome;
+
+    if report.compared.is_empty() {
+        out.push_str(PROGRAM);
+        out.push_str(": no mapping is declared.\n");
+        return;
+    }
+
+    for entry in &report.compared {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {safix} <-> {kdbx}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            safix = entry.safix,
+            kdbx = entry.kdbx,
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        match &entry.outcome {
+            KeepassxcOutcome::Diverged => {
+                remedy(out, &format!("{PROGRAM} sync keepassxc {}", entry.mapping));
+            }
+            KeepassxcOutcome::Unjudgeable(reason) => {
+                out.push('\n');
+                for line in reason.to_string().lines() {
+                    out.push_str("  ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            KeepassxcOutcome::Agreeing => {}
+        }
+    }
+
+    push_lingering(out, &report.lingering);
+
+    let agreeing = report
+        .compared
+        .iter()
+        .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::Agreeing))
+        .count();
+    let diverged = report
+        .compared
+        .iter()
+        .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::Diverged))
+        .count();
+    let unjudgeable = report
+        .compared
+        .iter()
+        .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::Unjudgeable(_)))
+        .count();
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {database}: {agreeing} agreeing, {diverged} \
+         diverged, {unjudgeable} unjudgeable.\n",
+        total = report.compared.len(),
+        database = report.database,
+    );
+    out.push_str(&closing);
 }
 
 /// The one line a run with nothing to report prints.
@@ -710,31 +835,7 @@ pub fn sync(report: &safix_core::sync::Report) -> String {
         push_sync_detail(&mut out, entry);
     }
 
-    for entry in &report.lingering {
-        out.push('\n');
-        if safix_core::store::is_companion(entry) {
-            detail(
-                &mut out,
-                &format!("{entry} is safix's own record of a two-way agreement, and the"),
-            );
-            detail(
-                &mut out,
-                "mapping it belonged to is no longer declared. It holds no value \u{2014} only a",
-            );
-            detail(&mut out, "digest of one \u{2014} and removing it is safe.");
-        } else {
-            detail(
-                &mut out,
-                &format!("{entry} is in the group and no mapping declares it."),
-            );
-            detail(
-                &mut out,
-                "No mode deletes an entry, so this is what a mapping that was removed",
-            );
-            detail(&mut out, "leaves behind.");
-        }
-        detail(&mut out, "Nothing here will remove it; a person does that.");
-    }
+    push_lingering(&mut out, &report.lingering);
 
     let tally = report.tally();
     let closing = format!(
@@ -816,7 +917,10 @@ fn push_sync_detail(out: &mut String, entry: &safix_core::sync::Converged) {
             remedy(out, "    mode = \"keepassxc-to-safix\";");
             remedy(
                 out,
-                &format!("then:  {PROGRAM} sync {mapping}", mapping = entry.mapping),
+                &format!(
+                    "then:  {PROGRAM} sync keepassxc {mapping}",
+                    mapping = entry.mapping
+                ),
             );
             remedy(out, "and put the mode back to two-way afterwards.");
         }
@@ -841,12 +945,11 @@ fn flow(finding: &audit::Finding) -> (&String, &String) {
     }
 }
 
-/// The command that converges one mapping: its own direction's verb, named at
-/// it.
+/// The command that converges one mapping, over the clan target.
+///
+/// `sync clan <mapping>` rather than a `--direction`-narrowed form: `sync`
+/// converges the mapping in its own declared direction regardless, so naming
+/// the filter would ask for something the plain form already does.
 fn converging(finding: &audit::Finding) -> String {
-    format!(
-        "{PROGRAM} {verb} {mapping}",
-        verb = finding.direction.verb(),
-        mapping = finding.mapping,
-    )
+    format!("{PROGRAM} sync clan {}", finding.mapping)
 }
