@@ -607,3 +607,149 @@ pub fn commit_subject(mapping: &Mapping) -> String {
         mapping.safix.user
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::Path;
+
+    use super::*;
+    use crate::model::Bridge;
+
+    /// A single shared-placement two-way mapping, deserialized the way the
+    /// runtime reads one off `nix eval`.
+    fn shared_mapping_bridge() -> Bridge {
+        serde_json::from_str(
+            r#"{
+              "clanFlake": ".",
+              "mappings": [
+                {
+                  "id": "ntfy-token",
+                  "direction": "two-way",
+                  "clan": {
+                    "placement": "shared",
+                    "machine": null,
+                    "generator": "ntfy",
+                    "file": "token"
+                  },
+                  "safix": { "user": "alice", "name": "ntfy-token" }
+                }
+              ]
+            }"#,
+        )
+        .expect("a fixture bridge")
+    }
+
+    /// A stub `clan` answering `machines list` with `machines`, in order, and
+    /// `vars get` by appending the machine it was asked about to `log` and
+    /// resolving only `right`; every other machine answers "Couldn't find
+    /// var", the same substring [`Error::ClanVarUnknown`] matches on the real
+    /// command.
+    ///
+    /// A bash script rather than a compiled binary, following
+    /// `enroll::proof::tests`' own pattern of writing a small executable stub
+    /// into a per-test directory under [`std::env::temp_dir`]: `Clan::read`
+    /// and `Clan::machines` both spawn `self.program` directly, so the
+    /// double under test needs to be a real executable rather than a closure.
+    fn stub(directory: &Path, machines: &[&str], right: &str, log: &Path) -> std::path::PathBuf {
+        let script = format!(
+            "#!/usr/bin/env bash\n\
+             set -euo pipefail\n\
+             case \"$1 $2\" in\n\
+             \"machines list\")\n\
+             printf '%s\\n' {machines}\n\
+             ;;\n\
+             \"vars get\")\n\
+             printf '%s\\n' \"$5\" >> {log}\n\
+             if [ \"$5\" = {right} ]; then\n\
+             printf '%s' fixture-value\n\
+             else\n\
+             echo \"Couldn't find var: $6 for machine: $5\" >&2\n\
+             exit 1\n\
+             fi\n\
+             ;;\n\
+             *)\n\
+             echo \"stub: unrecognized arguments: $*\" >&2\n\
+             exit 1\n\
+             ;;\n\
+             esac\n",
+            machines = machines.join(" "),
+            log = log.display(),
+            right = right,
+        );
+        let path = directory.join("clan-addressing-stub");
+        let mut file = std::fs::File::create(&path).expect("the stub file can be created");
+        file.write_all(script.as_bytes())
+            .expect("the stub can be written");
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        path
+    }
+
+    #[test]
+    fn a_shared_addressing_search_stops_at_the_first_machine_that_resolves() {
+        let directory = std::env::temp_dir().join(format!(
+            "safix-bridge-addressing-stop-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
+        let log = directory.join("attempts");
+        let program = stub(&directory, &["wrong-one", "right", "wrong-two"], "right", &log);
+
+        let clan = Clan::for_tests(program, ".".to_owned());
+        let addressing = Addressing::new(&clan);
+        let bridge = shared_mapping_bridge();
+        let mapping = bridge.named("ntfy-token").expect("the fixture mapping");
+
+        let reading = addressing.read(mapping).expect("the search resolves");
+        assert!(matches!(reading, Reading::Present(_)));
+
+        let attempts = std::fs::read_to_string(&log).expect("the log was written");
+        assert_eq!(
+            attempts.lines().collect::<Vec<_>>(),
+            ["wrong-one", "right"],
+            "the third candidate was tried although the second already resolved"
+        );
+
+        std::fs::remove_dir_all(&directory).expect("it can be removed");
+    }
+
+    #[test]
+    fn exhausting_every_machine_is_refused_naming_the_mapping_and_tries_each_once() {
+        let directory = std::env::temp_dir().join(format!(
+            "safix-bridge-addressing-exhaust-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
+        let log = directory.join("attempts");
+        let program = stub(&directory, &["one", "two", "three"], "nobody", &log);
+
+        let clan = Clan::for_tests(program, ".".to_owned());
+        let addressing = Addressing::new(&clan);
+        let bridge = shared_mapping_bridge();
+        let mapping = bridge.named("ntfy-token").expect("the fixture mapping");
+
+        let refusal = addressing.read(mapping).expect_err("no machine resolves");
+        match refusal {
+            Error::ClanAddressUnresolved {
+                mapping: id,
+                generator,
+                file,
+            } => {
+                assert_eq!(id, "ntfy-token");
+                assert_eq!(generator, "ntfy");
+                assert_eq!(file, "token");
+            }
+            other => unreachable!("exhaustion became {other:?}"),
+        }
+
+        let attempts = std::fs::read_to_string(&log).expect("the log was written");
+        assert_eq!(
+            attempts.lines().collect::<Vec<_>>(),
+            ["one", "two", "three"],
+            "each candidate should have been tried exactly once"
+        );
+
+        std::fs::remove_dir_all(&directory).expect("it can be removed");
+    }
+}
