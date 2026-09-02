@@ -1328,6 +1328,23 @@ mod tests {
         .expect("a fixture bridge")
     }
 
+    /// A scratch directory unique to one test run, not only one process.
+    ///
+    /// A pid alone collides with a stale directory a differently-timed
+    /// earlier run of this same binary left behind under load, whose script
+    /// can still be executing when this run's [`stub`] tries to create a new
+    /// one at the same path, failing with `ETXTBSY` for a reason that has
+    /// nothing to do with [`Addressing`] itself.
+    fn addressing_test_dir(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        std::env::temp_dir().join(format!(
+            "safix-bridge-addressing-{label}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
     /// A stub `clan` answering `machines list` with `machines`, in order, and
     /// `vars get` by appending the machine it was asked about to `log` and
     /// resolving only `right`; every other machine answers "Couldn't find
@@ -1373,12 +1390,31 @@ mod tests {
         path
     }
 
+    /// [`Addressing::read`], retried past a transient `ETXTBSY`.
+    ///
+    /// This suite runs hundreds of tests concurrently, many of them spawning
+    /// subprocesses of their own; under that load a script this test just
+    /// wrote and `chmod`ed can be reported busy for a moment by the kernel
+    /// before it settles, which is a property of running many `fork`/`exec`
+    /// calls at once rather than of [`Addressing`] or of the stub script
+    /// itself.
+    fn read_past_transient_busy(addressing: &Addressing<'_>, mapping: &Mapping) -> Result<Reading> {
+        for _ in 0..49 {
+            match addressing.read(mapping) {
+                Err(Error::ClanUnavailable { cause, .. })
+                    if cause.kind() == std::io::ErrorKind::ExecutableFileBusy =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                other => return other,
+            }
+        }
+        addressing.read(mapping)
+    }
+
     #[test]
     fn a_shared_addressing_search_stops_at_the_first_machine_that_resolves() {
-        let directory = std::env::temp_dir().join(format!(
-            "safix-bridge-addressing-stop-{}",
-            std::process::id()
-        ));
+        let directory = addressing_test_dir("stop");
         std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
         let log = directory.join("attempts");
         let program = stub(
@@ -1393,7 +1429,7 @@ mod tests {
         let bridge = shared_mapping_bridge();
         let mapping = bridge.named("ntfy-token").expect("the fixture mapping");
 
-        let reading = addressing.read(mapping).expect("the search resolves");
+        let reading = read_past_transient_busy(&addressing, mapping).expect("the search resolves");
         assert!(matches!(reading, Reading::Present(_)));
 
         let attempts = std::fs::read_to_string(&log).expect("the log was written");
@@ -1408,10 +1444,7 @@ mod tests {
 
     #[test]
     fn exhausting_every_machine_is_refused_naming_the_mapping_and_tries_each_once() {
-        let directory = std::env::temp_dir().join(format!(
-            "safix-bridge-addressing-exhaust-{}",
-            std::process::id()
-        ));
+        let directory = addressing_test_dir("exhaust");
         std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
         let log = directory.join("attempts");
         let program = stub(&directory, &["one", "two", "three"], "nobody", &log);
@@ -1421,7 +1454,7 @@ mod tests {
         let bridge = shared_mapping_bridge();
         let mapping = bridge.named("ntfy-token").expect("the fixture mapping");
 
-        match addressing.read(mapping) {
+        match read_past_transient_busy(&addressing, mapping) {
             Ok(_) => unreachable!("no machine should have resolved"),
             Err(Error::ClanAddressUnresolved {
                 mapping: id,
