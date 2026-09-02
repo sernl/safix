@@ -2129,7 +2129,7 @@ fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
 /// one that declares a database of its own fails on the second.
 fn refuse_a_real_database(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
     let touches_keepassxc = match arguments.first() {
-        Some(&"sync") | Some(&"audit") => arguments.get(1) != Some(&"clan"),
+        Some(&("sync" | "audit")) => arguments.get(1) != Some(&"clan"),
         _ => false,
     } && !arguments.contains(&"-h")
         && !arguments.contains(&"--help");

@@ -241,11 +241,7 @@ fn a_second_run_does_not_ask_clan_to_write_again() {
         .expect_success("seeding the source");
 
     bridge(&fixture, &["sync", "clan"], &[]).expect_success("the first run");
-    assert_eq!(
-        fixture.clan_writes(),
-        1,
-        "the first run did not write once"
-    );
+    assert_eq!(fixture.clan_writes(), 1, "the first run did not write once");
 
     let again = bridge(&fixture, &["sync", "clan"], &[]).expect_success("the second run");
     again.says("unchanged");
@@ -544,8 +540,7 @@ fn an_undeclared_mapping_name_is_refused_naming_the_declared_ones() {
 #[test]
 fn an_empty_bridge_is_silent_rather_than_refused() {
     let fixture = Fixture::new();
-    let run = bridge(&fixture, &["sync", "clan"], &[])
-        .expect_success("a run over an empty bridge");
+    let run = bridge(&fixture, &["sync", "clan"], &[]).expect_success("a run over an empty bridge");
     run.says("no mapping is declared");
 }
 
@@ -557,9 +552,7 @@ fn sync_appears_in_the_help_with_both_directions() {
     let scaffold = fixture.run(&["--help"]).expect_success("the general help");
     scaffold.says("safix sync");
 
-    let help = fixture
-        .run(&["sync", "-h"])
-        .expect_success("the sync help");
+    let help = fixture.run(&["sync", "-h"]).expect_success("the sync help");
     help.says("clan-to-safix");
     help.says("safix-to-clan");
     help.says("--direction");

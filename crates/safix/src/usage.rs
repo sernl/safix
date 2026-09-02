@@ -93,10 +93,10 @@ target and the database's own password on the keepassxc target. Carrying
 them here is what keeps both of `check`'s properties unconditionally true.
 
 A mapping this operator cannot decrypt, or a database entry the store's own
-command refuses over, is reported as one that could not be judged rather
-than skipped. A report that dropped those would be a report about who ran
-it, and a clean one would mean `what I could see agrees` while reading as
-`the mappings agree`.
+command refuses over, is reported rather than skipped, as one that could not
+be judged. A report that dropped it would be a report about who ran it, and
+a clean one would mean `what I could see agrees` while reading as `the
+mappings agree`.
 
 Nothing here writes, on either target. No value, and no digest of one,
 reaches the report.
