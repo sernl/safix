@@ -18,13 +18,13 @@ It sits in clan's repository, live, disconnected from any current declaration, a
 
 ## What Changes
 
-- `Clan` gains a fourth read contract, `vars list <machine>`, alongside the three it already has (`get`, `set`, `check`).
+- `Clan` gains a fourth contract, `vars list <machine>`, alongside the three `sync-clan-vars-two-way` leaves it with (`get`, `set`, `machines`).
   It is invoked once per machine that at least one currently declared mapping names, never per mapping and never against the whole clan.
 - `audit`'s report gains a `lingering` field, in the same shape and under the same name as `sync::Report::lingering`: clan vars, named as `<machine> <generator>/<file>`, that no currently declared mapping's clan side accounts for.
   It is reported as information on every `audit` run where at least one mapping is declared, alongside the existing per-mapping agreement findings, and it does not change `audit`'s exit status — exactly as `lingering` does not change `sync`'s tally or `is_clean`.
 - No mode this change adds deletes anything, on either side of the boundary.
   Reporting is the entire deliverable; a person still removes a var, on clan's side, with clan's own command.
-- The scope of what gets enumerated is exactly the machines the bridge currently names through its mappings, not clan's whole machine inventory (`clan machines list` is deliberately not called — see design.md's D2 for why "one consumer bridges one clan" does not mean one consumer may see every machine of that clan).
+- The scope of what gets enumerated is exactly the machines the bridge currently names or resolves through its mappings — declared directly for a per-machine mapping, discovered via clan for a shared one, never for a per-export one — not clan's whole machine inventory (`clan machines list` is deliberately not called — see design.md's D2 for why "one consumer bridges one clan" does not mean one consumer may see every machine of that clan).
   A machine whose last mapping is removed becomes invisible to this report; that is a stated, deliberate limitation and not a defect — see design.md's Risks.
 - `crates/safix/tests/support/clan-stub.rs` answers `vars list` for the hermetic suite, and `modules/flake/checks/real-clan.nix` gains a var no mapping names, so the parsing this change adds is held against the real clan CLI's real output shape, not only against a stub written to agree with it.
 
@@ -40,15 +40,16 @@ Not in scope: deleting a lingering var on either side, on any operator's say-so 
 
 Affected code:
 
-- `crates/safix-core/src/clan.rs` — new `Clan::list` method and its doc comment ("the two contracts" becomes three); a new error path for a machine that cannot be listed.
+- `crates/safix-core/src/clan.rs` — new `Clan::list` method and its doc comment (`sync-clan-vars-two-way`'s own rewrite, "the three contracts" naming read, write and machine discovery, becomes four); a new error path for a machine that cannot be listed.
 - `crates/safix-core/src/error/mod.rs` and `error/prose.rs` — one new `Error` variant and its message.
-- `crates/safix-core/src/audit.rs` — `Report::lingering`, the machine-grouping and enumeration that fills it, and the module's own doc comment.
+- `crates/safix-core/src/audit.rs` — the clan section's `lingering` field, alongside `rename-transfer-verbs`' own keepassxc section and its own `lingering` field on the same per-target report, the machine-grouping and enumeration that fills the clan one, and the module's own doc comment.
 - `crates/safix/src/render.rs` and `crates/safix/src/usage.rs` — the lingering section of `audit`'s printed report, and its help text.
-- `README.md:911-914` — the paragraph describing `audit`'s scope currently says it compares declared mappings and nothing else; it needs the same correction.
+- `README.md`'s "The bridge to clan" section, in the paragraph beginning "`safix audit` is the report over the same declarations" — it currently says `audit` compares declared mappings and nothing else; it needs the same correction.
 - `crates/safix/tests/support/clan-stub.rs`, `crates/safix/tests/audit.rs` — hermetic coverage of the new report field.
 - `crates/safix/tests/real_clan.rs`, `modules/flake/checks/real-clan.nix` — real-clan coverage that a var no mapping names is actually reported, against the real `clan vars list` output shape.
+- `CHANGELOG.md` — an `## [Unreleased]` entry naming the new lingering report, following the file's existing style.
 
 Sequencing: this change is written assuming `sync-clan-vars-two-way` has already landed, and for a structural reason rather than a scheduling preference.
-That change amends bridge-surface's current blanket refusal of a two-way relationship and is expected to give `Mapping` a third kind of relationship alongside its two directions (mirroring keepassxc's `Mode`, per the shared program contract's D2).
-This change's `claimed` computation — which var ids count as accounted for — is written against `mapping.clan.machine`, `.generator`, and `.file` alone, never against `mapping.direction`, precisely so that a third relationship kind requires no change here (design.md's D3 records this as a decision rather than an accident).
+That change gives `ClanSide` a `placement` (`shared | per-machine | per-export`, defaulting to `per-machine`) and makes `machine` `nullOr str` — null for a shared or per-export mapping, whose addressing machine is instead discovered at run time by trying each machine `Clan::machines` returns against the mapping's generator (two-way's D3) — rather than the mode-like third relationship kind this change originally assumed before two-way's design was written.
+This change's `claimed` computation is placement-sensitive rather than a single-field match: a per-machine mapping's clan triple is claimed on its declared machine, a shared mapping's is claimed on any machine that lists it (design.md's D2/D3 record why, and why comparison stays machine-insensitive there), and a per-export mapping's is never claimed or reported at all, because `clan vars list <machine>` cannot surface a `PerExport`-placed generator's var on any machine — a structural fact about clan's own command at the pinned revision, cited and grounded in design.md's Context.
 Both changes touch `crates/safix-core/src/audit.rs` and `modules/flake/checks/real-clan.nix`; landing the two-way change first means this change's diff to those two files is written against their post-two-way shape once, rather than against two moving targets.
