@@ -73,6 +73,11 @@ const STALE: &str = "SAFIX_CLAN_STUB_STALE";
 /// A var id whose read or write fails the way any other clan refusal does.
 const REFUSES: &str = "SAFIX_CLAN_STUB_REFUSES";
 
+/// Every machine name `machines list` answers with, comma-separated, in
+/// order. Absent or empty answers none, which is a fleet a shared-placement
+/// search always exhausts.
+const MACHINES: &str = "SAFIX_CLAN_STUB_MACHINES";
+
 fn main() -> ! {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
@@ -89,6 +94,7 @@ fn main() -> ! {
     match words.as_slice() {
         ["vars", "get", "--flake", _flake, machine, id] => get(machine, id),
         ["vars", "set", "--flake", _flake, machine, id] => set(machine, id),
+        ["machines", "list", "--flake", _flake] => machines(),
         [
             "vars",
             "check",
@@ -181,6 +187,15 @@ fn set(machine: &str, id: &str) -> ! {
 
     let _ = std::fs::create_dir_all(store_dir(machine, id).0);
     let _ = std::fs::write(store_dir(machine, id).1, encoded(&value));
+    std::process::exit(0);
+}
+
+/// Every machine name the fleet has, one per line.
+fn machines() -> ! {
+    let list = named(MACHINES).unwrap_or_default();
+    for name in list.split(',').filter(|name| !name.is_empty()) {
+        println!("{name}");
+    }
     std::process::exit(0);
 }
 
