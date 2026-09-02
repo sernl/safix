@@ -51,6 +51,15 @@ path = "tests/support/clan-stub.rs"
 name = "safix-card-stub"
 path = "tests/support/card-stubs.rs"
 
+# The ssh-adjacent tools `safix upload` shells out to — ssh-keygen, ssh-to-age,
+# ssh-keyscan and ssh — in one binary with a role chosen by the shape of its own
+# argument vector, for the reason the clan and card stubs are: the claims are
+# about the delegation, and no check in this repository reaches a real network
+# or mints a real ed25519 key.
+[[bin]]
+name = "safix-transport-stub"
+path = "tests/support/transport-stub.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true

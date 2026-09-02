@@ -132,6 +132,25 @@ pub fn clan_stub() -> &'static str {
     .as_str()
 }
 
+/// The ssh-adjacent tools `safix upload` shells out to: `ssh-keygen`,
+/// `ssh-to-age`, `ssh-keyscan` and `ssh`, one stub binary with four roles for
+/// the reason `card_stub` is: the claims this suite drives against it are
+/// about the delegation — that the identity conversion runs the named tool
+/// and reaches no network, that a probe reads only what is offered, and that
+/// a write streams the tarball and nothing besides — not about a real
+/// network's behaviour, which no check in this repository reaches. See the
+/// head of `tests/support/transport-stub.rs`.
+pub fn transport_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        located(
+            "SAFIX_TEST_TRANSPORT_STUB",
+            env!("CARGO_BIN_EXE_safix-transport-stub"),
+        )
+    })
+    .as_str()
+}
+
 /// The real clan command, where a check put one in the environment.
 ///
 /// Nothing falls back here, and that is the point: there is no compiled-in path
@@ -1000,6 +1019,50 @@ impl Fixture {
                 self.clan_spool().to_string_lossy().into_owned(),
             ),
         ]
+    }
+
+    /// Where the transport stub records every role it played.
+    pub fn transport_spool(&self) -> PathBuf {
+        self.work.join("transport-spool")
+    }
+
+    /// The environment an upload run needs: `ssh-keygen`, `ssh-to-age`,
+    /// `ssh-keyscan` and `ssh` each pointed at the transport stub, and the
+    /// spool it all records into.
+    ///
+    /// Four variables rather than one, for the reason [`Fixture::card_env`]
+    /// has four: the runtime reaches each tool by its own override, and a
+    /// single one would let a rename of any of them go unnoticed.
+    pub fn transport_env(&self) -> Vec<(String, String)> {
+        let stub = transport_stub().to_owned();
+        vec![
+            ("SAFIX_SSH_KEYGEN".to_owned(), stub.clone()),
+            ("SAFIX_SSH_TO_AGE".to_owned(), stub.clone()),
+            ("SAFIX_SSH_KEYSCAN".to_owned(), stub.clone()),
+            ("SAFIX_SSH".to_owned(), stub),
+            (
+                "SAFIX_TRANSPORT_STUB_SPOOL".to_owned(),
+                self.transport_spool().to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
+    /// One file the transport stub recorded, or the empty string.
+    pub fn transport_recorded(&self, name: &str) -> String {
+        std::fs::read_to_string(self.transport_spool().join(name)).unwrap_or_default()
+    }
+
+    /// Every role the transport stub played, in the order it played them —
+    /// `ssh-keygen`, `ssh-to-age`, `ssh-keyscan` or `ssh` — one per line.
+    ///
+    /// What task 2.5's and 3.6's claims are asserted against: a
+    /// `--directory` run's list holds no `ssh-keyscan` and no `ssh`, and a
+    /// matching remote probe's holds no `ssh` at all.
+    pub fn transport_invocations(&self) -> Vec<String> {
+        self.transport_recorded("roles")
+            .lines()
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Write every fixture document the stubbed evaluator answers with.
