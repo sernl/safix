@@ -155,7 +155,10 @@
 
       violationsWith =
         fleet': catalogue': record:
-        bridge.violationsOf { users = fleet'; catalogue = catalogue'; } (bridgeOf record);
+        bridge.violationsOf {
+          users = fleet';
+          catalogue = catalogue';
+        } (bridgeOf record);
 
       # A second catalogue and fleet, used only by the share/placement fixtures
       # below: `shared-tok` is a generator whose derived `share` is true because

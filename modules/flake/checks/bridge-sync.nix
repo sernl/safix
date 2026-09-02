@@ -83,7 +83,9 @@
         };
       };
 
-      registry = { users = fleet; };
+      registry = {
+        users = fleet;
+      };
 
       oneWayBridge = bridgeOf {
         clanFlake = ".";
@@ -118,9 +120,7 @@
             messages=$(mktemp)
             printf '%s\n' ${
               lib.escapeShellArg (
-                builtins.head (
-                  bridge.violationsOf { users = reservedCompanionFleet; } twoWayBridge
-                )
+                builtins.head (bridge.violationsOf { users = reservedCompanionFleet; } twoWayBridge)
               )
             } > "$messages"
 
@@ -162,8 +162,7 @@
           placementsUnchangedByOneWay =
             lib.mapAttrs (
               user: named: named // (bridge.companionsOf registry oneWayBridge).${user} or { }
-            ) basePlacements
-            == basePlacements;
+            ) basePlacements == basePlacements;
         };
         expected = {
           companionFile = mapped.file;

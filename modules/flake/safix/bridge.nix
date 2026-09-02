@@ -205,7 +205,12 @@ let
         in
         lib.recursiveUpdate acc {
           ${m.safix.user}.${companionOf m} = {
-            inherit (mapped) origin owner shared file;
+            inherit (mapped)
+              origin
+              owner
+              shared
+              file
+              ;
             key = "${mapped.key}${stateSuffix}";
             generator = null;
             public = null;
@@ -236,9 +241,7 @@ let
   # same `refuseScript` bytes the real check runs over a perturbed fleet.
   mappingsOf = bridge: lib.mapAttrsToList (id: m: m // { inherit id; }) bridge.mappings;
 
-  endpointsOf =
-    m:
-    "${clanAddressOf m} <-> ${safixAddressOf m}";
+  endpointsOf = m: "${clanAddressOf m} <-> ${safixAddressOf m}";
 
   violationsOf =
     registry: bridge:
@@ -417,11 +420,13 @@ let
       # two faults hears about both.
       reservedId = lib.concatMap (
         m:
-        lib.optional (builtins.elem m.id [
-          "clan"
-          "keepassxc"
-          "all"
-        ]) "flake.safix.bridge.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+        lib.optional
+          (builtins.elem m.id [
+            "clan"
+            "keepassxc"
+            "all"
+          ])
+          "flake.safix.bridge.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
       ) declared;
 
       # A two-way mapping's companion reserves a name in its own user's

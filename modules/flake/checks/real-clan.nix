@@ -153,7 +153,11 @@
       secondMachine = "aurora";
 
       generator =
-        { value, validation, share ? false }:
+        {
+          value,
+          validation,
+          share ? false,
+        }:
         {
           files.token.secret = true;
           script = ''echo -n ${value} > "$out"/token'';

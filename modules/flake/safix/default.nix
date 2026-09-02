@@ -306,7 +306,12 @@ in
     # already a string: a nix path here would put a copy of the whole encrypted
     # database in the store on every evaluation, which ./options.nix records.
     keepassxc = {
-      inherit (cfg.keepassxc) database group yubikey keyFile;
+      inherit (cfg.keepassxc)
+        database
+        group
+        yubikey
+        keyFile
+        ;
       mappings = keepassxcLib.mappingsOf cfg.keepassxc;
     };
 

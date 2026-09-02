@@ -217,11 +217,13 @@ let
       # faults hears about both.
       reservedId = lib.concatMap (
         m:
-        lib.optional (builtins.elem m.id [
-          "clan"
-          "keepassxc"
-          "all"
-        ]) "flake.safix.keepassxc.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+        lib.optional
+          (builtins.elem m.id [
+            "clan"
+            "keepassxc"
+            "all"
+          ])
+          "flake.safix.keepassxc.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
       ) declared;
     in
     if resolve.violations registry != [ ] then

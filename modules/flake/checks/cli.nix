@@ -930,12 +930,14 @@
 
       # 3.4: `--force` is inert on the match branch.
       checks.safix-upload-remote-match-force =
-        mode "safix-upload-remote-match-force" "upload" "force_is_inert_on_a_match";
+        mode "safix-upload-remote-match-force" "upload"
+          "force_is_inert_on_a_match";
 
       # 3.3, second branch: no key presented writes the given identity, with
       # the recorded invocation order and the `ssh` argv both asserted.
       checks.safix-upload-remote-write =
-        mode "safix-upload-remote-write" "upload" "no_key_presented_writes_given_identity";
+        mode "safix-upload-remote-write" "upload"
+          "no_key_presented_writes_given_identity";
 
       # 3.3, second branch without `--identity`: refuses before opening a
       # write-capable session.

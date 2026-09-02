@@ -198,9 +198,8 @@
       # `nullOr str` to `nullOr (either str path)` turns this `true`, because a
       # path would then typecheck where today it is refused.
       keyFileDeclaredAsAPathTypechecks =
-        (builtins.tryEval (
-          builtins.deepSeq (recordOf { keyFile = ./mk-structural-check.nix; }) "resolved"
-        )).success;
+        (builtins.tryEval (builtins.deepSeq (recordOf { keyFile = ./mk-structural-check.nix; }) "resolved"))
+        .success;
 
       drill =
         pkgs.runCommand "safix-keepassxc-drill"
