@@ -75,7 +75,7 @@
 # # The drills, and what they were observed to do
 #
 # Withholding `SAFIX_TEST_REAL_CLAN_SEED` makes every test in the target report
-# the absence and return, and libtest then says eleven passed. Observed: the
+# the absence and return, and libtest then says twelve passed. Observed: the
 # result-line guard below caught it and the check failed. That is the failure
 # this whole shape exists to prevent — an attribute that is present, green, and
 # asserting nothing.
