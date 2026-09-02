@@ -10,7 +10,7 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 - [x] 1.2 In the same fixture, assert that a secret var's state is exactly `********` and that listing does not require an age identity to be present — holding design.md's D1 claim that enumeration never decrypts
 - [x] 1.3 Assert that `clan vars list` accepts the same global `--flake` flag in the same position `clan.rs`'s existing `get`/`set`/`check` calls already use, so `Clan::list`'s argument vector is exercised against the real parser rather than only against `clan_cli/cli.py:85-91` as read
 - [x] 1.4 Assert that a shared-placement generator's var appears with the identical id in `clan vars list <machine>` for every machine that declares it, holding design.md's Context finding that `vars list`'s underlying selector (`<machine>.config.clan.core.vars.generators.*`) reaches a `Shared`-placed generator through every declaring machine's own configuration
-- [ ] 1.5 Verify: the fixture from 1.1-1.4 passes against the real clan built in that check's sandbox
+- [x] 1.5 Verify: the fixture from 1.1-1.4 passes against the real clan built in that check's sandbox (log: `logs/1a-safix-bridge-real-clan-retry2-20260903-072743.log`, 24 passed)
 
 ## 2. `Clan::list` and the new error path
 
@@ -55,8 +55,8 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 - [x] 6.1 In `modules/flake/checks/real-clan.nix`'s fixture, add a fourth generator or file that no bridge mapping in that check's fleet names, alongside the existing `ntfy`/`handover`/`scheduled` three, so the real clan built there has something for `Clan::list` to find and no mapping to claim it
 - [x] 6.2 Add a test to `crates/safix/tests/real_clan.rs` asserting `safix audit clan` against the real clan reports the unmapped var under the new section, naming the real machine and the real generator/file the check declares (no fleet identifier — these are the check's own synthetic names)
 - [x] 6.3 Add a test asserting that once a mapping for that var is declared and the fixture rebuilt, the same var stops appearing in `lingering` — holding that the scope is genuinely computed from current declarations and not cached across runs
-- [ ] 6.4 Severity drill: temporarily removing the claimed-set check in `audit.rs` (per 3.3's drill) and re-running 6.2 against the real clan must also turn red, confirming the hermetic drill in 3.8 is not answering a question only the stub can pose
-- [ ] 6.5 Verify: `nix build .#checks.x86_64-linux.safix-bridge-real-clan` green on Linux with clan-core in the closure, and its own absence-guard (per that file's existing discipline) still fires when `SAFIX_TEST_REAL_CLAN_SEED` is withheld
+- [x] 6.4 Severity drill: temporarily removing the claimed-set check in `audit.rs` (per 3.3's drill) and re-running 6.2 against the real clan must also turn red, confirming the hermetic drill in 3.8 is not answering a question only the stub can pose (red: `logs/6.4-drill-red-20260903-073503.log`, the perturbation fails the check one derivation upstream, in `safix-integration`'s own hermetic `audit.rs` suite that `safix-bridge-real-clan` depends on, 18/22 passed there; green after `git checkout -- crates/safix-core/src/audit.rs`: `logs/6.4-drill-green-20260903-073812.log`, 24/24 `against_a_real_clan::*` tests passing; drill-ledger comment in `modules/flake/checks/real-clan.nix` updated with both this drill and the corrected twenty-four-test count)
+- [x] 6.5 Verify: `nix build .#checks.x86_64-linux.safix-bridge-real-clan` green on Linux with clan-core in the closure, and its own absence-guard (per that file's existing discipline) still fires when `SAFIX_TEST_REAL_CLAN_SEED` is withheld (log: `logs/1a-safix-bridge-real-clan-retry2-20260903-072743.log`, 24 passed; two real-clan fixture defects fixed first, see the two `fix(real-clan):` commits on this branch)
 
 ## 7. Documentation
 
