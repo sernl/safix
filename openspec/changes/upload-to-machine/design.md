@@ -1,5 +1,10 @@
 Revisions are as named in `proposal.md`; every anchor below was read at one of them.
 
+Amended 2026-09-03 while proposing `rename-transfer-verbs`: this change now applies after `rename-transfer-verbs` rather than independently of it, because both edit the same `safix-cli` requirement and the same `crates/safix/src/usage.rs` block.
+The `safix-cli` delta now MODIFIES `rename-transfer-verbs`'s ADDED requirement "Retired and reserved verbs are recorded rather than left mysterious" rather than the base spec's now-removed "Absent verbs are recorded rather than left mysterious".
+Every reference below to `one-unlock-bootstrap` as a change in this repository is corrected: no such change exists here, and the design that owns bootstrapping a person's own first identity is the dotfiles repository's own `one-unlock-bootstrap` design (`CHANGELOG.md:169`).
+The transport, the `Error` variant location, and the check-mapping decisions this design left open are now recorded below (D7).
+
 ## Context
 
 A machine's recipient is declared before the machine exists in any bootable form: `flake.safix.machines.<m>.recipient` is the age form of a host ed25519 key the operator holds (`modules/flake/safix/types.nix:548-576`), and every ciphertext that machine's audience reaches gets wrapped to that recipient as soon as `safix fix` runs, independent of whether the machine has ever booted.
@@ -22,10 +27,10 @@ Reuse clan's transport shape rather than inventing one, because it is a proven d
 
 Non-Goals.
 Minting a machine's identity. safix mints no machine identity anywhere in its existing surface — `keygen` mints a *person's* age identity and explicitly stops there (`crates/safix-core/src/keygen.rs:1-8`) — and this change does not add the first case of it; the operator supplies the private key, harvested or minted by their own means, exactly as they already supply the public half that becomes the declared recipient.
-Provisioning a person's own first identity. That is one-unlock-bootstrap's territory (an active, unarchived change in this repository's own `openspec/changes/one-unlock-bootstrap/`), and this verb parses a machine name only.
+Provisioning a person's own first identity: this verb parses a machine name only, and bootstrapping a person's own first identity is separate, deferred design work outside this repository — the dotfiles repository's `one-unlock-bootstrap` design, which `CHANGELOG.md:169` references.
 A systemd-credentials delivery path for the same material. Recorded as a named non-goal in Decisions below, with the one-sentence extension point stated and nothing built toward it.
 Any verb that deploys, switches, or rebuilds a machine. safix is pull-model: a machine's own next rebuild is what activates the closure carrying its ciphertext, and nothing this change adds triggers one.
-Ongoing secret delivery to an already-provisioned machine. That is what the closure and safix's own installer already do, and is the reasoning `safix-cli`'s "Absent verbs" requirement keeps, narrowed rather than dropped.
+Ongoing secret delivery to an already-provisioned machine. That is what the closure and safix's own installer already do, and is the reasoning `safix-cli`'s "Retired and reserved verbs are recorded rather than left mysterious" requirement (`rename-transfer-verbs`'s successor to "Absent verbs are recorded rather than left mysterious") keeps, narrowed rather than dropped.
 
 ## Decisions
 
@@ -88,10 +93,20 @@ An explicit `--force` proceeds past this branch alone; it has no effect on the f
 ### D6. Person identities and systemd-credentials are named non-goals, not silent omissions
 
 Person identities: `safix upload` parses a machine name against `flake.safix.machines` and refuses a name it does not find there the same way it refuses any other undeclared machine — it does not special-case a person's name to explain the boundary, because the refusal is already the right shape and a second message saying the same thing under a different condition would be two answers to one question.
-one-unlock-bootstrap is where a person's own first-identity bootstrap belongs, tracked in that change's own tasks rather than here.
+Bootstrapping a person's own first identity is separate, deferred design work outside this repository — the dotfiles repository's `one-unlock-bootstrap` design, which `CHANGELOG.md:169` references — and tracked there rather than here.
 
 systemd-credentials: binding the host key to a TPM-backed or otherwise encrypted systemd credential at boot, rather than a plaintext file under `/etc/ssh`, is a real alternative delivery mechanism and the operator has deferred it as a feature entire.
 The one sentence worth recording is the extension point rather than a design for it: `--directory DIR`'s output is a plain filesystem tree, and a future systemd-credentials backend would consume the same operator-supplied `--identity` input through a different write path from D3 rather than through a different verb, because what changes is where the bytes land and not what decides which bytes they are.
+
+### D7. The transport shells out to `ssh` and `tar`; refusals are `Error` variants; checks map one-to-one through `cli.nix`'s `mode` helper
+
+The remote leg shells out to `ssh` and `tar` as subprocesses, exactly as clan's own `clan_lib/ssh/upload.py` does, rather than adding a Cargo dependency for either protocol: task 5.1's positive enumeration of the module's own subprocess set names only `ssh-to-age` and the ssh transport itself, which reads as a boundary on what runs rather than a boundary on what compiles in.
+The `Host` abstraction D1 and D5 both name is a small, module-private type over `std::process::Command` in `crates/safix-core/src/upload.rs`, holding the operator-named address and mediating the probe (D5) and the write (D2) through the same two subprocess calls rather than through a network library — the same posture `keygen.rs` already takes toward `ssh-to-age` (`crates/safix-core/src/keygen.rs:231-233`).
+
+Every refusal this change adds — the three machine-targeting refusals (task 1.4), the recipient-mismatch refusals (task 2.2, task 3.3), and the missing-`--identity` refusals (task 2.4, task 3.3) — is a new `Error` variant in `crates/safix-core/src/error/mod.rs`, with its message in `error/prose.rs` and its code in `error/code.rs`, matching every existing refusal in this crate; each gets a reporter sample in `crates/safix/src/reporter.rs` and two accepted insta snapshots, per this repository's closed code table.
+
+The "new check group" `proposal.md`'s Impact section once promised is not a new `modules/flake/checks/*.nix` file: this change adds no nix option, so there is no structural check to add.
+Its checks are integration tests in `crates/safix/tests/upload.rs`, one nix check per claim through `modules/flake/checks/cli.nix`'s `mode` helper (`mode "safix-upload-<claim>" "upload" "<test_function>"`), matching how every other verb's checks in that file are wired, and each gets its own perturbation drill recorded in that file's ledger comment, per its header's established convention.
 
 ## Risks / Trade-offs
 
