@@ -68,6 +68,6 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 
 - [x] 8.1 `openspec validate enumerate-clan-namespace --strict`
 - [x] 8.2 `openspec validate --all --strict`
-- [ ] 8.3 `cargo test` green
+- [x] 8.3 `cargo test` green (log: `logs/cargo-test-workspace-20260903-074055.log`, `cargo test --locked --workspace`, 33 test binaries all `ok`, 0 failed)
 - [ ] 8.4 `nix flake check` green
 - [x] 8.5 `rg` the whole tree for any real fleet identifier introduced by this change and confirm none
