@@ -1,0 +1,47 @@
+---
+source: crates/safix/tests/upload.rs
+expression: run.combined()
+---
+safix upload <machine> --directory DIR --identity PATH
+safix upload <machine> --to ADDRESS [--identity PATH] [--force]
+
+Seed a machine's own ed25519 host key before its first activation, so the
+audience already wrapped to its declared recipient can be decrypted from the
+moment it boots. safix mints no machine identity: --identity PATH names a
+private key the operator already holds, and the command refuses before
+writing anything when its derived recipient does not match the machine's
+declared one.
+
+── --directory: a pre-seed tree, touching no network ──
+Writes DIR/etc/ssh/ssh_host_ed25519_key at mode 0600 and
+DIR/etc/ssh/ssh_host_ed25519_key.pub at mode 0644 — the paths and modes a
+fresh NixOS install's own sshd-keygen would produce — for nixos-anywhere
+--extra-files or for hand-copying onto installer media. Creates no other path
+under DIR and makes no ssh connection.
+
+── --to: probe first, then no-op, write, or refuse ──
+Reads the ed25519 host key ADDRESS currently presents, unauthenticated,
+before writing anything:
+
+  already the declared key     reports it and writes nothing, even with
+                               --force and --identity both given
+  no key presented             writes, given --identity; refused naming the
+                               flag otherwise
+  a different key presented    refused by default, naming both recipients;
+                               --force together with --identity proceeds
+
+A write streams a tarball built inside the same private staging root
+generation and editing use — files at mode 0400, directories at 0700, as
+root — and wipes the fixed destination before extracting into it. No value
+is decrypted, encrypted or read on this path: what travels is the identity
+material the operator supplied, once.
+
+── what this does not cover ──
+Provisioning a person's own first identity. A machine name is all this verb
+parses, and a person's name is refused the way an undeclared machine is.
+
+A systemd-credentials delivery path for the same material. It does not exist
+yet; --directory's output is a plain filesystem tree.
+
+Any deploy, switch or rebuild. Nothing here triggers one: the machine's own
+next rebuild is what activates what was written here.

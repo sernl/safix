@@ -1,0 +1,108 @@
+---
+source: crates/safix/tests/upload.rs
+expression: run.combined()
+---
+safix — the whole lifecycle of one secret, by name and never by file.
+
+  safix set      [<user>] <name>                    write a value you type
+  safix edit     [<user>] <name>                    author a value in your editor
+  safix get      [<user>] <name>                    decrypt one key to stdout
+  safix list     [<user>]                           every name a user holds
+  safix generate [--regenerate] [--yes] [<user>] [<name>]
+                                                    mint values from generators
+  safix check    [<user>]                           report drift, change nothing
+  safix fix      [--yes]                            converge policy and ciphertext
+  safix audit    [clan|keepassxc] [<mapping>...]    report bridge or mirror drift
+  safix sync     [clan|keepassxc] [<mapping>...]    converge declared relationships
+  safix keygen   [--for-someone-else] [<user>] | --show
+                                                    an age identity for a person
+  safix adduser  <name> <age-recipient> [...]       declare a person who holds none
+  safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
+  safix group    add|remove <group> <subject>       edit a group's membership
+  safix upload   <machine> --directory DIR | --to ADDRESS
+                                                    seed a machine's host identity
+
+── global options ──
+  --entry <file>          evaluate <file> instead of the repository's flake
+  --nixpkgs <flake-ref>   generate's sandbox resolves its tools against this
+                          flake reference instead of the declaring one
+
+SAFIX_ENTRY and SAFIX_NIXPKGS set the same two, and --entry and --nixpkgs win
+when both a flag and its variable are given. Thirteen of the fourteen
+subcommands behave identically under --entry as against a flake; generate is
+the exception and refuses under --entry with neither --nixpkgs nor
+SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
+stages or commits: that root is still the one git reports for the current
+directory.
+
+<user> defaults to $USER when flake.safix.users declares them, and otherwise to
+the sole declared holder when there is exactly one.
+
+The file, the key inside it and the recipients all come from
+flake.safix.lib.placements. A name no declaration covers is refused rather than
+given a destination.
+
+`safix <subcommand> -h` explains one of them.
+
+── narrowing an audience is not revocation ──
+Removing someone from an audience stops future encryptions reaching them. It
+takes nothing back: they have already read every value in every file they could
+open, and only minting a new value revokes it. `safix fix` re-wraps each
+governed file's data key to the audience now declared, which aligns ciphertext
+with policy and is explicitly not revocation.
+
+── who may scaffold for whom ──
+`flake.safix.organizations.<o>.managers` names the people who scaffold for an
+organization, and a person's own `flake.safix.users.<u>.managedBy` consents to
+that. Where both are declared, `safix enroll` and `safix group` accept those
+managers and refuse anybody else, judged against the identity the resulting
+commit will carry — there is no flag naming somebody else, because a scaffold and
+its attribution must not be able to disagree.
+
+Those refusals bind the cooperative path and are not authorization. The tree is
+the authorization: anyone who can commit can edit these declarations by hand,
+evaluation refuses structure rather than people, and no delegation record places a
+key in any audience. A person no organization manages is scaffolded by whoever can
+commit, exactly as before.
+
+── what sync's clan target is, and is not ──
+`sync clan` moves values across the clan boundary, one declared mapping at a
+time, each in its own declared direction. It is not a plaintext dump and
+restore: clan's own `vars export` writes a machine's whole vars folder to
+plaintext on disk, and that tree outlives the migration that justified it,
+on a disk — the shape this command exists to avoid. There is nothing here
+that writes one.
+
+`safix audit` is the report over the same declarations: it compares both
+sides of every mapping, on either target, and writes nothing. It is separate
+from `check` because it needs what `check` refuses — a decryption of the
+safix side, and either clan or the password database's own password.
+
+── what sync's keepassxc target is, and how it differs from the clan target ──
+`sync keepassxc` converges declared safix entries with entries in your
+password database, which is where a credential a person types goes. Each
+mapping declares its own mode — one-way in either direction, two-way, or
+backup — so one run can push some entries and pull others. No mode deletes
+anything on either side.
+
+It is not a second bridge with a different far end. The clan target moves
+values between two tools that both hold them for programs; this target ends
+the drift between a value a program reads and the same value a person reads.
+Its report is the same `audit`/`sync` verbs' own, over the second target,
+rather than more rows in `check`.
+
+── verbs retired, reserved, or narrower here than in clan ──
+  export   retired permanently. clan's own vars export writes a machine's whole
+           vars folder to plaintext on disk, which is the bulk dump safix's
+           design refuses to build on either side of the boundary; sync clan
+           moves one declared mapping at a time, encrypted, and always did.
+  import   reserved rather than retired: a future, unbuilt feature — ingesting
+           a value from an external plaintext source one entry at a time,
+           analogous to clan's own import-sops — may use this word later.
+           There is no scaffold and no partial parser for it yet.
+  upload   moves only a machine's own host identity, once, before that
+           machine's first activation — not clan's ongoing vars-delivery verb
+           of the same name. No verb here delivers a secret's value on an
+           ongoing basis: activation already does, through sops-nix reading
+           the committed file, once a machine holds the identity this verb
+           seeds.

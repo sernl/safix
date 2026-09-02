@@ -93,7 +93,10 @@ fn ssh_to_age() -> ! {
     if std::io::stdin().read_to_string(&mut fed).is_err() || fed.trim().is_empty() {
         refuse("no public key given on standard input");
     }
-    let body = fed.trim().strip_prefix("ssh-ed25519 ").unwrap_or(fed.trim());
+    let body = fed
+        .trim()
+        .strip_prefix("ssh-ed25519 ")
+        .unwrap_or(fed.trim());
     println!("age1{body}");
     std::process::exit(0);
 }
@@ -128,7 +131,9 @@ fn ssh(arguments: &[String]) -> ! {
 
 /// One environment variable this stub was given, or `None`.
 fn named(variable: &str) -> Option<String> {
-    std::env::var(variable).ok().filter(|value| !value.is_empty())
+    std::env::var(variable)
+        .ok()
+        .filter(|value| !value.is_empty())
 }
 
 /// The spool directory, made if it is not there yet.

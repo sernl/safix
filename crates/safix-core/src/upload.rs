@@ -127,7 +127,10 @@ pub fn run(
     let declared = resolve_machine(workspace, machine)?;
     match target {
         Target::Directory(directory) => {
-            let identity = options.identity.as_deref().ok_or(Error::UploadNeedsIdentity)?;
+            let identity = options
+                .identity
+                .as_deref()
+                .ok_or(Error::UploadNeedsIdentity)?;
             write_directory(directory, identity, machine, &declared)?;
             log(
                 progress,
@@ -211,7 +214,11 @@ fn write_directory(directory: &Path, identity: &Path, machine: &str, declared: &
 
     let private = read_identity(identity)?;
     write_secret(&target_dir.join(KEY_NAME), &private, 0o600)?;
-    write_plain(&target_dir.join(PUB_NAME), format!("{public}\n").as_bytes(), 0o644)?;
+    write_plain(
+        &target_dir.join(PUB_NAME),
+        format!("{public}\n").as_bytes(),
+        0o644,
+    )?;
     Ok(())
 }
 
@@ -518,10 +525,12 @@ impl Program {
 fn spawn(program: Program, configure: impl FnOnce(&mut Command)) -> Result<std::process::Child> {
     let mut command = program.command();
     configure(&mut command);
-    command.spawn().map_err(|cause| Error::UploadToolUnavailable {
-        program: program.program_name(),
-        cause,
-    })
+    command
+        .spawn()
+        .map_err(|cause| Error::UploadToolUnavailable {
+            program: program.program_name(),
+            cause,
+        })
 }
 
 /// Run `program` to completion, capturing both streams.
@@ -532,10 +541,12 @@ fn spawn(program: Program, configure: impl FnOnce(&mut Command)) -> Result<std::
 fn output(program: Program, configure: impl FnOnce(&mut Command)) -> Result<std::process::Output> {
     let mut command = program.command();
     configure(&mut command);
-    command.output().map_err(|cause| Error::UploadToolUnavailable {
-        program: program.program_name(),
-        cause,
-    })
+    command
+        .output()
+        .map_err(|cause| Error::UploadToolUnavailable {
+            program: program.program_name(),
+            cause,
+        })
 }
 
 /// The public half of the private key at `path`, in OpenSSH wire format.
@@ -562,7 +573,9 @@ fn public_half(path: &Path) -> Result<String> {
             output: trimmed(&String::from_utf8_lossy(&finished.stderr)),
         });
     }
-    Ok(String::from_utf8_lossy(&finished.stdout).trim_end().to_owned())
+    Ok(String::from_utf8_lossy(&finished.stdout)
+        .trim_end()
+        .to_owned())
 }
 
 /// The age recipient an OpenSSH public key converts to, over `ssh-to-age`'s
@@ -695,10 +708,12 @@ fn write_secret(path: &Path, value: &Secret, mode: u32) -> Result<()> {
             path: path.display().to_string(),
             cause,
         })?;
-    value.write_to(&mut file).map_err(|cause| Error::FileUnwritable {
-        path: path.display().to_string(),
-        cause,
-    })
+    value
+        .write_to(&mut file)
+        .map_err(|cause| Error::FileUnwritable {
+            path: path.display().to_string(),
+            cause,
+        })
 }
 
 /// Write plain (non-secret) bytes into a new file at `mode`, refusing to
@@ -713,10 +728,11 @@ fn write_plain(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
             path: path.display().to_string(),
             cause,
         })?;
-    file.write_all(bytes).map_err(|cause| Error::FileUnwritable {
-        path: path.display().to_string(),
-        cause,
-    })
+    file.write_all(bytes)
+        .map_err(|cause| Error::FileUnwritable {
+            path: path.display().to_string(),
+            cause,
+        })
 }
 
 /// A subprocess's captured standard error, without its trailing newline.
@@ -745,7 +761,10 @@ mod tests {
         .into_iter()
         .map(Program::default_name)
         .collect();
-        assert_eq!(names, ["ssh-keygen", "ssh-to-age", "ssh-keyscan", "ssh", "tar"]);
+        assert_eq!(
+            names,
+            ["ssh-keygen", "ssh-to-age", "ssh-keyscan", "ssh", "tar"]
+        );
 
         let source = include_str!("upload.rs");
         let needle = ["Command", "::new("].concat();
