@@ -829,6 +829,30 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare one shared-placement two-way bridge mapping, and mint its
+    /// companion placement the same way [`Self::seed_two_way_mapping`] does
+    /// for a per-machine one.
+    pub fn seed_two_way_mapping_shared(
+        &mut self,
+        id: &str,
+        clan: (&str, &str),
+        safix: (&str, &str),
+    ) {
+        self.seed_shared_mapping(id, "two-way", clan, safix);
+
+        let (user, name) = safix;
+        let mapped = self.placements[user][name].clone();
+        let file = mapped["file"].as_str().unwrap_or(ALICE_FILE).to_owned();
+        let owner = mapped["owner"].as_str().unwrap_or(user).to_owned();
+        let shared = mapped["shared"].as_bool().unwrap_or(false);
+        let companion = format!("{name}-safix-bridge-sync-state");
+        self.placements[user][companion.as_str()] = json!({
+            "file": file, "key": companion, "origin": "private",
+            "owner": owner, "shared": shared, "generator": null, "public": null,
+        });
+        self.write_fixtures();
+    }
+
     /// Declare one keepassxc mapping, as `flake.safix.lib.keepassxc` resolves it.
     ///
     /// The shape is the one `modules/flake/safix/default.nix` projects: the
