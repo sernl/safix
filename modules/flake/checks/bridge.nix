@@ -30,19 +30,38 @@
 # ── severity: proven by perturbation, one drill per claim ──
 # Dropping `unresolvableSafixSide` from the list `violationsOf` returns empties
 # `unknownUserMessages` and `unknownNameMessages` and moves no other field.
-# Dropping `twoProducers` empties `twoProducersMessages`; the fixture's mapping
-# is otherwise sound, so nothing else covers it.
-# Dropping `twoMappingsOneTarget` empties `oneTargetMessages`. `bothDirections`
-# does not move under that drill and must not: opposite directions over one pair
-# of endpoints have *different* targets, so the duplicate-target rule never saw
-# them and the two rules are independent or the two-way refusal is unreachable.
-# Dropping `bothDirections` empties `bothDirectionsMessages` alone.
+# Dropping `twoProducers` empties `twoProducersMessages` and, since the rule was
+# broadened to two-way, `twoWayTwoProducersMessages` as well; each fixture's
+# mapping is otherwise sound, so nothing else covers either.
+# Dropping `twoMappingsOneTarget` empties `oneTargetMessages` and
+# `sharedDuplicateTargetMessages`. `bothDirections` does not move under that
+# drill and must not: opposite directions over one pair of endpoints have
+# *different* targets, so the duplicate-target rule never saw them and the two
+# rules are independent.
+# Dropping `bothDirections` empties `bothDirectionsMessages` alone;
+# `singleTwoWayMessages` stays empty either way, which is what proves the
+# narrowed rule accepts a single two-way declaration rather than merely never
+# firing.
 # Dropping the `resolve.violations` short-circuit fills `brokenCustody` with
 # bridge sentences about a fleet whose custody has not resolved, which is one
 # fault producing two unrelated messages.
 # Removing the direction enum lets `badDirection` evaluate rather than throw.
 # Dropping `reservedId` from the list empties `reservedIdMessages`' three
 # fields, one per reserved word a mapping id may collide with.
+# Dropping `placementConsistency` empties `perMachineNoMachineMessages` and
+# `sharedMachineSetMessages` independently, one per branch of the `if`.
+# Dropping the placement-aware branch of `clanAddressOf` (reverting a shared
+# mapping's key to `m.clan.machine`, always null) collapses every shared
+# mapping's target to the same string regardless of generator or file, which
+# would turn `soundSharedMessages` non-empty (two unrelated shared mappings in
+# the well-formed fixture would collide) rather than catching the genuine
+# collision `sharedDuplicateTargetMessages` asserts.
+# Dropping `sharePlacementMismatch` empties `sharedGeneratorPerMachinePlacementMessages`
+# and `perUserGeneratorSharedPlacementMessages` independently, one per branch;
+# `sharedGeneratorSharedPlacementMessages` and `handSetSharedPlacementMessages`
+# stay empty either way, which is what proves the rule accepts rather than
+# merely never firing.
+# Dropping `reservedCompanionName` empties `reservedCompanionNameMessages`.
 {
   perSystem =
     {
@@ -121,7 +140,56 @@
         safix = { inherit user name; };
       };
 
+      sharedMapping = direction: user: name: generator: {
+        inherit direction;
+        clan = {
+          placement = "shared";
+          machine = null;
+          inherit generator;
+          file = "token";
+        };
+        safix = { inherit user name; };
+      };
+
       violations = fleet': record: bridge.violationsOf { users = fleet'; } (bridgeOf record);
+
+      violationsWith =
+        fleet': catalogue': record:
+        bridge.violationsOf { users = fleet'; catalogue = catalogue'; } (bridgeOf record);
+
+      # A second catalogue and fleet, used only by the share/placement fixtures
+      # below: `shared-tok` is a generator whose derived `share` is true because
+      # its one output is carried from a `shared = true` catalogue entry, so it
+      # is a distinct fixture from `fleet`'s `minted` (a per-user generator,
+      # `share = false`).
+      shareCatalogue = typed (lib.types.attrsOf types.entry) {
+        shared-tok = {
+          shared = true;
+          generator.script = ''printf '%s' x > "$out/shared-tok"'';
+        };
+      };
+
+      shareFleet = fleetOf {
+        alice = {
+          recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
+          carries.shared-tok = { };
+          private.tok = { };
+          private.minted.generator.script = ''printf '%s' x > "$out/minted"'';
+        };
+      };
+
+      shareViolations = record: violationsWith shareFleet shareCatalogue record;
+
+      # A fleet whose alice has hand-declared the exact name a two-way mapping
+      # of `tok` would reserve for its companion, used only by
+      # `reservedCompanionNameMessages`.
+      reservedCompanionFleet = fleetOf {
+        alice = {
+          recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
+          private.tok = { };
+          private."tok-safix-bridge-sync-state" = { };
+        };
+      };
 
       sound = {
         clanFlake = ".";
@@ -267,12 +335,105 @@
           # is one custody actually refuses.
           brokenCustodyIsBroken = resolve.violations { users = brokenFleet; } != [ ];
 
+          # ── the placement model ──
+          perMachineNoMachineMessages = violations fleet {
+            clanFlake = ".";
+            mappings.a = {
+              direction = "clan-to-safix";
+              clan = {
+                placement = "per-machine";
+                machine = null;
+                generator = "ntfy";
+                file = "token";
+              };
+              safix = {
+                user = "alice";
+                name = "tok";
+              };
+            };
+          };
+
+          sharedMachineSetMessages = violations fleet {
+            clanFlake = ".";
+            mappings.a = {
+              direction = "clan-to-safix";
+              clan = {
+                placement = "shared";
+                machine = "nonexistent";
+                generator = "ntfy";
+                file = "token";
+              };
+              safix = {
+                user = "alice";
+                name = "tok";
+              };
+            };
+          };
+
+          soundSharedMessages = violations fleet {
+            clanFlake = ".";
+            mappings.a = sharedMapping "clan-to-safix" "alice" "tok" "ntfy";
+          };
+
+          # A single two-way mapping over one pair of endpoints, accepted:
+          # `bothDirections` groups by pair and only fires when a group holds
+          # more than one distinct direction, so one mapping never can.
+          singleTwoWayMessages = violations fleet {
+            clanFlake = ".";
+            mappings.rel = mapping "two-way" "alice" "tok" "ntfy";
+          };
+
+          # Two shared mappings of the same generator and file collide by
+          # generator/file alone, regardless of the (absent) machine — the
+          # defect D2 exists to close.
+          sharedDuplicateTargetMessages = violations fleet {
+            clanFlake = ".";
+            mappings = {
+              a = sharedMapping "safix-to-clan" "alice" "tok" "ntfy";
+              b = sharedMapping "safix-to-clan" "bob" "tok" "ntfy";
+            };
+          };
+
+          # ── two-producers broadened to two-way ──
+          twoWayTwoProducersMessages = violations fleet {
+            clanFlake = ".";
+            mappings.a = mapping "two-way" "alice" "minted" "ntfy";
+          };
+
+          # ── the share/placement comparison ──
+          sharedGeneratorSharedPlacementMessages = shareViolations {
+            clanFlake = ".";
+            mappings.a = sharedMapping "safix-to-clan" "alice" "shared-tok" "ntfy";
+          };
+
+          sharedGeneratorPerMachinePlacementMessages = shareViolations {
+            clanFlake = ".";
+            mappings.a = mapping "safix-to-clan" "alice" "shared-tok" "ntfy";
+          };
+
+          perUserGeneratorSharedPlacementMessages = shareViolations {
+            clanFlake = ".";
+            mappings.a = sharedMapping "safix-to-clan" "alice" "minted" "ntfy";
+          };
+
+          handSetSharedPlacementMessages = shareViolations {
+            clanFlake = ".";
+            mappings.a = sharedMapping "safix-to-clan" "alice" "tok" "ntfy";
+          };
+
+          # ── the companion reservation ──
+          reservedCompanionNameMessages = violations reservedCompanionFleet {
+            clanFlake = ".";
+            mappings.a = mapping "two-way" "alice" "tok" "ntfy";
+          };
+
           badDirection = badDirection;
         };
         expected = {
           directions = [
             "clan-to-safix"
             "safix-to-clan"
+            "two-way"
           ];
 
           soundMessages = [ ];
@@ -294,7 +455,7 @@
           ];
 
           bothDirectionsMessages = [
-            "flake.safix.bridge.mappings down and up declare nonexistent:ntfy/token <-> flake.safix.users.alice.tok in both directions, which is a two-way synchronisation and has no conflict resolution"
+            "flake.safix.bridge.mappings down and up declare nonexistent:ntfy/token <-> flake.safix.users.alice.tok in both directions, which is a two-way relationship and is declared once, as a single mapping whose direction is \"two-way\""
           ];
 
           noClanFlakeMessages = [
@@ -318,6 +479,35 @@
           brokenCustody = [ ];
           brokenCustodyIsBroken = true;
           badDirection = false;
+
+          perMachineNoMachineMessages = [
+            "flake.safix.bridge.mappings.a has placement = \"per-machine\" and declares no machine"
+          ];
+          sharedMachineSetMessages = [
+            "flake.safix.bridge.mappings.a has placement = \"shared\" and declares a machine, which a shared placement does not take: the machine that answers for it is discovered at run time"
+          ];
+          soundSharedMessages = [ ];
+          singleTwoWayMessages = [ ];
+          sharedDuplicateTargetMessages = [
+            "flake.safix.bridge.mappings a and b both write shared:ntfy/token"
+          ];
+
+          twoWayTwoProducersMessages = [
+            "flake.safix.bridge.mappings.a imports into flake.safix.users.alice.minted, which a generator also produces — two producers for one value, and the winner is whichever ran last"
+          ];
+
+          sharedGeneratorSharedPlacementMessages = [ ];
+          sharedGeneratorPerMachinePlacementMessages = [
+            "flake.safix.bridge.mappings.a exports from a generator whose derived share is true into placement = \"per-machine\", which clan would derive as shared"
+          ];
+          perUserGeneratorSharedPlacementMessages = [
+            "flake.safix.bridge.mappings.a exports from a generator whose derived share is false into placement = \"shared\", which clan would derive as per-machine"
+          ];
+          handSetSharedPlacementMessages = [ ];
+
+          reservedCompanionNameMessages = [
+            "flake.safix.users.alice declares 'tok-safix-bridge-sync-state', and '-safix-bridge-sync-state' is the suffix flake.safix.bridge.mappings.a reserves for the entry its two-way convergence records its last agreement in"
+          ];
         };
       };
 

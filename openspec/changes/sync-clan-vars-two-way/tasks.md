@@ -6,29 +6,29 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 1. The placement model, in nix
 
-- [ ] 1.1 Add `placement` (`shared | per-machine`, default `per-machine`) to `clanSide` in `modules/flake/safix/bridge.nix`, and change `machine` from `str` to `nullOr str` (null exactly when placement is shared)
-- [ ] 1.2 Add `"two-way"` to `directions` and confirm `bridgeOf`'s existing `typed` harness in `modules/flake/checks/bridge.nix` accepts a mapping declaring it, without building a derivation
-- [ ] 1.3 Rewrite `endpointsOf` and `targetOf` to key on placement: per-machine keeps `<machine>:<generator>/<file>`; shared becomes `shared:<generator>/<file>`
-- [ ] 1.4 Add the placement/machine consistency refusal to `violationsOf`: per-machine with no machine, or shared with machine set
-- [ ] 1.5 Narrow `bothDirections`'s message from "has no conflict resolution" to naming that a two-way relationship is declared once, and add a fixture asserting a single `direction = "two-way"` mapping over the same pair of endpoints produces no message
-- [ ] 1.6 Verify: extend `checks.safix-bridge`'s `actual`/`expected` in `modules/flake/checks/bridge.nix` with fixtures for each new placement, the narrowed two-way message, the accepted single two-way declaration, and the consistency refusal; `nix build .#checks.x86_64-linux.safix-bridge` green
-- [ ] 1.7 Severity drill: a shared-placement fixture naming a machine anyway turns 1.4's new assertion red; two mappings of one shared var naming two different machines turns the broadened 1.3 target-collision assertion red where the old machine-keyed `targetOf` would have stayed green — hold both, observed red before the fix and green after
+- [x] 1.1 Add `placement` (`shared | per-machine`, default `per-machine`) to `clanSide` in `modules/flake/safix/bridge.nix`, and change `machine` from `str` to `nullOr str` (null exactly when placement is shared)
+- [x] 1.2 Add `"two-way"` to `directions` and confirm `bridgeOf`'s existing `typed` harness in `modules/flake/checks/bridge.nix` accepts a mapping declaring it, without building a derivation
+- [x] 1.3 Rewrite `endpointsOf` and `targetOf` to key on placement: per-machine keeps `<machine>:<generator>/<file>`; shared becomes `shared:<generator>/<file>`
+- [x] 1.4 Add the placement/machine consistency refusal to `violationsOf`: per-machine with no machine, or shared with machine set
+- [x] 1.5 Narrow `bothDirections`'s message from "has no conflict resolution" to naming that a two-way relationship is declared once, and add a fixture asserting a single `direction = "two-way"` mapping over the same pair of endpoints produces no message
+- [x] 1.6 Verify: extend `checks.safix-bridge`'s `actual`/`expected` in `modules/flake/checks/bridge.nix` with fixtures for each new placement, the narrowed two-way message, the accepted single two-way declaration, and the consistency refusal; `nix build .#checks.x86_64-linux.safix-bridge` green
+- [x] 1.7 Severity drill: a shared-placement fixture naming a machine anyway turns 1.4's new assertion red (`sharedMachineSetMessages`); two shared mappings of one generator/file colliding by generator/file alone turns the broadened 1.3 target-collision assertion red where the old machine-keyed `targetOf` would have stayed green (`sharedDuplicateTargetMessages`) — both observed red before the fix and green after
 
 ## 2. The generator-share comparison, and two-producers broadened to two-way
 
-- [ ] 2.1 In `violationsOf`, extend `twoProducers`'s condition from `direction == "clan-to-safix"` to `direction == "clan-to-safix" || direction == "two-way"`
-- [ ] 2.2 Add the share/placement comparison: for a `safix-to-clan` mapping whose source is generator-produced, refuse when the generator's derived `share` disagrees with the mapping's `placement` (`share = true` requires `shared`; `share = false` requires `per-machine`)
-- [ ] 2.3 Add fixtures: a shared generator paired with `shared` (accepted), a shared generator paired with `per-machine` (refused, naming both), a per-user generator paired with `shared` (refused), and a hand-set safix-to-clan source with any placement (accepted, no message)
-- [ ] 2.4 Verify: `nix build .#checks.x86_64-linux.safix-bridge` green with 2.3's fixtures added to `actual`/`expected`
-- [ ] 2.5 Severity drill: dropping 2.2's comparison turns the two refusal fixtures in 2.3 green when they should be red; dropping 2.1's broadening turns a two-way mapping over a generator-produced source green when it should be refused by the two-producers rule
+- [x] 2.1 In `violationsOf`, extend `twoProducers`'s condition from `direction == "clan-to-safix"` to `direction == "clan-to-safix" || direction == "two-way"`
+- [x] 2.2 Add the share/placement comparison: for a `safix-to-clan` mapping whose source is generator-produced, refuse when the generator's derived `share` disagrees with the mapping's `placement` (`share = true` requires `shared`; `share = false` requires `per-machine`)
+- [x] 2.3 Add fixtures: a shared generator paired with `shared` (accepted), a shared generator paired with `per-machine` (refused, naming both), a per-user generator paired with `shared` (refused), and a hand-set safix-to-clan source with any placement (accepted, no message)
+- [x] 2.4 Verify: `nix build .#checks.x86_64-linux.safix-bridge` green with 2.3's fixtures added to `actual`/`expected`
+- [x] 2.5 Severity drill: dropping 2.2's comparison turns the two refusal fixtures in 2.3 green when they should be red; dropping 2.1's broadening turns a two-way mapping over a generator-produced source green when it should be refused by the two-producers rule (`twoWayTwoProducersMessages`)
 
 ## 3. The companion entry: reservation and minting
 
-- [ ] 3.1 In `modules/flake/safix/resolve.nix`, for every `two-way` mapping, mint a second placement sharing the mapped entry's `file`, distinguished by a reserved key suffix (`.safix-bridge-sync-state`, distinct from `store.rs`'s `.safix-sync-state` so the two mechanisms' reservations are independently checkable)
-- [ ] 3.2 Add the reservation refusal: a hand-declared entry whose name carries the suffix is refused, naming the entry, the mapping that reserves it, and the suffix, mirroring `modules/flake/safix/keepassxc.nix:208-211`'s shape
-- [ ] 3.3 Confirm a mapping with no two-way declaration mints no companion, by asserting the resolved placement set for a fixture with only one-way mappings is unchanged by this change
-- [ ] 3.4 Verify: a new or extended structural check (`modules/flake/checks/bridge-sync.nix` or an addition to `resolve.nix`'s own check) asserting the companion's file and audience equal the mapped entry's, and that the reservation refusal fires
-- [ ] 3.5 Severity drill: dropping 3.2's refusal lets a hand-declared entry collide with a companion's name and evaluate clean; hold it red before 3.2 lands and green after
+- [x] 3.1 In `modules/flake/safix/bridge.nix`, for every `two-way` mapping, mint a second placement (`companionsOf`, folded into `flake.safix.lib.placements` by `default.nix` rather than into `resolve.nix`'s own algebra) sharing the mapped entry's `file`, distinguished by a reserved key suffix drawn from the same alphabet `wellFormedName` requires of every declarable entry name (`-safix-bridge-sync-state`, not a dot-prefixed form: `resolve.nix`'s own name check refuses any declared name outside `[a-z0-9][a-z0-9_-]*`, so a dot-prefixed suffix could never collide with a hand declaration and the reservation refusal below would be unreachable; distinct from `store.rs`'s `.safix-sync-state`, which names a kdbx path rather than a safix entry and is under no such constraint, so the two mechanisms' reservations are independently checkable)
+- [x] 3.2 Add the reservation refusal: a hand-declared entry whose name carries the suffix is refused, naming the entry, the mapping that reserves it, and the suffix, mirroring `modules/flake/safix/keepassxc.nix:208-211`'s shape
+- [x] 3.3 Confirm a mapping with no two-way declaration mints no companion, by asserting the resolved placement set for a fixture with only one-way mappings is unchanged by this change (`checks/bridge-sync.nix`'s `oneWayCompanions`/`placementsUnchangedByOneWay`)
+- [x] 3.4 Verify: a new structural check (`modules/flake/checks/bridge-sync.nix`, imported from `flake.nix`) asserting the companion's file and audience equal the mapped entry's, and that the reservation refusal fires; `nix build .#checks.x86_64-linux.safix-bridge-sync .#checks.x86_64-linux.safix-bridge-sync-drill` green
+- [x] 3.5 Severity drill: `checks/bridge-sync.nix`'s drill runs `refuseScript` over a fleet whose alice has hand-declared the reserved companion name; dropping `reservedCompanionName` from `violationsOf`'s list turns the drill's `grep` red — observed red before the fix and green after
 
 ## 4. The rust model: `ClanPlacement`, and the widened `ClanSide`
 

@@ -200,7 +200,19 @@ in
     # holds only what a person granted it, under that person's own record, so a
     # machine's entries are already here under their owner's name and appear again
     # under no second key.
-    placements = resolve.placementsOf registry;
+    #
+    # A two-way bridge mapping's companion entry is folded in here rather than
+    # exposed as a separate map: it is a placement like any other by the time the
+    # command reads it (`safix sync clan --direction two-way` resolves it through
+    # the same `Workspace::resolve` every other write goes through), and giving it
+    # a second surface would be a second way to ask "does this name exist" that
+    # could disagree with this one.
+    placements =
+      let
+        base = resolve.placementsOf registry;
+        companions = bridgeLib.companionsOf registry cfg.bridge;
+      in
+      lib.mapAttrs (user: named: named // (companions.${user} or { })) base;
 
     # subject -> [ recipient ]: every key a declared subject holds of its own — a
     # person's own and their recovery keys, a machine's host identity, an
