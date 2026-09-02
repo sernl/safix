@@ -110,6 +110,7 @@ mod against_a_real_clan {
     /// which is what lets an addressing search genuinely distinguish "does
     /// not see this generator" from "has not generated it".
     const SHARED: &str = "bothways";
+
     /// The machine both are declared on.
     const MACHINE: &str = "meridian";
 
@@ -655,7 +656,6 @@ mod against_a_real_clan {
             .expect_success("both mappings now agree")
             .silent_about("no declared mapping accounts for it");
     }
-
     /// The value came off a pipe rather than out of a terminal rendering.
     ///
     /// Asserted from this side because there is no far side to ask: the real

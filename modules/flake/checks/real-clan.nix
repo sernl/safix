@@ -170,6 +170,10 @@
                 validation = null;
                 share = true;
               };
+              orphan = generator {
+                value = "CANARY-never-claimed";
+                validation = null;
+              };
             };
           };
         };
