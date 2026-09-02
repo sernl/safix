@@ -54,6 +54,8 @@
 # `group` above already have: this file's fixture types are hand-written to
 # match ../safix/options.nix rather than derived from it, because that file is
 # not standalone-evaluable outside the full flake-parts module.
+# Dropping `reservedId` from the list empties `reservedIdMessages`' three
+# fields, one per reserved word a mapping id may collide with.
 {
   perSystem =
     {
@@ -276,6 +278,18 @@
             mappings.a = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana.safix-sync-state";
           };
 
+          reservedIdMessages = {
+            clan = violations fleet {
+              mappings.clan = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+            };
+            keepassxc = violations fleet {
+              mappings.keepassxc = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+            };
+            all = violations fleet {
+              mappings.all = mapping "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+            };
+          };
+
           # Two faults in one mapping, both reported. The safix side does not
           # resolve and the entry path is reserved, and the second is judged on
           # the database half alone so the first does not suppress it.
@@ -354,6 +368,18 @@
           reservedNameMessages = [
             "flake.safix.keepassxc.mappings.a names the entry safix/alice/grafana.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
           ];
+
+          reservedIdMessages = {
+            clan = [
+              "flake.safix.keepassxc.mappings.clan is named 'clan', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+            keepassxc = [
+              "flake.safix.keepassxc.mappings.keepassxc is named 'keepassxc', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+            all = [
+              "flake.safix.keepassxc.mappings.all is named 'all', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+          };
 
           bothFaultsMessages = [
             "flake.safix.keepassxc.mappings.a names the user 'carol', which flake.safix.users does not declare"

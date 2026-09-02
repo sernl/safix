@@ -209,11 +209,25 @@ let
         m:
         lib.optional (lib.hasSuffix stateSuffix m.kdbx.path) "flake.safix.keepassxc.mappings.${m.id} names the entry ${entryPathOf keepassxc.group m}, and '${stateSuffix}' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
       ) declared;
+
+      # A mapping id spelled the same as a target keyword makes sync's and
+      # audit's first argument ambiguous, the same way `bridge.nix`'s own
+      # `reservedId` refuses it over its own mappings. Judged over every
+      # declared mapping rather than the sound ones, so a mapping with two
+      # faults hears about both.
+      reservedId = lib.concatMap (
+        m:
+        lib.optional (builtins.elem m.id [
+          "clan"
+          "keepassxc"
+          "all"
+        ]) "flake.safix.keepassxc.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+      ) declared;
     in
     if resolve.violations registry != [ ] then
       [ ]
     else
-      unresolvableSafixSide ++ twoProducers ++ twoMappingsOneEntry ++ reservedName;
+      unresolvableSafixSide ++ twoProducers ++ twoMappingsOneEntry ++ reservedName ++ reservedId;
 in
 {
   inherit

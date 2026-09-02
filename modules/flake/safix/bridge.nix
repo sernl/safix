@@ -18,11 +18,11 @@ let
 
   # Written as its endpoints rather than as a verb.
   #
-  # `clan vars export <dir>` moves values *out of* clan; `safix export` moves
-  # values *into* clan. Both words are correct relative to the tool that says
-  # them, and a declaration is read by someone with no tool in hand to be
-  # relative to. The verbs stay `import` and `export` on safix's command line,
-  # where safix is the frame every other verb already assumes.
+  # `clan vars export <dir>` moves values *out of* clan; a safix-to-clan
+  # mapping's convergence moves a value the opposite way. Both are correct
+  # relative to the tool that moves them, and a declaration is read by
+  # someone with no tool in hand to be relative to — so the endpoints are
+  # named instead of a verb either tool speaks.
   directions = [
     "clan-to-safix"
     "safix-to-clan"
@@ -82,11 +82,11 @@ let
         description = ''
           Which way the value moves, written as its endpoints.
 
-          The word `export` moves values out of clan when clan says it and into
-          clan when safix says it, so a direction spelled with it means opposite
-          things depending on which tool the reader has in mind. A declaration
-          is read without a tool in hand to be relative to, so the endpoints are
-          named instead.
+          clan's own `vars export` moves values out of clan; a safix-to-clan
+          mapping's convergence moves a value the opposite way, so a word one
+          tool already uses for its own verb would mean the opposite thing if
+          reused for this option. A declaration is read without a tool in
+          hand to be relative to, so the endpoints are named instead.
         '';
       };
 
@@ -207,11 +207,26 @@ let
       noClanFlake =
         lib.optional (declared != [ ] && bridge.clanFlake == null)
           "flake.safix.bridge declares ${toString (builtins.length declared)} mapping(s) and no clanFlake, so there is no clan for them to reach";
+
+      # A mapping id spelled the same as a target keyword makes sync's and
+      # audit's first argument ambiguous: there would be no way to tell
+      # `audit clan` (the target) from a mapping literally named `clan` (an
+      # id). Judged over every declared mapping rather than the sound ones,
+      # the same way `keepassxc.nix`'s `reservedName` is, so a mapping with
+      # two faults hears about both.
+      reservedId = lib.concatMap (
+        m:
+        lib.optional (builtins.elem m.id [
+          "clan"
+          "keepassxc"
+          "all"
+        ]) "flake.safix.bridge.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+      ) declared;
     in
     if resolve.violations registry != [ ] then
       [ ]
     else
-      unresolvableSafixSide ++ twoProducers ++ twoMappingsOneTarget ++ bothDirections ++ noClanFlake;
+      unresolvableSafixSide ++ twoProducers ++ twoMappingsOneTarget ++ bothDirections ++ noClanFlake ++ reservedId;
 in
 {
   inherit

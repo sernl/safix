@@ -41,6 +41,8 @@
 # bridge sentences about a fleet whose custody has not resolved, which is one
 # fault producing two unrelated messages.
 # Removing the direction enum lets `badDirection` evaluate rather than throw.
+# Dropping `reservedId` from the list empties `reservedIdMessages`' three
+# fields, one per reserved word a mapping id may collide with.
 {
   perSystem =
     {
@@ -212,6 +214,21 @@
             mappings.a = mapping "clan-to-safix" "alice" "tok" "ntfy";
           };
 
+          reservedIdMessages = {
+            clan = violations fleet {
+              clanFlake = ".";
+              mappings.clan = mapping "clan-to-safix" "alice" "tok" "ntfy";
+            };
+            keepassxc = violations fleet {
+              clanFlake = ".";
+              mappings.keepassxc = mapping "clan-to-safix" "alice" "tok" "ntfy";
+            };
+            all = violations fleet {
+              clanFlake = ".";
+              mappings.all = mapping "clan-to-safix" "alice" "tok" "ntfy";
+            };
+          };
+
           # A mapping-free bridge with no clan named is the default a consumer
           # who has never heard of clan evaluates, and it must be silent.
           emptyBridgeMessages = violations fleet { };
@@ -283,6 +300,18 @@
           noClanFlakeMessages = [
             "flake.safix.bridge declares 1 mapping(s) and no clanFlake, so there is no clan for them to reach"
           ];
+
+          reservedIdMessages = {
+            clan = [
+              "flake.safix.bridge.mappings.clan is named 'clan', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+            keepassxc = [
+              "flake.safix.bridge.mappings.keepassxc is named 'keepassxc', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+            all = [
+              "flake.safix.bridge.mappings.all is named 'all', which sync and audit read as a target keyword rather than a mapping name"
+            ];
+          };
 
           emptyBridgeMessages = [ ];
           handSetExportMessages = [ ];
