@@ -729,18 +729,18 @@ mod tests {
         let bridge = shared_mapping_bridge();
         let mapping = bridge.named("ntfy-token").expect("the fixture mapping");
 
-        let refusal = addressing.read(mapping).expect_err("no machine resolves");
-        match refusal {
-            Error::ClanAddressUnresolved {
+        match addressing.read(mapping) {
+            Ok(_) => unreachable!("no machine should have resolved"),
+            Err(Error::ClanAddressUnresolved {
                 mapping: id,
                 generator,
                 file,
-            } => {
+            }) => {
                 assert_eq!(id, "ntfy-token");
                 assert_eq!(generator, "ntfy");
                 assert_eq!(file, "token");
             }
-            other => unreachable!("exhaustion became {other:?}"),
+            Err(other) => unreachable!("exhaustion became {other:?}"),
         }
 
         let attempts = std::fs::read_to_string(&log).expect("the log was written");
