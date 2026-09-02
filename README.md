@@ -687,6 +687,7 @@ A re-wrap that dropped a recipient a file had before the run is refused rather t
 
 Three things are refused, and each refusal names why.
 No OTP slot is written under any flag — a programmed challenge-response slot is what opens a password database, the database has no record of the secret it was built with, and writing that slot ends it permanently.
+Reading that same slot to answer a database's own unlock challenge is a different operation from writing it, and it is what `safix sync` and `safix enroll --store-database` do when a database declares one — this refusal is about programming a slot, never about reading one to unlock what it already opens.
 `--touch-policy never` is refused, because the touch is the property a card is for.
 And a run with no terminal is refused before the card is touched, because somebody has to touch it and somebody has to be told when.
 

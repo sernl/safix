@@ -44,13 +44,14 @@ Every `keepassxc-cli` behaviour cited in `design.md` was measured against versio
 
 ## 6. Documentation
 
-- [ ] 6.1 Add one sentence to `crates/safix/src/usage.rs`'s `sync` prose block (`usage.rs:194-208`) stating that a database may additionally declare a YubiKey slot and/or a key file, opened alongside the one password prompt, and reusing this file's own "it manages no keyring" heading to state that reading the slot is not the thing that heading forbids
-- [ ] 6.2 Add one sentence to `README.md:686-689`'s "three things are refused" paragraph distinguishing programming a slot (refused, unconditionally, by `enroll`) from reading one to unlock a database (what this change does), so the two nearby claims about the same slot number space do not read as contradictory to someone who has not read `design.md`
-- [ ] 6.3 Verify: `rg -n 'yubikey|key.file' README.md crates/safix/src/usage.rs` shows the new sentences, and every guarantee either states names a check in groups 1-5 that holds it
+- [x] 6.1 Add one sentence to `crates/safix/src/usage.rs`'s `sync` prose block (`usage.rs:194-208`) stating that a database may additionally declare a YubiKey slot and/or a key file, opened alongside the one password prompt, and reusing this file's own "it manages no keyring" heading to state that reading the slot is not the thing that heading forbids
+- [x] 6.2 Add one sentence to `README.md:686-689`'s "three things are refused" paragraph distinguishing programming a slot (refused, unconditionally, by `enroll`) from reading one to unlock a database (what this change does), so the two nearby claims about the same slot number space do not read as contradictory to someone who has not read `design.md`; actual anchor is README.md:688-691, not :686-689
+- [x] 6.3 Verify: `rg -n 'yubikey|key.file' README.md crates/safix/src/usage.rs` shows the new sentences, and every guarantee either states names a check in groups 1-5 that holds it
+- [x] 6.4 Add a `CHANGELOG.md` `[Unreleased]` entry describing the new options and the argv change, per the shared program contract's documentation discipline (this change originally named no CHANGELOG task; added per cross-change contract C1)
 
 ## 7. Verification
 
-- [ ] 7.1 `openspec validate unlock-keepassxc-composite-key --strict`
-- [ ] 7.2 `openspec validate --all --strict`
-- [ ] 7.3 `cargo test` (whole workspace) green, confirming no other suite regressed from the `Keepassxc`/`Database`/`Transport::PasswordStore` shape changes
-- [ ] 7.4 `nix flake check` green
+- [x] 7.1 `openspec validate unlock-keepassxc-composite-key --strict`
+- [x] 7.2 `openspec validate --all --strict`
+- [ ] 7.3 `cargo test` (whole workspace) green, confirming no other suite regressed from the `Keepassxc`/`Database`/`Transport::PasswordStore` shape changes — deferred: the subagent contract prohibits `cargo test --workspace` without `--lib --bins` (the full integration suite runs for minutes); `cargo test --locked --workspace --lib --bins` (209 passed) plus the scoped `enrollment`/`sync_path`/`store::tests`/`model::` targets were run instead, and the full suite is Main's pre-pull-request validation on the merged epic tip
+- [ ] 7.4 `nix flake check` green — deferred for the same reason: the subagent contract prohibits `nix flake check`; the scoped checks (`safix-keepassxc`, `safix-keepassxc-drill`, `safix-vault-projection`, `safix-examples`) were built instead

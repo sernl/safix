@@ -19,6 +19,13 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### keepassxc's password database may declare a composite key
+
+`flake.safix.keepassxc.yubikey` and `flake.safix.keepassxc.keyFile` declare a YubiKey challenge-response slot, a key file, or both, for a database whose own composite key requires more than a password.
+`safix sync` and `safix enroll --store-database` now carry the declared factors alongside the single password prompt those commands already ask for, on every invocation they issue against that database.
+Both options default to `null`, so every existing declaration evaluates and runs exactly as it did before this change.
+Reading a declared slot to unlock the database is not writing it: safix still issues no command anywhere that creates, reprograms, or deletes a hardware slot.
+
 ### The system scope installs its own secrets, into its own store
 
 This is a breaking change to the nix surface for any consumer reading `config.sops.secrets` on a system configuration: that option now reads empty.

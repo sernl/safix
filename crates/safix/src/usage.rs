@@ -205,7 +205,10 @@ has.
 No database is created, no database key is changed or added, and no hardware slot
 is touched, under any flag. The store is a store being written, not a keyring
 being managed. Writing a challenge-response slot is what would end a database
-permanently, and there is nothing here that can.
+permanently, and there is nothing here that can. A database may additionally
+declare a YubiKey slot, a key file, or both; both open alongside the one
+password prompt, and reading a declared slot to answer the database's own
+unlock challenge is not the touching this heading forbids.
 
 \u{2500}\u{2500} convergence, and why it is load-bearing \u{2500}\u{2500}
 A kdbx save rewrites and re-uploads the whole file. So both sides of every
