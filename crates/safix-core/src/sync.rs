@@ -267,7 +267,7 @@ pub fn run(
     if !enroll::terminal_present() {
         return Err(Error::StoreLocked { database: named });
     }
-    let mut database = Database::open(std::path::PathBuf::from(&named), password)?;
+    let mut database = Database::open(std::path::PathBuf::from(&named), mirror, password)?;
 
     let mut decided: Vec<(&SyncMapping, Decision)> = Vec::with_capacity(selected.len());
     for mapping in &selected {

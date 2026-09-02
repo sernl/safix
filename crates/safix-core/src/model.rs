@@ -1169,7 +1169,10 @@ mod tests {
         let yubikey = mirror.yubikey.as_ref().unwrap();
         assert_eq!(yubikey.slot, "1");
         assert_eq!(yubikey.serial.as_deref(), Some("12345678"));
-        assert_eq!(mirror.key_file.as_deref(), Some("/home/alice/.keys/master.keyx"));
+        assert_eq!(
+            mirror.key_file.as_deref(),
+            Some("/home/alice/.keys/master.keyx")
+        );
 
         let bare_slot = r#"{"slot": "2", "serial": null}"#;
         let yubikey: Yubikey = serde_json::from_str(bare_slot).unwrap();

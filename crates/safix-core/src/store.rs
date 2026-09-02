@@ -57,6 +57,7 @@ use std::process::{Command, Stdio};
 
 use crate::enroll::custody::{DatabasePassword, keepassxc_cli};
 use crate::error::{Error, Result};
+use crate::model::{Keepassxc, Yubikey};
 use crate::secret::Secret;
 
 /// The suffix safix reserves for the entry a two-way mapping records its last
@@ -99,6 +100,12 @@ pub struct Database {
     program: PathBuf,
     path: PathBuf,
     key: Secret,
+    /// A YubiKey challenge-response slot the database requires to open, or
+    /// none when the database opens on its password alone.
+    yubikey: Option<Yubikey>,
+    /// A key file the database requires to open, or none when the database
+    /// opens on its password alone.
+    key_file: Option<String>,
     /// Every entry the database holds, as `ls -R -f` listed them, updated by
     /// every write this run makes.
     entries: BTreeSet<String>,
@@ -113,17 +120,27 @@ impl Database {
     /// follows is what establishes that it opened, so a run whose password is
     /// wrong refuses here rather than reporting every mapping as unjudgeable.
     ///
+    /// The composite-key factors, if any, come from the `Keepassxc` the caller
+    /// already has: the same declaration that names this database also names
+    /// what else it takes to open.
+    ///
     /// # Errors
     ///
     /// [`Error::StoreUnavailable`] when the command cannot be run,
     /// [`Error::DatabaseUnreadable`] when it runs and will not open the
     /// database, and whatever reading the password failed with.
-    pub fn open(path: PathBuf, password: &mut dyn DatabasePassword) -> Result<Self> {
+    pub fn open(
+        path: PathBuf,
+        mirror: &Keepassxc,
+        password: &mut dyn DatabasePassword,
+    ) -> Result<Self> {
         let key = password.database_password(&path)?;
         let mut database = Self {
             program: keepassxc_cli(),
             path,
             key,
+            yubikey: mirror.yubikey.clone(),
+            key_file: mirror.key_file.clone(),
             entries: BTreeSet::new(),
             groups: BTreeSet::new(),
         };
@@ -183,7 +200,12 @@ impl Database {
         if !self.holds(entry) {
             return Ok(None);
         }
-        let arguments = read_arguments(&self.path, entry);
+        let arguments = read_arguments(
+            &self.path,
+            entry,
+            self.yubikey.as_ref(),
+            self.key_file.as_deref(),
+        );
         let mut child = self.spawn(&arguments)?;
 
         // The password first and the pipe closed with it, then the value on the
@@ -240,7 +262,14 @@ impl Database {
         if !existing {
             self.create_groups(entry)?;
         }
-        let arguments = write_arguments(&self.path, entry, username, existing);
+        let arguments = write_arguments(
+            &self.path,
+            entry,
+            username,
+            existing,
+            self.yubikey.as_ref(),
+            self.key_file.as_deref(),
+        );
         self.feed(entry, &arguments, value)?;
         self.entries.insert(entry.to_owned());
         Ok(())
@@ -264,7 +293,12 @@ impl Database {
             if self.groups.contains(&path) {
                 continue;
             }
-            let arguments = group_arguments(&self.path, &path);
+            let arguments = group_arguments(
+                &self.path,
+                &path,
+                self.yubikey.as_ref(),
+                self.key_file.as_deref(),
+            );
             self.feed(&path, &arguments, &Secret::empty())?;
             self.groups.insert(path.clone());
         }
@@ -273,7 +307,8 @@ impl Database {
 
     /// The entries and groups the database holds, as text.
     fn listing(&self) -> Result<String> {
-        let arguments = listing_arguments(&self.path);
+        let arguments =
+            listing_arguments(&self.path, self.yubikey.as_ref(), self.key_file.as_deref());
         let mut child = self.spawn(&arguments)?;
         {
             let mut stdin = child.stdin.take().ok_or(Error::StorePipeMissing)?;
@@ -357,6 +392,37 @@ impl Database {
     }
 }
 
+/// The argument-vector fragment that carries a database's composite-key
+/// factors, spliced into every constructor below right after `--quiet`.
+///
+/// `slot[:serial]` is keepassxc-cli's own punctuation for `-y`, joined here
+/// rather than asked of the declaration: a bare slot when no serial was
+/// declared, `slot:serial` when one was. `pub(crate)` because
+/// [`crate::enroll::custody`] opens the same database by a different route
+/// and needs the identical splice — one definition beside the four
+/// constructors that already know keepassxc-cli's exact flag spelling, rather
+/// than a second copy free to drift from this one.
+#[must_use]
+pub(crate) fn composite_key_arguments(
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = Vec::new();
+    if let Some(yubikey) = yubikey {
+        let spec = match &yubikey.serial {
+            Some(serial) => format!("{}:{serial}", yubikey.slot),
+            None => yubikey.slot.clone(),
+        };
+        arguments.push("-y".to_owned());
+        arguments.push(spec);
+    }
+    if let Some(key_file) = key_file {
+        arguments.push("-k".to_owned());
+        arguments.push(key_file.to_owned());
+    }
+    arguments
+}
+
 /// The argument vector one entry's value is read through.
 ///
 /// `--show-protected` because the value is one, and `--attributes Password`
@@ -364,16 +430,22 @@ impl Database {
 /// print the title and the username beside it, which the report has no use for
 /// and which would then be on this pipe.
 #[must_use]
-pub fn read_arguments(database: &Path, entry: &str) -> Vec<String> {
-    vec![
-        "show".to_owned(),
-        "--quiet".to_owned(),
+pub fn read_arguments(
+    database: &Path,
+    entry: &str,
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = vec!["show".to_owned(), "--quiet".to_owned()];
+    arguments.extend(composite_key_arguments(yubikey, key_file));
+    arguments.extend([
         "--show-protected".to_owned(),
         "--attributes".to_owned(),
         "Password".to_owned(),
         database.display().to_string(),
         entry.to_owned(),
-    ]
+    ]);
+    arguments
 }
 
 /// The argument vector one entry's value is written through.
@@ -388,12 +460,15 @@ pub fn write_arguments(
     entry: &str,
     username: Option<&str>,
     existing: bool,
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
 ) -> Vec<String> {
     let mut arguments = vec![
         if existing { "edit" } else { "add" }.to_owned(),
         "--quiet".to_owned(),
-        "--password-prompt".to_owned(),
     ];
+    arguments.extend(composite_key_arguments(yubikey, key_file));
+    arguments.push("--password-prompt".to_owned());
     if let Some(username) = username {
         arguments.push("--username".to_owned());
         arguments.push(username.to_owned());
@@ -405,25 +480,34 @@ pub fn write_arguments(
 
 /// The argument vector one group is created through.
 #[must_use]
-pub fn group_arguments(database: &Path, group: &str) -> Vec<String> {
-    vec![
-        "mkdir".to_owned(),
-        "--quiet".to_owned(),
-        database.display().to_string(),
-        group.to_owned(),
-    ]
+pub fn group_arguments(
+    database: &Path,
+    group: &str,
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = vec!["mkdir".to_owned(), "--quiet".to_owned()];
+    arguments.extend(composite_key_arguments(yubikey, key_file));
+    arguments.push(database.display().to_string());
+    arguments.push(group.to_owned());
+    arguments
 }
 
 /// The argument vector the database's own contents are listed through.
 #[must_use]
-pub fn listing_arguments(database: &Path) -> Vec<String> {
-    vec![
-        "ls".to_owned(),
-        "--quiet".to_owned(),
+pub fn listing_arguments(
+    database: &Path,
+    yubikey: Option<&Yubikey>,
+    key_file: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = vec!["ls".to_owned(), "--quiet".to_owned()];
+    arguments.extend(composite_key_arguments(yubikey, key_file));
+    arguments.extend([
         "--recursive".to_owned(),
         "--flatten".to_owned(),
         database.display().to_string(),
-    ]
+    ]);
+    arguments
 }
 
 fn trimmed(complaint: &str) -> String {
@@ -458,12 +542,39 @@ mod tests {
     #[test]
     fn no_argument_vector_can_carry_a_value() {
         let database = Path::new("/keys/master.kdbx");
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: Some("12345678".to_owned()),
+        };
+        let key_file = "/keys/master.key";
         let vectors = [
-            read_arguments(database, "safix/alice/grafana"),
-            write_arguments(database, "safix/alice/grafana", Some("alice"), false),
-            write_arguments(database, "safix/alice/grafana", None, true),
-            group_arguments(database, "safix/alice"),
-            listing_arguments(database),
+            read_arguments(database, "safix/alice/grafana", None, None),
+            read_arguments(
+                database,
+                "safix/alice/grafana",
+                Some(&yubikey),
+                Some(key_file),
+            ),
+            write_arguments(
+                database,
+                "safix/alice/grafana",
+                Some("alice"),
+                false,
+                None,
+                None,
+            ),
+            write_arguments(
+                database,
+                "safix/alice/grafana",
+                None,
+                true,
+                Some(&yubikey),
+                Some(key_file),
+            ),
+            group_arguments(database, "safix/alice", None, None),
+            group_arguments(database, "safix/alice", Some(&yubikey), Some(key_file)),
+            listing_arguments(database, None, None),
+            listing_arguments(database, Some(&yubikey), Some(key_file)),
         ];
         for vector in &vectors {
             let shown = vector.join(" ");
@@ -478,43 +589,145 @@ mod tests {
                 );
             }
         }
+        // The key file's own contents never appear here because there is
+        // nothing to assert of them in an argv test: `key_file` is
+        // `Option<&str>`, a path, never a `Secret`, so the type signature
+        // already forbids the file's bytes from reaching this function at all.
+    }
+
+    /// The fourth constructor `no_argument_vector_can_carry_a_value` exercises
+    /// but does not pin a literal for: `read_arguments`, `write_arguments` and
+    /// `listing_arguments` each have their own literal-pinning test above, and
+    /// this one gives `group_arguments` the same independent coverage.
+    #[test]
+    fn a_group_is_created_with_the_declared_factors_alongside_it() {
+        let database = Path::new("/keys/master.kdbx");
+        let bare = group_arguments(database, "safix/alice", None, None).join(" ");
+        assert_eq!(bare, "mkdir --quiet /keys/master.kdbx safix/alice");
+
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: Some("12345678".to_owned()),
+        };
+        let factored = group_arguments(
+            database,
+            "safix/alice",
+            Some(&yubikey),
+            Some("/keys/master.key"),
+        )
+        .join(" ");
+        assert_eq!(
+            factored,
+            "mkdir --quiet -y 1:12345678 -k /keys/master.key /keys/master.kdbx safix/alice"
+        );
     }
 
     #[test]
     fn a_write_adds_what_is_absent_and_edits_what_is_there() {
         let database = Path::new("/keys/master.kdbx");
-        let added = write_arguments(database, "safix/alice/grafana", None, false).join(" ");
-        let edited = write_arguments(database, "safix/alice/grafana", None, true).join(" ");
+        let added =
+            write_arguments(database, "safix/alice/grafana", None, false, None, None).join(" ");
+        let edited =
+            write_arguments(database, "safix/alice/grafana", None, true, None, None).join(" ");
         assert!(added.starts_with("add --quiet --password-prompt"));
         assert!(edited.starts_with("edit --quiet --password-prompt"));
+
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: None,
+        };
+        let factored = write_arguments(
+            database,
+            "safix/alice/grafana",
+            None,
+            false,
+            Some(&yubikey),
+            Some("/keys/master.key"),
+        )
+        .join(" ");
+        assert!(factored.starts_with("add --quiet -y 1 -k /keys/master.key --password-prompt"));
     }
 
     #[test]
     fn a_username_reaches_argv_and_its_absence_leaves_the_field_alone() {
         let database = Path::new("/keys/master.kdbx");
-        let named = write_arguments(database, "safix/alice/grafana", Some("alice@example"), true);
-        let unnamed = write_arguments(database, "safix/alice/grafana", None, true);
+        let named = write_arguments(
+            database,
+            "safix/alice/grafana",
+            Some("alice@example"),
+            true,
+            None,
+            None,
+        );
+        let unnamed = write_arguments(database, "safix/alice/grafana", None, true, None, None);
         assert!(named.contains(&"--username".to_owned()));
         assert!(named.contains(&"alice@example".to_owned()));
         assert!(!unnamed.contains(&"--username".to_owned()));
+
+        let yubikey = Yubikey {
+            slot: "2".to_owned(),
+            serial: None,
+        };
+        let factored = write_arguments(
+            database,
+            "safix/alice/grafana",
+            Some("alice@example"),
+            true,
+            Some(&yubikey),
+            None,
+        );
+        assert!(factored.contains(&"--username".to_owned()));
+        assert!(factored.contains(&"alice@example".to_owned()));
+        assert!(factored.contains(&"-y".to_owned()));
     }
 
     #[test]
     fn the_read_asks_for_the_protected_password_attribute_and_nothing_else() {
-        let arguments = read_arguments(Path::new("/keys/master.kdbx"), "safix/alice/grafana");
+        let arguments = read_arguments(
+            Path::new("/keys/master.kdbx"),
+            "safix/alice/grafana",
+            None,
+            None,
+        );
         assert_eq!(
             arguments.join(" "),
             "show --quiet --show-protected --attributes Password /keys/master.kdbx safix/alice/grafana"
+        );
+
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: Some("12345678".to_owned()),
+        };
+        let factored = read_arguments(
+            Path::new("/keys/master.kdbx"),
+            "safix/alice/grafana",
+            Some(&yubikey),
+            Some("/keys/master.key"),
+        );
+        assert_eq!(
+            factored.join(" "),
+            "show --quiet -y 1:12345678 -k /keys/master.key --show-protected --attributes Password /keys/master.kdbx safix/alice/grafana"
         );
     }
 
     /// The listing is what absence is answered from, so its shape is a contract.
     #[test]
     fn the_listing_is_recursive_and_flat() {
-        let arguments = listing_arguments(Path::new("/keys/master.kdbx")).join(" ");
+        let arguments = listing_arguments(Path::new("/keys/master.kdbx"), None, None).join(" ");
         assert_eq!(
             arguments,
             "ls --quiet --recursive --flatten /keys/master.kdbx"
+        );
+
+        let yubikey = Yubikey {
+            slot: "1".to_owned(),
+            serial: None,
+        };
+        let factored =
+            listing_arguments(Path::new("/keys/master.kdbx"), Some(&yubikey), None).join(" ");
+        assert_eq!(
+            factored,
+            "ls --quiet -y 1 --recursive --flatten /keys/master.kdbx"
         );
     }
 
@@ -525,6 +738,8 @@ mod tests {
             program: PathBuf::from("safix-no-such-store-command"),
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
+            yubikey: None,
+            key_file: None,
             entries: BTreeSet::new(),
             groups: BTreeSet::new(),
         };
@@ -544,6 +759,8 @@ mod tests {
             program: PathBuf::from("safix-no-such-store-command"),
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
+            yubikey: None,
+            key_file: None,
             entries: BTreeSet::new(),
             groups: BTreeSet::new(),
         };
@@ -558,6 +775,8 @@ mod tests {
             program: PathBuf::from("safix-no-such-store-command"),
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
+            yubikey: None,
+            key_file: None,
             entries: BTreeSet::from([
                 "safix/alice/grafana".to_owned(),
                 "safix/alice/grafana.safix-sync-state".to_owned(),
@@ -580,6 +799,8 @@ mod tests {
             program: PathBuf::from("safix-no-such-store-command"),
             path: PathBuf::from("/keys/master.kdbx"),
             key: Secret::empty(),
+            yubikey: None,
+            key_file: None,
             entries: BTreeSet::from(["safix/alice/grafana".to_owned()]),
             groups: BTreeSet::new(),
         };
