@@ -6,10 +6,10 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 
 ## 1. The clan-side facts this design rests on, held before anything is built
 
-- [ ] 1.1 Add a test or check fixture asserting that `clan vars list <machine>` at the pinned revision emits one line per var, sorted, of the shape `<generator>/<file>: <state>`, against the real clan built in `modules/flake/checks/real-clan.nix`'s sandbox — this is the fact `Clan::list`'s parser in group 2 depends on, and it is held against the real command rather than assumed from reading `clan_cli/vars/list.py`
-- [ ] 1.2 In the same fixture, assert that a secret var's state is exactly `********` and that listing does not require an age identity to be present — holding design.md's D1 claim that enumeration never decrypts
-- [ ] 1.3 Assert that `clan vars list` accepts the same global `--flake` flag in the same position `clan.rs`'s existing `get`/`set`/`check` calls already use, so `Clan::list`'s argument vector is exercised against the real parser rather than only against `clan_cli/cli.py:85-91` as read
-- [ ] 1.4 Assert that a shared-placement generator's var appears with the identical id in `clan vars list <machine>` for every machine that declares it, holding design.md's Context finding that `vars list`'s underlying selector (`<machine>.config.clan.core.vars.generators.*`) reaches a `Shared`-placed generator through every declaring machine's own configuration
+- [x] 1.1 Add a test or check fixture asserting that `clan vars list <machine>` at the pinned revision emits one line per var, sorted, of the shape `<generator>/<file>: <state>`, against the real clan built in `modules/flake/checks/real-clan.nix`'s sandbox — this is the fact `Clan::list`'s parser in group 2 depends on, and it is held against the real command rather than assumed from reading `clan_cli/vars/list.py`
+- [x] 1.2 In the same fixture, assert that a secret var's state is exactly `********` and that listing does not require an age identity to be present — holding design.md's D1 claim that enumeration never decrypts
+- [x] 1.3 Assert that `clan vars list` accepts the same global `--flake` flag in the same position `clan.rs`'s existing `get`/`set`/`check` calls already use, so `Clan::list`'s argument vector is exercised against the real parser rather than only against `clan_cli/cli.py:85-91` as read
+- [x] 1.4 Assert that a shared-placement generator's var appears with the identical id in `clan vars list <machine>` for every machine that declares it, holding design.md's Context finding that `vars list`'s underlying selector (`<machine>.config.clan.core.vars.generators.*`) reaches a `Shared`-placed generator through every declaring machine's own configuration
 - [ ] 1.5 Verify: the fixture from 1.1-1.4 passes against the real clan built in that check's sandbox
 
 ## 2. `Clan::list` and the new error path
