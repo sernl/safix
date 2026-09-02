@@ -49,12 +49,14 @@
 #
 # # The clan the check builds
 #
-# Two machines, five `age`-backed generators between them, an identity
-# minted here and a recipient derived from it. The first three on `meridian`
-# differ in the two axes that turn out to matter, and the real clan is what
-# established that the second axis exists; the fourth, `orphan`, is
-# `enumerate-clan-namespace`'s own addition, a var no bridge mapping this
-# check declares ever names, and the fifth, `bothways`, is this change's own:
+# Two machines, six `age`-backed generators between them, an identity minted
+# here and a recipient derived from it. Three generators on `meridian` differ
+# in the two axes that turn out to matter, and the real clan is what
+# established that the second axis exists; a fourth on `meridian`, `orphan`,
+# is `enumerate-clan-namespace`'s own addition, a var no bridge mapping this
+# check declares ever names; the fifth, `bothways`, and the sixth,
+# `everywhere`, are both `share = true`, the one declared on `meridian`
+# alone and the other on both machines:
 #
 #   - `ntfy` declares `validation` and is generated. `validationHash` is null
 #     unless a generator declares `validation`, and `hash_is_valid` calls a
@@ -81,16 +83,25 @@
 # cannot: the stub's staleness is a switch a test throws, so no fixture of it
 # would have produced a generator that is stale for having never run.
 #
-# `bothways` is the fourth, `share = true`, declared on `meridian` alone and
-# minted there; `aurora` declares no generator at all. This is group 8's own
-# addressing-search fixture, and it exists for the same reason the third
-# generator does: `crates/safix/tests/bridge_sync.rs`'s stubbed clan can only
-# ever answer "Couldn't find var" because it was told to, for any machine
-# name a test hands it, so it cannot establish that a real, unrelated second
-# machine — one that genuinely does not declare the generator — is what
-# makes `clan vars get` say that. Only a real clan can be asked and answer
-# honestly, which is what makes this the one place the addressing search's
-# skip-a-real-candidate property is established rather than merely modelled.
+# `bothways` is the fifth, `share = true`, declared on `meridian` alone and
+# minted there; `aurora` declares no generator named `bothways`. This is
+# group 8's own addressing-search fixture, and it exists for the same reason
+# the third generator does: `crates/safix/tests/bridge_sync.rs`'s stubbed
+# clan can only ever answer "Couldn't find var" because it was told to, for
+# any machine name a test hands it, so it cannot establish that a real,
+# unrelated second machine — one that genuinely does not declare the
+# generator — is what makes `clan vars get` say that. Only a real clan can be
+# asked and answer honestly, which is what makes this the one place the
+# addressing search's skip-a-real-candidate property is established rather
+# than merely modelled.
+#
+# `everywhere` is the sixth, declared identically on `meridian` and `aurora`
+# and never generated on either — `enumerate-clan-namespace`'s own group-1
+# fixture, holding design.md's Context finding that a `Shared`-placed
+# generator's var is present in `clan vars list <machine>` on every machine
+# whose own configuration declares it, real evidence a stub cannot give
+# because the stub answers each `list` call in isolation rather than from one
+# shared registry two machine listings both read.
 #
 # # The drills, and what they were observed to do
 #
@@ -174,19 +185,39 @@
                 value = "CANARY-never-claimed";
                 validation = null;
               };
+              # `everywhere` is declared identically on both machines below,
+              # which is `enumerate-clan-namespace`'s own group-1 fixture: a
+              # shared generator's var must appear with the identical id in
+              # `clan vars list` on every machine that declares it
+              # (design.md's Context, citing `get_machine_generators`,
+              # `clan_lib/vars/generator.py:229-382`). It is never generated
+              # on either machine, so both listings show it `<not set>`.
+              everywhere = generator {
+                value = "CANARY-declared-on-both-machines";
+                validation = null;
+                share = true;
+              };
             };
           };
         };
       };
 
-      # `aurora` declares no generators at all, which is what makes it a real
-      # candidate `bothways`'s addressing search must skip rather than a
-      # machine that simply has not generated the shared var yet.
+      # `aurora` declares no generator `bothways` names, which is what makes
+      # it a real candidate `bothways`'s addressing search must skip; it does
+      # declare `everywhere`, identically to `meridian`, for the group-1
+      # shared-listing fixture above.
       secondMachineConfiguration = builtins.toJSON {
         nixpkgs.hostPlatform = system;
         clan.core = {
           settings.state-version.enable = false;
-          vars.settings.secretStore = "age";
+          vars = {
+            settings.secretStore = "age";
+            generators.everywhere = generator {
+              value = "CANARY-declared-on-both-machines";
+              validation = null;
+              share = true;
+            };
+          };
         };
       };
 

@@ -105,14 +105,24 @@ mod against_a_real_clan {
     /// real command's own output shape.
     const ORPHAN: &str = "orphan";
 
-    /// The generator declared `share = true`, minted on `MACHINE` alone; a
-    /// second real machine in the seed clan declares no generator at all,
-    /// which is what lets an addressing search genuinely distinguish "does
-    /// not see this generator" from "has not generated it".
+    /// The generator declared `share = true`, minted on `MACHINE` alone;
+    /// `SECOND_MACHINE` declares no generator named this, which is what lets
+    /// an addressing search genuinely distinguish "does not see this
+    /// generator" from "has not generated it".
     const SHARED: &str = "bothways";
 
-    /// The machine both are declared on.
+    /// The machine every generator but `EVERYWHERE` is declared on.
     const MACHINE: &str = "meridian";
+
+    /// The second real machine in the seed clan — declares no generator
+    /// named `SHARED`, but does declare `EVERYWHERE`, identically to
+    /// `MACHINE`.
+    const SECOND_MACHINE: &str = "aurora";
+
+    /// The generator declared identically on `MACHINE` and `SECOND_MACHINE`,
+    /// never generated on either — group 1's own fixture for a shared
+    /// generator's var appearing on every declaring machine's own listing.
+    const EVERYWHERE: &str = "everywhere";
 
     /// The value the seed clan's generator mints, fixed by its script so that
     /// "safix pulled what clan was holding" is an assertion against a literal
@@ -1036,6 +1046,37 @@ mod against_a_real_clan {
             stdout_not_empty(&finished.stdout),
             "vars list produced no output despite succeeding"
         );
+    }
+
+    /// A `Shared`-placed generator's var appears with the identical id in
+    /// `clan vars list <machine>` for every machine that declares it — held
+    /// against `everywhere`, declared identically on `MACHINE` and
+    /// `SECOND_MACHINE` — design.md's Context, citing `get_machine_generators`
+    /// (`clan_lib/vars/generator.py:229-382`) querying
+    /// `<machine>.config.clan.core.vars.generators.*`
+    /// (`clan_lib/nix_selectors.py:191-193`), present for every machine whose
+    /// own configuration declares or consumes it.
+    #[test]
+    fn a_shared_generators_var_appears_identically_on_every_declaring_machine() {
+        let Some((_fixture, clan)) = unmapped() else {
+            return no_clan_here("a shared generator's identical id across declaring machines");
+        };
+        let id = format!("{EVERYWHERE}/token");
+        for machine in [MACHINE, SECOND_MACHINE] {
+            let finished = clan.run(&["list", machine]);
+            assert!(
+                finished.status.success(),
+                "vars list refused for {machine}: {}",
+                String::from_utf8_lossy(&finished.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&finished.stdout).into_owned();
+            assert!(
+                stdout
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{id}: "))),
+                "{machine}'s own listing named nothing for {id:?}"
+            );
+        }
     }
 
     /// Whether a `vars list` run produced any output at all, trimmed the way
