@@ -44,9 +44,9 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 - [x] 5.2 Add an addressing-search helper (`bridge::Addressing`, memoized per run keyed on `(generator, file)`), trying each machine `machines()` returns against `clan vars get` in turn, using the existing `NO_SUCH_VAR`-derived `Error::ClanVarUnknown` to tell "wrong machine" apart from a genuine failure
 - [x] 5.3 Wire the search into every read/write of a shared mapping's clan side: `bridge::one_import`/`one_export` and `audit::compare` now go through `Addressing` rather than `Clan` directly; a per-machine mapping is unaffected and still uses its declared `machine` directly (`Addressing::resolve`'s first branch)
 - [x] 5.4 Add `Error::ClanAddressUnresolved` naming the mapping, the generator and the file, raised when the search exhausts every machine `machines()` returned
-- [ ] 5.5 Test against `crate::clan`'s existing stub harness (`clan.rs:395-413`'s pattern): a stub `clan machines list` returning three names, one of which resolves the var; assert the search stops at the first success and does not try the remaining two
-- [ ] 5.6 Test the exhaustion case: a stub where no returned machine resolves the var; assert `ClanAddressUnresolved` and that every returned machine was tried exactly once
-- [ ] 5.7 Verify: `cargo test -p safix-core clan::` green
+- [x] 5.5 Test against a stub `clan` command, built the way `Clan::for_tests` (`clan.rs`) lets `bridge::tests` construct one: `machines list` returns three names, one of which resolves the var; the search stops at the first success and does not try the remaining one (`bridge.rs::tests::a_shared_addressing_search_stops_at_the_first_machine_that_resolves`)
+- [x] 5.6 Test the exhaustion case: a stub where no returned machine resolves the var; `ClanAddressUnresolved` is raised and every returned machine was tried exactly once (`bridge.rs::tests::exhausting_every_machine_is_refused_naming_the_mapping_and_tries_each_once`)
+- [x] 5.7 Verify: `cargo test -p safix-core bridge::` green (anchor corrected from `clan::`: `Addressing` and its tests are `bridge.rs`'s own, and `Clan::for_tests` is the one addition `clan::` tests gain)
 
 ## 6. The two-way decision function
 
