@@ -425,6 +425,20 @@ impl Clan {
             output: trimmed(&complaint),
         })
     }
+
+    /// A command pointed at a stub, for a unit test outside this module.
+    ///
+    /// [`Self::new`] stays the only way to build one from a flake and the
+    /// override variable, because that is the constructor a caller reaches for
+    /// clan as this run will invoke it. This one exists because [`Addressing`]
+    /// lives in [`crate::bridge`], whose own tests cannot otherwise reach a
+    /// [`Clan`] at all: both fields here are private to this module, the way
+    /// `an_absent_command_is_refused_by_name` below builds one directly because
+    /// it *is* this module.
+    #[cfg(test)]
+    pub(crate) fn for_tests(program: PathBuf, flake: String) -> Self {
+        Self { program, flake }
+    }
 }
 
 fn trimmed(complaint: &str) -> String {
