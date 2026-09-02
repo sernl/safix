@@ -58,9 +58,17 @@ safix's own `flake.nix` currently publishes no `flake.lib` at all, so this is a 
 ```nix
 mkVault = { modules, root }:
   (lib.evalModules {
-    modules = [ ../safix { _module.args.self = root; } ] ++ modules;
+    modules = [ ./safix { _module.args.self = root; } ] ++ modules;
   }).config.flake.safix.lib;
 ```
+
+Amended during apply.
+This snippet read `../safix` when the change was proposed, which is correct only from a file one level below `modules/flake/`, as `modules/flake/checks/portability.nix` is.
+`modules/flake/lib.nix` is a sibling of `modules/flake/safix` rather than a level below it, so `../safix` resolves to a nonexistent `modules/safix` and fails to evaluate; `./safix` is the correct path from that file.
+The formula is otherwise implemented verbatim, including the `_module.args.self = root` binding and the `++ modules` composition order.
+
+One further detail the proposal did not settle: `options.flake.lib.mkVault`'s type is `lib.types.raw`, matching the convention `modules/consume/common.nix` already uses for `safix.flake` and `safix.lib`.
+`lib.types.functionTo` was tried first and rejected, because its merge wraps the value in a type-checking functor set, which makes `builtins.typeOf` report `set` and `builtins.isFunction` report false even though the value stays callable — failing task 1.2's own stated verification.
 
 **Alternative rejected: extend `flake.safix.lib` with a callable field.**
 Two problems, not one. First, it changes `flake.safix.lib`'s type from "a resolved projection" to "a resolved projection that also carries an unrelated function," which every existing reader of that value — `common.nix:285`, the consumption modules, every check that reads `config.flake.safix.lib` — would now see a stray key inside. Second, and more basically, it does not solve the problem: a flakeless consumer has no flake of their own with `flake.safix.lib` populated by anything, since flake-parts is what populates it, so an escape hatch placed inside the thing flake-parts populates is unreachable by exactly the consumer it is for.
