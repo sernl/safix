@@ -89,9 +89,9 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 10. Verification
 
-- [ ] 10.1 `openspec validate sync-clan-vars-two-way --strict`
-- [ ] 10.2 `openspec validate --all --strict`
+- [x] 10.1 `openspec validate sync-clan-vars-two-way --strict` \u{2014} "Change 'sync-clan-vars-two-way' is valid"
+- [x] 10.2 `openspec validate --all --strict` \u{2014} 27 passed, 0 failed, run post-rebase onto the epic tip
 - [ ] 10.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` lists `safix-bridge`, `safix-bridge-drill`, and every new check named in groups 1 through 3
-- [ ] 10.4 `nix flake check` green
+- [ ] 10.4 `nix flake check` green \u{2014} out of scope for this session per the assignment's constraints; Main runs it on the merged epic tip
 - [ ] 10.5 `cargo test` green
 - [ ] 10.6 `rg` the whole tree for any real fleet identifier, machine name, or clan flake reference and confirm none
