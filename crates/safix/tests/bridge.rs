@@ -393,6 +393,44 @@ fn multiple_named_mappings_converge_in_one_run() {
     run.says("2 mapping(s): 2 updated");
 }
 
+/// A named mapping's actual direction is told apart from a wrong
+/// `--direction` filter in both directions across the two-way boundary: a
+/// two-way mapping named under a one-way filter, and a one-way mapping named
+/// under `--direction two-way`. The same generic refusal
+/// `rename-transfer-verbs` already gives one-way mismatches, unmodified.
+#[test]
+fn a_two_way_mapping_and_a_one_way_filter_are_told_apart_in_both_directions() {
+    let mut fixture = Fixture::new();
+    fixture.seed_mapping(
+        "bothways",
+        "two-way",
+        (MACHINE, "ntfy", "token"),
+        ("alice", "api-token"),
+    );
+    fixture.seed_mapping(
+        "down",
+        "clan-to-safix",
+        (MACHINE, "wg", "private"),
+        ("alice", "wg-key"),
+    );
+
+    let run = bridge(
+        &fixture,
+        &["sync", "clan", "bothways", "--direction", "clan-to-safix"],
+        &[],
+    )
+    .expect_refusal("naming a two-way mapping under a clan-to-safix filter");
+    run.says("'bothways' is declared two-way, not clan-to-safix");
+
+    let run = bridge(
+        &fixture,
+        &["sync", "clan", "down", "--direction", "two-way"],
+        &[],
+    )
+    .expect_refusal("naming a clan-to-safix mapping under a two-way filter");
+    run.says("'down' is declared clan-to-safix, not two-way");
+}
+
 // ── the boundary itself ────────────────────────────────────────────────────
 
 /// The read took the raw bytes rather than a rendering meant for a terminal.
