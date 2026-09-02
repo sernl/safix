@@ -32,6 +32,9 @@
 //! - `clan vars check <machine> --generator <g>` exits non-zero and reports
 //!   "outdated invalidation hash" for a generator whose recorded validation no
 //!   longer matches its definition (`clan_lib/vars/check.py`).
+//! - `clan vars list <machine>` prints one line per var that machine's own
+//!   configuration declares, `<generator>/<file>: <state>`, sorted by the
+//!   line's own text (`clan_cli/vars/list.py`).
 //! - "Couldn't find var" for an id clan has nothing under, and "has not been
 //!   generated yet" for one it knows and that holds nothing
 //!   (`clan_lib/vars/get.py`, `clan_cli/vars/get.py`).
@@ -94,6 +97,7 @@ fn main() -> ! {
 
     match words.as_slice() {
         ["vars", "get", "--flake", _flake, machine, id] => get(machine, id),
+        ["vars", "list", "--flake", _flake, machine] => list(machine),
         ["vars", "set", "--flake", _flake, machine, id] => set(machine, id),
         ["machines", "list", "--flake", _flake] => machines(),
         [
@@ -159,6 +163,34 @@ fn get(machine: &str, id: &str) -> ! {
     let mut out = std::io::stdout().lock();
     let _ = out.write_all(&value);
     let _ = out.flush();
+    std::process::exit(0);
+}
+
+/// Every var the stub considers declared for a machine, printed the shape
+/// `clan vars list` uses: one `<generator>/<file>: <state>` line per var,
+/// sorted by the line's own text.
+///
+/// Read out of the same store [`get`] and [`set`] use, keyed by machine, so a
+/// test declares a var for this to find the way it declares one for `get` to
+/// find: through [`Fixture::clan_seed`] or through a `set` the run itself
+/// performed. The state half is fixed at `********` for every entry: the
+/// runtime never reads it past the id (design.md's D1 in
+/// `enumerate-clan-namespace`), so nothing this stub could vary there is
+/// observable, and pretending to distinguish "generated" from "not set" here
+/// would test the stub's own fiction rather than safix's parsing.
+fn list(machine: &str) -> ! {
+    let directory = spool().join("store").join(machine);
+    let mut lines: Vec<String> = std::fs::read_dir(&directory)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .map(|name| format!("{}: ********", name.replace('%', "/")))
+        .collect();
+    lines.sort();
+    for line in lines {
+        println!("{line}");
+    }
     std::process::exit(0);
 }
 

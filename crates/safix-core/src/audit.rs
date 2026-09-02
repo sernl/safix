@@ -15,9 +15,12 @@
 //! target's is `Values`-or-`OneSided` over a direction, the keepassxc target's
 //! is `agreeing`-or-`diverged` over a mode — that [`Report`] carries one section
 //! per target rather than folding both into one list, and each section's own
-//! `lingering` and exit-status contribution is its own: naming `keepassxc`
-//! surfaces `keepassxc-sync`'s own lingering report, and it never moves the
-//! clan section's.
+//! `lingering` and exit-status contribution is its own: the clan section's
+//! `lingering` names clan vars no currently declared mapping's clan side
+//! accounts for, over the machines its own selected mappings name or resolve
+//! (`openspec/changes/enumerate-clan-namespace/design.md`'s D2-D5); naming
+//! `keepassxc` instead surfaces `keepassxc-sync`'s own lingering report; and
+//! neither ever moves either section's exit status.
 //!
 //! # Why this is a verb of its own and not part of `check`
 //!
@@ -44,12 +47,14 @@
 //! [`Secret::equals`](crate::Secret::equals) over two values that are zeroed
 //! when it returns, and what leaves it is whether they agreed.
 
+use std::collections::{BTreeSet, HashSet};
+
 use crate::bridge::{self, Addressing, Target};
 use crate::clan::{Clan, Reading};
 use crate::enroll;
 use crate::enroll::custody::DatabasePassword;
 use crate::error::{Error, Result};
-use crate::model::{Direction, Mapping, Mode, SyncMapping};
+use crate::model::{ClanPlacement, Direction, Mapping, Mode, SyncMapping};
 use crate::store::Database;
 use crate::sync;
 use crate::workspace::Workspace;
@@ -117,6 +122,14 @@ pub struct ClanReport {
     /// One entry per mapping whose two sides do not agree, in declaration
     /// order.
     pub findings: Vec<Finding>,
+    /// Clan vars no currently declared mapping's clan side accounts for, as
+    /// `"<machine> <generator>/<file>"`, scoped to the machines the selected
+    /// mappings name or resolve and sorted by machine then by id.
+    ///
+    /// Information rather than a finding: reported alongside the compared
+    /// mappings and excluded from [`ClanReport::is_clean`], the same way
+    /// [`KeepassxcReport::lingering`] is excluded from its own.
+    pub lingering: Vec<String>,
 }
 
 impl ClanReport {
@@ -273,6 +286,7 @@ fn run_clan(
         return Ok(ClanReport {
             examined: 0,
             findings: Vec::new(),
+            lingering: Vec::new(),
         });
     }
 
@@ -284,6 +298,12 @@ fn run_clan(
     let clan = Clan::new(flake);
     clan.probe()?;
     let addressing = Addressing::new(&clan);
+
+    // Enumerated before any mapping is compared: a listing failure raised
+    // partway through the findings loop would already have said "agrees"
+    // about mappings it never looked at, the same reasoning `run`'s own doc
+    // comment gives for its own stopping conditions.
+    let lingering = lingering(&clan, &addressing, &mappings)?;
 
     let mut findings = Vec::new();
     for mapping in &mappings {
@@ -303,7 +323,60 @@ fn run_clan(
     Ok(ClanReport {
         examined: mappings.len(),
         findings,
+        lingering,
     })
+}
+
+/// Clan vars no currently declared mapping's clan side accounts for, over the
+/// machines the selected mappings name or resolve.
+///
+/// Placement-sensitive rather than a single-field match
+/// (`openspec/changes/enumerate-clan-namespace/design.md`'s D2/D3): a
+/// per-machine mapping's var is claimed on its declared machine alone, and a
+/// shared mapping's is claimed by id, machine-insensitively, because the same
+/// shared generator's var can legitimately appear in more than one machine's
+/// own listing. `mapping.direction` never enters either comparison.
+///
+/// # Errors
+///
+/// Whatever [`Addressing::machine_for`] raises resolving a shared mapping's
+/// machine, and [`Error::ClanMachineListFailed`] when a machine's vars cannot
+/// be listed.
+fn lingering(
+    clan: &Clan,
+    addressing: &Addressing<'_>,
+    mappings: &[&Mapping],
+) -> Result<Vec<String>> {
+    let mut claimed_on_machine: HashSet<(String, String)> = HashSet::new();
+    let mut claimed_anywhere: HashSet<String> = HashSet::new();
+    let mut machines: BTreeSet<String> = BTreeSet::new();
+
+    for mapping in mappings {
+        let machine = addressing.machine_for(mapping)?;
+        let id = Clan::var_id(&mapping.clan.generator, &mapping.clan.file);
+        match mapping.clan.placement {
+            ClanPlacement::PerMachine => {
+                claimed_on_machine.insert((machine.clone(), id));
+            }
+            ClanPlacement::Shared => {
+                claimed_anywhere.insert(id);
+            }
+        }
+        machines.insert(machine);
+    }
+
+    let mut found = Vec::new();
+    for machine in &machines {
+        for id in clan.list(machine)? {
+            let claimed = claimed_anywhere.contains(&id)
+                || claimed_on_machine.contains(&(machine.clone(), id.clone()));
+            if !claimed {
+                found.push(format!("{machine} {id}"));
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
 }
 
 /// The keepassxc target's own comparison.
@@ -462,6 +535,7 @@ mod tests {
         let clean_clan = ClanReport {
             examined: 1,
             findings: Vec::new(),
+            lingering: vec!["meridian ntfy/orphan".into()],
         };
         let dirty_clan = ClanReport {
             examined: 1,
@@ -472,6 +546,7 @@ mod tests {
                 safix: "alice.ntfy-token".into(),
                 disagreement: Disagreement::Values,
             }],
+            lingering: Vec::new(),
         };
         let clean_keepassxc = KeepassxcReport {
             database: "/nonexistent/master.kdbx".into(),
@@ -502,7 +577,7 @@ mod tests {
                 keepassxc: Some(clean_keepassxc),
             }
             .is_clean(),
-            "lingering with no divergence should not flip the exit status"
+            "lingering on either section should not flip the exit status"
         );
         assert!(
             !Report {
