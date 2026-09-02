@@ -1351,15 +1351,15 @@ mod tests {
     /// var", the same substring [`Error::ClanVarUnknown`] matches on the real
     /// command.
     ///
-    /// A bash script rather than a compiled binary, following
+    /// A `/bin/sh` script rather than a compiled binary, following
     /// `enroll::proof::tests`' own pattern of writing a small executable stub
     /// into a per-test directory under [`std::env::temp_dir`]: `Clan::read`
     /// and `Clan::machines` both spawn `self.program` directly, so the
     /// double under test needs to be a real executable rather than a closure.
     fn stub(directory: &Path, machines: &[&str], right: &str, log: &Path) -> std::path::PathBuf {
         let script = format!(
-            "#!/usr/bin/env bash\n\
-             set -euo pipefail\n\
+            "#!/bin/sh\n\
+             set -eu\n\
              case \"$1 $2\" in\n\
              \"machines list\")\n\
              printf '%s\\n' {machines}\n\
