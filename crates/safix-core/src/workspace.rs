@@ -50,14 +50,25 @@ impl Workspace {
     ///
     /// [`Error::NotInsideRepository`] when git reports none.
     pub fn discover() -> Result<Self> {
+        Self::discover_with(Nix::from_environment())
+    }
+
+    /// The repository this process is inside, with git and sops taken from the
+    /// environment and the nix driver given.
+    ///
+    /// [`Workspace::discover`] is the environment-only form this specializes;
+    /// this exists so that the command can apply `--entry`'s precedence over
+    /// `SAFIX_ENTRY` before building the `Nix` root discovery reads through —
+    /// see D8 in `support-plain-nix-consumers`'s design: `--entry` changes only
+    /// how declarations are evaluated, never where a run stages or commits.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotInsideRepository`] when git reports none.
+    pub fn discover_with(nix: Nix) -> Result<Self> {
         let git = Git::from_environment();
         let root = git.repository_root()?;
-        Ok(Self::at(
-            root,
-            git,
-            Nix::from_environment(),
-            Sops::from_environment(),
-        ))
+        Ok(Self::at(root, git, nix, Sops::from_environment()))
     }
 
     /// A workspace at a named root, with drivers given rather than discovered.

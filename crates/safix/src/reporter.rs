@@ -401,6 +401,7 @@ mod tests {
                 producer: "base".into(),
                 file: "secrets/safix/users/alice/secrets.yaml".into(),
             },
+            Code::GenerateNeedsNixpkgs => Error::GenerateNeedsNixpkgs,
             Code::SandboxUnavailable => Error::SandboxUnavailable {
                 backend: safix_core::sandbox::Backend::Bubblewrap.program(),
                 supplied_by: safix_core::sandbox::Backend::Bubblewrap.supplied_by(),

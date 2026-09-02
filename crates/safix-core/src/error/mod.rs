@@ -582,6 +582,26 @@ pub enum Error {
         file: String,
     },
 
+    /// The generator sandbox's tools resolve through a flake, and this run
+    /// named neither one.
+    ///
+    /// Raised in [`crate::generate::run`], immediately after the empty-order
+    /// return and before [`crate::sandbox::Envelope::probe`] — see D5 in
+    /// `support-plain-nix-consumers`'s design — so a user with nothing to mint
+    /// is unaffected by `--entry` exactly as before this refusal existed.
+    #[error(
+        "generate needs a flake or a declared nixpkgs reference.\n\
+        \n\
+        A generator's sandbox resolves its own tools through nix shell, which\n\
+        is a flake-only operation. This run named --entry, which points at a\n\
+        plain file rather than a flake, and named no --nixpkgs or\n\
+        SAFIX_NIXPKGS for the sandbox to resolve its tools against instead.\n\
+        \n\
+        Drop --entry and run against the declaring flake, or add --nixpkgs\n\
+        <flake-ref> (or SAFIX_NIXPKGS)."
+    )]
+    GenerateNeedsNixpkgs,
+
     /// The platform's sandbox backend is the one it should have and does not run.
     ///
     /// Raised by the probe, before the first fragment. There is deliberately no

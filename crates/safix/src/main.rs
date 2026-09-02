@@ -44,11 +44,13 @@ mod table;
 mod usage;
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::OnceLock;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
-    keygen, set, sync,
+    keygen, nix::Nix, set, sync,
 };
 
 use reporter::Refusal;
@@ -208,6 +210,9 @@ pub(crate) fn expected_verbs() -> String {
 }
 
 fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    let (nix, arguments) = parse_globals(arguments)?;
+    let _ = NIX.set(nix);
+
     let Some((subcommand, rest)) = arguments.split_first() else {
         eprint!("{}", usage::SCAFFOLD);
         return Ok(ExitCode::from(1));
@@ -238,6 +243,56 @@ fn run(arguments: &[String]) -> Result<ExitCode, Refusal> {
     }
 }
 
+/// The nix driver `--entry`, `SAFIX_ENTRY`, `--nixpkgs` and `SAFIX_NIXPKGS`
+/// build, and the arguments after the leading global options.
+///
+/// Read as a prefix rather than scanned for throughout, because these options
+/// change how every subcommand evaluates and are not a subcommand's own
+/// concern: `safix --entry ./entry.nix list alice` reads naturally where
+/// `safix list --entry ./entry.nix alice` would leave `list` guessing whether
+/// `--entry` is its own flag. `--entry` overrides `SAFIX_ENTRY` and
+/// `--nixpkgs` overrides `SAFIX_NIXPKGS`: [`Nix::from_environment`] reads the
+/// environment first, and the builders below apply on top of it only when the
+/// flag was actually given.
+fn parse_globals(arguments: &[String]) -> Result<(Nix, &[String]), Refusal> {
+    let mut nix = Nix::from_environment();
+    let mut rest = arguments;
+    loop {
+        match rest {
+            [option, value, tail @ ..] if option == "--entry" => {
+                nix = nix.with_entry(PathBuf::from(value));
+                rest = tail;
+            }
+            [option, value, tail @ ..] if option == "--nixpkgs" => {
+                nix = nix.with_nixpkgs(value.clone());
+                rest = tail;
+            }
+            [option] if option == "--entry" || option == "--nixpkgs" => {
+                return Err(Refusal::OptionNeedsValue {
+                    option: option.clone(),
+                });
+            }
+            _ => return Ok((nix, rest)),
+        }
+    }
+}
+
+/// The nix driver [`parse_globals`] built in [`run`], read by every
+/// subcommand through [`workspace`] rather than each rebuilding its own.
+static NIX: OnceLock<Nix> = OnceLock::new();
+
+/// The workspace `--entry`, `SAFIX_ENTRY`, `--nixpkgs` and `SAFIX_NIXPKGS`
+/// name, in place of [`Workspace::discover`]'s environment-only form.
+///
+/// Every subcommand function calls this rather than [`Workspace::discover`]
+/// directly, so `--entry`'s precedence over `SAFIX_ENTRY` is applied
+/// uniformly rather than by each subcommand remembering to read it.
+fn workspace() -> Result<Workspace, Refusal> {
+    Ok(Workspace::discover_with(
+        NIX.get().cloned().unwrap_or_default(),
+    )?)
+}
+
 /// Which help text an invocation asks for, if any.
 ///
 /// The whole argument list is scanned rather than only its head, because the
@@ -256,7 +311,7 @@ fn help_requested(subcommand: &str, rest: &[String]) -> Option<&'static str> {
 
 /// Every name a user holds, and what serves it.
 fn list(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let user = match arguments {
         [] => workspace.default_user()?,
         [user] => user.clone(),
@@ -288,7 +343,7 @@ fn list(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// is why the value travels as a [`safix_core::Secret`] right up to the write —
 /// it is zeroed when this returns whether the write succeeded or not.
 fn get(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let (user, name) = match arguments {
         [name] => (workspace.default_user()?, name.clone()),
         [user, name] => (user.clone(), name.clone()),
@@ -323,7 +378,7 @@ fn get(arguments: &[String]) -> Result<ExitCode, Refusal> {
 
 /// One value, typed twice or piped once, written and committed.
 fn set_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let (user, name) = match arguments {
         [name] => (workspace.default_user()?, name.clone()),
         [user, name] => (user.clone(), name.clone()),
@@ -378,7 +433,7 @@ fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         rest = tail;
     }
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let (user, name) = match positional.as_slice() {
         [name] => (workspace.default_user()?, name.clone()),
         [user, name] => (user.clone(), name.clone()),
@@ -400,14 +455,14 @@ fn fix_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
             });
         }
     };
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let status = fix::run(&workspace, &Terminal, assume_yes)?;
     Ok(abort::exit_code(status))
 }
 
 /// The drift report.
 fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let only = match arguments {
         [] => None,
         [user] => Some(user.clone()),
@@ -457,7 +512,7 @@ fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         rest = tail;
     }
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let (user, name) = match rest {
         [] => (workspace.default_user()?, None),
         // The one argument is a user when it names one, and a secret otherwise.
@@ -515,7 +570,7 @@ fn transfer(
         _ => return Err(Refusal::Usage { form }),
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let outcome = act(&workspace, &Terminal, only.as_deref())?;
     eprint!("{}", render::transfer(&outcome));
 
@@ -549,7 +604,7 @@ fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         }
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let report = audit::run(&workspace, only.as_deref())?;
     eprint!("{}", render::audit(&report));
 
@@ -581,7 +636,7 @@ fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         }
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let report = sync::run(
         &workspace,
         &Terminal,
@@ -605,7 +660,7 @@ fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         _ => (false, arguments),
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let user = match rest {
         [] => workspace.default_user()?,
         [user] => user.clone(),
@@ -661,7 +716,7 @@ fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         return Err(Refusal::Usage { form: FORM });
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     adduser::run(
         &workspace,
         &Terminal,
@@ -759,7 +814,7 @@ fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         }
     }
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     let user = match positional.as_slice() {
         [] => workspace.default_user()?,
         [user] => user.clone(),
@@ -799,7 +854,7 @@ fn group_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         return Err(Refusal::Usage { form: FORM });
     };
 
-    let workspace = Workspace::discover()?;
+    let workspace = workspace()?;
     group::run(&workspace, &Terminal, act, group, subject)?;
     Ok(ExitCode::SUCCESS)
 }

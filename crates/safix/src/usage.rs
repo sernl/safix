@@ -366,6 +366,13 @@ remains yours to get right is what a granted connection carries.
 There is no --no-sandbox and nothing spelled otherwise. Where no backend runs,
 this refuses before the first fragment and names what it looked for.
 
+\u{2500}\u{2500} under --entry \u{2500}\u{2500}
+The sandbox above resolves its own tools through nix shell, a flake-only
+operation. Run under --entry with something to mint and neither --nixpkgs nor
+SAFIX_NIXPKGS declared, this refuses before the sandbox is probed, naming both
+remedies: drop --entry and run against the declaring flake, or add --nixpkgs
+<flake-ref>. A user with nothing to mint is unaffected either way.
+
 Standard error and standard output both reach you, so diagnostics are free and
 neither is a value.
 ";
@@ -628,6 +635,19 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
   safix group    add|remove <group> <subject>       edit a group's membership
+
+\u{2500}\u{2500} global options \u{2500}\u{2500}
+  --entry <file>          evaluate <file> instead of the repository's flake
+  --nixpkgs <flake-ref>   generate's sandbox resolves its tools against this
+                          flake reference instead of the declaring one
+
+SAFIX_ENTRY and SAFIX_NIXPKGS set the same two, and --entry and --nixpkgs win
+when both a flag and its variable are given. Fourteen of the fifteen
+subcommands behave identically under --entry as against a flake; generate is
+the exception and refuses under --entry with neither --nixpkgs nor
+SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
+stages or commits: that root is still the one git reports for the current
+directory.
 
 <user> defaults to $USER when flake.safix.users declares them, and otherwise to
 the sole declared holder when there is exactly one.

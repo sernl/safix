@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: generate needs a flake or a declared nixpkgs reference.
+
+A generator's sandbox resolves its own tools through nix shell, which
+is a flake-only operation. This run named --entry, which points at a
+plain file rather than a flake, and named no --nixpkgs or
+SAFIX_NIXPKGS for the sandbox to resolve its tools against instead.
+
+Drop --entry and run against the declaring flake, or add --nixpkgs
+<flake-ref> (or SAFIX_NIXPKGS).

@@ -206,6 +206,15 @@ pub fn run(
         return Ok(0);
     }
 
+    // `--entry` names a plain file rather than a flake, and the sandbox's
+    // tools resolve through `nix shell`, a flake-only operation — see D5 in
+    // `support-plain-nix-consumers`'s design. This sits after the empty-order
+    // return above, so a user with nothing to mint is unaffected, and before
+    // the probe below, so the refusal fires before anything is committed.
+    if workspace.nix().entry().is_some() && workspace.nix().nixpkgs().is_none() {
+        return Err(Error::GenerateNeedsNixpkgs);
+    }
+
     // Once, and before the first fragment. Availability does not change mid-run,
     // and a refusal after generator three has committed is worse than the same
     // refusal before generator one. A user who declares no generator never

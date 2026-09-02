@@ -88,15 +88,6 @@ impl Attribute {
     }
 }
 
-/// The flake reference `nix eval` is handed: the repository, then the
-/// attribute.
-fn target(root: &Path, attribute: Attribute) -> OsString {
-    let mut target = OsString::from(root);
-    target.push("#");
-    target.push(attribute.as_str());
-    target
-}
-
 /// The nix binary, and how it is reached.
 ///
 /// `SAFIX_NIX` overrides the program so that a hermetic check can drive the
@@ -105,6 +96,21 @@ fn target(root: &Path, attribute: Attribute) -> OsString {
 #[derive(Debug, Clone)]
 pub struct Nix {
     program: PathBuf,
+    /// The plain file `--entry` or `SAFIX_ENTRY` named, when either did.
+    ///
+    /// Set, every evaluation targets `--file <entry> <attribute>` instead of
+    /// `<root>#<attribute>` — see [`Nix::target`]. This changes only how the
+    /// target is built; [`Attribute::as_str`] supplies the same string either
+    /// way.
+    entry: Option<PathBuf>,
+    /// The flake reference `--nixpkgs` or `SAFIX_NIXPKGS` declared, when
+    /// either did.
+    ///
+    /// Read by [`Nix::shell`], and only when [`entry`](Self::entry) is also
+    /// set: flake mode already resolves the sandbox's tools through
+    /// `--inputs-from`, so a declared reference with no `--entry` is ignored
+    /// rather than consulted.
+    nixpkgs: Option<String>,
 }
 
 impl Default for Nix {
@@ -114,12 +120,70 @@ impl Default for Nix {
 }
 
 impl Nix {
-    /// The binary `SAFIX_NIX` names, or `nix`.
+    /// The binary `SAFIX_NIX` names, or `nix`; the entry file `SAFIX_ENTRY`
+    /// names, if any; and the nixpkgs reference `SAFIX_NIXPKGS` names, if any.
     #[must_use]
     pub fn from_environment() -> Self {
         Self {
             program: std::env::var_os("SAFIX_NIX")
                 .map_or_else(|| PathBuf::from("nix"), PathBuf::from),
+            entry: std::env::var_os("SAFIX_ENTRY").map(PathBuf::from),
+            nixpkgs: std::env::var("SAFIX_NIXPKGS").ok(),
+        }
+    }
+
+    /// Point every evaluation at a plain file instead of `<root>#<attribute>`.
+    ///
+    /// Takes the value rather than reading `--entry` itself, because the
+    /// command parses it after already building a `Nix` from the
+    /// environment; calling this is what lets `--entry` override
+    /// `SAFIX_ENTRY` rather than merely duplicate it.
+    #[must_use]
+    pub fn with_entry(mut self, entry: PathBuf) -> Self {
+        self.entry = Some(entry);
+        self
+    }
+
+    /// Declare the nixpkgs reference `generate`'s sandbox resolves its tools
+    /// against, overriding `SAFIX_NIXPKGS` the same way [`Nix::with_entry`]
+    /// overrides `SAFIX_ENTRY`.
+    #[must_use]
+    pub fn with_nixpkgs(mut self, nixpkgs: String) -> Self {
+        self.nixpkgs = Some(nixpkgs);
+        self
+    }
+
+    /// Whether `--entry` or `SAFIX_ENTRY` named a plain file to evaluate.
+    #[must_use]
+    pub fn entry(&self) -> Option<&Path> {
+        self.entry.as_deref()
+    }
+
+    /// The nixpkgs reference `--nixpkgs` or `SAFIX_NIXPKGS` declared, if any.
+    #[must_use]
+    pub fn nixpkgs(&self) -> Option<&str> {
+        self.nixpkgs.as_deref()
+    }
+
+    /// The arguments naming what to evaluate: a plain file when `--entry` or
+    /// `SAFIX_ENTRY` named one, the repository's flake output otherwise.
+    ///
+    /// Two arguments where a flake target is one — `--file <entry>` ahead of
+    /// the attribute — but [`Attribute::as_str`] supplies the same string in
+    /// the last position either way, so the twelve attribute spellings this
+    /// runtime reads are unchanged by which form this returns.
+    fn target(&self, root: &Path, attribute: Attribute) -> Vec<OsString> {
+        if let Some(entry) = &self.entry {
+            vec![
+                OsString::from("--file"),
+                entry.as_os_str().to_owned(),
+                OsString::from(attribute.as_str()),
+            ]
+        } else {
+            let mut target = OsString::from(root);
+            target.push("#");
+            target.push(attribute.as_str());
+            vec![target]
         }
     }
 
@@ -174,7 +238,7 @@ impl Nix {
         let status = Command::new(&self.program)
             .arg("eval")
             .arg("--raw")
-            .arg(target(root, attribute))
+            .args(self.target(root, attribute))
             .stdin(Stdio::null())
             .stdout(Stdio::from(out))
             .stderr(Stdio::inherit())
@@ -201,12 +265,22 @@ impl Nix {
     ///
     /// `--inputs-from` resolves each `nixpkgs#<attribute>` against this flake's
     /// own locked nixpkgs, which is what makes a generator mint the same value
-    /// from the same declaration on every machine.
+    /// from the same declaration on every machine. When `--entry` and
+    /// `--nixpkgs` are both set, there is no flake to resolve `--inputs-from`
+    /// against, so each attribute is instead resolved directly against the
+    /// declared reference — the refusal in `generate.rs` is what keeps this
+    /// branch from being reached with `--entry` set and no reference declared.
     pub(crate) fn shell(&self, root: &Path, attributes: &[&str]) -> Command {
         let mut command = Command::new(&self.program);
-        command.arg("shell").arg("--inputs-from").arg(root);
+        command.arg("shell");
+        let reference = if let (Some(_), Some(nixpkgs)) = (&self.entry, &self.nixpkgs) {
+            nixpkgs.clone()
+        } else {
+            command.arg("--inputs-from").arg(root);
+            "nixpkgs".to_owned()
+        };
         for attribute in attributes {
-            command.arg(format!("nixpkgs#{attribute}"));
+            command.arg(format!("{reference}#{attribute}"));
         }
         command.arg("-c");
         command
@@ -282,7 +356,7 @@ impl Nix {
         let output = Command::new(&self.program)
             .arg("eval")
             .arg(format)
-            .arg(target(root, attribute))
+            .args(self.target(root, attribute))
             .stdin(Stdio::null())
             .stderr(Stdio::inherit())
             .output()
@@ -300,5 +374,86 @@ impl Nix {
             });
         }
         Ok(output.stdout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D4: `--entry` changes only how the target is built, never the twelve
+    /// attribute spellings — [`Attribute::as_str`] supplies the identical
+    /// string either way.
+    #[test]
+    fn target_reads_a_plain_file_when_entry_is_set() {
+        let nix = Nix::from_environment().with_entry(PathBuf::from("/fixture/entry.nix"));
+        assert_eq!(
+            nix.target(Path::new("/repo"), Attribute::GeneratorPlan),
+            vec![
+                OsString::from("--file"),
+                OsString::from("/fixture/entry.nix"),
+                OsString::from(Attribute::GeneratorPlan.as_str()),
+            ]
+        );
+    }
+
+    #[test]
+    fn target_reads_the_flake_output_when_entry_is_not_set() {
+        let nix = Nix {
+            program: PathBuf::from("nix"),
+            entry: None,
+            nixpkgs: None,
+        };
+        assert_eq!(
+            nix.target(Path::new("/repo"), Attribute::GeneratorPlan),
+            vec![OsString::from(format!(
+                "/repo#{}",
+                Attribute::GeneratorPlan.as_str()
+            ))]
+        );
+    }
+
+    /// `--entry` overrides `SAFIX_ENTRY`: [`Nix::with_entry`] is applied after
+    /// [`Nix::from_environment`] already read the variable, so the value it
+    /// sets is the one [`Nix::target`] reads.
+    #[test]
+    fn with_entry_overrides_whatever_from_environment_already_read() {
+        let nix = Nix {
+            program: PathBuf::from("nix"),
+            entry: Some(PathBuf::from("/env/entry.nix")),
+            nixpkgs: None,
+        }
+        .with_entry(PathBuf::from("/cli/entry.nix"));
+        assert_eq!(nix.entry(), Some(Path::new("/cli/entry.nix")));
+    }
+
+    /// D5's other half: `shell()` resolves directly against the declared
+    /// reference only when both `entry` and `nixpkgs` are set; `nixpkgs` alone
+    /// is ignored, which is `generate`'s "flake mode is unaffected" scenario.
+    #[test]
+    fn shell_ignores_a_declared_nixpkgs_reference_without_entry() {
+        let nix = Nix {
+            program: PathBuf::from("nix"),
+            entry: None,
+            nixpkgs: Some("github:example/nixpkgs".to_owned()),
+        };
+        let command = nix.shell(Path::new("/repo"), &["coreutils"]);
+        let rendered = format!("{command:?}");
+        assert!(rendered.contains("--inputs-from"));
+        assert!(rendered.contains("nixpkgs#coreutils"));
+        assert!(!rendered.contains("github:example/nixpkgs"));
+    }
+
+    #[test]
+    fn shell_resolves_against_the_declared_reference_when_entry_and_nixpkgs_are_both_set() {
+        let nix = Nix {
+            program: PathBuf::from("nix"),
+            entry: Some(PathBuf::from("/fixture/entry.nix")),
+            nixpkgs: Some("github:example/nixpkgs".to_owned()),
+        };
+        let command = nix.shell(Path::new("/repo"), &["coreutils"]);
+        let rendered = format!("{command:?}");
+        assert!(!rendered.contains("--inputs-from"));
+        assert!(rendered.contains("github:example/nixpkgs#coreutils"));
     }
 }
