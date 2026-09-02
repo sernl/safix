@@ -69,5 +69,5 @@ No real fleet identifier, real hostname, or real user name enters this repositor
 - [x] 8.1 `openspec validate enumerate-clan-namespace --strict`
 - [x] 8.2 `openspec validate --all --strict`
 - [x] 8.3 `cargo test` green (log: `logs/cargo-test-workspace-20260903-074055.log`, `cargo test --locked --workspace`, 33 test binaries all `ok`, 0 failed)
-- [ ] 8.4 `nix flake check` green
+- [x] 8.4 `nix flake check` green (log: `logs/8.4-nix-flake-check-retry-20260903-074704.log`, `nix flake check --keep-going --print-build-logs`, "all checks passed!"; a first run failed `checks.x86_64-linux.treefmt` on eight files left unformatted by today's commits, fixed with `nix fmt`, see the `style(nix):` commit on this branch)
 - [x] 8.5 `rg` the whole tree for any real fleet identifier introduced by this change and confirm none
