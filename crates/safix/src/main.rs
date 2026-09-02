@@ -53,7 +53,7 @@ use std::sync::OnceLock;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
-    keygen, model::Direction, nix::Nix, set, sync,
+    keygen, model::Direction, nix::Nix, set, sync, upload,
 };
 
 use reporter::Refusal;
@@ -178,6 +178,11 @@ const VERBS: &[Verb] = &[
         name: "group",
         help: usage::GROUP,
         run: group_command,
+    },
+    Verb {
+        name: "upload",
+        help: usage::UPLOAD,
+        run: upload_command,
     },
 ];
 
@@ -914,6 +919,82 @@ fn group_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 
     let workspace = workspace()?;
     group::run(&workspace, &Terminal, act, group, subject)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A machine's own ed25519 host key, seeded before its first activation:
+/// written straight to `--directory DIR`, or probed and then written over
+/// ssh to `--to ADDRESS`.
+///
+/// Flags are read in any order and around the one positional, the way
+/// `enroll`'s are — `--directory` and `--to` name the two write modes and
+/// are mutually exclusive, and naming neither or both is the same usage
+/// refusal.
+fn upload_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "upload <machine> --directory DIR --identity PATH | \
+                        upload <machine> --to ADDRESS [--identity PATH] [--force]";
+
+    let mut directory: Option<String> = None;
+    let mut identity: Option<String> = None;
+    let mut to: Option<String> = None;
+    let mut force = false;
+    let mut positional: Vec<String> = Vec::new();
+    let mut rest = arguments;
+
+    while let Some((first, tail)) = rest.split_first() {
+        let valued = |sink: &mut Option<String>| match tail.split_first() {
+            Some((value, after)) => {
+                *sink = Some(value.clone());
+                Ok(after)
+            }
+            None => Err(Refusal::OptionNeedsValue {
+                option: first.clone(),
+            }),
+        };
+        match first.as_str() {
+            "--directory" => rest = valued(&mut directory)?,
+            "--identity" => rest = valued(&mut identity)?,
+            "--to" => rest = valued(&mut to)?,
+            "--force" => {
+                force = true;
+                rest = tail;
+            }
+            "--" => {
+                positional.extend(tail.iter().cloned());
+                rest = &[];
+            }
+            option if option.starts_with('-') => {
+                return Err(Refusal::UnknownOption {
+                    option: option.to_owned(),
+                });
+            }
+            _ => {
+                positional.push(first.clone());
+                rest = tail;
+            }
+        }
+    }
+
+    let [machine] = positional.as_slice() else {
+        return Err(Refusal::Usage { form: FORM });
+    };
+    let target = match (directory, to) {
+        (Some(dir), None) => upload::Target::Directory(PathBuf::from(dir)),
+        (None, Some(address)) => upload::Target::Remote(address),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    let workspace = workspace()?;
+    upload::run(
+        &workspace,
+        &Terminal,
+        machine,
+        &target,
+        &upload::Options {
+            identity: identity.map(PathBuf::from),
+            force,
+        },
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 

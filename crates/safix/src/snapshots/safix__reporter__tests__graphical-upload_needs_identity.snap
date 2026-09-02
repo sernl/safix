@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::upload_needs_identity
+
+  × --identity is required to write a host identity; nothing was written

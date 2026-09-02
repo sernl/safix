@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::upload_pipe_missing
+
+  × ssh-to-age was started without the pipe its input travels

@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: /mnt is shallower than the wipe-then-extract transport allows; refusing before touching it

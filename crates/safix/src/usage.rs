@@ -629,6 +629,53 @@ A public output is not editable here: it is already plaintext in the repository,
 and the generator declaring it is what mints it.
 ";
 
+/// `safix upload -h`.
+pub const UPLOAD: &str = "\
+safix upload <machine> --directory DIR --identity PATH
+safix upload <machine> --to ADDRESS [--identity PATH] [--force]
+
+Seed a machine's own ed25519 host key before its first activation, so the
+audience already wrapped to its declared recipient can be decrypted from the
+moment it boots. safix mints no machine identity: --identity PATH names a
+private key the operator already holds, and the command refuses before
+writing anything when its derived recipient does not match the machine's
+declared one.
+
+\u{2500}\u{2500} --directory: a pre-seed tree, touching no network \u{2500}\u{2500}
+Writes DIR/etc/ssh/ssh_host_ed25519_key at mode 0600 and
+DIR/etc/ssh/ssh_host_ed25519_key.pub at mode 0644 \u{2014} the paths and modes a
+fresh NixOS install's own sshd-keygen would produce \u{2014} for nixos-anywhere
+--extra-files or for hand-copying onto installer media. Creates no other path
+under DIR and makes no ssh connection.
+
+\u{2500}\u{2500} --to: probe first, then no-op, write, or refuse \u{2500}\u{2500}
+Reads the ed25519 host key ADDRESS currently presents, unauthenticated,
+before writing anything:
+
+  already the declared key     reports it and writes nothing, even with
+                               --force and --identity both given
+  no key presented             writes, given --identity; refused naming the
+                               flag otherwise
+  a different key presented    refused by default, naming both recipients;
+                               --force together with --identity proceeds
+
+A write streams a tarball built inside the same private staging root
+generation and editing use \u{2014} files at mode 0400, directories at 0700, as
+root \u{2014} and wipes the fixed destination before extracting into it. No value
+is decrypted, encrypted or read on this path: what travels is the identity
+material the operator supplied, once.
+
+\u{2500}\u{2500} what this does not cover \u{2500}\u{2500}
+Provisioning a person's own first identity. A machine name is all this verb
+parses, and a person's name is refused the way an undeclared machine is.
+
+A systemd-credentials delivery path for the same material. It does not exist
+yet; --directory's output is a plain filesystem tree.
+
+Any deploy, switch or rebuild. Nothing here triggers one: the machine's own
+next rebuild is what activates what was written here.
+";
+
 pub const SCAFFOLD: &str = "\
 safix \u{2014} the whole lifecycle of one secret, by name and never by file.
 
@@ -647,6 +694,8 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
   safix group    add|remove <group> <subject>       edit a group's membership
+  safix upload   <machine> --directory DIR | --to ADDRESS
+                                                    seed a machine's host identity
 
 \u{2500}\u{2500} global options \u{2500}\u{2500}
   --entry <file>          evaluate <file> instead of the repository's flake
@@ -654,7 +703,7 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                           flake reference instead of the declaring one
 
 SAFIX_ENTRY and SAFIX_NIXPKGS set the same two, and --entry and --nixpkgs win
-when both a flag and its variable are given. Twelve of the thirteen
+when both a flag and its variable are given. Thirteen of the fourteen
 subcommands behave identically under --entry as against a flake; generate is
 the exception and refuses under --entry with neither --nixpkgs nor
 SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
@@ -717,12 +766,7 @@ the drift between a value a program reads and the same value a person reads.
 Its report is the same `audit`/`sync` verbs' own, over the second target,
 rather than more rows in `check`.
 
-\u{2500}\u{2500} verbs retired, reserved, or never built, and why \u{2500}\u{2500}
-  upload   a tool that pushes generated values to a machine over ssh exists
-           because the machine does not evaluate the flake holding them. A
-           profile served from this repository does: activation is what delivers
-           a value, through sops-nix reading the committed file. There is
-           nothing for an upload to do that a rebuild does not already do.
+\u{2500}\u{2500} verbs retired, reserved, or narrower here than in clan \u{2500}\u{2500}
   export   retired permanently. clan's own vars export writes a machine's whole
            vars folder to plaintext on disk, which is the bulk dump safix's
            design refuses to build on either side of the boundary; sync clan
@@ -731,4 +775,10 @@ rather than more rows in `check`.
            a value from an external plaintext source one entry at a time,
            analogous to clan's own import-sops \u{2014} may use this word later.
            There is no scaffold and no partial parser for it yet.
+  upload   moves only a machine's own host identity, once, before that
+           machine's first activation \u{2014} not clan's ongoing vars-delivery verb
+           of the same name. No verb here delivers a secret's value on an
+           ongoing basis: activation already does, through sops-nix reading
+           the committed file, once a machine holds the identity this verb
+           seeds.
 ";

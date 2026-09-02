@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::machine_has_no_recipient
+
+  × 'deck' is a declared machine with no recipient, so there is nothing to
+  │ check supplied identity material against. Declare
+  │ flake.safix.machines.deck.recipient.

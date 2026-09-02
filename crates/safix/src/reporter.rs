@@ -624,6 +624,37 @@ mod tests {
                 generator: "ntfy".into(),
                 file: "token".into(),
             },
+            Code::UnknownMachine => Error::UnknownMachine {
+                machine: "deck".into(),
+                declared: vec!["deck".into(), "server".into()],
+            },
+            Code::MachineHasNoRecipient => Error::MachineHasNoRecipient {
+                machine: "deck".into(),
+            },
+            Code::UploadNeedsIdentity => Error::UploadNeedsIdentity,
+            Code::SuppliedIdentityMismatch => Error::SuppliedIdentityMismatch {
+                machine: "deck".into(),
+                path: "/home/alice/deck-host-key".into(),
+                declared: format!("age1{}", "d".repeat(58)),
+                supplied: format!("age1{}", "e".repeat(58)),
+            },
+            Code::PresentedIdentityMismatch => Error::PresentedIdentityMismatch {
+                machine: "deck".into(),
+                declared: format!("age1{}", "d".repeat(58)),
+                presented: format!("age1{}", "f".repeat(58)),
+            },
+            Code::UploadToolUnavailable => Error::UploadToolUnavailable {
+                program: "ssh-keygen".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::UploadPipeMissing => Error::UploadPipeMissing,
+            Code::UploadToolFailed => Error::UploadToolFailed {
+                program: "ssh".into(),
+                output: "Permission denied (publickey).".into(),
+            },
+            Code::UploadDestinationUnsafe => Error::UploadDestinationUnsafe {
+                destination: "/mnt".into(),
+            },
         }
     }
 

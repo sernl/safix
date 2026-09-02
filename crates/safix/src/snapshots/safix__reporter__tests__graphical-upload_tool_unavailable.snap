@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::upload_tool_unavailable
+
+  × could not run ssh-keygen
+  ╰─▶ entity not found

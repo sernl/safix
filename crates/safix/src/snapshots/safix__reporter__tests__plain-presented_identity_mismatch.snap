@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: deck already presents an ed25519 host key, and its age form age1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffff is neither absent nor deck's declared recipient age1dddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Seed it anyway with --force and a matching --identity, or investigate before overriding a host that may already be live.

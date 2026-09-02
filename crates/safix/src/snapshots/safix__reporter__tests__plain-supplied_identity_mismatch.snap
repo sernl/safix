@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the identity at /home/alice/deck-host-key derives to age1eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, which is not deck's declared recipient age1dddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Seeding it would not match what deck's audience is already wrapped to.
