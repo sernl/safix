@@ -49,9 +49,11 @@
 #
 # # The clan the check builds
 #
-# One machine, three `age`-backed generators, an identity minted here and a
-# recipient derived from it. The three differ in the two axes that turn out to
-# matter, and the real clan is what established that the second axis exists:
+# One machine, four `age`-backed generators, an identity minted here and a
+# recipient derived from it. The first three differ in the two axes that turn
+# out to matter, and the real clan is what established that the second axis
+# exists; the fourth is `enumerate-clan-namespace`'s own addition, a var no
+# bridge mapping this check declares ever names:
 #
 #   - `ntfy` declares `validation` and is generated. `validationHash` is null
 #     unless a generator declares `validation`, and `hash_is_valid` calls a
@@ -67,6 +69,12 @@
 #     drift refusal fires on at a first export, and it is correct that it does:
 #     such a generator has not run and will, and the run would overwrite
 #     whatever the export wrote.
+#   - `orphan` declares no `validation` and is not generated, the same shape as
+#     `handover`. No mapping in this check's fleet ever names it, so `clan vars
+#     list meridian` reports it and `audit clan`'s lingering section is what is
+#     expected to name it — real evidence that `Clan::list`'s parsing and the
+#     claimed-set computation hold against the real command's own output shape,
+#     not only against `tests/support/clan-stub.rs`'s.
 #
 # The third was not anticipated. It is what a real clan establishes and a stub
 # cannot: the stub's staleness is a switch a test throws, so no fixture of it
@@ -131,6 +139,10 @@
               scheduled = generator {
                 value = "CANARY-would-be-minted";
                 validation = 1;
+              };
+              orphan = generator {
+                value = "CANARY-never-claimed";
+                validation = null;
               };
             };
           };

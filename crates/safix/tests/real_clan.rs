@@ -99,6 +99,11 @@ mod against_a_real_clan {
     /// it does not match, and that is what the safix-to-clan direction refuses.
     const SCHEDULED: &str = "scheduled";
 
+    /// The generator no bridge mapping this fixture declares ever names — the
+    /// var `audit clan`'s lingering section is expected to report against the
+    /// real command's own output shape.
+    const ORPHAN: &str = "orphan";
+
     /// The machine both are declared on.
     const MACHINE: &str = "meridian";
 
@@ -534,6 +539,52 @@ mod against_a_real_clan {
         let after = bridge(&fixture, &clan, &["audit", "clan"])
             .expect_success("auditing the resolved pair");
         after.says("no disagreement");
+    }
+
+    /// The audit's lingering section names a real clan var no bridge mapping
+    /// in this fixture claims — `enumerate-clan-namespace`'s own claim, held
+    /// against the real command's own `vars list` output rather than only
+    /// against the stub's.
+    #[test]
+    fn audit_clan_reports_a_real_var_no_mapping_names() {
+        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+            return no_clan_here("the lingering report against a real clan");
+        };
+        bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("bringing the declared mapping into agreement");
+
+        let report = bridge(&fixture, &clan, &["audit", "clan"])
+            .expect_success("an unmapped var alone must not refuse the run");
+        report.says(&format!("{MACHINE} {ORPHAN}/token"));
+        report.says("no declared mapping accounts for it");
+    }
+
+    /// Once a mapping is declared for a var that used to be unclaimed, the
+    /// next audit stops naming it — the scope is genuinely computed from the
+    /// current declarations against the real command, not cached across runs.
+    #[test]
+    fn a_newly_mapped_real_var_stops_lingering() {
+        let Some((mut fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+            return no_clan_here("re-scoping the lingering report against a real clan");
+        };
+        bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("bringing the first mapping into agreement");
+        bridge(&fixture, &clan, &["audit", "clan"])
+            .expect_success("an unmapped var alone must not refuse the run")
+            .says(&format!("{MACHINE} {ORPHAN}/token"));
+
+        fixture.seed_mapping(
+            "orphan-token",
+            "clan-to-safix",
+            (MACHINE, ORPHAN, "token"),
+            ("alice", "orphan-token"),
+        );
+        bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("bringing the second mapping into agreement");
+
+        bridge(&fixture, &clan, &["audit", "clan"])
+            .expect_success("both mappings now agree")
+            .silent_about("no declared mapping accounts for it");
     }
 
     /// The value came off a pipe rather than out of a terminal rendering.
