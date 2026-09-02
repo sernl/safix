@@ -717,5 +717,354 @@
       checks.safix-audience-widened =
         mode "safix-audience-widened" "subjects"
           "a_widened_audience_is_re_wrapped_by_fix";
+
+      # Holds the `--entry`/`SAFIX_ENTRY` evaluation path (safix-cli spec) and
+      # `generate`'s flakeless refusal, over one fixture fleet declared once as
+      # nix source text and evaluated two ways: `nix eval --file <entry>`
+      # against a plain expression outside any repository, the same mechanism
+      # D1's `mkVault` wraps, and `nix eval <flakeref>#<attr>` against a
+      # from-scratch zero-input flake — no flake-parts, no network either way,
+      # because neither evaluation resolves a flake input.
+      #
+      # ── what this holds ──
+      # All twelve `Attribute` spellings evaluate under `--file` exactly as
+      # they do under a flake target — the same strings, only how the target
+      # is built differs (D4). `generatorPlan`, `bridge` and `keepassxc`
+      # deserialize against the real `Generator`, `GeneratorFile`, `Mapping`,
+      # `SyncMapping` and `PlanInput` structs with no `deny_unknown_fields`
+      # rejection — reached through the real `safix` binary's own `generate`,
+      # `import` and `sync`, which is the residual measurement gap the
+      # proposal names. The same three attributes are byte-identical between
+      # the two evaluation paths. `--entry` overrides a conflicting
+      # `SAFIX_ENTRY`. The workspace root a write stages and commits into is
+      # still the one git discovers, even with `--entry` pointed at a file
+      # outside that repository. `generate` refuses under `--entry` with no
+      # `--nixpkgs`/`SAFIX_NIXPKGS` declared and a non-empty generator order,
+      # names both remedies, is unaffected for a user with an empty order —
+      # the ordering drill — and is unaffected in flake mode regardless of
+      # `--nixpkgs`.
+      #
+      # ── what this cannot check ──
+      # That a generator actually runs to completion under `--nixpkgs`: the
+      # declared reference resolves inside a nested, network-disabled build
+      # sandbox only as far as `nix shell` itself gets, which is enough to
+      # prove the refusal lifted and not enough to prove a tool resolves. The
+      # assertions below hold the refusal's presence and absence, not the
+      # generator's own run — `safix-generate*` already holds that under a
+      # flake.
+      checks.safix-cli =
+        pkgs.runCommand "safix-cli"
+          {
+            nativeBuildInputs = [
+              pkgs.git
+              pkgs.nix
+            ];
+            # The real `safix` binary's own `nix` subprocess calls carry no
+            # `--extra-experimental-features` of their own — the same as at an
+            # operator's terminal, where the ambient nix.conf already enables
+            # them for a flake-based project. The sandbox's nix.conf does not,
+            # so this is what the sandbox stands in for that ambient config.
+            env.NIX_CONFIG = "experimental-features = nix-command flakes";
+          }
+          ''
+                    set -eu
+                    export HOME="$PWD"
+                    export GIT_AUTHOR_NAME="safix-cli fixture"
+                    export GIT_AUTHOR_EMAIL="fixture@example.invalid"
+                    export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+                    export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
+                    nix_eval() {
+                      nix --extra-experimental-features "nix-command flakes" eval "$@"
+                    }
+
+                    safix="${config.packages.safix}/bin/safix"
+
+                    # The one fleet both evaluation paths declare: alice holds a hand-set
+                    # entry and a generated one, and bob holds nothing generated — bob is
+                    # the empty-order user the ordering drill (4.7) needs. The bridge and
+                    # keepassxc mappings are synthetic: no machine, database or clan named
+                    # here exists, matching every other fixture in this directory.
+                    fleetText=$(cat <<'FLEET'
+                    {
+                      users.alice = {
+                        recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
+                        private.tok = { };
+                        private.api-token.generator = {
+                          script = "printf '%s' fixture > \"$out/api-token\"";
+                          runtimeInputs = [ "coreutils" ];
+                        };
+                      };
+                      users.bob.recipient = "age1fixturebbb00000000000000000000000000000000000000000000000";
+                      bridge = {
+                        clanFlake = null;
+                        mappings.a = {
+                          direction = "clan-to-safix";
+                          clan = {
+                            machine = "nonexistent";
+                            generator = "ntfy";
+                            file = "token";
+                          };
+                          safix = {
+                            user = "alice";
+                            name = "tok";
+                          };
+                        };
+                      };
+                      keepassxc = {
+                        database = "/nonexistent/master.kdbx";
+                        group = "safix";
+                        mappings.a = {
+                          mode = "safix-to-keepassxc";
+                          safix = {
+                            user = "alice";
+                            name = "tok";
+                          };
+                          kdbx = {
+                            path = "alice/grafana";
+                          };
+                        };
+                      };
+                      groups.oncall.members = [ ];
+                    }
+            FLEET
+                    )
+
+                    # The flake-mode side: a from-scratch flake declaring only `nixpkgs`
+                    # as an input, resolved against this system's own already-fetched
+                    # copy so nothing here fetches. Pure evaluation forbids a flake from
+                    # reading any absolute path outside its own inputs and `self`, so the
+                    # safix module is copied into the fixture tree rather than referenced
+                    # by the store path outside it; the `--entry` side below has no such
+                    # restriction; and `self` here is the flake's own store path, which is
+                    # `mkVault`'s `root` under flake-parts's own mechanism (D2, D3) — the
+                    # same `lib.evalModules` call the `--entry` side makes, differing only
+                    # in where `self` comes from, which the three compared attributes
+                    # never read (model.rs: none of Generator, GeneratorFile, Mapping,
+                    # SyncMapping or PlanInput carry a path).
+                    repo="$PWD/repo"
+                    mkdir -p "$repo/safix/groups"
+                    cd "$repo"
+                    git init -q
+                    cp -r ${../safix} ./safix-module
+
+                    cat > safix/groups/oncall.nix <<'GRP'
+                    {
+                      flake.safix.groups.oncall.members = [ ];
+                    }
+            GRP
+
+                    cat > flake.nix <<FLAKE
+                    {
+                      inputs.nixpkgs.url = "path:${pkgs.path}";
+                      outputs = { self, nixpkgs, ... }: {
+                        safix =
+                          let
+                            lib = nixpkgs.lib;
+                            projection = (lib.evalModules {
+                              modules = [
+                                ./safix-module
+                                { _module.args.self = self; }
+                                { flake.safix = $fleetText; }
+                              ];
+                            }).config.flake.safix.lib;
+                          in {
+                            lib = projection;
+                            onboardingHook = null;
+                            enrollHook = null;
+                          };
+                      };
+                    }
+            FLAKE
+
+                    git add -A
+                    git commit -q -m fixture
+
+                    # The --entry side: a plain expression outside the repository nix
+                    # never sees as a flake at all. `self` is a literal string, which the
+                    # design's own scenario admits: "any path value that supports
+                    # `+ \"/…\"` concatenation is sufficient."
+                    mkdir -p "$PWD/../outside"
+                    entry="$PWD/../outside/entry.nix"
+                    cat > "$entry" <<ENTRY
+                    let
+                      lib = import ${pkgs.path}/lib;
+                      projection = (lib.evalModules {
+                        modules = [
+                          ${../safix}
+                          { _module.args.self = "/entry-fixture-root"; }
+                          { flake.safix = $fleetText; }
+                        ];
+                      }).config.flake.safix.lib;
+                    in {
+                      safix = {
+                        lib = projection;
+                        onboardingHook = null;
+                        enrollHook = null;
+                      };
+                    }
+            ENTRY
+
+                    # 3.5: all twelve attribute spellings evaluate under --file exactly as
+                    # they do against the flake target.
+                    attrs=(
+                      safix.lib.placements safix.lib.audiences safix.lib.governedFiles
+                      safix.lib.recipients safix.lib.delegation safix.lib.policyText
+                      safix.lib.generatorPlan safix.lib.nameRegex safix.lib.bridge
+                      safix.lib.keepassxc safix.onboardingHook safix.enrollHook
+                    )
+                    formats=(
+                      --json --json --json --json --json --raw --json --raw --json --json --json --json
+                    )
+                    for i in "''${!attrs[@]}"; do
+                      attr="''${attrs[$i]}"
+                      fmt="''${formats[$i]}"
+                      nix_eval --file "$entry" "$attr" "$fmt" >/dev/null \
+                        || { echo "entry-mode evaluation of $attr failed" >&2; exit 1; }
+                      nix_eval "path:$repo#$attr" "$fmt" --no-write-lock-file >/dev/null \
+                        || { echo "flake-mode evaluation of $attr failed" >&2; exit 1; }
+                    done
+
+                    # 3.7: generatorPlan, bridge and keepassxc are byte-identical between
+                    # the two paths.
+                    for attr in safix.lib.generatorPlan safix.lib.bridge safix.lib.keepassxc; do
+                      entry_json="$(nix_eval --file "$entry" "$attr" --json)"
+                      flake_json="$(nix_eval "path:$repo#$attr" --json --no-write-lock-file)"
+                      if [ "$entry_json" != "$flake_json" ]; then
+                        echo "entry-mode and flake-mode $attr diverge:" >&2
+                        echo "  entry: $entry_json" >&2
+                        echo "  flake: $flake_json" >&2
+                        exit 1
+                      fi
+                    done
+
+                    # Every CLI invocation below runs from inside $repo, so
+                    # Workspace::discover finds $repo as root — with --entry pointed
+                    # outside it, which is 3.8's claim.
+
+                    # 3.9 drill: --entry overrides a conflicting SAFIX_ENTRY. Only the
+                    # value --entry names is a valid nix expression, so a run that used
+                    # SAFIX_ENTRY's instead fails with a broken evaluation rather than
+                    # succeeding on bob's empty order.
+                    output="$(SAFIX_ENTRY="$PWD/../outside/does-not-exist.nix" "$safix" --entry "$entry" generate bob 2>&1)" \
+                      && status=0 || status=$?
+                    if [ "$status" != 0 ]; then
+                      echo "--entry did not override a conflicting SAFIX_ENTRY:" >&2
+                      echo "$output" >&2
+                      exit 1
+                    fi
+
+                    # 3.6 / 4.5: alice's generatorPlan deserializes (Generator,
+                    # GeneratorFile, PlanInput) and the refusal fires before the sandbox
+                    # is probed, naming both remedies.
+                    output="$("$safix" --entry "$entry" generate alice 2>&1)" && status=0 || status=$?
+                    if [ "$status" = 0 ]; then
+                      echo "generate alice under --entry with no --nixpkgs did not refuse" >&2
+                      exit 1
+                    fi
+                    case "$output" in
+                      *"generate needs a flake or a declared nixpkgs reference"*) ;;
+                      *)
+                        echo "generate alice refused for the wrong reason:" >&2
+                        echo "$output" >&2
+                        exit 1
+                        ;;
+                    esac
+                    case "$output" in
+                      *"evaluated to a shape this runtime does not read"*)
+                        echo "generatorPlan failed to deserialize against the real structs:" >&2
+                        echo "$output" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    # 3.6 continued: bridge (Mapping) and keepassxc (SyncMapping)
+                    # deserialize too, reached through import and sync — each refuses
+                    # afterwards for an unrelated reason (no clan, no terminal), which is
+                    # not what this asserts.
+                    output="$("$safix" --entry "$entry" import 2>&1)" || true
+                    case "$output" in
+                      *"evaluated to a shape this runtime does not read"*)
+                        echo "bridge failed to deserialize against the real structs:" >&2
+                        echo "$output" >&2
+                        exit 1
+                        ;;
+                    esac
+                    output="$("$safix" --entry "$entry" sync 2>&1)" || true
+                    case "$output" in
+                      *"evaluated to a shape this runtime does not read"*)
+                        echo "keepassxc failed to deserialize against the real structs:" >&2
+                        echo "$output" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    # 4.6 / 4.7: the ordering drill. bob's generatorPlan order is empty,
+                    # so the empty-order return above the refusal has to fire first: this
+                    # asserts directly that it does, rather than only that the refusal
+                    # itself exists.
+                    output="$("$safix" --entry "$entry" generate bob 2>&1)" && status=0 || status=$?
+                    if [ "$status" != 0 ]; then
+                      echo "generate bob (no generator) refused under --entry:" >&2
+                      echo "$output" >&2
+                      exit 1
+                    fi
+                    case "$output" in
+                      *"generate needs a flake or a declared nixpkgs reference"*)
+                        echo "the empty-order user was refused -- the ordering drill fired red" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    # 4.5 continued: a declared --nixpkgs lifts the refusal. The declared
+                    # reference is this system's own already-fetched nixpkgs, so nothing
+                    # here needs the network; whether the sandbox can go on to build a
+                    # tool from it is `safix-generate*`'s claim, not this one.
+                    output="$("$safix" --entry "$entry" --nixpkgs "path:${pkgs.path}" generate alice 2>&1)" || true
+                    case "$output" in
+                      *"generate needs a flake or a declared nixpkgs reference"*)
+                        echo "--nixpkgs did not lift the refusal:" >&2
+                        echo "$output" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    # Flake mode is unaffected: an empty-order user succeeds exactly as
+                    # under --entry, with no --entry, no --nixpkgs, and no flake to
+                    # resolve --nixpkgs against even if it had been given.
+                    output="$("$safix" generate bob 2>&1)" && status=0 || status=$?
+                    if [ "$status" != 0 ]; then
+                      echo "flake-mode generate bob (no generator) refused:" >&2
+                      echo "$output" >&2
+                      exit 1
+                    fi
+                    case "$output" in
+                      *"generate needs a flake or a declared nixpkgs reference"*)
+                        echo "flake mode raised the flake-only refusal, which it must never do" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    # 3.8: the root a write stages and commits into is still the one git
+                    # discovers, with --entry pointed outside that repository.
+                    before_head="$(git rev-parse HEAD)"
+                    output="$("$safix" --entry "$entry" group add oncall alice 2>&1)" && status=0 || status=$?
+                    if [ "$status" != 0 ]; then
+                      echo "group add under --entry (pointed outside the repository) refused:" >&2
+                      echo "$output" >&2
+                      exit 1
+                    fi
+                    after_head="$(git rev-parse HEAD)"
+                    if [ "$before_head" = "$after_head" ]; then
+                      echo "group add under --entry committed nothing into the discovered root" >&2
+                      exit 1
+                    fi
+                    if ! grep -q '"alice"' safix/groups/oncall.nix; then
+                      echo "group add under --entry did not edit the discovered root's declaration file" >&2
+                      exit 1
+                    fi
+
+                    touch "$out"
+          '';
     };
 }
