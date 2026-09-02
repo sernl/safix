@@ -664,7 +664,7 @@ mod against_a_real_clan {
 
         bridge(&fixture, &clan, &["audit", "clan"])
             .expect_success("both mappings now agree")
-            .silent_about("no declared mapping accounts for it");
+            .silent_about(&format!("{MACHINE} {ORPHAN}/token"));
     }
     /// The value came off a pipe rather than out of a terminal rendering.
     ///
