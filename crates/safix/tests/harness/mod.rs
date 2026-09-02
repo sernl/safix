@@ -758,7 +758,44 @@ impl Fixture {
         self.bridge["mappings"].as_array_mut().unwrap().push(json!({
             "id": id,
             "direction": direction,
-            "clan": { "machine": machine, "generator": generator, "file": file },
+            "clan": {
+                "placement": "per-machine",
+                "machine": machine,
+                "generator": generator,
+                "file": file,
+            },
+            "safix": { "user": user, "name": name },
+        }));
+        self.write_fixtures();
+    }
+
+    /// Declare one shared-placement bridge mapping: the clan side names a
+    /// generator and a file but no machine, the way a `placement = "shared"`
+    /// declaration resolves.
+    pub fn seed_shared_mapping(
+        &mut self,
+        id: &str,
+        direction: &str,
+        clan: (&str, &str),
+        safix: (&str, &str),
+    ) {
+        let (generator, file) = clan;
+        let (user, name) = safix;
+        self.bridge["clanFlake"] = json!(
+            self.clan_flake
+                .clone()
+                .unwrap_or_else(|| self.repo.clone())
+                .to_string_lossy()
+        );
+        self.bridge["mappings"].as_array_mut().unwrap().push(json!({
+            "id": id,
+            "direction": direction,
+            "clan": {
+                "placement": "shared",
+                "machine": null,
+                "generator": generator,
+                "file": file,
+            },
             "safix": { "user": user, "name": name },
         }));
         self.write_fixtures();
