@@ -10,11 +10,14 @@ Amended 2026-09-03 while proposing `sync-clan-vars-two-way`: this design origina
 Two-way instead gives `ClanSide` a `placement` (`shared | per-machine | per-export`, defaulting to `per-machine`) and makes `machine` `nullOr str` — null for a shared or per-export mapping, whose addressing machine is discovered at run time (two-way's D3) rather than declared.
 D2 and D3 below are rewritten against that model, grounded directly in `clan_cli`/`clan_lib`'s `vars list` implementation at the pinned revision rather than assumed from it; the Context section below is corrected in the same pass, since its original placement-transparency claim does not hold for `PerExport`.
 
+Amended 2026-09-03 while finishing `sync-clan-vars-two-way`: per-export placement is dropped from the domain entirely, confirmed unreachable via `clan vars get`/`set` at clan-core `56e35624d94e4f1ac55d36575ebab97cbd9b9cdd` (`get_machine_generators`, `clan_lib/vars/generator.py:229-351`, only ever constructs `Shared` or `PerMachine` placements, never `PerExport`); `ClanPlacement` now has two variants only.
+Every per-export mention this design carried is removed in the same pass: the Context section's `PerExport`/`get_flake_generators` clause and the `export_vars.py` paragraph, D2's title and its per-export paragraph, D3's per-export sentence, and the Risks section's per-export-invisibility paragraph.
+The delta spec's `## MODIFIED Requirements` block is re-synced against `sync-clan-vars-two-way`'s own final `specs/bridge-transfer/spec.md` on the epic tip, which already carries this same removal.
+
 ## Context
 
 `clan vars list <machine>` is `clan_cli/vars/list.py`, registered with no flag of its own beyond the global `--flake` (`clan_cli/cli.py:85-91`, the same flag `vars get`, `vars set` and `vars check` already take in `clan.rs`).
-It resolves `Machine(name=machine, flake=flake)` and loads every generator that machine's own NixOS configuration declares through `get_machine_generators` (`clan_lib/vars/generator.py:229-382`), which queries `<machine>.config.clan.core.vars.generators.*` (`clan_lib/nix_selectors.py:191-193`, `vars_generators_metadata`) — a `Shared`-placed generator is present there for every machine whose module declares or consumes it, and a `PerMachine`-placed one only for the one machine it names, but a `PerExport`-placed generator is never present there at all: it is built only by the disjoint `get_flake_generators` (`clan_lib/vars/generate.py:380-438`), which queries the flake-level attribute `clanInternals.systems.<system>.exports.*.generators.*`, a path `vars_generators_metadata` never selects and `list.py`/`get_machine_generators` never calls into.
-`export_vars.py`'s own dump function documents this directly: its output-layout comment names a `per-export/<exports_key>/…` directory as something the code is "naturally extensible" to — future tense, not present fact — because it too calls `get_machine_generators` (`clan_lib/vars/export_vars.py:27-51`) and so never actually populates that directory either.
+It resolves `Machine(name=machine, flake=flake)` and loads every generator that machine's own NixOS configuration declares through `get_machine_generators` (`clan_lib/vars/generator.py:229-382`), which queries `<machine>.config.clan.core.vars.generators.*` (`clan_lib/nix_selectors.py:191-193`, `vars_generators_metadata`) — a `Shared`-placed generator is present there for every machine whose module declares or consumes it, and a `PerMachine`-placed one only for the one machine it names.
 `clan vars list <machine>` prints one line per var, sorted by the line's own text (`clan_cli/vars/list.py:9-13`).
 
 Each line is `Var.__str__` (`clan_lib/vars/var.py:79-88`): `f"{self.id}: ..."`, where `id` is always `f"{generator}/{file}"` (`clan_lib/vars/generator.py:308`, `clan_lib/vars/generate.py:411`) — exactly the string `Clan::var_id` in `clan.rs:142-144` already builds.
@@ -26,7 +29,7 @@ That is enough for this change and no more.
 Every var's `id` sits before the first `": "` on its line and an `id` cannot itself contain `": "` — it is `generator/file`, and both halves are nix attribute names — so splitting on the first occurrence of that substring recovers the `id` exactly, and the state half, along with any public value it might carry, is discarded unread.
 Nothing this change reports ever needs to know whether a var exists, only whether clan knows its id at all, so the state half being present or not-set is treated identically: a listed id is part of clan's declared namespace either way, whether or not a generator has been run yet.
 
-What this cannot give, and what this change does not need: a machine-independent view of clan's whole namespace, and — structurally, not by choice — any view of a `PerExport`-placed var at all, on any machine.
+What this cannot give, and what this change does not need: a machine-independent view of clan's whole namespace.
 `clan vars list` names one machine at a time, and there is no sibling verb that lists vars across every machine in one call.
 `clan machines list` (`clan_cli/machines/list.py:12-21`) exists and would supply the machine names, but D2 below is why it is deliberately not called.
 
@@ -53,17 +56,13 @@ A machine-readable (`--json`) clan output; none exists at this revision, so the 
 That is a deliberate, narrower claim than "never reads a value": for a public var, `list`'s own output already contains the value in plain text before safix ever runs, so safix reading and discarding it changes nothing about what is disclosed, and doing so is what lets one parse recover the id for every var uniformly, secret and public alike, without a branch on secrecy.
 What matters, and what is held, is that nothing safix reports — the `lingering` list itself — ever contains anything but an id.
 
-### D2. Enumeration is scoped to the machines the bridge's own mappings name or resolve, not to `clan machines list` — and never to a per-export placement
+### D2. Enumeration is scoped to the machines the bridge's own mappings name or resolve, not to `clan machines list`
 
 `bridge-surface` already states "one consumer bridges one clan" as a refusal against declaring more than one `clanFlake`.
 It has never stated, and this change does not introduce, "one consumer may see every machine of that clan" — and a single clan repository backing several downstream consumers, each bridging a disjoint subset of its machines, is exactly the shape that sentence is agnostic to.
 Calling `clan machines list` and enumerating every machine it returns would make one consumer's `audit` report on machines that consumer's own declarations never mention, which is a stronger claim about clan's namespace than this bridge has ever made about anything else in it — every other requirement in `bridge-surface` and `bridge-transfer` is scoped to what a mapping names or resolves.
 So the set of machines enumerated is `{ mapping.clan.machine for mapping in the selected set with placement = per-machine } ∪ { addressing_machine(mapping) for mapping in the selected set with placement = shared }`, where `addressing_machine` reuses `sync-clan-vars-two-way`'s own addressing-machine search (its D3: `Clan::machines` plus the `get`/`set` trial), memoized the same way that search already is so a mapping sharing a generator with another does not repeat it.
 `clan machines list` is never called directly by this change; the only route to a machine name that is not `mapping.clan.machine` is that reused search.
-
-A per-export-placement mapping contributes no machine to this set, and its clan triple is compared against nothing (D3).
-This is not a narrowing choice; it is a consequence of the Context section's finding above: `clan vars list <machine>` can never surface a `PerExport`-placed generator's var, for any machine, at this pinned revision, because the code path that lists a machine's vars never reads the flake attribute a per-export generator's definition lives under.
-Discovering an addressing machine for a per-export mapping anyway — the search two-way's D3 already performs for `get`/`set` — and enumerating it would cost a subprocess and a new failure mode (D6) for a var that could never appear in what that subprocess returns, so this change does not perform that search for enumeration's sake.
 
 The consequence, stated rather than discovered later: a machine whose last per-machine mapping is removed, or whose shared mapping's addressing search no longer resolves to it, is no longer named or resolved by anything safix declares, and so drops out of this enumeration along with it.
 Its vars do not become permanently invisible to the operator — `clan vars list <machine>` run by hand still shows them — but they stop being carried in `safix audit clan`'s report the same day the mapping that once named or resolved the machine changes.
@@ -73,7 +72,6 @@ This is recorded as a Risk below rather than solved, because solving it means de
 
 A per-machine-placement mapping's var is claimed exactly as before: `(mapping.clan.machine, id)` — where `id` is `mapping.clan.generator/mapping.clan.file` — must match a listed `(machine, id)` pair exactly.
 A shared-placement mapping's var is claimed by `id` alone, machine-insensitively: enumeration visits only the one addressing machine D2's search happens to resolve to, but the same shared generator's var can legitimately appear, with the identical `id`, in more than one machine's own listing (Context, above), so a listed `id` on any enumerated machine counts as claimed if any selected shared mapping names that generator and file, regardless of which machine listed it.
-A per-export-placement mapping's clan triple is never compared against any listed id, per D2: nothing this report ever lists could be it.
 Nothing about `mapping.direction` enters any of these comparisons, including `two-way`, which still carries one clan machine (or one resolved address), one generator and one file per mapping — the same shape a one-way mapping's clan side always had.
 Only a design that let one mapping claim a *set* of clan triples, or claim one dynamically, would need to revisit this, and nothing `sync-clan-vars-two-way` proposes does either.
 
@@ -112,10 +110,6 @@ This mirrors `keepassxc-sync`'s own explicit choice — "No mode SHALL delete an
 A machine whose last mapping is removed drops out of this report on the same day, per D2.
 Its vars are not lost and remain visible to `clan vars list` run by hand; what is lost is `safix audit clan` continuing to mention them.
 Declaring a machine independently of any mapping would close this gap and is out of scope: `bridge-surface` has no such declaration today, and adding one is a larger surface than this change was asked to add.
-
-A per-export-placed var is invisible to this report for a stronger reason than the machine-removal case above: `clan vars list` cannot surface a `PerExport`-placed generator's var on any machine, at this pinned revision (Context, above), so a per-export mapping's clan side is never checked against clan's namespace at all, and a var no mapping accounts for under that placement can never be reported lingering by any mode this change or `sync-clan-vars-two-way` adds.
-An operator relying on this report to notice namespace drift for a per-export-placed generator has no substitute here; `clan vars list <machine>` run by hand cannot show it either, for the identical reason.
-This is a limitation of clan's own `vars list` command, not a choice this design made about what to call, and closing it would mean building a flake-level export enumeration this change was not asked for.
 
 Enumeration cost scales with the number of distinct machines a bridge declares, one subprocess per machine per `audit` run, on top of the one subprocess per mapping `audit` already spends.
 For the fleet sizes this bridge is built for — mappings measured in the tens, not thousands — this is the same order of cost `audit` already pays, and no batching across machines is attempted.

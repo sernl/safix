@@ -3,7 +3,7 @@
 ### Requirement: clan is the authority on its own store and is reached only through its command
 
 Every read of a clan value, every write of one, and every enumeration of a machine's vars SHALL be performed by invoking clan's own command as a subprocess, and the runtime SHALL NOT read, write, decrypt, encrypt or parse clan's stored files.
-When a mapping's placement is shared or per-export, the machine named on clan's command line to address it SHALL itself be obtained by invoking clan's command, never from a second field a consumer declares.
+When a mapping's placement is shared, the machine named on clan's command line to address it SHALL itself be obtained by invoking clan's command, never from a second field a consumer declares.
 
 #### Scenario: Reading a clan value delegates
 
@@ -42,15 +42,15 @@ When a mapping's placement is shared or per-export, the machine named on clan's 
 - **AND** the refusal states that clan is the authority on its own store
 - **AND** the run does not proceed with a subset of its mappings
 
-#### Scenario: A shared or per-export mapping's address is discovered from clan, not declared twice
+#### Scenario: A shared mapping's address is discovered from clan, not declared twice
 
-- **WHEN** a mapping's placement is shared or per-export
+- **WHEN** a mapping's placement is shared
 - **THEN** the runtime asks clan which machines it has, and tries them in turn against the mapping's generator until one resolves it
 - **AND** no option or field on the mapping names that machine
 
-#### Scenario: An unaddressable shared or export placement refuses naming the generator
+#### Scenario: An unaddressable shared placement refuses naming the generator
 
-- **WHEN** no machine clan has resolves a shared or per-export mapping's generator
+- **WHEN** no machine clan has resolves a shared mapping's generator
 - **THEN** the mapping is refused
 - **AND** the refusal names the mapping, the placement, the generator and the file, and states that no machine in clan's own fleet exposed it
 
@@ -79,12 +79,6 @@ No mode SHALL delete, export, or import a var by virtue of this report alone, an
 - **WHEN** the audit enumerates clan vars
 - **THEN** it considers only machines enumerated for a currently declared mapping
 - **AND** it does not enumerate a clan machine that no declared mapping names or resolves, even when clan manages one
-
-#### Scenario: A per-export-placement mapping is invisible to this report, structurally
-
-- **WHEN** a currently declared mapping's placement is per-export
-- **THEN** its clan side is not enumerated and not compared against any machine's listing
-- **AND** the reason recorded is that `clan vars list` cannot surface a per-export-placed var for any machine, not that this report chooses to skip it
 
 #### Scenario: Lingering never changes the exit status
 

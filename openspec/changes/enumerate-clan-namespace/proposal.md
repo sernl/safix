@@ -5,6 +5,8 @@ Every clan-core line anchor below was read at that revision.
 
 This change depends on `sync-clan-vars-two-way` and is written to land after it; see Impact for why, and see Sequencing below for what that dependency does and does not touch.
 
+Amended 2026-09-03 while finishing `sync-clan-vars-two-way`: per-export is dropped from that change after confirming, at the pinned clan-core revision, that `clan vars get`/`set` can never resolve a `PerExport`-placed var through any machine (`get_machine_generators`, `clan_lib/vars/generator.py:229-351`, builds every generator's placement as `Shared()` or `PerMachine(machine)` alone). `ClanPlacement` has two variants, `shared` and `per-machine`, and `clanSide` gains no `export` field. Every per-export mention this change's own artifacts carried is removed in the same pass, since D2's and D3's per-export paragraphs were reasoning about a placement that no longer exists; see `design.md`'s amendment note for the full citation.
+
 ## Why
 
 `crates/safix-core/src/clan.rs` invokes exactly three clan verbs — `vars get`, `vars set`, `vars check` — plus `secrets users add`/`add-key` and `--help`.
@@ -24,7 +26,7 @@ It sits in clan's repository, live, disconnected from any current declaration, a
   It is reported as information on every `audit` run where at least one mapping is declared, alongside the existing per-mapping agreement findings, and it does not change `audit`'s exit status — exactly as `lingering` does not change `sync`'s tally or `is_clean`.
 - No mode this change adds deletes anything, on either side of the boundary.
   Reporting is the entire deliverable; a person still removes a var, on clan's side, with clan's own command.
-- The scope of what gets enumerated is exactly the machines the bridge currently names or resolves through its mappings — declared directly for a per-machine mapping, discovered via clan for a shared one, never for a per-export one — not clan's whole machine inventory (`clan machines list` is deliberately not called — see design.md's D2 for why "one consumer bridges one clan" does not mean one consumer may see every machine of that clan).
+- The scope of what gets enumerated is exactly the machines the bridge currently names or resolves through its mappings — declared directly for a per-machine mapping, discovered via clan for a shared one — not clan's whole machine inventory (`clan machines list` is deliberately not called — see design.md's D2 for why "one consumer bridges one clan" does not mean one consumer may see every machine of that clan).
   A machine whose last mapping is removed becomes invisible to this report; that is a stated, deliberate limitation and not a defect — see design.md's Risks.
 - `crates/safix/tests/support/clan-stub.rs` answers `vars list` for the hermetic suite, and `modules/flake/checks/real-clan.nix` gains a var no mapping names, so the parsing this change adds is held against the real clan CLI's real output shape, not only against a stub written to agree with it.
 
@@ -50,6 +52,6 @@ Affected code:
 - `CHANGELOG.md` — an `## [Unreleased]` entry naming the new lingering report, following the file's existing style.
 
 Sequencing: this change is written assuming `sync-clan-vars-two-way` has already landed, and for a structural reason rather than a scheduling preference.
-That change gives `ClanSide` a `placement` (`shared | per-machine | per-export`, defaulting to `per-machine`) and makes `machine` `nullOr str` — null for a shared or per-export mapping, whose addressing machine is instead discovered at run time by trying each machine `Clan::machines` returns against the mapping's generator (two-way's D3) — rather than the mode-like third relationship kind this change originally assumed before two-way's design was written.
-This change's `claimed` computation is placement-sensitive rather than a single-field match: a per-machine mapping's clan triple is claimed on its declared machine, a shared mapping's is claimed on any machine that lists it (design.md's D2/D3 record why, and why comparison stays machine-insensitive there), and a per-export mapping's is never claimed or reported at all, because `clan vars list <machine>` cannot surface a `PerExport`-placed generator's var on any machine — a structural fact about clan's own command at the pinned revision, cited and grounded in design.md's Context.
+That change gives `ClanSide` a `placement` (`shared | per-machine`, defaulting to `per-machine`) and makes `machine` `nullOr str` — null for a shared mapping, whose addressing machine is instead discovered at run time by trying each machine `Clan::machines` returns against the mapping's generator (two-way's D3) — rather than the mode-like third relationship kind this change originally assumed before two-way's design was written.
+This change's `claimed` computation is placement-sensitive rather than a single-field match: a per-machine mapping's clan triple is claimed on its declared machine, and a shared mapping's is claimed on any machine that lists it (design.md's D2/D3 record why, and why comparison stays machine-insensitive there).
 Both changes touch `crates/safix-core/src/audit.rs` and `modules/flake/checks/real-clan.nix`; landing the two-way change first means this change's diff to those two files is written against their post-two-way shape once, rather than against two moving targets.
