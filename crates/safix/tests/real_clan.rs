@@ -80,8 +80,9 @@ mod harness;
 
 #[cfg(target_os = "linux")]
 mod against_a_real_clan {
+    use std::io::Write as _;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     use crate::harness::{ALICE_FILE, Fixture, Run, real_clan, real_clan_seed};
 
@@ -104,6 +105,11 @@ mod against_a_real_clan {
     /// real command's own output shape.
     const ORPHAN: &str = "orphan";
 
+    /// The generator declared `share = true`, minted on `MACHINE` alone; a
+    /// second real machine in the seed clan declares no generator at all,
+    /// which is what lets an addressing search genuinely distinguish "does
+    /// not see this generator" from "has not generated it".
+    const SHARED: &str = "bothways";
     /// The machine both are declared on.
     const MACHINE: &str = "meridian";
 
@@ -226,22 +232,83 @@ mod against_a_real_clan {
                 .expect("could not commit in the clan repository");
             assert!(committed.success(), "the definition change did not commit");
         }
+
+        /// Write a value directly into the real clan, bypassing safix.
+        ///
+        /// The clan-side counterpart of a hand-set safix write: used to move
+        /// clan's side of a two-way mapping without going through the
+        /// runtime under test, so that "safix converged toward what clan was
+        /// already holding" is a claim about the runtime rather than about a
+        /// write the runtime itself made.
+        fn set(&self, generator: &str, file: &str, value: &str) {
+            let id = format!("{generator}/{file}");
+            let mut child = Command::new(&self.command)
+                .arg("vars")
+                .arg("set")
+                .arg("--flake")
+                .arg(&self.flake)
+                .arg(MACHINE)
+                .arg(&id)
+                .envs(self.environment())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("could not spawn clan vars set");
+            {
+                let mut stdin = child.stdin.take().expect("clan vars set has no stdin");
+                stdin
+                    .write_all(value.as_bytes())
+                    .expect("could not write the value");
+            }
+            let finished = child
+                .wait_with_output()
+                .expect("could not wait for clan vars set");
+            assert!(
+                finished.status.success(),
+                "clan vars set refused: {}",
+                String::from_utf8_lossy(&finished.stderr)
+            );
+        }
     }
 
     /// A fixture and a clan, with one mapping between them.
     ///
+    /// `placement` is `"per-machine"` or `"shared"`; `direction` may be
+    /// `"two-way"`, in which case the fixture also mints the companion
+    /// placement [`Fixture::seed_two_way_mapping`]/`_shared` mints, the way
+    /// `crates/safix/tests/bridge_sync.rs`'s own fixtures do.
+    ///
     /// `None` when no check supplied a clan, which every test below turns into a
     /// stated absence.
-    fn bridged(direction: &str, generator: &str) -> Option<(Fixture, Clan)> {
+    fn bridged(direction: &str, placement: &str, generator: &str) -> Option<(Fixture, Clan)> {
         let mut fixture = Fixture::new();
         let clan = Clan::copied(&fixture)?;
         fixture.clan_flake_is(&clan.flake);
-        fixture.seed_mapping(
-            "ntfy-token",
-            direction,
-            (MACHINE, generator, "token"),
-            ("alice", "api-token"),
-        );
+        match (direction, placement) {
+            ("two-way", "shared") => fixture.seed_two_way_mapping_shared(
+                "ntfy-token",
+                (generator, "token"),
+                ("alice", "api-token"),
+            ),
+            ("two-way", _) => fixture.seed_two_way_mapping(
+                "ntfy-token",
+                (MACHINE, generator, "token"),
+                ("alice", "api-token"),
+            ),
+            (_, "shared") => fixture.seed_shared_mapping(
+                "ntfy-token",
+                direction,
+                (generator, "token"),
+                ("alice", "api-token"),
+            ),
+            _ => fixture.seed_mapping(
+                "ntfy-token",
+                direction,
+                (MACHINE, generator, "token"),
+                ("alice", "api-token"),
+            ),
+        }
         Some((fixture, clan))
     }
 
@@ -298,7 +365,7 @@ mod against_a_real_clan {
     /// when it is, and a rendering would not decrypt back to this literal.
     #[test]
     fn a_clan_to_safix_run_lands_the_bytes_the_real_clan_minted() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("converging from a real clan");
         };
 
@@ -318,7 +385,7 @@ mod against_a_real_clan {
     /// A second run over the same mapping writes nothing and commits nothing.
     #[test]
     fn a_second_run_leaves_both_repositories_where_they_were() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("converging a mapping twice against a real clan");
         };
 
@@ -344,7 +411,7 @@ mod against_a_real_clan {
     /// run during bootstrap.
     #[test]
     fn a_generator_the_real_clan_has_not_run_is_reported_and_the_run_continues() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", EMPTY) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", EMPTY) else {
             return no_clan_here("converging a var the real clan has not generated");
         };
 
@@ -360,7 +427,9 @@ mod against_a_real_clan {
     /// runtime treating them alike would refuse every first safix-to-clan write.
     #[test]
     fn a_triple_the_real_clan_declares_nothing_for_is_refused_by_name() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", "nothing-declares-this") else {
+        let Some((fixture, clan)) =
+            bridged("clan-to-safix", "per-machine", "nothing-declares-this")
+        else {
             return no_clan_here("converging an undeclared triple");
         };
 
@@ -380,7 +449,7 @@ mod against_a_real_clan {
     /// the read afterwards is clan's own, and clan's repository moved.
     #[test]
     fn a_safix_to_clan_run_puts_safixs_value_into_the_real_clan_and_clan_commits_it() {
-        let Some((fixture, clan)) = bridged("safix-to-clan", EMPTY) else {
+        let Some((fixture, clan)) = bridged("safix-to-clan", "per-machine", EMPTY) else {
             return no_clan_here("converging into a real clan");
         };
         fixture
@@ -421,7 +490,7 @@ mod against_a_real_clan {
     /// each one a fresh ciphertext of an unchanged value.
     #[test]
     fn a_second_run_does_not_move_the_real_clans_history() {
-        let Some((fixture, clan)) = bridged("safix-to-clan", EMPTY) else {
+        let Some((fixture, clan)) = bridged("safix-to-clan", "per-machine", EMPTY) else {
             return no_clan_here("converging a mapping twice against a real clan");
         };
         fixture
@@ -448,7 +517,7 @@ mod against_a_real_clan {
     /// validation moves, and clan is asked.
     #[test]
     fn a_safix_to_clan_run_refuses_a_generator_the_real_clan_calls_stale() {
-        let Some((fixture, clan)) = bridged("safix-to-clan", MINTED) else {
+        let Some((fixture, clan)) = bridged("safix-to-clan", "per-machine", MINTED) else {
             return no_clan_here("refusing a write into a stale generator");
         };
         fixture
@@ -520,7 +589,7 @@ mod against_a_real_clan {
     /// report still red afterwards would be reporting something else.
     #[test]
     fn audit_clan_finds_a_real_divergence_and_finds_none_once_it_is_resolved() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("auditing against a real clan");
         };
         fixture
@@ -595,7 +664,7 @@ mod against_a_real_clan {
     /// terminal branch, and that rendering is not these bytes.
     #[test]
     fn the_real_clans_read_gave_bytes_and_not_a_rendering() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("the raw-capture contract");
         };
 
@@ -624,7 +693,7 @@ mod against_a_real_clan {
     /// store.
     #[test]
     fn a_safix_to_clan_run_refuses_a_generator_that_declares_a_validation_and_has_never_run() {
-        let Some((fixture, clan)) = bridged("safix-to-clan", SCHEDULED) else {
+        let Some((fixture, clan)) = bridged("safix-to-clan", "per-machine", SCHEDULED) else {
             return no_clan_here("refusing a first write into a scheduled generator");
         };
         fixture
@@ -644,6 +713,163 @@ mod against_a_real_clan {
         );
     }
 
+    // ── two-way convergence ─────────────────────────────────────────────────
+
+    /// Neither side holding a value writes nothing anywhere, and clan's tree
+    /// does not move.
+    #[test]
+    fn a_two_way_run_with_neither_side_moved_writes_nothing() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", EMPTY) else {
+            return no_clan_here("a two-way run against a real clan with neither side moved");
+        };
+        let before = digest(&clan.flake);
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("converging with neither side holding a value");
+        run.says("ntfy-token");
+        run.says("unchanged");
+
+        assert_eq!(
+            digest(&clan.flake),
+            before,
+            "an unchanged run moved the real clan's tree"
+        );
+    }
+
+    /// safix holding a value and clan holding none pushes it into the real
+    /// clan, and records the agreement in the companion.
+    #[test]
+    fn a_two_way_run_with_only_safixs_side_moved_pushes_it_into_the_real_clan() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", EMPTY) else {
+            return no_clan_here("a two-way push against a real clan");
+        };
+        fixture
+            .set("alice", "api-token", "CANARY-two-way-pushed-for-real")
+            .expect_success("seeding the safix side");
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("converging toward the real clan");
+        run.says("converged ntfy-token");
+        run.silent_about("CANARY-two-way-pushed-for-real");
+
+        assert_eq!(
+            clan.holds(EMPTY, "token").as_deref(),
+            Some("CANARY-two-way-pushed-for-real"),
+            "the real clan does not hold what safix pushed"
+        );
+        assert!(
+            fixture
+                .value(ALICE_FILE, "api-token-safix-bridge-sync-state")
+                .starts_with("safix-bridge-sync-v1 "),
+            "the companion does not carry the recorded agreement"
+        );
+    }
+
+    /// clan holding a value, set directly rather than through the runtime
+    /// under test, and safix holding none pulls it in.
+    #[test]
+    fn a_two_way_run_with_only_clans_side_moved_pulls_it_from_the_real_clan() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", EMPTY) else {
+            return no_clan_here("a two-way pull from a real clan");
+        };
+        clan.set(EMPTY, "token", "CANARY-two-way-pulled-for-real");
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("converging from the real clan");
+        run.says("converged ntfy-token");
+        run.silent_about("CANARY-two-way-pulled-for-real");
+
+        assert_eq!(
+            fixture.value(ALICE_FILE, "api-token"),
+            "CANARY-two-way-pulled-for-real",
+            "safix does not hold what the real clan was holding"
+        );
+    }
+
+    /// Both sides moved, with no agreement recorded yet: a conflict against
+    /// a real clan, exactly as against the stub, and clan's tree does not
+    /// move.
+    #[test]
+    fn a_two_way_run_with_both_sides_moved_is_a_conflict_against_a_real_clan() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", EMPTY) else {
+            return no_clan_here("a two-way conflict against a real clan");
+        };
+        fixture
+            .set("alice", "api-token", "CANARY-safix-side-for-real")
+            .expect_success("seeding the safix side");
+        clan.set(EMPTY, "token", "CANARY-clan-side-for-real");
+        let before = digest(&clan.flake);
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_refusal("a conflict is what makes the run's exit code non-zero");
+        run.says("ntfy-token");
+        run.says("conflict");
+        run.silent_about("CANARY-safix-side-for-real");
+        run.silent_about("CANARY-clan-side-for-real");
+
+        assert_eq!(
+            digest(&clan.flake),
+            before,
+            "a conflict moved the real clan's tree"
+        );
+        assert_eq!(
+            fixture.value(ALICE_FILE, "api-token"),
+            "CANARY-safix-side-for-real",
+            "a conflict overwrote safix's side"
+        );
+    }
+
+    /// A two-way push into a generator the real clan calls stale is refused
+    /// by the identical condition a safix-to-clan write already carries,
+    /// reusing
+    /// `a_safix_to_clan_run_refuses_a_generator_the_real_clan_calls_stale`'s
+    /// own fixture shape with a two-way mapping instead.
+    #[test]
+    fn a_two_way_push_refuses_a_generator_the_real_clan_calls_stale() {
+        let Some((fixture, clan)) = bridged("two-way", "per-machine", MINTED) else {
+            return no_clan_here("refusing a two-way push into a generator clan calls stale");
+        };
+        fixture
+            .set("alice", "api-token", "CANARY-would-be-lost-two-way")
+            .expect_success("seeding the source");
+        clan.invalidate(MINTED);
+        let settled = clan.head();
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_refusal("converging a two-way push into a generator clan calls stale");
+        run.says("outdated");
+        run.silent_about("CANARY-would-be-lost-two-way");
+
+        assert_eq!(
+            clan.head(),
+            settled,
+            "the refused two-way push committed in the clan repository"
+        );
+    }
+
+    /// A shared-placement two-way mapping's clan side is reached by a
+    /// machine discovered from clan's own `machines list`, skipping a real
+    /// second machine that declares no generator at all — the property
+    /// `crates/safix/tests/bridge_sync.rs`'s own stubbed test defers to this
+    /// file, because its stub cannot tell "does not declare this generator"
+    /// apart from "globally unknown" for a machine it was not told to name.
+    #[test]
+    fn a_shared_placements_machine_is_discovered_from_a_real_clan_skipping_an_unrelated_one() {
+        let Some((fixture, clan)) = bridged("two-way", "shared", SHARED) else {
+            return no_clan_here("discovering a shared mapping's machine against a real clan");
+        };
+
+        let run = bridge(&fixture, &clan, &["sync", "clan"])
+            .expect_success("a shared mapping's machine is discovered rather than declared");
+        run.says("converged ntfy-token");
+
+        assert_eq!(
+            fixture.value(ALICE_FILE, "api-token"),
+            "CANARY-shared-and-real",
+            "the shared mapping did not converge through the discovered machine"
+        );
+    }
+
     /// Nothing safix ran opened a file the real clan placed.
     ///
     /// The prohibition decision one states, held against the clan that has real
@@ -657,11 +883,17 @@ mod against_a_real_clan {
     /// move across it would be asserting about the wrong run.
     #[test]
     fn the_runtime_reached_clans_store_only_through_clans_command() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((mut fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("the prohibition on reading clan's store");
         };
-        bridge(&fixture, &clan, &["sync", "clan"])
-            .expect_success("bringing the two sides into step");
+        fixture.seed_two_way_mapping(
+            "handover-token",
+            (MACHINE, EMPTY, "token"),
+            ("alice", "handover-token"),
+        );
+        bridge(&fixture, &clan, &["sync", "clan"]).expect_success(
+            "bringing the two sides into step, including the two-way mapping's own convergence",
+        );
 
         let before = digest(&clan.flake);
         bridge(&fixture, &clan, &["audit", "clan"]).expect_success("auditing an agreeing pair");

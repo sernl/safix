@@ -49,11 +49,12 @@
 #
 # # The clan the check builds
 #
-# One machine, four `age`-backed generators, an identity minted here and a
-# recipient derived from it. The first three differ in the two axes that turn
-# out to matter, and the real clan is what established that the second axis
-# exists; the fourth is `enumerate-clan-namespace`'s own addition, a var no
-# bridge mapping this check declares ever names:
+# Two machines, five `age`-backed generators between them, an identity
+# minted here and a recipient derived from it. The first three on `meridian`
+# differ in the two axes that turn out to matter, and the real clan is what
+# established that the second axis exists; the fourth, `orphan`, is
+# `enumerate-clan-namespace`'s own addition, a var no bridge mapping this
+# check declares ever names, and the fifth, `bothways`, is this change's own:
 #
 #   - `ntfy` declares `validation` and is generated. `validationHash` is null
 #     unless a generator declares `validation`, and `hash_is_valid` calls a
@@ -80,18 +81,29 @@
 # cannot: the stub's staleness is a switch a test throws, so no fixture of it
 # would have produced a generator that is stale for having never run.
 #
+# `bothways` is the fourth, `share = true`, declared on `meridian` alone and
+# minted there; `aurora` declares no generator at all. This is group 8's own
+# addressing-search fixture, and it exists for the same reason the third
+# generator does: `crates/safix/tests/bridge_sync.rs`'s stubbed clan can only
+# ever answer "Couldn't find var" because it was told to, for any machine
+# name a test hands it, so it cannot establish that a real, unrelated second
+# machine — one that genuinely does not declare the generator — is what
+# makes `clan vars get` say that. Only a real clan can be asked and answer
+# honestly, which is what makes this the one place the addressing search's
+# skip-a-real-candidate property is established rather than merely modelled.
+#
 # # The drills, and what they were observed to do
 #
 # Withholding `SAFIX_TEST_REAL_CLAN_SEED` makes every test in the target report
-# the absence and return, and libtest then says twelve passed. Observed: the
+# the absence and return, and libtest then says eighteen passed. Observed: the
 # result-line guard below caught it and the check failed. That is the failure
 # this whole shape exists to prevent — an attribute that is present, green, and
 # asserting nothing.
 #
 # Putting the stub in `SAFIX_TEST_REAL_CLAN`'s place, which is the strongest
-# available statement that the real command is what is under test. Observed: ten
-# of the eleven failed. The eleventh is the ungenerated-var outcome, and it
-# passes because the stub's answer for that state was written against this
+# available statement that the real command is what is under test. Observed:
+# every test but the ungenerated-var outcome failed. That one passes because
+# the stub's answer for that state was written against this
 # clan's — which is the stub being right rather than the drill being weak.
 { inputs, ... }:
 {
@@ -111,13 +123,19 @@
 
       machine = "meridian";
 
+      # A real second machine, declaring no generator at all. Group 8's
+      # addressing-search test needs one — see "The clan the check builds"
+      # above.
+      secondMachine = "aurora";
+
       generator =
-        { value, validation }:
+        { value, validation, share ? false }:
         {
           files.token.secret = true;
           script = ''echo -n ${value} > "$out"/token'';
         }
-        // lib.optionalAttrs (validation != null) { validation.revision = validation; };
+        // lib.optionalAttrs (validation != null) { validation.revision = validation; }
+        // lib.optionalAttrs share { share = true; };
 
       machineConfiguration = builtins.toJSON {
         nixpkgs.hostPlatform = system;
@@ -144,8 +162,27 @@
                 value = "CANARY-never-claimed";
                 validation = null;
               };
+              # `bothways` is `share = true`, so it is stored once under
+              # `vars/shared/` rather than per-machine — declared here, on
+              # `meridian`, and not on `aurora` at all.
+              bothways = generator {
+                value = "CANARY-shared-and-real";
+                validation = null;
+                share = true;
+              };
             };
           };
+        };
+      };
+
+      # `aurora` declares no generators at all, which is what makes it a real
+      # candidate `bothways`'s addressing search must skip rather than a
+      # machine that simply has not generated the shared var yet.
+      secondMachineConfiguration = builtins.toJSON {
+        nixpkgs.hostPlatform = system;
+        clan.core = {
+          settings.state-version.enable = false;
+          vars.settings.secretStore = "age";
         };
       };
 
@@ -193,7 +230,7 @@
                 SAFIX_TEST_SHIM = "${config.checks.safix-integration}/libexec/safix-test-shim";
                 SAFIX_TEST_CLAN_STUB = "${config.checks.safix-integration}/libexec/safix-clan-stub";
                 SAFIX_TEST_REAL_CLAN = "${clanCli}/bin/clan";
-                inherit machineConfiguration;
+                inherit machineConfiguration secondMachineConfiguration;
               };
             }
             ''
@@ -216,7 +253,7 @@
               nix-store --load-db --store "$CLAN_TEST_STORE" < "$closureInfo/registration"
 
               clan="$TMPDIR/seed-clan"
-              mkdir -p "$clan/machines/${machine}" "$clan/.age"
+              mkdir -p "$clan/machines/${machine}" "$clan/machines/${secondMachine}" "$clan/.age"
 
               # Minted here, per run, and never leaving this build: the recipient
               # the throwaway clan encrypts to is derived from it and nothing else
@@ -250,12 +287,22 @@
               cat > "$clan/clan.nix" <<EOF
               {
                 vars.settings.recipients.hosts.${machine} = [ "$recipient" ];
+                vars.settings.recipients.hosts.${secondMachine} = [ "$recipient" ];
               }
               EOF
 
               printf '%s' "$machineConfiguration" \
                 > "$clan/machines/${machine}/configuration.json"
               cat > "$clan/machines/${machine}/configuration.nix" <<'EOF'
+              { ... }:
+              {
+                imports = [ (builtins.fromJSON (builtins.readFile ./configuration.json)) ];
+              }
+              EOF
+
+              printf '%s' "$secondMachineConfiguration" \
+                > "$clan/machines/${secondMachine}/configuration.json"
+              cat > "$clan/machines/${secondMachine}/configuration.nix" <<'EOF'
               { ... }:
               {
                 imports = [ (builtins.fromJSON (builtins.readFile ./configuration.json)) ];
@@ -280,6 +327,12 @@
               # One of the two, so that the other stays in the state a clan is in
               # before its first generation.
               clan vars generate --flake "$clan" --generator ntfy ${machine}
+
+              # The shared generator, minted on the machine that declares
+              # it. `${secondMachine}` never generates it and never declares
+              # it, which is what group 8's addressing-search test needs: a
+              # real, unrelated machine for the search to try and skip.
+              clan vars generate --flake "$clan" --generator bothways ${machine}
 
               export SAFIX_TEST_REAL_CLAN_SEED="$clan"
 
