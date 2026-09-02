@@ -733,42 +733,6 @@ impl Fixture {
         self.write_fixtures();
     }
 
-    /// Declare one bridge mapping, as `flake.safix.bridge` resolves it.
-    ///
-    /// The shape is the one `modules/flake/safix/default.nix` projects: the
-    /// clan flake once for the consumer, and one record per mapping carrying
-    /// the attribute name it was declared under. Built rather than pasted, so a
-    /// field added on the nix side has to be added here too and the fixture
-    /// cannot drift into answering an older schema.
-    pub fn seed_mapping(
-        &mut self,
-        id: &str,
-        direction: &str,
-        clan: (&str, &str, &str),
-        safix: (&str, &str),
-    ) {
-        let (machine, generator, file) = clan;
-        let (user, name) = safix;
-        self.bridge["clanFlake"] = json!(
-            self.clan_flake
-                .clone()
-                .unwrap_or_else(|| self.repo.clone())
-                .to_string_lossy()
-        );
-        self.bridge["mappings"].as_array_mut().unwrap().push(json!({
-            "id": id,
-            "direction": direction,
-            "clan": {
-                "placement": "per-machine",
-                "machine": machine,
-                "generator": generator,
-                "file": file,
-            },
-            "safix": { "user": user, "name": name },
-        }));
-        self.write_fixtures();
-    }
-
     /// Declare one shared-placement bridge mapping: the clan side names a
     /// generator and a file but no machine, the way a `placement = "shared"`
     /// declaration resolves.
