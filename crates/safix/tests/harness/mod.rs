@@ -801,6 +801,34 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare one two-way bridge mapping, and mint its companion placement
+    /// beside the mapped entry's own \u{2014} the fixture's own hand-built
+    /// counterpart to `bridge.nix`'s `companionsOf`: the same file, owner and
+    /// shared-ness as the mapped entry already carries, a key suffixed
+    /// `-safix-bridge-sync-state`, and no generator of its own. Without this
+    /// the companion's own `set::run_committing` write has no placement to
+    /// resolve against and refuses with `UnknownName`.
+    pub fn seed_two_way_mapping(
+        &mut self,
+        id: &str,
+        clan: (&str, &str, &str),
+        safix: (&str, &str),
+    ) {
+        self.seed_mapping(id, "two-way", clan, safix);
+
+        let (user, name) = safix;
+        let mapped = self.placements[user][name].clone();
+        let file = mapped["file"].as_str().unwrap_or(ALICE_FILE).to_owned();
+        let owner = mapped["owner"].as_str().unwrap_or(user).to_owned();
+        let shared = mapped["shared"].as_bool().unwrap_or(false);
+        let companion = format!("{name}-safix-bridge-sync-state");
+        self.placements[user][companion.as_str()] = json!({
+            "file": file, "key": companion, "origin": "private",
+            "owner": owner, "shared": shared, "generator": null, "public": null,
+        });
+        self.write_fixtures();
+    }
+
     /// Declare one keepassxc mapping, as `flake.safix.lib.keepassxc` resolves it.
     ///
     /// The shape is the one `modules/flake/safix/default.nix` projects: the
