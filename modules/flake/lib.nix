@@ -1,10 +1,13 @@
 # Publishes `flake.lib.mkVault`, the entrypoint a consumer without
 # flake-parts calls to reach the same resolver projection a flake-parts
-# import's `flake.safix.lib` holds. See design decision D1 in
-# `openspec/changes/support-plain-nix-consumers/design.md` for why this lives
-# at a new top-level `flake.lib.mkVault` rather than inside `flake.safix.lib`
-# itself, and D4 for the boundary between what it returns and what an entry
-# file built for the CLI declares beside it.
+# import's `flake.safix.lib` holds. The definition itself lives in
+# `../../lib/default.nix`, a plain function of `{ lib }` with no flake-parts
+# and no flake in its own evaluation; this module is a thin publisher of that
+# one definition, so the two routes cannot drift. See design decision D1 in
+# `openspec/changes/support-plain-nix-consumers/design.md` for why the
+# published form lives at a new top-level `flake.lib.mkVault` rather than
+# inside `flake.safix.lib` itself, and D4 for the boundary between what it
+# returns and what an entry file built for the CLI declares beside it.
 { lib, ... }:
 {
   options.flake.lib.mkVault = lib.mkOption {
@@ -50,13 +53,5 @@
     '';
   };
 
-  config.flake.lib.mkVault =
-    { modules, root }:
-    (lib.evalModules {
-      modules = [
-        ./safix
-        { _module.args.self = root; }
-      ]
-      ++ modules;
-    }).config.flake.safix.lib;
+  config.flake.lib.mkVault = (import ../../lib { inherit lib; }).mkVault;
 }
