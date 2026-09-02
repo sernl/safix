@@ -76,7 +76,7 @@
           # them twice.
           doCheck = false;
 
-          meta.description = "The whole lifecycle of one secret, by name and never by file (set | get | list | generate | check | fix | keygen | adduser)";
+          meta.description = "The whole lifecycle of one secret, by name and never by file (set | edit | get | list | generate | check | fix | audit | sync | keygen | adduser | enroll | group)";
           meta.mainProgram = "safix";
         }
       );

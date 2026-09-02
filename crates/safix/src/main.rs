@@ -8,14 +8,17 @@
 //!
 //! # What this binary does
 //!
-//! Every subcommand the retired shell runtime had: the read paths `list`, `get`
-//! and `check`; the write paths `set` and `fix`; the generator graph behind
-//! `generate`; and the two that touch custody itself, `keygen` and `adduser`.
-//! Each appeared here only once the differential harness had compared it against
-//! that runtime on standard output, standard error, exit code and effect on the
-//! repository. What each subcommand does now is asserted against literals by
+//! Every subcommand this binary implements: the read paths `list`, `get`,
+//! `check` and `audit`; the write paths `set`, `edit` and `fix`; the generator
+//! graph behind `generate`; `sync`, converging the clan bridge and the
+//! password-database mirror; and the three that touch custody itself,
+//! `keygen`, `adduser` and `enroll`; plus `group`, for editing a group's
+//! declared membership.
+//! What each subcommand does is asserted against literals by
 //! `crates/safix/tests/`, driven per mode from `modules/flake/checks/cli.nix`;
-//! `CHANGELOG.md` records the retirement and what the comparison never
+//! the earliest of them were also compared against the retired shell runtime
+//! by a differential harness before that runtime was deleted, and
+//! `CHANGELOG.md` records that retirement and what the comparison never
 //! covered.
 //!
 //! # Exit codes
