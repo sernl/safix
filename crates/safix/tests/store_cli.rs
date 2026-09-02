@@ -399,7 +399,8 @@ fn database_open_and_read_answer_a_compare_only_pass_against_a_real_database() {
     };
     let entry = "safix/alice/grafana";
     let (_, group, write, _) = vectors(entry);
-    let nested = safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice");
+    let nested =
+        safix_core::store::group_arguments(Path::new("DATABASE"), "safix/alice", None, None);
     assert!(scratch.run(&words(&group), &format!("{UNLOCK}\n")).status);
     assert!(scratch.run(&words(&nested), &format!("{UNLOCK}\n")).status);
     let value = "CANARY-real-database-value";
@@ -409,8 +410,12 @@ fn database_open_and_read_answer_a_compare_only_pass_against_a_real_database() {
             .status
     );
 
-    let database = safix_core::store::Database::open(scratch.database(), &mut FixedPassword)
-        .expect("Database::open refused a database this test just created");
+    let mirror: safix_core::model::Keepassxc =
+        serde_json::from_str(r#"{"database": null, "group": "safix", "mappings": []}"#)
+            .expect("a fixture mirror opening the database on its password alone");
+    let database =
+        safix_core::store::Database::open(scratch.database(), &mirror, &mut FixedPassword)
+            .expect("Database::open refused a database this test just created");
 
     let held = database
         .read(entry)

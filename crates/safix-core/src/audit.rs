@@ -333,7 +333,7 @@ fn run_keepassxc(
     if !enroll::terminal_present() {
         return Err(Error::StoreLocked { database: named });
     }
-    let database = Database::open(std::path::PathBuf::from(&named), password)?;
+    let database = Database::open(std::path::PathBuf::from(&named), mirror, password)?;
 
     let mut compared = Vec::with_capacity(mappings.len());
     for mapping in &mappings {
