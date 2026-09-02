@@ -978,8 +978,8 @@ fn converging(finding: &audit::Finding) -> String {
     format!("{PROGRAM} sync clan {}", finding.mapping)
 }
 
-/// What a two-way convergence did, one line per declared mapping and a
-/// closing count.
+/// What a two-way convergence did, one line per two-way mapping acted on and
+/// a closing count.
 ///
 /// The shape [`transfer`] and [`sync`] both have, over
 /// [`safix_core::bridge::bridge_sync::Report`] instead: each line names the
@@ -990,16 +990,23 @@ fn converging(finding: &audit::Finding) -> String {
 /// it: a two-way mapping's outcome is reported through this function rather
 /// than through `transfer`'s. A mapping that needs a person \u{2014} a conflict or
 /// a refusal \u{2014} gets its paragraph under its line.
+///
+/// An empty report prints nothing at all, rather than a "no mapping is
+/// declared" line of its own: [`transfer`] already prints that sentence
+/// for a fleet with nothing declared \u{2014} `bridge::sync`'s own early return
+/// covers both a genuinely empty bridge and one whose mappings are all
+/// two-way \u{2014} and the ordinary case this covers, a fleet whose bridge
+/// declares one-way mappings only, should read exactly as it did before
+/// this convergence existed.
 #[must_use]
 pub fn bridge_sync(report: &safix_core::bridge::bridge_sync::Report) -> String {
     use safix_core::bridge::bridge_sync::Outcome;
 
-    let mut out = String::new();
     if report.converged.is_empty() {
-        out.push_str(PROGRAM);
-        out.push_str(": no two-way mapping is declared.\n");
-        return out;
+        return String::new();
     }
+
+    let mut out = String::new();
 
     for entry in &report.converged {
         let line = if matches!(
