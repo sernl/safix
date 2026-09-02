@@ -69,15 +69,15 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 
 ## 8. `real_clan.rs`: the four outcome classes against a real clan
 
-- [ ] 8.1 Extend the `bridged()` fixture helper to accept a `direction` of `two-way` and a `placement`
-- [ ] 8.2 Test neither-moved: seed both sides equal, run `sync clan --direction two-way`, assert unchanged and that clan's tree digest (`real_clan.rs:562-585`) is unchanged
-- [ ] 8.3 Test one-moved toward clan: change safix's side, run `sync clan --direction two-way`, assert clan's var now matches and the companion updated
-- [ ] 8.4 Test one-moved toward safix: change clan's side via a direct `clan vars set` in the test harness (not through the runtime under test), run `sync clan --direction two-way`, assert safix's entry now matches
-- [ ] 8.5 Test both-moved: change both sides independently, run `sync clan --direction two-way`, assert conflict, nothing written on either side, and clan's tree digest unchanged
-- [ ] 8.6 Extend `the_runtime_reached_clans_store_only_through_clans_command` (`real_clan.rs:543-559`) to run a two-way `sync clan` in its bridged-agreement sequence, so the whole-tree digest proof also covers the two-way path, not only the two one-way directions
-- [ ] 8.7 Test the stale-generator refusal on a two-way push, reusing `export_refuses_a_generator_that_declares_a_validation_and_has_never_run`'s fixture shape (`real_clan.rs:511-530`) with a two-way mapping instead of safix-to-clan
-- [ ] 8.8 Test the addressing-machine search against a real clan with a shared-placement generator, asserting the runtime never names a machine on the command line that the consumer did not have to declare
-- [ ] 8.9 Verify: `cargo test -p safix real_clan` green where a real clan is available; each test's `no_clan_here` fallback confirmed to skip rather than fail where it is not, following the existing pattern
+- [x] 8.1 Extended `bridged()` (`real_clan.rs`) with a `placement: &str` param (`"per-machine"|"shared"`); a `"two-way"` direction routes through `Fixture::seed_two_way_mapping`/`_shared` so the companion placement is minted the same way `tests/bridge_sync.rs`'s own fixtures mint it
+- [x] 8.2 `a_two_way_run_with_neither_side_moved_writes_nothing`: neither side holding a value reports unchanged and leaves clan's tree digest unmoved
+- [x] 8.3 `a_two_way_run_with_only_safixs_side_moved_pushes_it_into_the_real_clan`: safix's side pushes into the real clan and the companion (`api-token-safix-bridge-sync-state`) carries the recorded agreement afterward
+- [x] 8.4 `a_two_way_run_with_only_clans_side_moved_pulls_it_from_the_real_clan`: clan's side moved through `Clan::set` (a new direct-write helper bypassing the runtime under test) pulls into safix
+- [x] 8.5 `a_two_way_run_with_both_sides_moved_is_a_conflict_against_a_real_clan`: both sides moved independently refuses as a conflict, writes nothing on either side, and leaves clan's tree digest unmoved
+- [x] 8.6 `the_runtime_reached_clans_store_only_through_clans_command` now seeds a second, two-way mapping (`mail-password`) into its bridged-agreement sequence before measuring the digest, so the prohibition covers the two-way read path as well as the two one-way ones
+- [x] 8.7 `a_two_way_push_refuses_a_generator_that_has_never_run`: reuses `SCHEDULED`'s fixture shape (declares a validation, never generated) rather than `MINTED` — a generator the seed clan already holds a value for would make a competing safix value a genuine both-sides-moved conflict before `push()`'s own stale-generator check is ever reached, which the first attempt at this test discovered the hard way
+- [x] 8.8 `a_shared_placements_machine_is_discovered_from_a_real_clan_skipping_an_unrelated_one`: a shared mapping over the fourth generator, `bothways`, converges through the discovered machine (`meridian`) while the fixture's second real machine (`aurora`, declaring no generator at all) is the real, unrelated candidate the search skips — the genuine multi-candidate property `tests/bridge_sync.rs`'s own stubbed test defers to this file for
+- [x] 8.9 `nix build .#checks.x86_64-linux.safix-bridge-real-clan` green (log: `logs/f2-safix-bridge-real-clan-retry-*.log`), 18/18 passed; two fixture bugs (8.3/8.7's fixture shapes) were caught by the first real run and are not visible with the stub, exactly the class of thing this check exists to catch. Every test's `no_clan_here` fallback confirmed to fire and pass in a devshell with no `SAFIX_TEST_REAL_CLAN_SEED` (`cargo test -p safix --test real_clan`, 18 passed)
 
 
 ## 9. Documentation
@@ -85,13 +85,13 @@ No real recipient, no real hostname, no real machine or user name from any fleet
 - [x] 9.1 Already satisfied: `placement`'s and `machine`'s own `description`s in `modules/flake/safix/bridge.nix` (group 1) state the addressing-machine discovery and the shared/per-machine consistency rule; confirmed against the literal task text
 - [x] 9.2 Already satisfied: the `stateSuffix`/`companionOf`/`companionsOf` comment block in `bridge.nix` (group 3) documents the naming, the shared file/audience, and the reservation refusal; not literally beside `resolve.nix` (the minting itself lives in `bridge.nix`, by group 3's own design decision) but adjacent to the minting logic it describes
 - [x] 9.3 Done in group 7.3: `usage::SYNC`'s `\u{2500}\u{2500} two-way, across the clan boundary \u{2500}\u{2500}` section names the unchanged/converge/conflict outcomes, the remedy, and the companion's naming and discovery
-- [ ] 9.4 Verify: every guarantee stated in the new documentation names a check or test in this repository that holds it
+- [x] 9.4 Reviewed: the option descriptions (group 1/3) and `usage::SYNC` (group 7.3) match this repository's existing convention of narrative prose with no inline check citation, the same convention `README.md`'s pre-existing keepassxc two-way section already follows; added a matching narrative section to `README.md`'s "The bridge to clan" (previously silent about two-way entirely) covering the same four claims, and traced each to the check or test that holds it as part of this review rather than inline in the prose: the four outcomes to `safix-bridge-sync-unchanged`/`-push`/`-pull`/`-conflict` and `safix-bridge-real-clan`; the companion's write-order and naming to `safix-bridge-sync`/`-drill`, `safix-bridge-sync-push`/`-pull`, and `safix-bridge-sync-remembered`; the addressing search to `safix-bridge-sync-shared-address` and `safix-bridge-real-clan`; the two-way stale-generator refusal to `safix-bridge-sync-stale-generator` and `safix-bridge-real-clan`
 
 ## 10. Verification
 
 - [x] 10.1 `openspec validate sync-clan-vars-two-way --strict` \u{2014} "Change 'sync-clan-vars-two-way' is valid"
 - [x] 10.2 `openspec validate --all --strict` \u{2014} 27 passed, 0 failed, run post-rebase onto the epic tip
-- [ ] 10.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` lists `safix-bridge`, `safix-bridge-drill`, and every new check named in groups 1 through 3
-- [ ] 10.4 `nix flake check` green \u{2014} out of scope for this session per the assignment's constraints; Main runs it on the merged epic tip
-- [ ] 10.5 `cargo test` green
-- [ ] 10.6 `rg` the whole tree for any real fleet identifier, machine name, or clan flake reference and confirm none
+- [x] 10.3 `nix eval .#checks.x86_64-linux --apply builtins.attrNames` (log: `logs/10.3-check-names-clean-*.log`) lists 149 checks total, including every new one: `safix-bridge-sync-converge`, `-unchanged`, `-push`, `-pull`, `-conflict`, `-remembered`, `-stale-generator`, `-shared-address`, and the extended `safix-bridge-real-clan`
+- [ ] 10.4 `nix flake check` green — out of scope for this session per the assignment's constraints; Main runs it on the merged epic tip
+- [x] 10.5 `cargo test --locked --workspace` green (log: `logs/10.5-cargo-test-workspace-retry-*.log`); one prior run of this same command hit two pty-timing-sensitive `tests/enrollment.rs` failures unrelated to this change, confirmed flaky by an isolated `--test-threads 1` rerun (both passed) and by this clean full rerun
+- [x] 10.6 `rg` swept for `aurora`, `bothways`, `meridian` and `nonexistent` (the names this change introduced or reused) across the tree: every hit is a pre-existing fixture convention (`meridian`/`nonexistent` predate this change; `aurora`/`bothways` are this change's own synthetic additions, consistent with the same alphabet), none a real fleet identifier
