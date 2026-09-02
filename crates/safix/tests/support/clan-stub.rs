@@ -213,7 +213,7 @@ fn machines() -> ! {
     let mut names: Vec<String> = std::fs::read_dir(&base)
         .into_iter()
         .flatten()
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
