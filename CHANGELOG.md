@@ -40,6 +40,19 @@ The mapping ids `clan`, `keepassxc` and `all` are refused at evaluation, in both
 `import` is retired with a recorded reservation rather than a silent removal: the word is reserved for a future, unbuilt feature — ingesting a value from an external plaintext source one entry at a time, analogous to clan's own `import-sops`, plaintext only in memory and never written to a tree — and `safix --help` records the reservation so the absence reads as a decision rather than an oversight.
 `export` is retired permanently, with no reservation: the operation clan's own word names, a bulk plaintext dump, is the one safix's design refuses to build on either side of the boundary.
 
+### safix upload seeds a machine's host identity before its first activation
+
+A new `safix upload <machine>` command mirrors clan's own verb of the same name in what it is for — getting material onto a machine before that machine can help itself — and diverges from it in what it moves: clan uploads generated secret values on an ongoing basis, safix uploads only the host identity material a machine needs once, before its first boot, because ongoing secret delivery is already solved by the nix closure and safix's own installer.
+
+Two write modes.
+`--directory DIR` writes a pre-seed tree at `DIR` — the operator-supplied private host key at the path a fresh install's `services.openssh.hostKeys` will read it from, plus its public half — touching no network, for `nixos-anywhere --extra-files` or equivalent offline media preparation.
+`--to ADDRESS` connects over ssh, probing the target's currently presented ed25519 host key before writing anything, and mirrors clan's own transport shape: root, tar-over-ssh, files at mode `0400` and directories at `0700`, wipe-then-extract at the fixed destination a fresh install's target root is mounted at.
+
+An honest no-op: when the target already presents an ed25519 host key that derives to the machine's declared recipient, remote mode writes nothing and reports that the machine already has what it needs — even with `--force` given — rather than performing a transfer that would either overwrite a live host's own key or silently do nothing while claiming success.
+`--identity PATH` supplies the private key material the operator harvested or minted; the command mints no machine identity itself, and refuses when the supplied key's derived recipient does not match the machine's declared one.
+
+**BREAKING** (narrowing, not additive): `safix-cli`'s recorded absence of an upload verb — the help text stating that no such verb exists because activation already delivers what it would — is narrowed rather than removed: `safix --help` now states that no verb exists for *ongoing* secret delivery, and distinguishes this `upload` from clan's own verb of the same name.
+
 ### keepassxc's password database may declare a composite key
 
 `flake.safix.keepassxc.yubikey` and `flake.safix.keepassxc.keyFile` declare a YubiKey challenge-response slot, a key file, or both, for a database whose own composite key requires more than a password.

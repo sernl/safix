@@ -203,6 +203,8 @@ safix.machine = "deck"; # instead of safix.user
 
 It holds nothing of its own — there is no `carries`, no `private` and no `sharedWith` on a machine — and it needs no hostname, because it is the host.
 
+Declaring `recipient` here is necessary but not sufficient: it tells safix which age form to wrap every audience naming the machine to, and the machine still needs the matching private half sitting on its own disk before its first activation can decrypt any of it — `safix upload` (see "Seeding a machine's host identity") is the step that makes the declaration true on disk.
+
 ### A service is a subject whose recipients are its machines'
 
 A service grant narrows what is declared and what is placed, and not what decrypts: the audience names the service, the landed file belongs to the service's unix user and group, and the host identity remains what opens it — so the machine is the trust boundary for everything running on it.
@@ -699,6 +701,35 @@ The PIN and PUK land in the person's own custody by default, with an honest cave
 
 The primary `recipient` stays software-only.
 Activation decrypts with nobody present, so a card belongs in `recoveryRecipients` and `safix adduser` refuses one for the other field.
+
+
+## Seeding a machine's host identity: `safix upload`
+
+A machine's declared `recipient` is the age form of an ed25519 host key the operator holds, and `safix fix` wraps every audience naming the machine to it as soon as the declaration exists — independent of whether the machine has ever booted.
+Nothing else here mints that key or gets its private half onto the machine's own disk, so a freshly declared machine's first activation has nothing to decrypt with; `safix upload <machine>` closes that one gap, once, before the machine's first activation.
+
+```console
+$ safix upload deck --directory ./preseed --identity ~/.ssh/deck_host_key
+```
+
+Two write modes, chosen by which flag is given.
+`--directory DIR` writes a pre-seed tree straight to an operator-named directory and touches no network — `DIR/etc/ssh/ssh_host_ed25519_key` at mode `0600` and its `.pub` at mode `0644`, the paths and modes a fresh NixOS install's own `sshd-keygen` would produce — for `nixos-anywhere --extra-files` or for hand-copying onto installer media.
+`safix-upload-directory` holds the paths and the modes, and `safix-upload-directory-mismatch` and its one-character-off drill `safix-upload-directory-drift-drill` hold the refusal when the supplied identity does not derive to the declared recipient.
+
+`--to ADDRESS` probes the host's currently presented ed25519 key, unauthenticated, before writing anything, and takes exactly one of three actions.
+A target already presenting the declared key gets an honest no-op and writes nothing, even with `--force` and `--identity` both given — `safix-upload-remote-match` and `safix-upload-remote-match-force` hold that.
+A target presenting no key writes, given `--identity`, and otherwise refuses — `safix-upload-remote-write` and `safix-upload-remote-needs-identity` hold that.
+A target presenting a different key refuses by default, naming both recipients, and proceeds only with `--force` together with `--identity` — `safix-upload-remote-mismatch` and `safix-upload-remote-force` hold that.
+
+The honest no-op is the property this verb exists to hold: `safix-upload-remote-match` asserts it against the recorded subprocess invocations rather than against file state alone, so a bug that opened a write-capable session and happened to write nothing would not pass it, and flipping one byte of the declared recipient in the same fixture turns the same probe into the mismatch branch instead (`safix-upload-remote-flip-drill`) — proving the branch follows the comparison rather than a fixture-specific shortcut.
+
+A `--to` write mirrors clan's own transport (`clan_lib/ssh/upload.py`): the two files travel inside a gzip tarball built in the same private staging root generation and editing already use, at mode `0400` for files and `0700` for directories, owned by root in the archive, and the fixed destination `/mnt/etc/ssh` — the path `nixos-anywhere --extra-files` mounts a fresh install's target root at — is wiped and then extracted into.
+`safix-upload-tarball-modes` holds the archive's own contents, `safix-upload-destination` holds the wipe-then-extract sequence naming that fixed destination, and `safix-upload-staging-cleanup` holds the staging root's own lifecycle across both a success and a simulated transport failure.
+
+Three absences are named rather than left to be discovered.
+This verb provisions machines, never people: a person's name is refused the same way an undeclared machine is (`safix-upload-not-a-machine`), and provisioning a person's own first identity remains `safix keygen`'s and `safix enroll`'s.
+No systemd-credentials delivery path exists yet; `--directory`'s output is a plain filesystem tree.
+Nothing here triggers a deploy, a switch or a rebuild — the machine's own next rebuild is what activates what was written, and the command's own success output says so.
 
 ## Wiring it to your own user registry
 
