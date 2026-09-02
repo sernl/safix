@@ -6,6 +6,13 @@ Amended 2026-09-03 while proposing `rename-transfer-verbs`: vocabulary updated t
 `import`/`export`/`audit` become target-scoped forms of `sync`/`audit`; this change's own third verb, described below as `bridge` when this design was first written, folds into `sync clan`'s `--direction` option as a third value, `two-way`, rather than registering as a fourth CLI verb.
 Every decision below that named `bridge` as a verb, or `import`/`export` as the verbs a two-way mapping is refused under, is restated for the folded shape; the underlying mechanism — the companion entry, the four-outcome decision function, the write-after-value ordering, the inherited safix-to-clan write discipline — is exactly what it was.
 
+Amended 2026-09-03 after confirming per-export is unreachable through the two contracts safix uses.
+At clan-core rev `56e35624d94e4f1ac55d36575ebab97cbd9b9cdd`, `get_machine_generators` (`clan_lib/vars/generator.py:229-351`) builds every generator's placement as `Shared()` or `PerMachine(machine=machine_name)` alone — `PerExport` is never constructed there.
+`get_machine_vars` (`clan_cli/vars/list.py`), `get_machine_var` (`clan_lib/vars/get.py`), and `set_var`/`set_via_stdin` (`clan_lib/vars/set.py`) all route through `get_machine_generators`, so `clan vars get <machine> <id>` and `clan vars set <machine> <id>` can never resolve a var declared under a `PerExport` generator through any machine.
+`PerExport` instances are constructed only by `nix_selectors.py`'s separate `clan_exports()` selector reaching `clanInternals.systems.<system>.exports.*` directly, which neither `vars get` nor `vars set` uses, and reaching it directly from safix would also trip the `safix-namespace` check (`modules/flake/checks/namespace.nix`) and its own opinion that safix reads no option path outside its own namespace, extended here to clan values reached by a route neither of the two documented contracts takes.
+A declared placement neither contract can reach is a trap, not a feature, so this change drops `per-export` entirely rather than shipping it unimplemented or half-implemented: `ClanPlacement` has two variants, `shared` and `per-machine`; `clanSide` gains no `export` field; every refusal, endpoint key and addressing-search scenario below is written for the two placements safix can actually reach.
+Per-export placement may return as its own change once clan-core exposes a CLI path to it.
+
 ## Context
 
 Today `bridge.nix` computes four evaluation-time refusals over declared mappings — an unresolvable safix side, a second producer, two mappings on one target, and a pair of endpoints declared with opposite directions — and refuses the last of those unconditionally, naming the reason: "which is a two-way synchronisation and has no conflict resolution" (`modules/flake/safix/bridge.nix:200`).
@@ -13,7 +20,7 @@ Today `bridge.nix` computes four evaluation-time refusals over declared mappings
 `keepassxc-sync` already solved the general problem this refusal defers: `crate::sync::two_way` (`crates/safix-core/src/sync.rs:439-481`) converges toward whichever side changed, against a digest of the last agreement recorded in a companion entry inside the same encrypted store, and reports a conflict — writing nothing — when both sides moved or when no agreement has ever been recorded.
 
 Two facts specific to clan make porting that mechanism non-trivial rather than a renaming exercise.
-First, clan's placement is a three-way sum (`Shared`, `PerMachine`, `PerExport`, `clan_lib/vars/_types.py:23,45,65`), and safix's `ClanSide` today requires a machine unconditionally (`crates/safix-core/src/model.rs:657-659`) — so a shared or export-scoped var cannot be declared honestly, and, more concretely, `endpointsOf`'s and `targetOf`'s string keys (`modules/flake/safix/bridge.nix:122-124,169-174`) are machine-keyed, so two mappings of one shared var addressed through two different machines would silently evade the very refusals meant to catch a duplicate.
+First, clan's placement is a three-way sum in clan itself (`Shared`, `PerMachine`, `PerExport`, `clan_lib/vars/_types.py:23,45,65`), of which safix reaches two through `clan vars get`/`set` (see the amendment above); safix's `ClanSide` today requires a machine unconditionally (`crates/safix-core/src/model.rs:657-659`) — so a shared var cannot be declared honestly, and, more concretely, `endpointsOf`'s and `targetOf`'s string keys (`modules/flake/safix/bridge.nix:122-124,169-174`) are machine-keyed, so two mappings of one shared var addressed through two different machines would silently evade the very refusals meant to catch a duplicate.
 Second, `clan vars set` writes and commits unconditionally, and a re-encrypting backend produces fresh ciphertext for an unchanged value (`crates/safix-core/src/bridge.rs:10-17`), so any write toward clan — bootstrap, one-sided convergence, or a manually forced resolution — has to carry the same pre-write comparison and the same stale-generator refusal `one_export` already has, with no exception carved for the new path.
 
 ## Goals / Non-Goals
@@ -25,7 +32,8 @@ Make a two-way relationship between a clan var and a safix entry declarable as o
 A CLI override that picks a winner on conflict; the remedy is redeclaring the mapping's direction and running the verb that already exists for it, mirroring the remedy `keepassxc-sync` already documents for the same situation.
 Any change to `keepassxc-sync` itself, or to the mechanism it uses; this change ports its shape, not its code.
 Verifying a declared placement against clan's own generator beyond the share comparison; clan's placement is otherwise a run-time fact, exactly as the machine, generator and file already are.
-A general-purpose "ask clan what it has" cache or command; the addressing-machine lookup this change adds is scoped to shared and per-export mappings only.
+A general-purpose "ask clan what it has" cache or command; the addressing-machine lookup this change adds is scoped to shared mappings only.
+Reaching `PerExport` generators by any route other than `clan vars get`/`set`; see the amendment above.
 
 ## Decisions
 
@@ -37,34 +45,33 @@ The old refusal — declaring one pair of endpoints as two mappings with opposit
 
 ### D2. `ClanSide` gains a placement, and `machine` becomes conditional on it rather than always required
 
-`placement` is `shared | per-machine | per-export`, defaulting to `per-machine` so every mapping declared before this change parses unchanged.
-`machine` becomes `nullOr str`: required when placement is per-machine, refused otherwise.
-An `export` field, `nullOr str`, is required exactly when placement is per-export, naming the exports key clan itself keys generators by (`clan_lib/vars/generate.py:384`, `get_flake_generators`'s `GeneratorId(gen_name, PerExport(scope))`).
+`placement` is `shared | per-machine`, defaulting to `per-machine` so every mapping declared before this change parses unchanged.
+`machine` becomes `nullOr str`: required when placement is per-machine, refused (must be null) when placement is shared.
 
 Forbidding `machine` outside per-machine is not cosmetic.
 `endpointsOf` and `targetOf` are string keys that `byPair`/`bothDirections` and `byTarget`/`twoMappingsOneTarget` group by (`bridge.nix:122-124,169-174,178-202`); today they always include the machine.
 Two mappings of the same shared var, each naming a different (both otherwise-valid) machine, would produce two different keys and evade both the duplicate-target refusal and the two-way-declared-twice refusal — the exact class of silent loss D1's refusal exists to prevent.
-This change redefines both keys per placement: per-machine keeps `<machine>:<generator>/<file>`; shared becomes `shared:<generator>/<file>`; per-export becomes `export:<export>:<generator>/<file>`.
+This change redefines both keys per placement: per-machine keeps `<machine>:<generator>/<file>`; shared becomes `shared:<generator>/<file>`.
 A shared var is then one target and one pair of endpoints no matter which machine a declaration happens to name, which is what "not expressible" in the operator brief actually names: not merely refused, but incapable of being represented as one stable identity, which is a stronger defect than a missing type and is what motivates changing the field's cardinality rather than just relaxing its validation.
 
 `crate::model::Placement` already exists (`model.rs:147-168`) and names safix's own per-entry file/key/public shape; the new clan-side enum is `ClanPlacement` to avoid two unrelated concepts sharing one name in the same crate.
 
-### D3. The addressing machine for a shared or per-export mapping is discovered from clan, not declared as a second field
+### D3. The addressing machine for a shared mapping is discovered from clan, not declared as a second field
 
-`clan vars get`/`set` take a machine positionally regardless of a var's real placement (`clan_cli/vars/get.py:39-41`, `set.py:16-18`), and `get_machine_vars` scopes generators to the machine asked (`clan_lib/vars/list.py:24-25`, `get_machine_generators`), so an arbitrary fleet machine is not guaranteed to see a given shared or per-export generator.
+`clan vars get`/`set` take a machine positionally regardless of a var's real placement (`clan_cli/vars/get.py:39-41`, `set.py:16-18`), and `get_machine_vars` scopes generators to the machine asked (`clan_lib/vars/list.py:24-25`, `get_machine_generators`), so an arbitrary fleet machine is not guaranteed to see a given shared generator.
 
 The alternative considered and rejected is a fourth declared field, `addressingMachine`, naming a machine the consumer asserts imports the generator.
 It was rejected because it is a second copy of a fact only clan's own flake holds, it would drift silently the moment that machine is renamed or removed from the fleet, and `consumer-integration` already argues against exactly this shape of coupling for a different field — safix reading one of clan's options to decide something would make that option part of safix's interface.
 
 The chosen mechanism is `Clan::machines`, a new method beside `Clan::probe`/`register_user`/`generator_stale` (`crates/safix-core/src/clan.rs:126-138,240-269,295-317`) invoking `clan machines list --flake <flake>` (confirmed to exist, `clan_cli/machines/list.py:12-24`), memoized per run keyed on `(generator, file)` so mappings sharing one clan var do not repeat the search.
-For a shared or per-export mapping, the runtime tries each returned machine against `clan vars get`/`set` in turn, using the existing `NO_SUCH_VAR` substring match (`clan.rs:52-57,205-212,374-381`) to tell "this machine does not see this generator" apart from a genuine failure, and stops at the first that resolves.
+For a shared mapping, the runtime tries each returned machine against `clan vars get`/`set` in turn, using the existing `NO_SUCH_VAR` substring match (`clan.rs:52-57,205-212,374-381`) to tell "this machine does not see this generator" apart from a genuine failure, and stops at the first that resolves.
 No machine resolving it is `bridge-transfer`'s new refusal, naming the mapping, the placement, the generator and the file.
 
 ### D4. The generator-share comparison, discharged with the field this change adds
 
-`Generator.share` in clan is a derived property, `isinstance(self.key.placement, Shared)` (`clan_lib/vars/generator.py:418-420`) — `true` for `Shared` alone, `false` for both `PerMachine` and `PerExport`.
+`Generator.share` in clan is a derived property, `isinstance(self.key.placement, Shared)` (`clan_lib/vars/generator.py:418-420`) — `true` for `Shared` alone, `false` for `PerMachine`.
 safix's own `Generator.share` exists "for comparison against another system's generator" (`crates/safix-core/src/model.rs:118-124`, `openspec/specs/secret-generators/spec.md:195-197`), and no comparison existed because nothing until this change carried a declared clan placement to compare it against.
-`bridge-surface` gains a new requirement: for a safix-to-clan mapping whose source is generator-produced, `share = true` must pair with `placement = shared` and `share = false` must pair with `placement = per-machine` or `per-export`.
+`bridge-surface` gains a new requirement: for a safix-to-clan mapping whose source is generator-produced, `share = true` must pair with `placement = shared` and `share = false` must pair with `placement = per-machine`.
 This is scoped to safix-to-clan alone: a clan-to-safix or two-way mapping whose safix side is generator-produced is already refused by the broadened two-producers rule in D5, so by the time this comparison would run, no other direction can reach it with a generator on the safix side.
 A hand-set source is exempt, for the reason every other generator-shaped rule already exempts one: there is no generator to derive a share from.
 
@@ -138,7 +145,7 @@ This is not a new decision so much as the same one `keepassxc-sync` already made
 
 A two-way mapping's memory degrades to "next divergence is a conflict" after any manually forced resolution, because the one-way override verbs never write the companion — this is D8's stated safe direction, not a defect, but it means an operator who resolves a conflict by hand should expect the very next legitimate one-sided edit to also be reported as a conflict, once, before the mapping settles back into ordinary convergence.
 
-The addressing-machine search (D3) costs one or more `clan vars get`/`set` attempts per distinct shared or per-export generator per run, bounded by fleet size; this is paid only by mappings that use those two placements, and is memoized within a run rather than repeated per mapping.
+The addressing-machine search (D3) costs one or more `clan vars get`/`set` attempts per distinct shared generator per run, bounded by fleet size; this is paid only by mappings that use that placement, and is memoized within a run rather than repeated per mapping.
 
 Extending `twoProducers` to two-way (D5) is, on its own, a behavior change for any two-way mapping a consumer might already have hand-simulated as two opposed one-way declarations naming a generator-produced safix side — but D1's own refusal already forbids that spelling outright, so the set of mappings D5 newly refuses that D1 does not already refuse is empty.
 

@@ -7,13 +7,13 @@ Each relationship between a clan var and a safix entry SHALL be declared in the 
 #### Scenario: A mapping names both sides
 
 - **WHEN** a mapping is declared
-- **THEN** it names a clan generator and file, a placement, and a machine or an export key exactly as that placement requires
+- **THEN** it names a clan generator and file, a placement, and a machine exactly as that placement requires
 - **AND** it names a safix user and entry name
 
 #### Scenario: A run takes no endpoint arguments
 
 - **WHEN** `sync`'s arguments are enumerated
-- **THEN** none of them names a machine, an export key, a generator, a file, a user or an entry
+- **THEN** none of them names a machine, a generator, a file, a user or an entry
 - **AND** the mappings a run acts on come from the declarations
 
 #### Scenario: The mapping carries its own identifier
@@ -69,7 +69,7 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 
 - **WHEN** two mappings name the same destination
 - **THEN** evaluation refuses naming both mappings
-- **AND** for a shared or export-scoped placement the destination is identified by generator and file alone, so two mappings naming the same shared var through different machines still collide
+- **AND** for a shared placement the destination is identified by generator and file alone, so two mappings naming the same shared var through different machines still collide
 
 #### Scenario: A two-way relationship is refused however it is spelled
 
@@ -84,7 +84,7 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 
 #### Scenario: A placement's required field is refused when absent or present out of place
 
-- **WHEN** a mapping's placement is per-machine and no machine is declared, or its placement is per-export and no export key is declared, or a machine or an export key is declared for a placement that does not call for it
+- **WHEN** a mapping's placement is per-machine and no machine is declared, or a machine is declared for a placement that does not call for it
 - **THEN** evaluation refuses naming the mapping, its placement, and which field is missing or out of place
 
 #### Scenario: A mapping id reserved for a target keyword is refused
@@ -95,7 +95,7 @@ Evaluation SHALL refuse a mapping whose safix side is unresolvable, whose target
 
 ### Requirement: The clan half is checked at run time and the asymmetry is stated
 
-Evaluation SHALL NOT claim to have verified the clan side of a mapping, and the runtime SHALL refuse a mapping whose clan side does not resolve, naming its placement's address — a machine or an export key — the generator and the file.
+Evaluation SHALL NOT claim to have verified the clan side of a mapping, and the runtime SHALL refuse a mapping whose clan side does not resolve, naming its placement's address — a machine — the generator and the file.
 
 #### Scenario: Evaluation does not verify the far side
 
@@ -108,7 +108,7 @@ Evaluation SHALL NOT claim to have verified the clan side of a mapping, and the 
 - **WHEN** a transfer reaches a mapping whose clan side does not resolve
 - **THEN** the run refuses for that mapping
 - **AND** for a per-machine placement the refusal names the machine, the generator and the file
-- **AND** for a shared or per-export placement the refusal names the placement, the export key when there is one, the generator and the file
+- **AND** for a shared placement the refusal names the placement, the generator and the file
 
 #### Scenario: The messages are assertable against literals
 
@@ -120,7 +120,7 @@ Evaluation SHALL NOT claim to have verified the clan side of a mapping, and the 
 
 ### Requirement: A generator's derived share and its mapping's clan placement agree
 
-When a safix-to-clan mapping's source entry is produced by a generator, evaluation SHALL refuse a mismatch between that generator's derived `share` and the mapping's declared clan placement: `share = true` SHALL require `placement = shared`, and `share = false` SHALL require `placement = per-machine` or `placement = per-export`.
+When a safix-to-clan mapping's source entry is produced by a generator, evaluation SHALL refuse a mismatch between that generator's derived `share` and the mapping's declared clan placement: `share = true` SHALL require `placement = shared`, and `share = false` SHALL require `placement = per-machine`.
 This is the comparison `openspec/specs/secret-generators/spec.md`'s "The derived value is what the bridge compares" scenario already describes; this requirement is what performs it.
 
 #### Scenario: A shared generator paired with a shared placement is accepted
@@ -129,10 +129,10 @@ This is the comparison `openspec/specs/secret-generators/spec.md`'s "The derived
 - **AND** the mapping's placement is shared
 - **THEN** evaluation produces no message about it
 
-#### Scenario: A shared generator paired with a per-machine or per-export placement is refused
+#### Scenario: A shared generator paired with a per-machine placement is refused
 
 - **WHEN** a safix-to-clan mapping's source is produced by a generator whose derived share is true
-- **AND** the mapping's placement is per-machine or per-export
+- **AND** the mapping's placement is per-machine
 - **THEN** evaluation refuses naming the mapping, the generator, its derived share, and the declared placement
 
 #### Scenario: A per-user generator paired with a shared placement is refused

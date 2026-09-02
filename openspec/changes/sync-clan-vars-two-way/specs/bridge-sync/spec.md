@@ -58,9 +58,9 @@ Every mapping whose direction is two-way SHALL have a companion safix entry that
 - **THEN** nothing is written
 - **AND** the report says unchanged
 
-#### Scenario: A shared or export-scoped mapping's address is discovered from clan, not declared twice
+#### Scenario: A shared mapping's address is discovered from clan, not declared twice
 
-- **WHEN** a two-way mapping's placement is shared or per-export
+- **WHEN** a two-way mapping's placement is shared
 - **THEN** the machine used to reach it on clan's command line is discovered the same way `bridge-transfer` requires for every direction, one-way or two-way alike
 
 ### Requirement: The agreement is written after the value it describes, and nowhere a plaintext digest would be an oracle
