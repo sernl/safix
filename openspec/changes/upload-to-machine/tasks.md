@@ -7,7 +7,7 @@ Nothing here deploys, switches, or activates a real machine, per this change's o
 
 - [ ] 1.1 Add `crates/safix-core/src/upload.rs` with the machine-resolution entry point: look up the positional name in `Workspace`'s declared machines, distinguishing "not declared at all" from "declared but no recipient" from "declared as a person"
 - [ ] 1.2 Add `upload_command` to `crates/safix/src/main.rs` beside the other custody-touching verbs, parsing `<machine>`, `--directory DIR`, `--identity PATH`, `--to ADDRESS`, and `--force` in any order around the one positional, matching `enroll_command`'s stated convention
-- [ ] 1.3 Add `upload` to `crates/safix/src/usage.rs`'s scaffold table and to `expected_verbs()`'s derived list
+- [ ] 1.3 Add `upload` to `crates/safix/src/usage.rs`'s `SCAFFOLD` table and to `expected_verbs()`'s derived list, in the operator-facing row order the table carries after `rename-transfer-verbs` task 5.3 rewrites it — grouped with the other custody/identity verbs (`keygen`, `adduser`, `enroll`) rather than with the target-scoped bridge verbs `sync` and `audit` — confirmed by reading `usage.rs` rather than assumed from today's row positions
 - [ ] 1.4 Write the three machine-targeting refusals: undeclared name, declared machine with null recipient, and a person's name — the third reusing the undeclared-machine message rather than a distinct one
 - [ ] 1.5 Verify: `cargo test -p safix upload::` covers all three refusals with a fixture workspace declaring one machine with a recipient, one without, and one person; each refusal is asserted by matching its message rather than only its exit code
 
@@ -50,8 +50,8 @@ Nothing here deploys, switches, or activates a real machine, per this change's o
 
 ## 6. Help text and the recorded absences
 
-- [ ] 6.1 Write `upload`'s help text stating the three absences the `machine-provisioning` delta's last requirement names: person identities are one-unlock-bootstrap's territory, no systemd-credentials mode exists yet, and no deploy is triggered
-- [ ] 6.2 Update `crates/safix/src/usage.rs`'s scaffold-level help for the "Absent verbs" text, narrowing "no upload verb exists" to "no verb exists for ongoing secret delivery" and adding the sentence distinguishing this `upload` from clan's verb of the same name, matching the `safix-cli` delta
+- [ ] 6.1 Write `upload`'s help text stating the three absences the `machine-provisioning` delta's last requirement names: this command provisions machines and not people, no systemd-credentials mode exists yet, and no deploy is triggered
+- [ ] 6.2 Update `crates/safix/src/usage.rs`'s retired-and-reserved-verbs block — the text `rename-transfer-verbs` task 5.3 writes in place of today's "one verb that does not exist here" section — narrowing its statement that no upload verb exists to state instead that no verb exists for ongoing secret delivery, and adding the sentence distinguishing this `upload` from clan's verb of the same name, matching the `safix-cli` delta
 - [ ] 6.3 Verify: `safix -h` and `safix upload -h` both render the updated text, asserted by a snapshot test in the style `crates/safix/tests/` already uses for other help text
 
 ## 7. README documentation
@@ -59,6 +59,7 @@ Nothing here deploys, switches, or activates a real machine, per this change's o
 - [ ] 7.1 Add a subsection documenting `safix upload`: the two write modes, the honest no-op, the transport it mirrors, and the three named absences
 - [ ] 7.2 State plainly, beside the machine subject section (`README.md:177-196`), that a machine's recipient is declared before the machine can boot, and that `upload` is the step that makes the declaration true on disk
 - [ ] 7.3 Verify: every guarantee stated in the new README section names a check from groups 1 through 6 that holds it
+- [ ] 7.4 Add a `CHANGELOG.md` entry under `## [Unreleased]` naming the new `safix upload` verb, its two write modes, the honest no-op, and the `safix-cli` retired-and-reserved-verbs narrowing; verify by reading the entry against `proposal.md`'s **BREAKING** marker for completeness
 
 ## 8. Verification
 
@@ -67,3 +68,4 @@ Nothing here deploys, switches, or activates a real machine, per this change's o
 - [ ] 8.3 `cargo test -p safix-core upload::` and `cargo test -p safix upload::` both green
 - [ ] 8.4 `rg` the whole tree for any real fleet identifier introduced by this change's fixtures and confirm none
 - [ ] 8.5 Re-read `openspec/specs/safix-cli/spec.md` and `openspec/specs/plaintext-staging/spec.md` after archive-time merge (not performed by this change) would apply, confirming the two delta edits above are the only changes each requirement needs
+- [ ] 8.6 Wire `crates/safix/tests/upload.rs`'s integration tests into `modules/flake/checks/cli.nix` through its `mode` helper, one check per claim named in groups 1 through 5 (the three machine-targeting refusals, the directory-mode drills, the remote-mode severity drills, the transport-depth drill), each with its own perturbation drill recorded in that file's ledger comment; verify with `nix build .#checks.x86_64-linux.<check-name>` for each new check
