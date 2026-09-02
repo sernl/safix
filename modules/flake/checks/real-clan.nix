@@ -106,7 +106,7 @@
 # # The drills, and what they were observed to do
 #
 # Withholding `SAFIX_TEST_REAL_CLAN_SEED` makes every test in the target report
-# the absence and return, and libtest then says eighteen passed. Observed: the
+# the absence and return, and libtest then says twenty-four passed. Observed: the
 # result-line guard below caught it and the check failed. That is the failure
 # this whole shape exists to prevent — an attribute that is present, green, and
 # asserting nothing.
@@ -116,6 +116,19 @@
 # every test but the ungenerated-var outcome failed. That one passes because
 # the stub's answer for that state was written against this
 # clan's — which is the stub being right rather than the drill being weak.
+#
+# `enumerate-clan-namespace`'s task 6.4 drills `lingering`'s claimed-set
+# comparison in `crates/safix-core/src/audit.rs` — the same `let claimed =
+# false;` perturbation task 3.8 already drills hermetically — to confirm 3.8
+# is not answering a question only the stub can pose. This check depends on
+# `config.checks.safix-integration`'s own compiled-and-tested binary, and
+# that compile-and-test-all derivation runs `crates/safix/tests/audit.rs`
+# against the stub before this check's shell script ever runs, so the
+# perturbation turns this check red one derivation upstream: the same 3.8
+# fixture failing four of its twenty-two hermetic tests, rather than a
+# distinct real-clan-only failure this check's own suite could report on its
+# own. Reverting the perturbation restores both the hermetic suite and this
+# check's own twenty-four `against_a_real_clan::*` tests to green.
 { inputs, ... }:
 {
   perSystem =
