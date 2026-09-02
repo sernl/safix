@@ -1177,13 +1177,21 @@ pub mod bridge_sync {
         #[test]
         fn one_side_moved_since_the_agreement_converges_toward_it() {
             let remembered = agreement_of("alpha");
-            match judge(Some(secret("beta")), Some(secret("alpha")), Some(remembered)) {
+            match judge(
+                Some(secret("beta")),
+                Some(secret("alpha")),
+                Some(remembered),
+            ) {
                 Decision::Push { remember, .. } => assert!(remember),
                 other => unreachable!("safix-moved became {other:?}", other = describe(&other)),
             }
 
             let remembered = agreement_of("alpha");
-            match judge(Some(secret("alpha")), Some(secret("gamma")), Some(remembered)) {
+            match judge(
+                Some(secret("alpha")),
+                Some(secret("gamma")),
+                Some(remembered),
+            ) {
                 Decision::Pull { remember, .. } => assert!(remember),
                 other => unreachable!("clan-moved became {other:?}", other = describe(&other)),
             }
@@ -1373,7 +1381,12 @@ mod tests {
         ));
         std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
         let log = directory.join("attempts");
-        let program = stub(&directory, &["wrong-one", "right", "wrong-two"], "right", &log);
+        let program = stub(
+            &directory,
+            &["wrong-one", "right", "wrong-two"],
+            "right",
+            &log,
+        );
 
         let clan = Clan::for_tests(program, ".".to_owned());
         let addressing = Addressing::new(&clan);
