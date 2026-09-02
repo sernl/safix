@@ -616,7 +616,7 @@ mod against_a_real_clan {
     /// against the stub's.
     #[test]
     fn audit_clan_reports_a_real_var_no_mapping_names() {
-        let Some((fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("the lingering report against a real clan");
         };
         bridge(&fixture, &clan, &["sync", "clan"])
@@ -633,7 +633,7 @@ mod against_a_real_clan {
     /// current declarations against the real command, not cached across runs.
     #[test]
     fn a_newly_mapped_real_var_stops_lingering() {
-        let Some((mut fixture, clan)) = bridged("clan-to-safix", MINTED) else {
+        let Some((mut fixture, clan)) = bridged("clan-to-safix", "per-machine", MINTED) else {
             return no_clan_here("re-scoping the lingering report against a real clan");
         };
         bridge(&fixture, &clan, &["sync", "clan"])
