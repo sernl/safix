@@ -11,9 +11,10 @@
 //! Every subcommand this binary implements: the read paths `list`, `get`,
 //! `check` and `audit`; the write paths `set`, `edit` and `fix`; the generator
 //! graph behind `generate`; `sync`, converging the clan bridge and the
-//! password-database mirror; and the three that touch custody itself,
-//! `keygen`, `adduser` and `enroll`; plus `group`, for editing a group's
-//! declared membership.
+//! password-database mirror; the three that touch custody itself, `keygen`,
+//! `adduser` and `enroll`; `group`, for editing a group's declared
+//! membership; and `upload`, seeding a machine's own host identity before its
+//! first activation.
 //! What each subcommand does is asserted against literals by
 //! `crates/safix/tests/`, driven per mode from `modules/flake/checks/cli.nix`;
 //! the earliest of them were also compared against the retired shell runtime

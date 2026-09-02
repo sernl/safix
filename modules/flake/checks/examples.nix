@@ -81,10 +81,10 @@
       plainNixHooks = import (plainNixRoot + "/hooks.nix");
 
       # `safix.lib.<name>` for the ten data fields, `safix.<name>` for the
-      # two hooks — the twelve spellings `crates/safix-core/src/nix.rs`'s
-      # `Attribute` enum names, and the same twelve `--entry` and a flake
-      # target both resolve identically (README, "Without flake-parts, or
-      # without a flake").
+      # two hooks — twelve of the thirteen spellings `crates/safix-core/src/nix.rs`'s
+      # `Attribute` enum names (`safix.lib.subjects` is the thirteenth and is not
+      # read here), and the same twelve `--entry` and a flake target both resolve
+      # identically (README, "Without flake-parts, or without a flake").
       entryAttrs = (map (name: "safix.lib." + name) (builtins.attrNames (tenFields dendriticVault))) ++ [
         "safix.onboardingHook"
         "safix.enrollHook"
