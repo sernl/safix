@@ -440,94 +440,279 @@ in
       ];
 
       agreeOn = field: lib.all (shape: shapes.${shape}.${field} == shapes.nixos.${field}) allShapes;
+
+      # Shared by both checks below so neither recomputes the projection
+      # `serviceOwnership` reads or re-evaluates the refusal fixtures.
+      owning = projectionOf owningService;
+
+      refusalsResults = lib.genAttrs (builtins.attrNames broken) refusalsOf;
     in
     {
-      # A system configuration only evaluates on a Linux host platform, and the
-      # claim is about three shapes agreeing, so the whole comparison is Linux
-      # only. `safix-consumption-system` is split the same way and for the same
-      # reason.
-      checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-        safix-portability = mkStructuralCheck {
-          name = "safix-portability";
-          actual = {
-            # The three shapes resolve the same sets. Asserted as an agreement
-            # between them and as the literal each agrees on, because agreement
-            # alone would be satisfied by three shapes resolving nothing.
-            resolution = {
-              agree = {
-                person = agreeOn "person";
-                machine = agreeOn "machine";
+      # The system shape needs a real `nixosSystem`, which only evaluates on a
+      # Linux host platform, so `safix-portability-system` stays gated the way
+      # `safix-consumption-system` is. The two home shapes need nothing
+      # platform-specific — `homeFor`'s `osConfig` argument is either the
+      # synthetic `insideNixos` attrset or nothing at all — so
+      # `safix-portability-home` holds the `homeInNixos`-versus-`standalone`
+      # half of the same claims, ungated, on every system.
+      checks =
+        lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          safix-portability-system = mkStructuralCheck {
+            name = "safix-portability-system";
+            actual = {
+              # The nixos shape's own resolved sets, and its agreement with
+              # the two home shapes — the one comparison that legitimately
+              # needs a `nixosSystem` on both sides.
+              resolution = {
+                agree = {
+                  person = agreeOn "person";
+                  machine = agreeOn "machine";
+                };
+                person = {
+                  nixos = builtins.attrNames shapes.nixos.person;
+                };
+                machine = {
+                  nixos = builtins.attrNames shapes.nixos.machine;
+                };
+                placement = {
+                  nixos = lib.mapAttrs (_e: secret: secret.sopsFile) (shapes.nixos.person // shapes.nixos.machine);
+                };
               };
-              person = lib.mapAttrs (_n: v: builtins.attrNames v.person) shapes;
-              machine = lib.mapAttrs (_n: v: builtins.attrNames v.machine) shapes;
-              placement = lib.mapAttrs (
-                _n: v: lib.mapAttrs (_e: secret: secret.sopsFile) (v.person // v.machine)
-              ) shapes;
+
+              # The whole of what safix decided about one machine-granted entry,
+              # on the nixos shape: the file its audience picked, the key inside
+              # it, and the mode its owner declared.
+              machineEntry = {
+                nixos = shapes.nixos.machine.fleet-token;
+              };
+
+              # The same, over the two entries an organization is the audience
+              # of: one granted to acme directly and one granted to the owner of
+              # the machine acme owns.
+              organizationEntry = {
+                nixos = shapes.nixos.person.corp-token;
+              };
+              organizationOwnedEntry = {
+                nixos = shapes.nixos.person.corp-handover;
+              };
+
+              # The identity a machine's system scope opens those entries with is
+              # the one it already had. safix names none — the profile sets no
+              # `safix.identity.*` — and sops-nix's own default stands: the host's
+              # ed25519 keys, whose age form is what
+              # `flake.safix.machines.<m>.recipient` is. That is the whole of why
+              # declaring a machine needs no enrollment step, and it is a claim
+              # about the system scope alone, which is the one scope whose
+              # provisioner has a host identity to default to.
+              systemIdentity =
+                let
+                  system = nixosFor { machine = "deck"; } projection;
+                in
+                {
+                  keyFile = system.sops.age.keyFile;
+                  sshKeyPaths = system.sops.age.sshKeyPaths;
+                  hostKeys = map (key: key.path) (
+                    lib.filter (key: key.type == "ed25519") system.services.openssh.hostKeys
+                  );
+                };
+
+              # Every subject-model refusal, on the nixos shape. A refusal that
+              # lived in a module rather than in the algebra would fire on one
+              # shape and not the others.
+              refusals = lib.mapAttrs (_fleetName: result: { nixos = result.nixos; }) refusalsResults;
+
+              # ── the service, on the nixos shape ──
+              # The entry a service was granted arrives on the machine the
+              # service runs on, under the service's own composed name, and the
+              # store's path default takes that name and nests the file under it.
+              serviceEntry = {
+                nixos = shapes.nixos.machine."nginx/service-token";
+              };
+              servicePath = {
+                nixos = shapes.nixos.machineRaw."nginx/service-token".path;
+              };
+
+              # The ownership asymmetry's system half: the system scope carries
+              # the service's account and group to the provisioner. The two home
+              # shapes have no axis for either and refuse — held by
+              # `safix-portability-home`.
+              serviceOwnership.system = lib.getAttrs [
+                "owner"
+                "group"
+                "mode"
+              ] (nixosFor { machine = "deck"; } owning).safix.installed."nginx/service-token";
+
+              # The person's own resolution is unchanged by any of it: the
+              # entries they granted outward are still theirs, in the files
+              # their audiences picked.
+              grantsStayWithTheirOwner = lib.mapAttrs (_e: secret: secret.sopsFile) shapes.nixos.person;
             };
 
-            # The whole of what safix decided about one machine-granted entry, on
-            # each shape: the file its audience picked, the key inside it, and the
-            # mode its owner declared.
-            machineEntry = lib.mapAttrs (_n: v: v.machine.fleet-token) shapes;
-
-            # The same, over the two entries an organization is the audience of:
-            # one granted to acme directly and one granted to the owner of the
-            # machine acme owns. Read back through sops-nix's own option types, so a
-            # shape that stopped emitting a field shows up as a divergence rather
-            # than as a missing key.
-            organizationEntry = lib.mapAttrs (_n: v: v.person.corp-token) shapes;
-            organizationOwnedEntry = lib.mapAttrs (_n: v: v.person.corp-handover) shapes;
-
-            # The identity a machine's system scope opens those entries with is
-            # the one it already had. safix names none — the profile sets no
-            # `safix.identity.*` — and sops-nix's own default stands: the host's
-            # ed25519 keys, whose age form is what
-            # `flake.safix.machines.<m>.recipient` is. That is the whole of why
-            # declaring a machine needs no enrollment step, and it is a claim
-            # about the system scope alone, which is the one scope whose
-            # provisioner has a host identity to default to.
-            systemIdentity =
-              let
-                system = nixosFor { machine = "deck"; } projection;
-              in
-              {
-                keyFile = system.sops.age.keyFile;
-                sshKeyPaths = system.sops.age.sshKeyPaths;
-                hostKeys = map (key: key.path) (
-                  lib.filter (key: key.type == "ed25519") system.services.openssh.hostKeys
-                );
+            expected = {
+              resolution = {
+                agree = {
+                  person = true;
+                  machine = true;
+                };
+                person = {
+                  nixos = [
+                    "corp-handover"
+                    "corp-token"
+                    "fleet-token"
+                    "laptop-token"
+                    "oncall-token"
+                    "service-token"
+                  ];
+                };
+                machine = {
+                  nixos = [
+                    "fleet-token"
+                    "nginx/service-token"
+                  ];
+                };
+                placement = {
+                  nixos = {
+                    corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+                    corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+                    fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+                    laptop-token = "/secrets/safix/users/alice/secrets.yaml";
+                    oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
+                    service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                    "nginx/service-token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                  };
+                };
               };
 
-            # Every subject-model refusal, over every shape. A refusal that lived
-            # in a module rather than in the algebra would fire on one shape and
-            # not the others.
-            refusals = lib.genAttrs (builtins.attrNames broken) refusalsOf;
+              machineEntry = {
+                nixos = {
+                  format = "yaml";
+                  key = "fleet-token";
+                  mode = "0400";
+                  name = "fleet-token";
+                  sopsFile = "/secrets/safix/shared/alice,deck/secrets.yaml";
+                };
+              };
 
-            # ── the service, across the three shapes ──
-            # The entry a service was granted arrives on the machine the service
-            # runs on, under the service's own composed name, and the store's
-            # path default takes that name and nests the file under it — safix's
-            # own minted default at system scope, the provisioner's at the two
-            # home shapes. Read off each shape's own arrival rather than from
-            # safix, because the claim is about what the name becomes on disk.
-            serviceEntry = lib.mapAttrs (_n: v: v.machine."nginx/service-token") shapes;
-            servicePath = lib.mapAttrs (_n: v: v.machineRaw."nginx/service-token".path) shapes;
+              organizationEntry = {
+                nixos = {
+                  format = "yaml";
+                  key = "corp-token";
+                  mode = "0400";
+                  name = "corp-token";
+                  sopsFile = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+                };
+              };
 
-            # The ownership asymmetry, over the one capability that is scope-specific.
-            # The system scope carries the service's account and group to the
-            # provisioner; the two home shapes have no axis for either and refuse.
-            # An ownerless service resolves at every shape, which the fleet above is
-            # the whole of.
-            serviceOwnership =
-              let
-                owning = projectionOf owningService;
-              in
-              {
-                system = lib.getAttrs [
-                  "owner"
-                  "group"
-                  "mode"
-                ] (nixosFor { machine = "deck"; } owning).safix.installed."nginx/service-token";
+              organizationOwnedEntry = {
+                nixos = {
+                  format = "yaml";
+                  key = "corp-handover";
+                  mode = "0400";
+                  name = "corp-handover";
+                  sopsFile = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+                };
+              };
+
+              systemIdentity = {
+                keyFile = null;
+                sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                hostKeys = [ "/etc/ssh/ssh_host_ed25519_key" ];
+              };
+
+              refusals = lib.genAttrs (builtins.attrNames broken) (_: {
+                nixos = true;
+              });
+
+              serviceEntry = {
+                nixos = {
+                  format = "yaml";
+                  key = "service-token";
+                  mode = "0400";
+                  name = "nginx/service-token";
+                  sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                };
+              };
+
+              servicePath = {
+                nixos = "/run/safix/nginx/service-token";
+              };
+
+              serviceOwnership.system = {
+                owner = "nginx";
+                group = "nginx";
+                mode = "0400";
+              };
+
+              grantsStayWithTheirOwner = {
+                corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+                corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+                fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+                laptop-token = "/secrets/safix/users/alice/secrets.yaml";
+                oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
+                service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+              };
+            };
+          };
+        }
+        // {
+          safix-portability-home = mkStructuralCheck {
+            name = "safix-portability-home";
+            actual = {
+              # The two home shapes' own resolved sets, compared to each other
+              # by both agreeing with the same literal below rather than by an
+              # explicit boolean flag — the same technique every other
+              # per-field comparison in this check already uses.
+              resolution = {
+                person = {
+                  homeInNixos = builtins.attrNames shapes.homeInNixos.person;
+                  standalone = builtins.attrNames shapes.standalone.person;
+                };
+                machine = {
+                  homeInNixos = builtins.attrNames shapes.homeInNixos.machine;
+                  standalone = builtins.attrNames shapes.standalone.machine;
+                };
+                placement = {
+                  homeInNixos = lib.mapAttrs (_e: secret: secret.sopsFile) (
+                    shapes.homeInNixos.person // shapes.homeInNixos.machine
+                  );
+                  standalone = lib.mapAttrs (_e: secret: secret.sopsFile) (
+                    shapes.standalone.person // shapes.standalone.machine
+                  );
+                };
+              };
+
+              machineEntry = {
+                homeInNixos = shapes.homeInNixos.machine.fleet-token;
+                standalone = shapes.standalone.machine.fleet-token;
+              };
+
+              organizationEntry = {
+                homeInNixos = shapes.homeInNixos.person.corp-token;
+                standalone = shapes.standalone.person.corp-token;
+              };
+              organizationOwnedEntry = {
+                homeInNixos = shapes.homeInNixos.person.corp-handover;
+                standalone = shapes.standalone.person.corp-handover;
+              };
+
+              refusals = lib.mapAttrs (_fleetName: result: {
+                homeInNixos = result.homeInNixos;
+                standalone = result.standalone;
+              }) refusalsResults;
+
+              serviceEntry = {
+                homeInNixos = shapes.homeInNixos.machine."nginx/service-token";
+                standalone = shapes.standalone.machine."nginx/service-token";
+              };
+              servicePath = {
+                homeInNixos = shapes.homeInNixos.machineRaw."nginx/service-token".path;
+                standalone = shapes.standalone.machineRaw."nginx/service-token".path;
+              };
+
+              # The ownership asymmetry's home half: neither home shape has an
+              # axis for a service's account or group, so both refuse rather
+              # than silently dropping the claim.
+              serviceOwnership = {
                 homeInNixos =
                   fires
                     (homeFor {
@@ -543,140 +728,113 @@ in
                     }).safix.secrets;
               };
 
-            # ── the standalone shape ──
-            # It resolves a machine's entries with no `osConfig`, no NixOS
-            # configuration and no hostname of its own. Nothing about the
-            # resolution reaches for a host configuration, which on this profile
-            # would be reaching for null.
-            standalone = {
-              machine = builtins.attrNames shapes.standalone.machine;
-              resolvesWithoutAHostname =
-                (homeFor {
-                  subject.machine = "deck";
-                  safix = projection;
-                }).safix.hostname == null;
+              # ── the standalone shape ──
+              # It resolves a machine's entries with no `osConfig`, no NixOS
+              # configuration and no hostname of its own. Nothing about the
+              # resolution reaches for a host configuration, which on this
+              # profile would be reaching for null.
+              standalone = {
+                machine = builtins.attrNames shapes.standalone.machine;
+                resolvesWithoutAHostname =
+                  (homeFor {
+                    subject.machine = "deck";
+                    safix = projection;
+                  }).safix.hostname == null;
 
-              # The tags a machine's declaration carries reach the resolution:
-              # `laptop-token` is omitted by a perTag layer selecting on the tag
-              # `deck` declares, so its absence from the machine's set and its
-              # presence in the person's is the tag being read.
-              tagsComeFromTheDeclaration =
-                (homeFor {
-                  subject.machine = "deck";
-                  safix = projection;
-                }).safix.tags;
-            };
-
-            # The person's own resolution is unchanged by any of it: the entries
-            # they granted outward are still theirs, in the files their audiences
-            # picked.
-            grantsStayWithTheirOwner = lib.mapAttrs (_e: secret: secret.sopsFile) shapes.nixos.person;
-          };
-
-          expected = {
-            resolution = {
-              agree = {
-                person = true;
-                machine = true;
+                # The tags a machine's declaration carries reach the resolution:
+                # `laptop-token` is omitted by a perTag layer selecting on the
+                # tag `deck` declares, so its absence from the machine's set and
+                # its presence in the person's is the tag being read.
+                tagsComeFromTheDeclaration =
+                  (homeFor {
+                    subject.machine = "deck";
+                    safix = projection;
+                  }).safix.tags;
               };
-              person = lib.genAttrs allShapes (_: [
-                "corp-handover"
-                "corp-token"
-                "fleet-token"
-                "laptop-token"
-                "oncall-token"
-                "service-token"
-              ]);
-              machine = lib.genAttrs allShapes (_: [
-                "fleet-token"
-                "nginx/service-token"
-              ]);
-              placement = lib.genAttrs allShapes (_: {
-                corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
-                corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
-                fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
-                laptop-token = "/secrets/safix/users/alice/secrets.yaml";
-                oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
-                service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
-                "nginx/service-token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
-              });
             };
 
-            machineEntry = lib.genAttrs allShapes (_: {
-              format = "yaml";
-              key = "fleet-token";
-              mode = "0400";
-              name = "fleet-token";
-              sopsFile = "/secrets/safix/shared/alice,deck/secrets.yaml";
-            });
+            expected = {
+              resolution = {
+                person = lib.genAttrs [ "homeInNixos" "standalone" ] (_: [
+                  "corp-handover"
+                  "corp-token"
+                  "fleet-token"
+                  "laptop-token"
+                  "oncall-token"
+                  "service-token"
+                ]);
+                machine = lib.genAttrs [ "homeInNixos" "standalone" ] (_: [
+                  "fleet-token"
+                  "nginx/service-token"
+                ]);
+                placement = lib.genAttrs [ "homeInNixos" "standalone" ] (_: {
+                  corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+                  corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+                  fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
+                  laptop-token = "/secrets/safix/users/alice/secrets.yaml";
+                  oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
+                  service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                  "nginx/service-token" = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+                });
+              };
 
-            organizationEntry = lib.genAttrs allShapes (_: {
-              format = "yaml";
-              key = "corp-token";
-              mode = "0400";
-              name = "corp-token";
-              sopsFile = "/secrets/safix/shared/=acme,alice/secrets.yaml";
-            });
-
-            organizationOwnedEntry = lib.genAttrs allShapes (_: {
-              format = "yaml";
-              key = "corp-handover";
-              mode = "0400";
-              name = "corp-handover";
-              sopsFile = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
-            });
-
-            systemIdentity = {
-              keyFile = null;
-              sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
-              hostKeys = [ "/etc/ssh/ssh_host_ed25519_key" ];
-            };
-
-            refusals = lib.genAttrs (builtins.attrNames broken) (_: lib.genAttrs allShapes (_: true));
-
-            serviceEntry = lib.genAttrs allShapes (_: {
-              format = "yaml";
-              key = "service-token";
-              mode = "0400";
-              name = "nginx/service-token";
-              sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
-            });
-
-            servicePath = {
-              nixos = "/run/safix/nginx/service-token";
-              homeInNixos = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
-              standalone = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
-            };
-
-            serviceOwnership = {
-              system = {
-                owner = "nginx";
-                group = "nginx";
+              machineEntry = lib.genAttrs [ "homeInNixos" "standalone" ] (_: {
+                format = "yaml";
+                key = "fleet-token";
                 mode = "0400";
+                name = "fleet-token";
+                sopsFile = "/secrets/safix/shared/alice,deck/secrets.yaml";
+              });
+
+              organizationEntry = lib.genAttrs [ "homeInNixos" "standalone" ] (_: {
+                format = "yaml";
+                key = "corp-token";
+                mode = "0400";
+                name = "corp-token";
+                sopsFile = "/secrets/safix/shared/=acme,alice/secrets.yaml";
+              });
+
+              organizationOwnedEntry = lib.genAttrs [ "homeInNixos" "standalone" ] (_: {
+                format = "yaml";
+                key = "corp-handover";
+                mode = "0400";
+                name = "corp-handover";
+                sopsFile = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
+              });
+
+              refusals = lib.genAttrs (builtins.attrNames broken) (_: {
+                homeInNixos = true;
+                standalone = true;
+              });
+
+              serviceEntry = lib.genAttrs [ "homeInNixos" "standalone" ] (_: {
+                format = "yaml";
+                key = "service-token";
+                mode = "0400";
+                name = "nginx/service-token";
+                sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+              });
+
+              servicePath = {
+                homeInNixos = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
+                standalone = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
               };
-              homeInNixos = true;
-              standalone = true;
-            };
 
-            standalone = {
-              machine = [
-                "fleet-token"
-                "nginx/service-token"
-              ];
-              resolvesWithoutAHostname = true;
-              tagsComeFromTheDeclaration = [ "portable" ];
-            };
+              serviceOwnership = {
+                homeInNixos = true;
+                standalone = true;
+              };
 
-            grantsStayWithTheirOwner = {
-              corp-handover = "/secrets/safix/shared/@~rack,alice/secrets.yaml";
-              corp-token = "/secrets/safix/shared/=acme,alice/secrets.yaml";
-              fleet-token = "/secrets/safix/shared/alice,deck/secrets.yaml";
-              laptop-token = "/secrets/safix/users/alice/secrets.yaml";
-              oncall-token = "/secrets/safix/shared/@oncall,alice/secrets.yaml";
-              service-token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
+              standalone = {
+                machine = [
+                  "fleet-token"
+                  "nginx/service-token"
+                ];
+                resolvesWithoutAHostname = true;
+                tagsComeFromTheDeclaration = [ "portable" ];
+              };
             };
           };
         };
-      };
     };
 }
