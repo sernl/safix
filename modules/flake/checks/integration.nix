@@ -39,6 +39,11 @@ let
     # name on a path.
     pkgs.nix
     pkgs.sops
+    # `safix upload`'s local archive step alone: the ssh-adjacent tools it also
+    # shells out to are stubbed through `SAFIX_SSH_KEYGEN`/`SAFIX_SSH_TO_AGE`/
+    # `SAFIX_SSH_KEYSCAN`/`SAFIX_SSH` and never reach a real binary named on
+    # `PATH`, so `tar` is the one real tool that verb needs here.
+    pkgs.gnutar
   ]
   ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     pkgs.bubblewrap
@@ -97,6 +102,7 @@ let
           SAFIX_TEST_SHIM = "${suite}/libexec/safix-test-shim";
           SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
           SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
+          SAFIX_TEST_TRANSPORT_STUB = "${suite}/libexec/safix-transport-stub";
         }
         // stagingEnv;
       }
