@@ -914,3 +914,15 @@ pub(super) fn clan_address_unresolved(mapping: &str, generator: &str, file: &str
         \x20   clan vars list <machine>"
     )
 }
+
+/// clan refused to list one machine's vars, enumerating them for the audit's
+/// lingering report.
+pub(super) fn clan_machine_list_failed(machine: &str, output: &str) -> String {
+    format!(
+        "clan refused to list {machine}'s vars.\n\
+        \n\
+        clan said:\n\
+        \n\
+        {output}"
+    )
+}

@@ -200,6 +200,7 @@ refusal_codes! {
     UploadPipeMissing => "safix::upload_pipe_missing",
     UploadToolFailed => "safix::upload_tool_failed",
     UploadDestinationUnsafe => "safix::upload_destination_unsafe",
+    ClanMachineListFailed => "safix::clan_machine_list_failed",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

@@ -1,0 +1,11 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::clan_machine_list_failed
+
+  × clan refused to list meridian's vars.
+  │ 
+  │ clan said:
+  │ 
+  │ Error: Could not list vars for machine meridian

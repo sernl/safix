@@ -655,6 +655,10 @@ mod tests {
             Code::UploadDestinationUnsafe => Error::UploadDestinationUnsafe {
                 destination: "/mnt".into(),
             },
+            Code::ClanMachineListFailed => Error::ClanMachineListFailed {
+                machine: "meridian".into(),
+                output: "Error: Could not list vars for machine meridian".into(),
+            },
         }
     }
 

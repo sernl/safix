@@ -7,7 +7,7 @@
 //! owns, and a driver that reached past the command would silently support one
 //! of them and quietly corrupt the rest.
 //!
-//! # The two contracts
+//! # The four contracts
 //!
 //! Read is `clan vars get <machine> <generator>/<file>`, which writes the value
 //! to its standard output. It writes the raw bytes when that output is not a
@@ -22,15 +22,25 @@
 //! pipe is load-bearing there too: a `set` inheriting a terminal would hang
 //! waiting for a person.
 //!
-//! Both contracts were read out of clan-cli rather than out of its
-//! documentation: `clan_cli/vars/get.py` for the `isatty` branch on output,
-//! `clan_lib/vars/set.py` for the `isatty` branch on input.
+//! Machine discovery is `clan machines list`, every machine name clan's own
+//! fleet declares. It exists solely to resolve the machine that addresses a
+//! shared mapping's clan side, since nothing declares one: a caller tries each
+//! name in turn against [`Self::read`] until one resolves, rather than
+//! building a second copy of clan's own registry.
 //!
-//! # What travels where
+//! Enumeration is `clan vars list <machine>`, one line per var that machine's
+//! own configuration declares, sorted by the line's own text. It sends
+//! nothing to standard input and reads no secret var's value to build this
+//! list — clan masks a secret var's state as `********` in the same output —
+//! and it can never surface a var declared under a `PerExport` generator, on
+//! any machine: the selector `vars list` queries never reaches the disjoint
+//! flake-level attribute such a generator's definition lives under. Only the
+//! id half of each line is kept; the state half is read and discarded, for
+//! [`crate::audit`]'s own lingering report.
 //!
-//! The machine, the generator and the file travel in argv, which is public and
-//! is what clan's own command line takes. The value travels on a pipe and
-//! appears in no argument vector and no environment, in either direction.
+//! Both the read and the write contract were read out of clan-cli rather than
+//! out of its documentation: `clan_cli/vars/get.py` for the `isatty` branch on
+//! output, `clan_lib/vars/set.py` for the `isatty` branch on input.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -439,6 +449,52 @@ impl Clan {
     pub(crate) fn for_tests(program: PathBuf, flake: String) -> Self {
         Self { program, flake }
     }
+
+    /// Every var clan's own command reports for one machine, as
+    /// [`Self::var_id`] would build each one — the state half of each line is
+    /// read and discarded, per [`crate::audit`]'s reasoning for never
+    /// surfacing it (design.md's D1 in `enumerate-clan-namespace`): a secret
+    /// var's state is masked in the same output clan writes it in, so reading
+    /// and discarding it changes nothing about what clan already disclosed.
+    ///
+    /// Never sent a machine's vars on standard input, and never asked to
+    /// decrypt one: this is `clan vars list`, not `clan vars get` run once per
+    /// id it names.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ClanUnavailable`] when the binary cannot be run, and
+    /// [`Error::ClanMachineListFailed`] carrying clan's own message when it
+    /// refuses.
+    pub fn list(&self, machine: &str) -> Result<Vec<String>> {
+        let finished = Command::new(&self.program)
+            .arg("vars")
+            .arg("list")
+            .arg("--flake")
+            .arg(&self.flake)
+            .arg(machine)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|cause| Error::ClanUnavailable {
+                program: self.program(),
+                cause,
+            })?;
+
+        if !finished.status.success() {
+            return Err(Error::ClanMachineListFailed {
+                machine: machine.to_owned(),
+                output: trimmed(&String::from_utf8_lossy(&finished.stderr)),
+            });
+        }
+
+        Ok(String::from_utf8_lossy(&finished.stdout)
+            .lines()
+            .filter(|line| !line.is_empty())
+            .filter_map(|line| line.split_once(": ").map(|(id, _state)| id.to_owned()))
+            .collect())
+    }
 }
 
 fn trimmed(complaint: &str) -> String {
@@ -462,5 +518,57 @@ mod tests {
         };
         let refusal = clan.probe().expect_err("no such program exists");
         assert!(matches!(refusal, Error::ClanUnavailable { .. }));
+    }
+
+    /// A tiny executable script standing in for clan, for a test that needs a
+    /// real subprocess rather than a spawn failure — `Clan::list` has no
+    /// pipe to assert on, so `an_absent_command_is_refused_by_name`'s "point
+    /// at a name that does not exist" is not enough to exercise its parsing.
+    fn stub_script(label: &str, contents: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = std::env::temp_dir().join(format!(
+            "safix-clan-list-test-{label}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("a temporary directory can be made");
+        let path = directory.join("clan");
+        std::fs::write(&path, contents).expect("the stub script can be written");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("the stub script can be made executable");
+        path
+    }
+
+    #[test]
+    fn a_well_formed_listing_keeps_only_the_id_half_of_each_line() {
+        let program = stub_script(
+            "ok",
+            "#!/bin/sh\nprintf 'ntfy/token: ********\\nhandover/note: some-value\\n'\n",
+        );
+        let clan = Clan {
+            program: program.clone(),
+            flake: ".".into(),
+        };
+        let ids = clan.list("meridian").expect("the stub exits successfully");
+        assert_eq!(
+            ids,
+            vec!["ntfy/token".to_owned(), "handover/note".to_owned()]
+        );
+        std::fs::remove_dir_all(program.parent().expect("a parent directory")).ok();
+    }
+
+    #[test]
+    fn a_non_zero_exit_is_refused_naming_the_machine_and_carrying_clans_own_message() {
+        let program = stub_script("fail", "#!/bin/sh\necho 'clan: boom' >&2\nexit 1\n");
+        let clan = Clan {
+            program: program.clone(),
+            flake: ".".into(),
+        };
+        let refusal = clan.list("meridian").expect_err("the stub exits non-zero");
+        assert!(matches!(refusal, Error::ClanMachineListFailed { .. }));
+        if let Error::ClanMachineListFailed { machine, output } = refusal {
+            assert_eq!(machine, "meridian");
+            assert!(output.contains("clan: boom"));
+        }
+        std::fs::remove_dir_all(program.parent().expect("a parent directory")).ok();
     }
 }

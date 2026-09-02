@@ -1432,6 +1432,21 @@ pub enum Error {
         /// The destination that failed the check.
         destination: String,
     },
+
+    /// clan's own `vars list` failed while enumerating one machine's vars for
+    /// the audit's lingering report.
+    ///
+    /// Raised before any mapping is compared or any other machine is
+    /// enumerated, the same way [`Self::ClanUnavailable`] already is: a
+    /// lingering section that silently dropped one machine's contribution
+    /// would read as complete while being partial.
+    #[error("{}", prose::clan_machine_list_failed(machine, output))]
+    ClanMachineListFailed {
+        /// The machine whose vars could not be listed.
+        machine: String,
+        /// clan's own standard error, verbatim.
+        output: String,
+    },
 }
 
 /// The result type this crate returns.
