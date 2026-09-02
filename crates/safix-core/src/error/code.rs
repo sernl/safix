@@ -191,6 +191,15 @@ refusal_codes! {
     ScaffoldOutOfScope => "safix::scaffold_out_of_scope",
     ClanMachinesListFailed => "safix::clan_machines_list_failed",
     ClanAddressUnresolved => "safix::clan_address_unresolved",
+    UnknownMachine => "safix::unknown_machine",
+    MachineHasNoRecipient => "safix::machine_has_no_recipient",
+    UploadNeedsIdentity => "safix::upload_needs_identity",
+    SuppliedIdentityMismatch => "safix::supplied_identity_mismatch",
+    PresentedIdentityMismatch => "safix::presented_identity_mismatch",
+    UploadToolUnavailable => "safix::upload_tool_unavailable",
+    UploadPipeMissing => "safix::upload_pipe_missing",
+    UploadToolFailed => "safix::upload_tool_failed",
+    UploadDestinationUnsafe => "safix::upload_destination_unsafe",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

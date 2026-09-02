@@ -89,6 +89,7 @@ pub mod sops;
 pub mod staging;
 pub mod store;
 pub mod sync;
+pub mod upload;
 mod workspace;
 
 pub use error::{Code, Error, Result};

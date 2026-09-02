@@ -1326,6 +1326,112 @@ pub enum Error {
         /// The file that was searched for.
         file: String,
     },
+
+    /// The named target is not a declared machine — because nothing names it,
+    /// or because it names a person instead.
+    ///
+    /// One message for both: this verb targets machines only and carries no
+    /// separate code path for a person's name, so a distinct wording for that
+    /// case would be a second answer to a question this one already answers.
+    #[error(
+        "'{machine}' is not a declared machine of flake.safix.machines.\n\nDeclared machines:{}",
+        bulleted(.declared)
+    )]
+    UnknownMachine {
+        /// The name that was asked for.
+        machine: String,
+        /// Every machine the declarations do name, in name order.
+        declared: Vec<String>,
+    },
+
+    /// The named machine is declared and names no recipient.
+    #[error(
+        "'{machine}' is a declared machine with no recipient, so there is nothing to check \
+        supplied identity material against. Declare flake.safix.machines.{machine}.recipient."
+    )]
+    MachineHasNoRecipient {
+        /// The machine whose recipient is null.
+        machine: String,
+    },
+
+    /// A write was asked for and no `--identity` named material to write.
+    #[error("--identity is required to write a host identity; nothing was written")]
+    UploadNeedsIdentity,
+
+    /// The key at `--identity` does not derive to the machine's declared
+    /// recipient.
+    #[error(
+        "the identity at {path} derives to {supplied}, which is not {machine}'s declared \
+        recipient {declared}. Seeding it would not match what {machine}'s audience is \
+        already wrapped to."
+    )]
+    SuppliedIdentityMismatch {
+        /// The machine being provisioned.
+        machine: String,
+        /// The `--identity` file that was read.
+        path: String,
+        /// The machine's declared recipient.
+        declared: String,
+        /// The recipient the supplied key derives to.
+        supplied: String,
+    },
+
+    /// The target already presents an ed25519 host key, and it is neither
+    /// absent nor the machine's declared recipient.
+    #[error(
+        "{machine} already presents an ed25519 host key, and its age form {presented} is \
+        neither absent nor {machine}'s declared recipient {declared}. Seed it anyway with \
+        --force and a matching --identity, or investigate before overriding a host that may \
+        already be live."
+    )]
+    PresentedIdentityMismatch {
+        /// The machine being provisioned.
+        machine: String,
+        /// The machine's declared recipient.
+        declared: String,
+        /// The recipient the presented key derives to.
+        presented: String,
+    },
+
+    /// One of `upload`'s external tools — `ssh-keygen`, `ssh-to-age`,
+    /// `ssh-keyscan`, `ssh` or `tar` — could not be run at all.
+    #[error("could not run {program}")]
+    UploadToolUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// `ssh-to-age` was started without the pipe its input travels.
+    #[error("ssh-to-age was started without the pipe its input travels")]
+    UploadPipeMissing,
+
+    /// One of `upload`'s external tools ran and refused.
+    #[error("{program} exited refusing: {output}")]
+    UploadToolFailed {
+        /// The program that refused.
+        program: String,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// The fixed remote destination fails the path-depth safety the transport
+    /// itself enforces.
+    ///
+    /// Unreachable while the destination is the constant this crate declares;
+    /// carried as a real refusal rather than an assertion so that a future
+    /// change narrowing the destination fails safely rather than by panicking
+    /// mid-wipe.
+    #[error(
+        "{destination} is shallower than the wipe-then-extract transport allows; refusing \
+        before touching it"
+    )]
+    UploadDestinationUnsafe {
+        /// The destination that failed the check.
+        destination: String,
+    },
 }
 
 /// The result type this crate returns.
