@@ -1,0 +1,49 @@
+## 1. Nix: reserved mapping ids
+
+- [ ] 1.1 Add a `reservedId` refusal to `modules/flake/safix/bridge.nix`'s `violationsOf`, folding `declared` for `m.id` in `["clan" "keepassxc" "all"]`, appended to the `unresolvableSafixSide ++ twoProducers ++ twoMappingsOneTarget ++ bothDirections ++ noClanFlake` list; verify with `nix eval .#lib.x86_64-linux...` or the fixture check added in 1.3 evaluating cleanly.
+- [ ] 1.2 Add the mirrored `reservedId` refusal to `modules/flake/safix/keepassxc.nix`'s `violationsOf`, appended to its own `unresolvableSafixSide ++ twoProducers ++ twoMappingsOneEntry ++ reservedName` list; verify the same way.
+- [ ] 1.3 Add a perturbed-fixture severity drill to `modules/flake/checks/bridge.nix` and `modules/flake/checks/keepassxc.nix`, one fixture per file with a mapping id set to each of `clan`, `keepassxc`, `all`, asserting the exact refusal string against a literal; verify with `nix build .#checks.x86_64-linux.<bridge-check-name>` and `.#checks.x86_64-linux.<keepassxc-check-name>`.
+- [ ] 1.4 Update `modules/flake/safix/bridge.nix`'s `direction` option description (naming `export`'s stale rationale) and its top-of-file comment (lines ~19-25 as read on this branch) to state clan's own `vars export` as the reason, rather than a safix verb this change retires; verify with `nix eval .#lib.x86_64-linux...bridge.mappings.<fixture>.direction` still resolving and a doc-string grep confirming no remaining reference to a safix `export` verb.
+
+## 2. Rust core: the clan target of sync
+
+- [ ] 2.1 In `crates/safix-core/src/bridge.rs`, replace the `import`/`export` public functions with a single `sync` entry point that iterates every declared clan mapping (or the named ones), converging each in its own declared `Direction`, accepting an optional direction filter and a slice of mapping names rather than `Option<&str>`; verify with `cargo test -p safix-core bridge::` covering both directions converging in one call.
+- [ ] 2.2 Replace `Error::MappingWrongDirection`'s meaning in `crates/safix-core/src/error/mod.rs` with a direction-filter-mismatch refusal (naming the mapping's actual direction against the `--direction` value given), updating `crates/safix-core/src/error/prose.rs`'s `mapping_wrong_direction` message and `crates/safix-core/src/error/code.rs`'s `safix::mapping_wrong_direction` code text accordingly; verify with a unit test asserting the new message against a literal.
+- [ ] 2.3 Add a variadic-mapping-name refusal (a mapping name given with no target) and a reserved-target-vs-mapping-name refusal, each with its own `Error` variant, `prose.rs` message and `code.rs` entry; verify with unit tests asserting each message against a literal.
+- [ ] 2.4 Add a "`--direction` on the wrong target" refusal (given to `sync keepassxc`/`audit keepassxc`) with its own `Error` variant, message and code; verify with a unit test.
+
+## 3. Rust core: audit gains targets
+
+- [ ] 3.1 In `crates/safix-core/src/audit.rs`, add target dispatch: bare compares both `flake.safix.bridge.mappings` and `flake.safix.keepassxc.mappings`; `clan` narrows to today's comparison; `keepassxc` is new, comparing both sides of every declared keepassxc mapping per its mode without writing; verify with `cargo test -p safix-core audit::` covering all three target forms.
+- [ ] 3.2 Give the keepassxc-target audit a `lingering` field in the same shape `sync::Report::lingering` already has, reported as information and excluded from the exit-status tally; verify with a unit test asserting a lingering entry appears in the report and does not flip the exit status.
+- [ ] 3.3 Add mapping-name-list scoping (zero or more names) to both audit targets, reusing the selection logic `bridge.rs`'s `sync` gained in 2.1; verify with a unit test naming two mappings in one `audit clan` call.
+
+## 4. Rust core: keygen --show
+
+- [ ] 4.1 Add a `--show` flag to `crates/safix-core/src/keygen.rs`'s entry point that reads the existing identity file, derives and prints the public recipient, mints nothing, and refuses naming plain `keygen` as the remedy when no identity exists yet; verify with `cargo test -p safix-core keygen::` covering both the present-identity and absent-identity paths.
+
+## 5. Rust CLI: dispatch and usage text
+
+- [ ] 5.1 In `crates/safix/src/main.rs`, remove the `import` and `export` entries from `VERBS` and their `import_command`/`export_command`/`transfer` functions; verify `expected_verbs()`'s refusal text no longer names them, by re-running the snapshot test 6.3 updates.
+- [ ] 5.2 Rewrite `sync_command` and `audit_command` to parse an optional leading target (`clan`, `keepassxc`, or absent), zero or more mapping names after a target, and (for `clan`) an optional `--direction` value, refusing a mapping name with no target and `--direction` on `keepassxc`; verify with `cargo test -p safix` integration tests covering every form named in `specs/safix-cli/spec.md`'s ADDED dispatch requirement.
+- [ ] 5.3 Remove `usage::IMPORT` and `usage::EXPORT` from `crates/safix/src/usage.rs`; rewrite `usage::AUDIT` and `usage::SYNC` for the target-and-direction grammar, and `usage::KEYGEN` for `--show`; verify with `safix sync -h`, `safix audit -h` and `safix keygen -h` run by hand and by the snapshot tests in 6.3.
+- [ ] 5.4 In `crates/safix/src/render.rs`, render a clan-target `updated` outcome as `pulled <mapping> ← clan` for a clan-to-safix write and `pushed <mapping> → clan` for a safix-to-clan write, leaving `unchanged`, `absent at source` and `refused` rendered as today; verify with a snapshot test over a mixed-direction `sync clan` run showing both arrows in one report.
+
+## 6. Tests: renamed and target-scoped coverage
+
+- [ ] 6.1 Rename `crates/safix/tests/bridge.rs`'s import/export-specific test functions and helpers to exercise `sync clan` (both directions in one run, `--direction` narrowing, multiple named mappings); verify with `cargo test -p safix --test bridge`.
+- [ ] 6.2 Extend `crates/safix/tests/audit.rs` with the `keepassxc` target (compare-only, lingering, no writes) and the bare-audit-covers-both-targets case; verify with `cargo test -p safix --test audit`.
+- [ ] 6.3 Update `crates/safix/tests/support/` help-text and unknown-subcommand snapshots to drop `import`/`export` and reflect the new `sync`/`audit`/`keygen` help text; verify with `cargo insta review` (or the project's snapshot-acceptance command) showing no unexpected diff beyond the intended rewrite.
+- [ ] 6.4 Extend `crates/safix/tests/real_clan.rs` and `modules/flake/checks/real-clan.nix` with a `sync clan` run moving both directions in one invocation against the real clan CLI; verify with `nix build .#checks.x86_64-linux.safix-bridge-real-clan` (or its renamed equivalent).
+- [ ] 6.5 Extend `crates/safix/tests/store_cli.rs` (or the keepassxc-specific integration test) with an `audit keepassxc` run against a real database fixture; verify with `cargo test -p safix --test store_cli`.
+
+## 7. Documentation
+
+- [ ] 7.1 Rewrite `README.md`'s "The bridge to clan" section (`safix import`/`safix export` worked example and prose, roughly lines 590-970 as read on this branch) for `sync clan`, `--direction`, and the import-reserved/export-retired note; verify by reading the rewritten section against the archived spec's requirement text for factual match.
+- [ ] 7.2 Rewrite `README.md`'s "Mirroring into your password database" section for `sync keepassxc` and the new `audit keepassxc` verb; verify the same way.
+- [ ] 7.3 Update `README.md`'s two verb-count sentences (roughly lines 905 and 1114 as read on this branch) to the post-removal verb count and list; verify with a text search for `import`/`export` in `README.md` returning no remaining verb-name usage outside historical narrative about the rust rewrite (if any survives, confirm it is genuinely historical).
+- [ ] 7.4 Add a `CHANGELOG.md` entry naming the retired verbs, `import`'s reservation, and the one-run-two-directions behavior change; verify by reading the entry against `proposal.md`'s **BREAKING** marker for completeness.
+
+## 8. Verification sweep
+
+- [ ] 8.1 Run `cargo test` for the full `safix`/`safix-core` workspace and `nix flake check` (or the project's equivalent fast-check target) once all groups above are complete; record the command and its result rather than re-running per task.
