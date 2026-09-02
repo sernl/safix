@@ -1,20 +1,21 @@
 ## MODIFIED Requirements
 
-### Requirement: Absent verbs are recorded rather than left mysterious
+### Requirement: Retired and reserved verbs are recorded rather than left mysterious
 
 The command's help SHALL state which verbs from the tool this package replaces do not exist here, and why.
-Where a verb of the same name exists with different semantics, the help SHALL state what the verb is not, so the absence of the other tool's semantics stays on the record.
+Where a word this package's own vocabulary once used is retired outright, the help SHALL say so; where one is reserved for a feature not yet built, the help SHALL say that instead, so a reservation is never mistaken for an oversight.
 
 #### Scenario: The recorded absences
 
 - **WHEN** the help text is read
 - **THEN** it states that no verb exists for ongoing secret delivery, because activation already delivers what it would
+- **AND** it states that no export verb exists, naming clan's own `export` as the bulk plaintext dump safix's design refuses to build on either side of the boundary
 
-#### Scenario: The same names, different semantics
+#### Scenario: A reserved absence is told apart from a retired one
 
-- **WHEN** the help for `import` or `export` is read
-- **THEN** it states that each moves declared mappings across the clan boundary, one mapping at a time
-- **AND** states that neither is a plaintext dump or restore, because a plaintext export tree outlives the migration that justified it
+- **WHEN** the help for `import` is read
+- **THEN** it states that `import` is reserved for a future, unbuilt feature — ingesting a value from an external plaintext source one entry at a time — rather than retired outright
+- **AND** it states that this is distinct from `export`'s retirement, which is permanent
 
 #### Scenario: `upload` exists under a name clan also uses, with narrower semantics
 
