@@ -768,7 +768,6 @@ impl Fixture {
         }));
         self.write_fixtures();
     }
-
     /// Declare one shared-placement bridge mapping: the clan side names a
     /// generator and a file but no machine, the way a `placement = "shared"`
     /// declaration resolves.
