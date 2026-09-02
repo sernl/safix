@@ -544,10 +544,10 @@ fn an_empty_bridge_is_silent_rather_than_refused() {
     run.says("no mapping is declared");
 }
 
-/// `sync` appears in the command's help, and its own help names both
+/// `sync` appears in the command's help, and its own help names all three
 /// directions and the clan target's grammar.
 #[test]
-fn sync_appears_in_the_help_with_both_directions() {
+fn sync_appears_in_the_help_with_all_three_directions() {
     let fixture = Fixture::new();
     let scaffold = fixture.run(&["--help"]).expect_success("the general help");
     scaffold.says("safix sync");
@@ -555,5 +555,6 @@ fn sync_appears_in_the_help_with_both_directions() {
     let help = fixture.run(&["sync", "-h"]).expect_success("the sync help");
     help.says("clan-to-safix");
     help.says("safix-to-clan");
+    help.says("two-way");
     help.says("--direction");
 }
