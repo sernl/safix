@@ -593,6 +593,12 @@ mod tests {
     /// [`commit_two_roots`]'s declaration-root commit to fail, without
     /// depending on whether this machine happens to have a git identity
     /// configured anywhere `commit_paths`'s forced identity does not reach.
+    ///
+    /// The script is probed until it executes: this suite runs hundreds of
+    /// tests concurrently, and a sibling's `fork` between the write and the
+    /// `chmod` can hold the script open long enough for the first real
+    /// spawn to fail with `ETXTBSY`, which would surface far away as a
+    /// vault with no commit rather than as the refusal under test.
     fn write_refusing_shim(script: &Path, refuse_root: &Path) {
         let contents = format!(
             "#!/bin/sh\nif [ \"$1\" = \"-C\" ] && [ \"$2\" = \"{root}\" ] && [ \"$3\" = \"commit\" ]; then\n  echo \"shim: refusing commit at {root}\" >&2\n  exit 1\nfi\nexec git \"$@\"\n",
@@ -605,6 +611,17 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(script, permissions)
             .expect("the shim script can be made executable");
+        let mut probe = Command::new(script).arg("--version").output();
+        for _ in 0..200 {
+            match &probe {
+                Err(cause) if cause.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    probe = Command::new(script).arg("--version").output();
+                }
+                _ => break,
+            }
+        }
+        probe.expect("the shim script can be executed");
     }
 
     /// Two repositories and the git driver a `commit_two_roots` test drives —
@@ -738,7 +755,7 @@ mod tests {
             name: "Declaration Root".to_owned(),
             email: "declaration@example.com".to_owned(),
         };
-        commit_two_roots(
+        let first = commit_two_roots(
             &fixture.git,
             &fixture.vault,
             &fixture.declaration,
@@ -750,6 +767,10 @@ mod tests {
             &identity,
         )
         .expect_err("the first attempt was made to fail at the declaration root");
+        assert!(
+            matches!(first, Error::VaultCommitHalfLanded { .. }),
+            "the first attempt fails after the vault commit landed: {first:?}"
+        );
 
         let vault_head_before = TwoRoots::real_git()
             .head_short(&fixture.vault)
