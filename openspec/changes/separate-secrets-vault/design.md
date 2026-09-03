@@ -332,5 +332,6 @@ Both trees can coexist during the migration window.
 
 ## Open Questions
 
-Whether the `nix flake metadata`-based input-name discovery in V6 is worth its per-command latency, or whether the disclosure should always use the general phrasing and let the operator supply the exact input name from their own knowledge of their flake.
-Neither answer changes the `secrets-vault` capability's stated requirement — both scenarios in "A vault commit discloses the lock bump it requires" already account for the input name being determined or not — so this is deferred to an implementation-time measurement against a representative flake, not resolved here.
+Resolved, 2026-09-03, at implementation time: `nix flake metadata . --json` against this repository's own flake, warm-cache, ran in 93-99 ms across three runs — a small fraction of the several-hundred-millisecond floor a `set`, `generate` or `enroll` run already pays for its own `sops`, `age` and `git` subprocesses, and well under the latency an operator would notice as a pause distinct from the rest of the command.
+The discovery stays: task 9's `Nix::flake_metadata` runs it once per vault-root commit, and only ever against the declaration root, which is the same flake every other evaluation in the run already targets and therefore already warm in the evaluation cache by the time the disclosure asks.
+The `None`-on-any-failure shape [`Nix::flake_metadata`] and [`Nix::nar_hash`] both take — degrading to the general phrasing rather than propagating an error — is what keeps this measurement from being a correctness question as well as a latency one: a slow or failing lookup costs the specific input name, never the write that already committed.
