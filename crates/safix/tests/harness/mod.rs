@@ -2730,8 +2730,10 @@ fn binary_on_path(name: &str) -> String {
                 .map(|directory| directory.join(name))
                 .find(|candidate| candidate.is_file())
         })
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| panic!("{name} is not on PATH"))
+        .map_or_else(
+            || panic!("{name} is not on PATH"),
+            |path| path.display().to_string(),
+        )
 }
 
 /// `setsid`, when this process has a controlling terminal and so would hand one
