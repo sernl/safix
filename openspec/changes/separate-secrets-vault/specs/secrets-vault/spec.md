@@ -1,24 +1,51 @@
 ## Purpose
 
-Where the secrets vault lives when it is a separate repository from the one declaring users and the catalogue: the two-root model the command-line runtime carries, what lands at which root, and how a write spanning both roots lands safely.
+Where the secrets vault lives when it is a separate repository from the one declaring users and the catalogue: the two-root model the command-line runtime carries, what lands at which root, how a write spanning both roots lands safely, and how every vault-rooted name is made opaque so a vault host or a vault-only reader learns none of it.
 
 ## ADDED Requirements
 
-### Requirement: The vault is declared as an optional path
+### Requirement: The vault is declared as an optional, naming-keyed root
 
-`flake.safix.vault` SHALL be typed `nullOr path` and SHALL default to `null`.
-Every audience file's `sopsFile` SHALL resolve rooted at that path when it is set, and rooted at the declaring flake's own source when it is not.
+`flake.safix.vault` SHALL be typed `nullOr (submodule { root; namingKey; })` and SHALL default to `null`.
+`root` SHALL be a path; every audience file's `sopsFile` SHALL resolve rooted at it when the vault is set, and rooted at the declaring flake's own source when it is not.
+`namingKey` SHALL be a string of at least 64 lowercase hexadecimal characters, minted by the operator once per vault.
 
 #### Scenario: No vault declared
 
 - **WHEN** a consumer sets no value for `flake.safix.vault`
 - **THEN** every audience file resolves exactly where it resolves today, rooted at the declaring flake's own source
+- **AND** every physical name is exactly today's readable name
 
 #### Scenario: A vault declared
 
-- **WHEN** a consumer sets `flake.safix.vault` to a path
-- **THEN** every audience file resolves rooted at that path instead
-- **AND** no other resolution rule changes: the same audience still derives the same relative file name
+- **WHEN** a consumer sets `flake.safix.vault` to a `root` and a well-formed `namingKey`
+- **THEN** every audience file resolves rooted at that `root` instead
+- **AND** the physical name under that root is opaque rather than the readable relative name the audience would derive without a vault, per "Every vault-rooted name is opaque" below
+
+### Requirement: A vault without a well-formed naming key is refused
+
+Evaluation SHALL refuse a declared vault whose `namingKey` is absent, shorter than 64 characters, or contains a character outside `[0-9a-f]`, before resolving any path.
+The refusal SHALL name the option and state the requirement the supplied value fails.
+
+#### Scenario: No naming key
+
+- **WHEN** `flake.safix.vault.root` is set and `namingKey` is not
+- **THEN** evaluation refuses, naming `flake.safix.vault.namingKey` and stating that a vault requires one
+
+#### Scenario: A naming key shorter than 64 characters
+
+- **WHEN** `namingKey` is a hexadecimal string of fewer than 64 characters
+- **THEN** evaluation refuses, naming the option and stating the minimum length
+
+#### Scenario: A naming key containing a non-hexadecimal character
+
+- **WHEN** `namingKey` contains a character outside `[0-9a-f]`
+- **THEN** evaluation refuses, naming the option and stating the required alphabet
+
+#### Scenario: A well-formed naming key is accepted
+
+- **WHEN** `namingKey` is at least 64 characters, every one of them in `[0-9a-f]`
+- **THEN** evaluation proceeds and every vault-rooted name is derived from it
 
 ### Requirement: The runtime resolves two independent repository roots
 
@@ -32,7 +59,7 @@ Where no vault is declared, the vault root SHALL equal the declaration root.
 
 #### Scenario: A vault declared and a root named
 
-- **WHEN** `flake.safix.vault` is set and the operator names a vault root matching it
+- **WHEN** `flake.safix.vault` is set and the operator names a vault root matching its `root`
 - **THEN** the runtime resolves two roots, and every operation reads and writes each artifact at the root that governs it
 
 #### Scenario: Declared in nix, unnamed at the command line
@@ -65,10 +92,43 @@ The command SHALL refuse before writing anything when it is not.
 - **WHEN** the named vault root is inside a git repository but is not that repository's top level
 - **THEN** the runtime refuses, naming the path found by git and the path named by the operator, and stating that the two must agree
 
+### Requirement: Every vault-rooted name is opaque
+
+When a vault is declared, every ciphertext document, public output, generator definition record, and in-document key name the vault holds SHALL be derived from the naming key, a use-specific tag, and the corresponding logical name, rather than from the logical name alone.
+No vault-rooted physical name or directory listing SHALL disclose an audience's membership, a secret's name, or a definition record's owner.
+
+#### Scenario: A ciphertext document's name is opaque
+
+- **WHEN** a secret's audience resolves to a file in vault mode
+- **THEN** the file's name is a hash of the naming key and the audience's readable identity, not the audience's members or their count
+- **AND** the file sits one level under the vault's ciphertext prefix, never nested in an audience-named directory
+
+#### Scenario: A public output's path is opaque
+
+- **WHEN** a public output resolves to a path in vault mode
+- **THEN** the path is a hash of the naming key and the output's readable identity, held as a single file rather than a `<name>/value` directory
+
+#### Scenario: A definition record's path is opaque
+
+- **WHEN** a generator's definition record resolves to a path in vault mode
+- **THEN** the path is a hash of the naming key and the record's readable owner-or-audience identity, one level under the vault's state prefix
+
+#### Scenario: A document's key name is opaque
+
+- **WHEN** a secret's value is written into a vault-mode document
+- **THEN** the top-level key it is stored under is a hash of the naming key, the document's readable identity, and the secret's readable name
+- **AND** this holds whether or not the entry declares a custom key name
+
+#### Scenario: No vault, no opacity
+
+- **WHEN** no vault is declared
+- **THEN** every ciphertext document, public output, definition record, and in-document key keeps exactly today's readable name
+
 ### Requirement: What lands at the vault root and what stays at the declaration root
 
 The runtime SHALL write catalogue, user, and group declarations, and every scaffold it generates for them, at the declaration root.
-It SHALL write ciphertext, the recipient policy, generated public values, and generator definition records at the vault root.
+It SHALL write ciphertext, generated public values, and generator definition records at the vault root, under the opaque names the previous requirement derives.
+The recipient policy SHALL NOT be written at the vault root; see "The recipient policy stays at the declaration root" below.
 Git authorship for every commit the runtime makes SHALL be read from the declaration root, regardless of which root the commit's content lands in.
 
 #### Scenario: A new user's scaffold lands at the declaration root
@@ -79,13 +139,43 @@ Git authorship for every commit the runtime makes SHALL be read from the declara
 #### Scenario: A newly set secret's ciphertext lands at the vault root
 
 - **WHEN** an operator sets a secret's value
-- **THEN** the encrypted document is written, staged, and committed at the vault root
+- **THEN** the encrypted document is written, staged, and committed at the vault root, under its opaque name
 - **AND** nothing is written at the declaration root for that operation
 
 #### Scenario: Authorship is always the declaration root's
 
 - **WHEN** a commit lands at the vault root
 - **THEN** the identity that authors it is resolved from the declaration root's git configuration, not the vault's
+
+### Requirement: The recipient policy stays at the declaration root
+
+`.sops.yaml` SHALL be committed at the declaration root whether or not a vault is declared.
+For a command that needs creation rules to reach a vault-rooted document, the runtime SHALL render a disposable copy of the rules into the vault working tree, pass it to the encrypting backend explicitly, and never commit it.
+
+#### Scenario: The committed policy is unmoved by a vault
+
+- **WHEN** a vault is declared
+- **THEN** `.sops.yaml` is written, read, and drift-checked at the declaration root exactly as it is with no vault declared
+
+#### Scenario: Creation rules for a vault-rooted document are rendered to a scratch file
+
+- **WHEN** a value is set for the first time or a file's recipients are re-wrapped, against a vault-rooted document
+- **THEN** the runtime renders that document's creation rules into a file inside the vault working tree and passes it to the encrypting backend explicitly, naming no anchor and no audience in prose
+
+#### Scenario: The scratch rules file is never committed
+
+- **WHEN** the scratch rules file exists at any point during a run
+- **THEN** the vault's own `.gitignore` covers its name, so it cannot be staged even if a run ends between writing it and sweeping it
+
+#### Scenario: The scratch rules file is swept on every exit path
+
+- **WHEN** a run that rendered the scratch rules file ends, by return, by error, by panic, or by signal
+- **THEN** the file is removed
+
+#### Scenario: Reading and setting a value need no rules
+
+- **WHEN** a value is decrypted or set into an already-encrypted vault-rooted document
+- **THEN** the operation proceeds with no scratch rules file rendered
 
 ### Requirement: A write spanning both roots commits the vault first
 
@@ -165,3 +255,23 @@ It SHALL name the update command when it can determine which flake input the vau
 
 - **WHEN** the declaring flake's lock file names no input matching the vault root, or names more than one
 - **THEN** the disclosure still states that a lock update is required, in terms general enough to remain true, without naming an input it cannot identify
+
+### Requirement: What an opaque vault still reveals
+
+The documentation of this capability SHALL state, rather than omit, what an opaque vault continues to disclose to its host and to a reader holding only the vault.
+
+#### Scenario: Counts and sizes are unchanged
+
+- **WHEN** the residuals are read
+- **THEN** they state that the number of documents, the number of keys per document, and each leaf's ciphertext length are visible exactly as they are without a vault
+
+#### Scenario: Recipient public keys are visible
+
+- **WHEN** the residuals are read
+- **THEN** they state that each document's age recipient public keys are visible in the clear, because hiding them is a stated non-goal
+
+#### Scenario: The naming key is visible to anyone who can evaluate the declarations
+
+- **WHEN** the residuals are read
+- **THEN** they state that the naming key is an evaluation-time value in the declaring flake, so it — and therefore every name it derives — is visible to every local user of a machine that has the declaring flake in its nix store
+- **AND** they state that opacity holds only against the vault host and a reader holding only the vault
