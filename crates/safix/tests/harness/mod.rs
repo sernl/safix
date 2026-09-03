@@ -2710,14 +2710,28 @@ fn user_id() -> String {
 /// A shim that resolved `sops` by name would find itself, because the fixture
 /// puts it on the runtime's `PATH` under that name.
 pub fn real_sops() -> String {
+    binary_on_path("sops")
+}
+
+/// The git a shim stands in front of, found the way the runtime finds it.
+///
+/// A shim that resolved `git` by name would find itself, because the fixture
+/// puts it on the runtime's `PATH` under that name — see
+/// `tests/support/git-shim.rs`.
+pub fn real_git() -> String {
+    binary_on_path("git")
+}
+
+/// The first `name` found on this process's own `PATH`.
+fn binary_on_path(name: &str) -> String {
     std::env::var_os("PATH")
         .and_then(|path| {
             std::env::split_paths(&path)
-                .map(|directory| directory.join("sops"))
+                .map(|directory| directory.join(name))
                 .find(|candidate| candidate.is_file())
         })
         .map(|path| path.display().to_string())
-        .expect("sops is not on PATH")
+        .unwrap_or_else(|| panic!("{name} is not on PATH"))
 }
 
 /// `setsid`, when this process has a controlling terminal and so would hand one

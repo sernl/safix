@@ -118,6 +118,7 @@ let
           SAFIX_TEST_CLAN_STUB = "${suite}/libexec/safix-clan-stub";
           SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
           SAFIX_TEST_TRANSPORT_STUB = "${suite}/libexec/safix-transport-stub";
+          SAFIX_TEST_GIT_SHIM = "${suite}/libexec/safix-git-shim";
           INSTA_WORKSPACE_ROOT = "${instaWorkspaceRoot}";
         }
         // stagingEnv;

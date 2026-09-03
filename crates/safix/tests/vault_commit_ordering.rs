@@ -84,6 +84,7 @@ fn a_forced_declaration_commit_failure_reports_the_half_landed_state_and_a_retry
 
     let mut environment = enroll_env(&fixture, &vault);
     environment.push(("SAFIX_GIT".to_owned(), harness::git_shim().to_owned()));
+    environment.push(("SAFIX_SHIM_GIT".to_owned(), harness::real_git()));
     environment.push((
         "SAFIX_GIT_SHIM_REFUSE_ROOT".to_owned(),
         fixture.repo.to_str().expect("a utf-8 path").to_owned(),
