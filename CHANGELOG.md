@@ -19,6 +19,18 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### A secrets vault, opaque by construction, in a second repository
+
+`flake.safix.vault` is new: `nullOr (submodule { root; namingKey; })`, additive at `null` — the default — so every existing consumer is unaffected until a vault is declared.
+Its shape is a naming-keyed submodule rather than the bare path an earlier draft of this option considered: `root` names the second repository every ciphertext document, generated public value and generator definition record moves under, and `namingKey` is a string of at least 64 lowercase hexadecimal characters that keys the hash every vault-rooted name becomes, minted with `openssl rand -hex 32`.
+A declared vault's layout is opaque by construction — the ciphertext file, the in-document key, the public-output file and the definition-record path are each a keyed hash of today's readable name — while `.sops.yaml` never moves and stays committed at the declaring flake's own source in every case.
+
+The command-line runtime gains `SAFIX_VAULT_ROOT`, naming the operator's own working tree of the vault, and a cross-root write now commits the vault first and the declaration root second, with a `Safix-Vault:` trailer on the second naming the first's commit; every such commit discloses the lock bump it requires of the declaring flake, naming the exact `nix flake lock --update-input <name>` command when it can determine one.
+Six new refusals: `Error::VaultDeclaredWithoutRoot` and `Error::VaultRootWithoutDeclaration` for the two ways the option and `SAFIX_VAULT_ROOT` can disagree, `Error::VaultNotARepository` and `Error::VaultRootNotTopLevel` for a named root that is not a git repository's own top level, `Error::VaultCommitHalfLanded` for the half-landed state a failed second commit leaves, and `Error::VaultRelocationUnreadable` for a migration step that cannot decrypt what it is moving.
+Two new `check` findings: `Finding::VaultGitignoreMissing`, for a vault whose `.gitignore` does not cover the disposable creation-rules file `encrypt`/`updatekeys` render there, and `Finding::VaultRelocationPending`, for a readable-layout document, output or record still sitting at the declaration root while a vault is declared.
+
+`safix fix` adopts a vault as part of its ordinary convergence, relocating every pending readable-layout leaf into its opaque vault destination; `safix fix --vault-rollback` runs the same move the other direction while the vault is still declared, and rotating the naming key is the identical migration run again with a new one.
+
 ### Two-way convergence across the clan boundary, and a placement a shared clan var can declare honestly
 
 **BREAKING**: `flake.safix.bridge.mappings.<id>.clan.machine` becomes `nullOr str`, required when `placement` is `per-machine` (the default, and every mapping declared before this change) and refused when `placement` is `shared`; a mapping that already names a machine needs no edit, and only a newly declared `shared` mapping ever leaves it null.
