@@ -106,6 +106,7 @@
         ./modules/flake/checks/single-runtime.nix
         ./modules/flake/checks/subjects.nix
         ./modules/flake/checks/vault-projection.nix
+        ./modules/flake/checks/vault.nix
         ./modules/flake/devshell.nix
         ./modules/flake/lib.nix
         ./modules/flake/rust.nix
