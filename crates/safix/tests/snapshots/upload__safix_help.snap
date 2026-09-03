@@ -33,7 +33,12 @@ subcommands behave identically under --entry as against a flake; generate is
 the exception and refuses under --entry with neither --nixpkgs nor
 SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
 stages or commits: that root is still the one git reports for the current
-directory.
+directory, or the one SAFIX_REPO_ROOT names instead.
+
+SAFIX_VAULT_ROOT names a second, mutable working tree for a declared
+flake.safix.vault: unset and unread when no vault is declared, and
+required whenever one is — every ciphertext write, public output and
+generator definition record lands there instead of the declaration root.
 
 <user> defaults to $USER when flake.safix.users declares them, and otherwise to
 the sole declared holder when there is exactly one.

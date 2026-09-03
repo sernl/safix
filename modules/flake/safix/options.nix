@@ -322,6 +322,14 @@ in
         fetched as a plain, `flake = false` tree and read as paths and file
         contents, the same as this flake's own source is when no vault is
         declared.
+
+        Accepting `root` costs a lock-bump discipline this repository does
+        not otherwise have: a commit the command-line runtime makes at the
+        vault's own working tree is invisible to every consuming build
+        until the declaring flake's lock entry for that input is updated
+        with `nix flake lock --update-input <name>`, and the runtime
+        discloses that requirement, naming the input when it can, after
+        every such commit.
       '';
     };
 
