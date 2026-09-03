@@ -304,6 +304,12 @@ pub struct Fixture {
     bridge: Value,
     keepassxc: Value,
     clan_flake: Option<PathBuf>,
+    /// A second git repository this fixture also owns, once
+    /// [`Fixture::declare_vault`] has stood one up. `None` is what makes
+    /// `write_fixtures` answer `vaultDeclared: false`, which is every
+    /// fixture's default: nothing about the vault is set up until a test asks
+    /// for it.
+    vault: Option<PathBuf>,
     extras: Vec<String>,
 }
 
@@ -390,6 +396,7 @@ impl Fixture {
             // compatibility promise.
             delegation: json!({ "managers": {}, "managedBy": {}, "groups": {} }),
             clan_flake: None,
+            vault: None,
             genplan: json!({
                 "alice": { "order": [], "outputs": {}, "inputs": {} },
                 "bob":   { "order": [], "outputs": {}, "inputs": {} },
@@ -431,6 +438,32 @@ impl Fixture {
         std::fs::write(self.work.join("rules.txt"), rules_block(&["alice", "bob"])).unwrap();
     }
 
+    /// Stand up a second git repository as this fixture's vault, and answer
+    /// `vaultDeclared: true` from here on.
+    ///
+    /// Returns the vault's own path. [`Fixture::environment`] never sets
+    /// `SAFIX_VAULT_ROOT` itself — group 2's tests each need one of the four
+    /// `SAFIX_VAULT_ROOT`/`vaultDeclared` combinations independently, and a
+    /// method that chose one for them would take that away — so a caller
+    /// wanting the well-formed pair passes the returned path through
+    /// `run_env`'s `extra` as `SAFIX_VAULT_ROOT`.
+    ///
+    /// The vault repository is left with no commit: `git rev-parse
+    /// --show-toplevel` answers a freshly initialized repository exactly as
+    /// it answers a populated one, and nothing in group 2 or 3 needs the
+    /// vault to hold anything yet — the writers that will land content there
+    /// are a later wave's.
+    pub fn declare_vault(&mut self) -> PathBuf {
+        let vault = self.work.join("vault");
+        std::fs::create_dir_all(&vault).expect("a temporary directory can be made");
+        let mut init = Command::new("git");
+        init.arg("-C").arg(&vault).args(["init", "-q"]);
+        run_to_success(&mut init, "initializing the vault repository");
+        self.vault = Some(vault.clone());
+        self.write_fixtures();
+        vault
+    }
+
     /// Declare a placement for a name with no generator.
     pub fn seed_output(&mut self, name: &str, file: &str) {
         self.placements["alice"][name] = placement(file, name, "private", "alice");
@@ -448,6 +481,8 @@ impl Fixture {
             "file": ALICE_FILE, "key": name, "origin": "private",
             "owner": "alice", "shared": false, "generator": null,
             "public": path,
+            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null,
         });
         self.write_fixtures();
     }
@@ -466,6 +501,8 @@ impl Fixture {
             self.placements[user][name] = json!({
                 "file": file, "key": name, "origin": "carries",
                 "owner": user, "shared": true, "generator": null, "public": null,
+                "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+                "logicalPublic": null,
             });
         }
         self.write_fixtures();
@@ -577,6 +614,8 @@ impl Fixture {
             "file": file, "key": name, "origin": "private",
             "owner": "alice", "shared": false, "generator": record.clone(),
             "public": null,
+            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null,
         });
 
         // Keyed by the declared name, which is how `resolve.nix` emits the plan
@@ -838,6 +877,8 @@ impl Fixture {
         self.placements[user][companion.as_str()] = json!({
             "file": file, "key": companion, "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
+            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null,
         });
         self.write_fixtures();
     }
@@ -862,6 +903,8 @@ impl Fixture {
         self.placements[user][companion.as_str()] = json!({
             "file": file, "key": companion, "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
+            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null,
         });
         self.write_fixtures();
     }
@@ -1217,6 +1260,15 @@ impl Fixture {
         write_json(&self.work.join("recipients.json"), &self.subjects);
         write_json(&self.work.join("subjects-lib.json"), &self.subject_records);
         write_json(&self.work.join("governed.json"), &governed);
+        write_json(
+            &self.work.join("vault-declared.json"),
+            &json!(self.vault.is_some()),
+        );
+        // A vault-declared fixture's disposable creation rules text: wave two
+        // owns rendering non-null content and the scratch-config plumbing
+        // that consumes it, so every fixture answers `null` for now, the same
+        // answer a consumer who has never heard of a vault evaluates to.
+        write_json(&self.work.join("vault-rules.json"), &json!(null));
 
         // The subject name space, derived here the way `resolve.nix` derives it:
         // every declared person, every declared group, and every organization the
@@ -1742,6 +1794,14 @@ impl Fixture {
                 self.work.join("subjects-lib.json"),
             )
             .env("SAFIX_FIXTURE_RULES", self.work.join("rules.txt"))
+            .env(
+                "SAFIX_FIXTURE_VAULT_DECLARED",
+                self.work.join("vault-declared.json"),
+            )
+            .env(
+                "SAFIX_FIXTURE_VAULT_RULES",
+                self.work.join("vault-rules.json"),
+            )
             // The two the developer's own shell almost certainly sets. A test
             // that inherited them would open whoever is running it into their
             // real editor, on a fixture value, and wait; and one that passed
@@ -2215,6 +2275,8 @@ fn placement(file: &str, key: &str, origin: &str, owner: &str) -> Value {
     json!({
         "file": file, "key": key, "origin": origin,
         "owner": owner, "shared": false, "generator": null, "public": null,
+        "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+        "logicalPublic": null,
     })
 }
 
