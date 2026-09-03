@@ -145,6 +145,7 @@ pub fn run(
     }
 
     scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     // Before the card is selected, not only before the record is edited. A card
@@ -200,6 +201,7 @@ pub fn run(
 fn reload(workspace: &Workspace) -> Workspace {
     Workspace::at(
         workspace.root().to_path_buf(),
+        workspace.vault_root().to_path_buf(),
         workspace.git().clone(),
         workspace.nix().clone(),
         workspace.sops().clone(),

@@ -659,6 +659,17 @@ mod tests {
                 machine: "meridian".into(),
                 output: "Error: Could not list vars for machine meridian".into(),
             },
+            Code::VaultDeclaredWithoutRoot => Error::VaultDeclaredWithoutRoot,
+            Code::VaultRootWithoutDeclaration => Error::VaultRootWithoutDeclaration {
+                path: "/srv/vault".into(),
+            },
+            Code::VaultNotARepository => Error::VaultNotARepository {
+                path: "/srv/vault".into(),
+            },
+            Code::VaultRootNotTopLevel => Error::VaultRootNotTopLevel {
+                named: "/srv/fleet/vault".into(),
+                found: "/srv/fleet".into(),
+            },
         }
     }
 

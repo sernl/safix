@@ -201,6 +201,10 @@ refusal_codes! {
     UploadToolFailed => "safix::upload_tool_failed",
     UploadDestinationUnsafe => "safix::upload_destination_unsafe",
     ClanMachineListFailed => "safix::clan_machine_list_failed",
+    VaultDeclaredWithoutRoot => "safix::vault_declared_without_root",
+    VaultRootWithoutDeclaration => "safix::vault_root_without_declaration",
+    VaultNotARepository => "safix::vault_not_a_repository",
+    VaultRootNotTopLevel => "safix::vault_root_not_top_level",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::vault_root_not_top_level
+
+  × /srv/fleet/vault is not a git repository's top level; git reports /srv/
+  │ fleet as its top level instead. flake.safix.vault.root (or
+  │ SAFIX_VAULT_ROOT) must name the top level itself.

@@ -48,6 +48,11 @@ pub enum Attribute {
     EnrollHook,
     /// The subject records: every declared machine, service and group.
     Subjects,
+    /// Whether `flake.safix.vault` is declared.
+    VaultDeclared,
+    /// The vault's disposable creation rules, or null when no vault is
+    /// declared.
+    VaultCreationRulesText,
 }
 
 impl Attribute {
@@ -68,6 +73,8 @@ impl Attribute {
             Self::OnboardingHook => "safix.onboardingHook",
             Self::EnrollHook => "safix.enrollHook",
             Self::Subjects => "safix.lib.subjects",
+            Self::VaultDeclared => "safix.lib.vaultDeclared",
+            Self::VaultCreationRulesText => "safix.lib.vaultCreationRulesText",
         }
     }
 
@@ -88,6 +95,8 @@ impl Attribute {
             Self::OnboardingHook => "flake.safix.onboardingHook",
             Self::EnrollHook => "flake.safix.enrollHook",
             Self::Subjects => "flake.safix.lib.subjects",
+            Self::VaultDeclared => "flake.safix.lib.vaultDeclared",
+            Self::VaultCreationRulesText => "flake.safix.lib.vaultCreationRulesText",
         }
     }
 }

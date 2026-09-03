@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::vault_declared_without_root
+
+  × flake.safix.vault is declared, but SAFIX_VAULT_ROOT names no path. Set it
+  │ to the vault repository's working tree before running safix again.

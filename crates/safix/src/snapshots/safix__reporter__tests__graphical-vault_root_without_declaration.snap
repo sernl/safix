@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::vault_root_without_declaration
+
+  × SAFIX_VAULT_ROOT names /srv/vault, but flake.safix.vault is not declared.
+  │ Declare flake.safix.vault or unset SAFIX_VAULT_ROOT.

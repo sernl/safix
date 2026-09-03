@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: /srv/vault is not a git repository. flake.safix.vault.root (or SAFIX_VAULT_ROOT) must name a git repository's working tree.

@@ -29,6 +29,7 @@ use crate::sops::Sops;
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
+    vault_root: PathBuf,
     nix: Nix,
     git: Git,
     sops: Sops,
@@ -69,14 +70,22 @@ impl Workspace {
     pub fn discover_with(nix: Nix) -> Result<Self> {
         let git = Git::from_environment();
         let root = git.repository_root()?;
-        Ok(Self::at(root, git, nix, Sops::from_environment()))
+        let vault_root = resolve_vault_root(&git, &nix, &root)?;
+        Ok(Self::at(
+            root,
+            vault_root,
+            git,
+            nix,
+            Sops::from_environment(),
+        ))
     }
 
     /// A workspace at a named root, with drivers given rather than discovered.
     #[must_use]
-    pub fn at(root: PathBuf, git: Git, nix: Nix, sops: Sops) -> Self {
+    pub fn at(root: PathBuf, vault_root: PathBuf, git: Git, nix: Nix, sops: Sops) -> Self {
         Self {
             root,
+            vault_root,
             nix,
             git,
             sops,
@@ -120,6 +129,19 @@ impl Workspace {
     #[must_use]
     pub fn absolute(&self, relative: &str) -> PathBuf {
         self.root.join(relative)
+    }
+
+    /// The vault repository root, which equals [`Workspace::root`] when no
+    /// vault is declared.
+    #[must_use]
+    pub fn vault_root(&self) -> &Path {
+        &self.vault_root
+    }
+
+    /// The absolute path of a vault-relative one.
+    #[must_use]
+    pub fn vault_absolute(&self, relative: &str) -> PathBuf {
+        self.vault_root.join(relative)
     }
 
     /// `user -> name -> placement`.
@@ -374,6 +396,23 @@ impl Workspace {
             }),
         }
     }
+
+    /// The text of a vault-relative file, or nothing when it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::FileUnreadable`] when it exists and cannot be read.
+    pub fn read_vault_relative(&self, relative: &str) -> Result<Option<String>> {
+        let path = self.vault_absolute(relative);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(Some(text)),
+            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(cause) => Err(Error::FileUnreadable {
+                path: path.display().to_string(),
+                cause,
+            }),
+        }
+    }
 }
 
 /// `$USER`, or what `id -un` says when it is unset or empty.
@@ -407,4 +446,122 @@ fn cached<T>(cell: &OnceLock<T>, load: impl FnOnce() -> Result<T>) -> Result<&T>
     }
     let value = load()?;
     Ok(cell.get_or_init(|| value))
+}
+
+/// The vault root discovery and cross-validation design V1 and V2 specify.
+///
+/// Resolved once, at [`Workspace::discover_with`], because both mismatch
+/// refusals and the git-repository check below must run before anything is
+/// evaluated or written — see V1's "refuse before evaluating or writing
+/// anything".
+fn resolve_vault_root(git: &Git, nix: &Nix, root: &Path) -> Result<PathBuf> {
+    let named = std::env::var_os("SAFIX_VAULT_ROOT").map(PathBuf::from);
+    let declared: bool = nix.eval_json(root, Attribute::VaultDeclared)?;
+    let vault_root = match (named, declared) {
+        (None, false) => root.to_path_buf(),
+        (Some(path), true) => path,
+        (None, true) => return Err(Error::VaultDeclaredWithoutRoot),
+        (Some(path), false) => {
+            return Err(Error::VaultRootWithoutDeclaration {
+                path: path.display().to_string(),
+            });
+        }
+    };
+    verify_vault_repository(git, &vault_root)?;
+    Ok(vault_root)
+}
+
+/// The vault-is-a-git-repository refusal design V2 specifies.
+///
+/// Applied to every resolved vault root, including the default one — where no
+/// vault is declared `vault_root` equals `root`, and this is what would catch
+/// a `SAFIX_REPO_ROOT` named at a non-repository, exactly as it catches a
+/// misdirected `SAFIX_VAULT_ROOT`.
+fn verify_vault_repository(git: &Git, vault_root: &Path) -> Result<()> {
+    let found = git
+        .show_toplevel(vault_root)
+        .map_err(|_| Error::VaultNotARepository {
+            path: vault_root.display().to_string(),
+        })?;
+    if canonicalized(&found) != canonicalized(vault_root) {
+        return Err(Error::VaultRootNotTopLevel {
+            named: vault_root.display().to_string(),
+            found: found.display().to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// The canonical form of a path, or the path itself when it cannot be
+/// resolved.
+///
+/// A path git has just reported as a repository's top level is not expected
+/// to fail here; falling back to the path as given rather than propagating a
+/// second failure keeps this a comparison rather than a third refusal.
+fn canonicalized(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace(root: &Path, vault_root: &Path) -> Workspace {
+        Workspace::at(
+            root.to_path_buf(),
+            vault_root.to_path_buf(),
+            Git::from_environment(),
+            Nix::from_environment(),
+            Sops::from_environment(),
+        )
+    }
+
+    /// `absolute`/`read_relative` join against `root`, and
+    /// `vault_absolute`/`read_vault_relative` join against `vault_root`, even
+    /// when the two differ — the property [`Workspace::at`] gaining the
+    /// second root exists to hold.
+    #[test]
+    fn the_two_roots_are_joined_independently() {
+        let scratch =
+            std::env::temp_dir().join(format!("safix-workspace-roots-{}", std::process::id()));
+        let root = scratch.join("declaration");
+        let vault_root = scratch.join("vault");
+        std::fs::create_dir_all(&root).expect("a temporary directory can be made");
+        std::fs::create_dir_all(&vault_root).expect("a temporary directory can be made");
+        std::fs::write(root.join("marker.txt"), "declaration")
+            .expect("a temporary file can be written");
+        std::fs::write(vault_root.join("marker.txt"), "vault")
+            .expect("a temporary file can be written");
+
+        let space = workspace(&root, &vault_root);
+
+        assert_eq!(space.root(), root.as_path());
+        assert_eq!(space.vault_root(), vault_root.as_path());
+        assert_eq!(space.absolute("marker.txt"), root.join("marker.txt"));
+        assert_eq!(
+            space.vault_absolute("marker.txt"),
+            vault_root.join("marker.txt")
+        );
+        assert_eq!(
+            space.read_relative("marker.txt").expect("the file exists"),
+            Some("declaration".to_owned())
+        );
+        assert_eq!(
+            space
+                .read_vault_relative("marker.txt")
+                .expect("the file exists"),
+            Some("vault".to_owned())
+        );
+
+        // Each side is also blind to the other root's file: a stray read
+        // through the wrong accessor would silently pass this test.
+        assert_eq!(
+            space
+                .read_vault_relative("does-not-exist.txt")
+                .expect("a missing file reads as none"),
+            None
+        );
+
+        std::fs::remove_dir_all(&scratch).expect("the fixture can be removed");
+    }
 }

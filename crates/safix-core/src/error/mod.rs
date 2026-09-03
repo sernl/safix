@@ -1447,6 +1447,51 @@ pub enum Error {
         /// clan's own standard error, verbatim.
         output: String,
     },
+
+    /// `flake.safix.lib.vaultDeclared` is true, but nothing named a working
+    /// tree to write the vault into.
+    #[error(
+        "flake.safix.vault is declared, but SAFIX_VAULT_ROOT names no path. Set it to the \
+        vault repository's working tree before running safix again."
+    )]
+    VaultDeclaredWithoutRoot,
+
+    /// `SAFIX_VAULT_ROOT` names a path, but nix declares no vault.
+    ///
+    /// A root named for a vault nix does not know about would silently do
+    /// nothing: every vault-rooted write would land somewhere no consuming
+    /// build ever reads from.
+    #[error(
+        "SAFIX_VAULT_ROOT names {path}, but flake.safix.vault is not declared. Declare \
+        flake.safix.vault or unset SAFIX_VAULT_ROOT."
+    )]
+    VaultRootWithoutDeclaration {
+        /// The path `SAFIX_VAULT_ROOT` named.
+        path: String,
+    },
+
+    /// The vault root could not be verified as a git repository at all.
+    #[error(
+        "{path} is not a git repository. flake.safix.vault.root (or SAFIX_VAULT_ROOT) must \
+        name a git repository's working tree."
+    )]
+    VaultNotARepository {
+        /// The path named as the vault root.
+        path: String,
+    },
+
+    /// The vault root is inside a git repository, but is not that
+    /// repository's own top level.
+    #[error(
+        "{named} is not a git repository's top level; git reports {found} as its top level \
+        instead. flake.safix.vault.root (or SAFIX_VAULT_ROOT) must name the top level itself."
+    )]
+    VaultRootNotTopLevel {
+        /// The path named as the vault root.
+        named: String,
+        /// The top level git found from it.
+        found: String,
+    },
 }
 
 /// The result type this crate returns.

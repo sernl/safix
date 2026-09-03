@@ -195,6 +195,22 @@ impl Git {
         Ok(head.trim_end_matches('\n').to_owned())
     }
 
+    /// The top level of the git repository containing `path`.
+    ///
+    /// Unlike [`repository_root`](Self::repository_root), this never consults
+    /// `SAFIX_REPO_ROOT`: it asks git about a path named explicitly, for a
+    /// caller verifying a second root — the vault — rather than discovering
+    /// the process's own.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::GitUnavailable`] when git cannot be run, and
+    /// [`Error::GitCommandFailed`] when it runs and refuses.
+    pub fn show_toplevel(&self, path: &Path) -> Result<PathBuf> {
+        let output = self.capture(path, &["rev-parse".into(), "--show-toplevel".into()])?;
+        Ok(PathBuf::from(output.trim_end_matches('\n')))
+    }
+
     /// Who a commit made here would be authored by.
     ///
     /// `git var GIT_AUTHOR_IDENT` rather than two reads of `git config`, because
@@ -386,5 +402,62 @@ mod tests {
                 email: String::new(),
             }
         );
+    }
+
+    /// `author_identity` reads the configuration of the root it is asked
+    /// about, not some other root — the property `delegation.rs`'s call site
+    /// (`workspace.git().author_identity(workspace.root())`) depends on now
+    /// that `Workspace` carries a second, vault root: two repositories with
+    /// different configured identities read apart.
+    #[test]
+    fn author_identity_reads_the_named_roots_own_configuration() {
+        let scratch =
+            std::env::temp_dir().join(format!("safix-git-identity-{}", std::process::id()));
+        let first = scratch.join("first");
+        let second = scratch.join("second");
+        for (root, name, email) in [
+            (&first, "Alice Example", "alice@example.com"),
+            (&second, "Bob Example", "bob@example.com"),
+        ] {
+            std::fs::create_dir_all(root).expect("a temporary directory can be made");
+            for arguments in [
+                vec!["init", "-q"],
+                vec!["config", "user.name", name],
+                vec!["config", "user.email", email],
+            ] {
+                let status = Command::new("git")
+                    .arg("-C")
+                    .arg(root)
+                    .args(&arguments)
+                    .env("HOME", &scratch)
+                    .env_remove("GIT_AUTHOR_NAME")
+                    .env_remove("GIT_AUTHOR_EMAIL")
+                    .env_remove("GIT_COMMITTER_NAME")
+                    .env_remove("GIT_COMMITTER_EMAIL")
+                    .status()
+                    .expect("git can be run");
+                assert!(status.success(), "git {arguments:?} failed");
+            }
+        }
+
+        let git = Git {
+            program: PathBuf::from("git"),
+        };
+        assert_eq!(
+            git.author_identity(&first).expect("the identity resolves"),
+            Identity {
+                name: "Alice Example".to_owned(),
+                email: "alice@example.com".to_owned(),
+            }
+        );
+        assert_eq!(
+            git.author_identity(&second).expect("the identity resolves"),
+            Identity {
+                name: "Bob Example".to_owned(),
+                email: "bob@example.com".to_owned(),
+            }
+        );
+
+        std::fs::remove_dir_all(&scratch).expect("the fixture can be removed");
     }
 }

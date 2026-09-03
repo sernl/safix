@@ -695,6 +695,7 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
     let fixture = Fixture::new();
     let workspace = safix_core::Workspace::at(
         fixture.repo.clone(),
+        fixture.repo.clone(),
         safix_core::git::Git::from_environment(),
         safix_core::nix::Nix::from_environment(),
         safix_core::sops::Sops::from_environment(),
