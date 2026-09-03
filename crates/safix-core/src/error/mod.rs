@@ -25,7 +25,7 @@ use prose::{
     already_declared, bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous,
     drifted, generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
     no_file_to_prove_with, no_generator, no_group_declaration, recipients_lost,
-    scaffold_out_of_scope, unknown_subject,
+    scaffold_out_of_scope, unknown_subject, vault_commit_half_landed,
 };
 
 /// A refusal from the safix runtime.
@@ -1491,6 +1491,21 @@ pub enum Error {
         named: String,
         /// The top level git found from it.
         found: String,
+    },
+
+    /// A vault-root commit landed, but the declaration-root commit that was
+    /// to follow it then failed — design V4's half-landed state.
+    ///
+    /// Re-running the same command is the remedy and repeats no work: the
+    /// vault content the retry stages is unchanged from `HEAD`, so
+    /// [`crate::git::commit_written_files`] reports nothing to commit there
+    /// and only the declaration-root commit is attempted again.
+    #[error("{}", vault_commit_half_landed(vault_commit, pending))]
+    VaultCommitHalfLanded {
+        /// The vault-root commit's abbreviated object name.
+        vault_commit: String,
+        /// The declaration-root paths still staged and uncommitted.
+        pending: Vec<String>,
     },
 }
 

@@ -91,7 +91,9 @@ pub fn scaffold_path(name: &str) -> String {
 /// # Errors
 ///
 /// [`Error::BadUserName`], [`Error::HardwareRecipient`], [`Error::BadRecipient`],
-/// [`Error::AlreadyDeclared`], [`Error::ScaffoldExists`], [`Error::HostWithoutHook`],
+/// [`Error::AlreadyDeclared`], [`Error::MidOperation`],
+/// [`Error::ConflictEntries`], [`Error::UncommittedChanges`],
+/// [`Error::ScaffoldExists`], [`Error::HostWithoutHook`],
 /// [`Error::ScaffoldDeclined`], [`Error::Unparsable`],
 /// [`Error::PolicyEvalAfterScaffold`] and [`Error::HookFailed`], in that order of
 /// reachability.
@@ -109,14 +111,21 @@ pub fn run(
     refuse_bad_recipient(&request.recipient)?;
     refuse_existing(workspace, &request.name)?;
 
+    let relative = scaffold_path(&request.name);
+    crate::set::refuse_bad_repository_state(
+        workspace,
+        &[
+            (workspace.root(), relative.as_str()),
+            (workspace.root(), ".sops.yaml"),
+        ],
+    )?;
+
     let hook = workspace.onboarding_hook()?;
     if !request.hosts.is_empty() && hook.is_empty() {
         return Err(Error::HostWithoutHook);
     }
 
-    let relative = scaffold_path(&request.name);
     let absolute = workspace.absolute(&relative);
-
     progress.write(&plan(&relative, request));
     if !request.assume_yes {
         progress.write("  scaffold this? [y/N] ");
@@ -161,7 +170,7 @@ pub fn run(
     // first would write the policy of the declarations as they stood WITHOUT
     // this person — a .sops.yaml that looks freshly generated, carries no anchor
     // for them, and disagrees with the tree it was committed beside.
-    let written = vec![relative.clone(), String::from(".sops.yaml")];
+    let written_declaration = vec![relative.clone(), String::from(".sops.yaml")];
     workspace
         .git()
         .stage(workspace.root(), std::slice::from_ref(&relative))?;
@@ -180,15 +189,20 @@ pub fn run(
         cause,
     })?;
 
-    git::commit_written_files(
+    let identity = workspace.git().author_identity(root)?;
+    git::commit_two_roots(
         workspace.git(),
+        workspace.vault_root(),
         root,
         progress,
+        "",
         &format!(
             "feat(safix): declare {} and regenerate the recipient policy",
             request.name
         ),
-        &written,
+        &[],
+        &written_declaration,
+        &identity,
     )?;
 
     progress.write(&done(&relative, &request.name));

@@ -74,8 +74,15 @@ const NOT_REVOCATION: &str = "\n\
 ///
 /// Returns zero, or the status `sops` exited with when a re-wrap failed.
 ///
+/// A vault-root preflight over every managed file runs first, before the
+/// policy is regenerated or anything is re-wrapped — design V4's ordering,
+/// applied here vault-only since `fix` writes nothing at the declaration
+/// root that a commit governs.
+///
 /// # Errors
 ///
+/// [`Error::MidOperation`], [`Error::ConflictEntries`] or
+/// [`Error::UncommittedChanges`] from the preflight;
 /// [`Error::NixEvalFailed`] when the policy cannot be evaluated,
 /// [`Error::FileUnwritable`] when it cannot be put in place, and
 /// [`Error::NixSchemaMismatch`] when the governed set is not the shape this
@@ -84,10 +91,16 @@ pub fn run(workspace: &Workspace, progress: &dyn Progress, assume_yes: bool) -> 
     scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
+    let managed = workspace.governed_files()?.managed.clone();
+    let touches: Vec<(&Path, &str)> = managed
+        .iter()
+        .map(|file| (workspace.vault_root(), file.as_str()))
+        .collect();
+    crate::set::refuse_bad_repository_state(workspace, &touches)?;
+
     write_policy(workspace, progress)?;
     progress.write(NOT_REVOCATION);
 
-    let managed = workspace.governed_files()?.managed.clone();
     let permits = concurrency();
     let config = workspace.stage_vault_rules()?;
 

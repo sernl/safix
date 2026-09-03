@@ -312,6 +312,34 @@ impl Ceremony<'_> {
     /// Returns the name the credentials will be set under, when one was declared.
     fn wire(&mut self, captured: &identity::Captured) -> Result<Option<String>> {
         let relative = crate::adduser::scaffold_path(self.user);
+
+        // The mid-operation check runs against both roots unconditionally,
+        // but the declaration root's scaffold and `.sops.yaml` are not
+        // preflighted for uncommitted changes the way the vault-rooted
+        // governed files below are: a re-run after
+        // [`Error::VaultCommitHalfLanded`] finds its own prior attempt's
+        // edit already staged there, and a check that refused on exactly
+        // that residue would make the spec's own "re-running completes the
+        // operation" guarantee unsatisfiable. `commit_written_files`'s
+        // idempotent staging is what makes the retry safe on the vault side;
+        // this is its declaration-side counterpart.
+        if let Some(operation) = self
+            .workspace
+            .git()
+            .operation_in_progress(self.workspace.root())?
+        {
+            return Err(Error::MidOperation {
+                state: operation.state,
+                marker: operation.marker.display().to_string(),
+            });
+        }
+        let managed = self.workspace.governed_files()?.managed.clone();
+        let touches: Vec<(&Path, &str)> = managed
+            .iter()
+            .map(|file| (self.workspace.vault_root(), file.as_str()))
+            .collect();
+        crate::set::refuse_bad_repository_state(&self.workspace, &touches)?;
+
         let absolute = self.workspace.absolute(&relative);
         let original =
             self.workspace
@@ -372,15 +400,15 @@ impl Ceremony<'_> {
         // The governed files that exist, because a governed file is a path a
         // declaration implies rather than a file anybody has written yet, and
         // staging one that is not there refuses the whole commit.
-        let mut written = vec![relative, String::from(".sops.yaml")];
-        written.extend(
-            self.workspace
-                .governed_files()?
-                .managed
-                .iter()
-                .filter(|governed| self.workspace.vault_absolute(governed).exists())
-                .cloned(),
-        );
+        let written_vault: Vec<String> = self
+            .workspace
+            .governed_files()?
+            .managed
+            .iter()
+            .filter(|governed| self.workspace.vault_absolute(governed).exists())
+            .cloned()
+            .collect();
+        let written_declaration = vec![relative, String::from(".sops.yaml")];
         let mut message = format!(
             "feat(safix): enroll {} as a recovery recipient for {}",
             self.serial, self.user
@@ -389,12 +417,23 @@ impl Ceremony<'_> {
             message.push_str("\n\n");
             message.push_str(&context);
         }
-        git::commit_written_files(
+        let identity = self
+            .workspace
+            .git()
+            .author_identity(self.workspace.root())?;
+        git::commit_two_roots(
             self.workspace.git(),
+            self.workspace.vault_root(),
             self.workspace.root(),
             self.progress,
+            &format!(
+                "chore(safix): re-wrap governed files for {}'s enrollment",
+                self.serial
+            ),
             &message,
-            &written,
+            &written_vault,
+            &written_declaration,
+            &identity,
         )?;
 
         Ok(stored)

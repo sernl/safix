@@ -1,0 +1,14 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the vault committed a1b2c3d, but the declaration-root commit that was
+to follow it failed, so nothing there is committed yet.
+
+Still staged at the declaration root:
+  - safix/users/alice.nix
+  - .sops.yaml
+
+The vault content is correct and already committed; re-running the same
+command completes the operation and will not repeat the vault commit,
+because the content it would stage there already matches HEAD.

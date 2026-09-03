@@ -189,7 +189,18 @@ fn a_removal_says_what_it_does_not_undo_and_the_next_check_reports_the_shrink() 
     report.says("Only a new value revokes.");
 
     // Removing somebody the group does not hold writes nothing and commits
-    // nothing.
+    // nothing. Settle the `.sops.yaml` drift the check simulation above left
+    // uncommitted first: task group 6's preflight now checks both roots'
+    // cleanliness before any group edit, including a would-be no-op one, so
+    // a dirty `.sops.yaml` from a different fixture step would otherwise be
+    // refused for a reason unrelated to what this assertion is about.
+    fixture.git(&["add", "-A"]);
+    fixture.git(&[
+        "commit",
+        "-q",
+        "-m",
+        "fixture: settle the policy check derived",
+    ]);
     let head = fixture.head();
     let again = fixture
         .run(&["group", "remove", "oncall", "bob"])

@@ -670,6 +670,10 @@ mod tests {
                 named: "/srv/fleet/vault".into(),
                 found: "/srv/fleet".into(),
             },
+            Code::VaultCommitHalfLanded => Error::VaultCommitHalfLanded {
+                vault_commit: "a1b2c3d".into(),
+                pending: vec!["safix/users/alice.nix".into(), ".sops.yaml".into()],
+            },
         }
     }
 

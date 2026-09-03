@@ -926,3 +926,19 @@ pub(super) fn clan_machine_list_failed(machine: &str, output: &str) -> String {
         {output}"
     )
 }
+
+/// A vault-root commit landed with no matching declaration-root commit —
+/// design V4's half-landed state.
+pub(super) fn vault_commit_half_landed(vault_commit: &str, pending: &[String]) -> String {
+    format!(
+        "the vault committed {vault_commit}, but the declaration-root commit that was\n\
+        to follow it failed, so nothing there is committed yet.\n\
+        \n\
+        Still staged at the declaration root:{}\n\
+        \n\
+        The vault content is correct and already committed; re-running the same\n\
+        command completes the operation and will not repeat the vault commit,\n\
+        because the content it would stage there already matches HEAD.",
+        bulleted(pending)
+    )
+}

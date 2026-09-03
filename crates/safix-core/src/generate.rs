@@ -46,7 +46,7 @@
 //! generators that already committed stay committed, which is what the cascade
 //! confirmation warns about before it starts rather than after.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use crate::error::{Error, Result};
@@ -406,9 +406,11 @@ fn run_one(
             distinct.push(target.file().to_owned());
         }
     }
-    for file in &distinct {
-        set::refuse_bad_repository_state(workspace, file)?;
-    }
+    let touches: Vec<(&Path, &str)> = distinct
+        .iter()
+        .map(|file| (workspace.vault_root(), file.as_str()))
+        .collect();
+    set::refuse_bad_repository_state(workspace, &touches)?;
 
     let names = outputs.join(", ");
     log(progress, &format!("safix: generating {names} for {user}"));
@@ -878,12 +880,14 @@ fn write(
     let mut committed: Vec<String> = distinct.to_vec();
     committed.extend(records.paths.iter().cloned());
 
+    let identity = workspace.git().author_identity(workspace.root())?;
     git::commit_written_files(
         workspace.git(),
         workspace.vault_root(),
         progress,
         message,
         &committed,
+        Some(&identity),
     )?;
     Ok(Outcome::Ran)
 }

@@ -115,7 +115,7 @@ pub fn run_committing(
     let relative = placement.file.clone();
     let key = placement.key.clone();
 
-    refuse_bad_repository_state(workspace, &relative)?;
+    refuse_bad_repository_state(workspace, &[(workspace.vault_root(), relative.as_str())])?;
 
     let absolute = workspace.vault_absolute(&relative);
     let candidate = candidate_path(&absolute);
@@ -195,12 +195,14 @@ pub fn run_committing(
     })?;
     scratch::keep_dirs();
 
+    let identity = workspace.git().author_identity(workspace.root())?;
     git::commit_written_files(
         workspace.git(),
         workspace.vault_root(),
         progress,
         subject,
         std::slice::from_ref(&relative),
+        Some(&identity),
     )?;
     Ok(0)
 }
@@ -215,40 +217,45 @@ pub(crate) fn candidate_path(absolute: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The states in which a commit would mean something other than "this value was
-/// set".
+/// The states in which a commit would mean something other than what its
+/// message says.
 ///
 /// Judged before the operator is asked for anything: a refusal that arrives
-/// after they have typed a secret twice is a refusal that costs them the typing.
+/// after they have typed a secret twice is a refusal that costs them the
+/// typing. Takes the whole set of `(root, relative)` pairs one operation is
+/// about to touch, checked in order and refusing on the first failure before
+/// any of them is written — design V4's preflight, generalized from a single
+/// vault-root check to cover a cross-root operation's declaration-root paths
+/// too, in the same call.
 ///
 /// # Errors
 ///
 /// [`Error::MidOperation`], [`Error::ConflictEntries`] or
 /// [`Error::UncommittedChanges`].
-pub fn refuse_bad_repository_state(workspace: &Workspace, relative: &str) -> Result<()> {
+pub fn refuse_bad_repository_state(workspace: &Workspace, touches: &[(&Path, &str)]) -> Result<()> {
     let git = workspace.git();
-    let root = workspace.vault_root();
-
-    if let Some(operation) = git.operation_in_progress(root)? {
-        return Err(Error::MidOperation {
-            state: operation.state,
-            marker: operation.marker.display().to_string(),
-        });
+    for &(root, relative) in touches {
+        if let Some(operation) = git.operation_in_progress(root)? {
+            return Err(Error::MidOperation {
+                state: operation.state,
+                marker: operation.marker.display().to_string(),
+            });
+        }
+        if git.has_conflict_entries(root, relative)? {
+            return Err(Error::ConflictEntries {
+                file: relative.to_owned(),
+            });
+        }
+        let status = git.status_of(root, relative)?;
+        let status = status.trim_end_matches('\n');
+        if !status.is_empty() {
+            return Err(Error::UncommittedChanges {
+                file: relative.to_owned(),
+                status: status.to_owned(),
+            });
+        }
     }
-    if git.has_conflict_entries(root, relative)? {
-        return Err(Error::ConflictEntries {
-            file: relative.to_owned(),
-        });
-    }
-    let status = git.status_of(root, relative)?;
-    let status = status.trim_end_matches('\n');
-    if status.is_empty() {
-        return Ok(());
-    }
-    Err(Error::UncommittedChanges {
-        file: relative.to_owned(),
-        status: status.to_owned(),
-    })
+    Ok(())
 }
 
 /// Refuse a candidate document whose recipients are not the audience the
@@ -321,6 +328,134 @@ mod tests {
             candidate
                 .to_string_lossy()
                 .starts_with("/srv/fleet/secrets/alice/secrets.yaml.safix-tmp.")
+        );
+    }
+}
+
+/// Task 6.9's three preflight cases, at [`refuse_bad_repository_state`]'s own
+/// level rather than through a full command: both roots clean, the vault
+/// root dirty with the declaration root clean, and the reverse. Each dirty
+/// case is an untracked file sitting at the path the touch names — the
+/// simplest state [`crate::git::Git::status_of`]'s `--untracked-files=all`
+/// already reports as non-empty.
+///
+/// Task 6.10's drill — narrowing the touch list to the declaration root
+/// alone turns the vault-dirty case green when it should refuse — was
+/// observed manually rather than encoded as a standing test: calling
+/// `refuse_bad_repository_state` with only `[(declaration_root, "user.nix")]`
+/// in [`the_vault_root_being_dirty_is_refused_naming_it`]'s own fixture
+/// returns `Ok(())`, which is the evidence the vault-root check is
+/// independently load-bearing rather than redundant with the declaration
+/// root's.
+#[cfg(test)]
+mod preflight_tests {
+    use std::process::Command;
+
+    use super::*;
+    use crate::git::Git;
+    use crate::nix::Nix;
+    use crate::sops::Sops;
+
+    fn init_repo(root: &Path) {
+        std::fs::create_dir_all(root).expect("a temporary directory can be made");
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["init", "-q"])
+            .status()
+            .expect("git can be run");
+        assert!(status.success());
+    }
+
+    fn workspace_at(root: &Path, vault_root: &Path) -> Workspace {
+        Workspace::at(
+            root.to_path_buf(),
+            vault_root.to_path_buf(),
+            Git::default(),
+            Nix::from_environment(),
+            Sops::from_environment(),
+        )
+    }
+
+    struct TwoRoots {
+        scratch: PathBuf,
+        vault: PathBuf,
+        declaration: PathBuf,
+    }
+
+    impl TwoRoots {
+        fn new(label: &str) -> Self {
+            let scratch = std::env::temp_dir()
+                .join(format!("safix-preflight-{label}-{}", std::process::id()));
+            let vault = scratch.join("vault");
+            let declaration = scratch.join("declaration");
+            init_repo(&vault);
+            init_repo(&declaration);
+            Self {
+                scratch,
+                vault,
+                declaration,
+            }
+        }
+    }
+
+    impl Drop for TwoRoots {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.scratch);
+        }
+    }
+
+    #[test]
+    fn both_roots_clean_admits_the_touches() {
+        let fixture = TwoRoots::new("clean");
+        let workspace = workspace_at(&fixture.declaration, &fixture.vault);
+        refuse_bad_repository_state(
+            &workspace,
+            &[
+                (&fixture.vault, "secrets/opaque.yaml"),
+                (&fixture.declaration, "user.nix"),
+            ],
+        )
+        .expect("two clean roots admit the touches");
+    }
+
+    #[test]
+    fn the_vault_root_being_dirty_is_refused_naming_it() {
+        let fixture = TwoRoots::new("vault-dirty");
+        std::fs::write(fixture.vault.join("secrets-opaque.yaml"), "stray\n")
+            .expect("an untracked file can be written");
+        let workspace = workspace_at(&fixture.declaration, &fixture.vault);
+        let error = refuse_bad_repository_state(
+            &workspace,
+            &[
+                (&fixture.vault, "secrets-opaque.yaml"),
+                (&fixture.declaration, "user.nix"),
+            ],
+        )
+        .expect_err("an untracked file at the touched path refuses");
+        assert!(
+            matches!(&error, Error::UncommittedChanges { file, .. } if file == "secrets-opaque.yaml"),
+            "the refusal names the vault-root path: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_declaration_root_being_dirty_is_refused_naming_it() {
+        let fixture = TwoRoots::new("declaration-dirty");
+        std::fs::write(fixture.declaration.join("user.nix"), "{ }\n")
+            .expect("an untracked file can be written");
+        let workspace = workspace_at(&fixture.declaration, &fixture.vault);
+        let error = refuse_bad_repository_state(
+            &workspace,
+            &[
+                (&fixture.vault, "secrets-opaque.yaml"),
+                (&fixture.declaration, "user.nix"),
+            ],
+        )
+        .expect_err("an untracked file at the touched path refuses");
+        assert!(
+            matches!(&error, Error::UncommittedChanges { file, .. } if file == "user.nix"),
+            "the refusal names the declaration-root path: {error:?}"
         );
     }
 }

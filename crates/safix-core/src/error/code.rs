@@ -205,6 +205,7 @@ refusal_codes! {
     VaultRootWithoutDeclaration => "safix::vault_root_without_declaration",
     VaultNotARepository => "safix::vault_not_a_repository",
     VaultRootNotTopLevel => "safix::vault_root_not_top_level",
+    VaultCommitHalfLanded => "safix::vault_commit_half_landed",
 }
 
 /// The namespace every code is under, and the prefix a snapshot's name is the

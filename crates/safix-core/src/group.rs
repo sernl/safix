@@ -73,9 +73,16 @@ pub fn declaration_path(group: &str) -> String {
 ///
 /// [`Error::UnknownGroup`], [`Error::UnknownSubject`],
 /// [`Error::ActorUndeclared`], [`Error::ScaffoldOutOfScope`],
-/// [`Error::NoGroupDeclaration`], [`Error::Unparsable`],
-/// [`Error::PolicyEvalAfterScaffold`] and [`Error::FileUnwritable`], in that
-/// order of reachability.
+/// [`Error::MidOperation`], [`Error::ConflictEntries`],
+/// [`Error::UncommittedChanges`], [`Error::NoGroupDeclaration`],
+/// [`Error::Unparsable`], [`Error::PolicyEvalAfterScaffold`] and
+/// [`Error::FileUnwritable`], in that order of reachability.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one straight-line sequence — preflight, edit, parse-check, stage, regenerate \
+              the policy, commit — and splitting it loses the ordering a reader needs to see \
+              it as one"
+)]
 pub fn run(
     workspace: &Workspace,
     progress: &dyn Progress,
@@ -89,6 +96,14 @@ pub fn run(
     scope.announce(progress);
 
     let relative = declaration_path(group);
+    crate::set::refuse_bad_repository_state(
+        workspace,
+        &[
+            (workspace.root(), relative.as_str()),
+            (workspace.root(), ".sops.yaml"),
+        ],
+    )?;
+
     let absolute = workspace.absolute(&relative);
     let original =
         workspace
@@ -179,12 +194,17 @@ pub fn run(
         message.push_str("\n\n");
         message.push_str(&context);
     }
-    git::commit_written_files(
+    let identity = workspace.git().author_identity(workspace.root())?;
+    git::commit_two_roots(
         workspace.git(),
+        workspace.vault_root(),
         workspace.root(),
         progress,
+        "",
         &message,
+        &[],
         &[relative.clone(), String::from(".sops.yaml")],
+        &identity,
     )?;
 
     progress.write(&report(act, group, subject, &relative));
