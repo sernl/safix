@@ -597,9 +597,16 @@ fn push_lingering(out: &mut String, entries: &[String]) {
             );
             detail(
                 out,
-                "No mode deletes an entry, so this is what a mapping that was removed",
+                "A mapping removed after this entry was created leaves it looking",
             );
-            detail(out, "leaves behind.");
+            detail(
+                out,
+                "exactly like this, and so does an entry a person placed in the",
+            );
+            detail(
+                out,
+                "group by hand \u{2014} the declarations cannot tell the two apart.",
+            );
         }
         detail(out, "Nothing here will remove it; a person does that.");
     }
@@ -659,11 +666,19 @@ fn push_clan_lingering(out: &mut String, entries: &[String]) {
         );
         detail(
             out,
-            "No mode deletes a clan var, so this is what a mapping that was removed",
+            "Nothing here reads, moves, or deletes it. A mapping removed after this var",
         );
         detail(
             out,
-            "leaves behind. A person removes it, with clan's own command.",
+            "was created leaves it looking exactly like this, and so does a var that",
+        );
+        detail(
+            out,
+            "only clan's own services use \u{2014} the declarations cannot tell the two apart.",
+        );
+        detail(
+            out,
+            "If a person decides it is the former, clan's own command removes it.",
         );
     }
 }
