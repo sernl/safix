@@ -273,6 +273,11 @@ Which command performs it — a new `safix` verb, or a documented one-shot scrip
 Rollback is symmetric in the same corrected sense: decrypt every leaf from the vault, re-encrypt into the readable layout at the declaring root, remove the vault declaration and `SAFIX_VAULT_ROOT`.
 Both trees can coexist during the migration window, exactly as the unamended plan already allowed.
 
+**Note, 2026-09-03**: two simplifications adopted at implementation time, each superseding the paragraph above in the one respect named.
+First, the migration mechanism realizing this section is a `check` drift finding — `Finding::VaultRelocationPending`, one per readable-layout ciphertext document, public output, or definition record still present at the declaration root while a vault is declared — paired with a `fix` relocate phase, rather than a dedicated `safix` subcommand or a one-shot script; `fix` keeps its documented no-commit contract throughout the relocation, printing an informational note that names the vault-first commit order and the pending lock bump rather than committing or disclosing either itself.
+Second, the rollback direction is a `fix` flag, `safix fix --vault-rollback`, run while the vault is still declared — the naming key needed to map an opaque name back to its readable one is reachable only through the still-standing declaration — rather than a mirrored `Finding::VaultOrphanedAfterUndeclare` covering the state after the declaration has already been removed.
+That mirror finding is dropped entirely: the existing `Error::VaultRootWithoutDeclaration` refusal's prose instead gains one sentence telling the operator that a vault whose declaration was removed without first running the rollback is recovered by re-declaring `flake.safix.vault` and running `safix fix --vault-rollback`.
+
 ### V14. Runtime reversibility, traced site by site
 
 Every place the runtime or nix reverses a physical name back to an audience or a grant, traced and disposed of individually.
