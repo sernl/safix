@@ -69,6 +69,20 @@
 //! in microseconds. Waiting for genuine silence is therefore the difference
 //! between a prompt that is waiting and one that is still being written.
 //!
+//! Two more conditions separate a prompt from a tool that is merely slow. The
+//! wrapper judges the terminal only when the master has nothing queued: a tool
+//! that prints the newline closing one hidden read, restores the terminal
+//! through a subprocess, and only then writes its next prompt hands the wrapper
+//! those bytes in separate reads under load, and a judgement made between them
+//! would take the newline, the dark terminal, and the gap for a prompt. And a
+//! starved tool, or one that restores the terminal slowly, can hold the echo
+//! off for longer than a polling interval after the answer has been written,
+//! during which quiet plus a dark terminal looks exactly like a second prompt.
+//! A second prompt, though, is always *written*: the refusal and the prompt
+//! text arrive before it waits. So after an answer the wrapper also requires
+//! that the child has written something since, and a tool that is only slow to
+//! read is left alone rather than judged to have asked again.
+//!
 //! # Which stream gets the terminal
 //!
 //! Standard input and standard error, and not standard output. That split is
@@ -214,29 +228,6 @@ fn drain(
     let mut buffer = [0_u8; 4096];
 
     loop {
-        // A prompt that is waiting, rather than one still being written: the echo
-        // is off, nothing has arrived for a polling interval, and this wrapper's
-        // own last answer is at least that old. The module documentation states
-        // why each of the three is load-bearing.
-        let waiting = echo_is_off(master)
-            && last_byte.elapsed() >= POLL_INTERVAL
-            && last_answer.is_none_or(|at| at.elapsed() >= POLL_INTERVAL);
-        if waiting {
-            if answered >= limit {
-                // Not answered, and that is the whole of the protection: a retry
-                // is spent by submitting a value, so declining to submit one costs
-                // nothing and stops the run one below where it started.
-                let _ = child.kill();
-                return Err(Error::CardPinRejected {
-                    serial: serial.to_owned(),
-                });
-            }
-            write_answer(master, answer)?;
-            answered = answered.saturating_add(1);
-            last_answer = Some(Instant::now());
-            last_movement = Instant::now();
-        }
-
         match rustix::io::read(master, &mut buffer) {
             Ok(read) if read > 0 => {
                 last_byte = Instant::now();
@@ -254,6 +245,32 @@ fn drain(
             // A signal arrived mid-read; the next turn reads again.
             Err(rustix::io::Errno::INTR) => (),
             Err(rustix::io::Errno::AGAIN) => {
+                // A prompt that is waiting, rather than one still being written:
+                // nothing is queued on the master, the echo is off, nothing has
+                // arrived for a polling interval, this wrapper's own last answer
+                // is at least that old, and the child has written something since
+                // that answer. The module documentation states why each of the
+                // five is load-bearing.
+                let waiting = echo_is_off(master)
+                    && last_byte.elapsed() >= POLL_INTERVAL
+                    && last_answer.is_none_or(|at| at.elapsed() >= POLL_INTERVAL && last_byte > at);
+                if waiting {
+                    if answered >= limit {
+                        // Not answered, and that is the whole of the protection: a
+                        // retry is spent by submitting a value, so declining to
+                        // submit one costs nothing and stops the run one below
+                        // where it started.
+                        let _ = child.kill();
+                        return Err(Error::CardPinRejected {
+                            serial: serial.to_owned(),
+                        });
+                    }
+                    write_answer(master, answer)?;
+                    answered = answered.saturating_add(1);
+                    last_answer = Some(Instant::now());
+                    last_movement = Instant::now();
+                    continue;
+                }
                 // The child's exit is what ends the drain, and it is asked about
                 // rather than inferred from the master reporting `IO`. That report
                 // only comes once every description of the slave is closed, and

@@ -113,6 +113,15 @@ const RECIPIENT: &str = "SAFIX_CARD_STUB_RECIPIENT";
 /// outside, and is how the one-attempt claim is drilled.
 const EXPECTED_PIN: &str = "SAFIX_CARD_STUB_EXPECTED_PIN";
 
+/// Milliseconds each hidden read holds the terminal dark after the answer
+/// arrives, before restoring echo and moving on.
+///
+/// A tool starved of CPU, or one restoring the terminal through a subprocess,
+/// looks exactly like this from the wrapper's side: the answer is consumed but
+/// the echo stays off past the wrapper's polling interval. The drill that sets
+/// it proves the wrapper does not mistake that gap for a second prompt.
+const SLOW_READ_MS: &str = "SAFIX_CARD_STUB_SLOW_READ_MS";
+
 fn main() -> ! {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     record("argv", &arguments.join(" "));
@@ -644,6 +653,9 @@ fn read_unechoed(prompt: &str) -> String {
     let _ = std::io::stderr().flush();
     let mut line = String::new();
     let read = std::io::stdin().read_line(&mut line);
+    if let Some(millis) = named(SLOW_READ_MS).and_then(|value| value.parse::<u64>().ok()) {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+    }
     let _ = std::process::Command::new("stty").arg("echo").status();
     eprintln!();
     if read.is_err() {

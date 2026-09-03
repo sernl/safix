@@ -31,6 +31,12 @@ Two new `check` findings: `Finding::VaultGitignoreMissing`, for a vault whose `.
 
 `safix fix` adopts a vault as part of its ordinary convergence, relocating every pending readable-layout leaf into its opaque vault destination; `safix fix --vault-rollback` runs the same move the other direction while the vault is still declared, and rotating the naming key is the identical migration run again with a new one.
 
+### Fixed
+
+- `safix enroll` no longer reports a refused PIN when the card tool is merely slow to restore its terminal after an answer.
+  The wrapper answered a hidden prompt once the terminal had been dark and quiet for a polling interval, and a tool starved of CPU, or one restoring the terminal through a subprocess, keeps it dark past that interval while it consumes the answer; under load that gap was judged a second prompt, and a run that had answered correctly stopped with the one-attempt refusal.
+  A prompt is now judged only once the master has nothing queued and the tool has written something since the last answer, which is what a real second prompt always does before it waits.
+
 ### Two-way convergence across the clan boundary, and a placement a shared clan var can declare honestly
 
 **BREAKING**: `flake.safix.bridge.mappings.<id>.clan.machine` becomes `nullOr str`, required when `placement` is `per-machine` (the default, and every mapping declared before this change) and refused when `placement` is `shared`; a mapping that already names a machine needs no edit, and only a newly declared `shared` mapping ever leaves it null.

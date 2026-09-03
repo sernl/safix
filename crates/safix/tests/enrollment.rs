@@ -923,6 +923,43 @@ fn a_ykman_drive_that_asks_past_its_bound_stops_the_run() {
     );
 }
 
+/// A card tool that is slow to restore its terminal is not judged to have
+/// asked again.
+///
+/// After each hidden read the stub holds the echo off for three polling
+/// intervals before restoring it, which is what a starved tool, or one that
+/// restores the terminal through a subprocess, looks like from the wrapper's
+/// side. Every prompt of the ceremony still gets exactly one answer, and the
+/// run reaches the same outstanding-proof report a prompt-paced stub reaches.
+#[test]
+fn a_card_tool_slow_to_restore_its_terminal_is_not_judged_to_have_asked_again() {
+    let mut fixture = Fixture::new();
+    fixture.seed_declarations();
+    fixture.seed_card_custody(SERIAL);
+
+    let mut environment = card_env(&fixture, SERIAL, CARD);
+    environment.push(("SAFIX_CARD_STUB_SLOW_READ_MS".to_owned(), "60".to_owned()));
+
+    let run = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&environment));
+    assert_eq!(run.code, Some(1), "an outstanding proof is not a success");
+    run.says("INCOMPLETE");
+    assert!(
+        !run.stderr.contains("refused the PIN"),
+        "a slow terminal was taken for a second prompt: {}",
+        run.stderr
+    );
+    assert_eq!(
+        fixture.card_recorded("ykman-prompt").lines().count(),
+        5,
+        "the five ykman prompts were not each answered exactly once"
+    );
+    assert_eq!(
+        fixture.card_recorded("pin-attempt").lines().count(),
+        1,
+        "the generator's PIN was not answered exactly once"
+    );
+}
+
 /// The graphical code of one refusal, which is where a code is rendered.
 ///
 /// The harness sets the plain reporter for every run; emptying that variable
