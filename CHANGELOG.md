@@ -36,6 +36,8 @@ Two new `check` findings: `Finding::VaultGitignoreMissing`, for a vault whose `.
 - `safix enroll` no longer reports a refused PIN when the card tool is merely slow to restore its terminal after an answer.
   The wrapper answered a hidden prompt once the terminal had been dark and quiet for a polling interval, and a tool starved of CPU, or one restoring the terminal through a subprocess, keeps it dark past that interval while it consumes the answer; under load that gap was judged a second prompt, and a run that had answered correctly stopped with the one-attempt refusal.
   A prompt is now judged only once the master has nothing queued and the tool has written something since the last answer, which is what a real second prompt always does before it waits.
+- The clan and keepassxc lingering reports no longer assert that a removed mapping caused an unclaimed var or entry, or tell the operator to delete it.
+  A var or entry with no declared mapping looks the same whether a mapping was removed after it was created or the var or entry was never covered by one, and the declarations cannot tell the two apart, so the report now states both readings without choosing and, for a clan var, names the command that removes it if a person decides it is the former.
 
 ### Two-way convergence across the clan boundary, and a placement a shared clan var can declare honestly
 
