@@ -97,7 +97,8 @@ pub fn file_to_prove_with(workspace: &Workspace, user: &str) -> Result<String> {
         .0
         .iter()
         .find(|(file, record)| {
-            record.audience.iter().any(|member| member == user) && workspace.absolute(file).exists()
+            record.audience.iter().any(|member| member == user)
+                && workspace.vault_absolute(file).exists()
         })
         .map(|(file, _)| file.clone())
         .ok_or_else(|| Error::NoFileToProveWith {
@@ -155,8 +156,8 @@ pub fn decrypt_with(
     let mut command = Command::new(sops_program());
     command
         .arg("decrypt")
-        .arg(workspace.absolute(relative))
-        .current_dir(workspace.root())
+        .arg(workspace.vault_absolute(relative))
+        .current_dir(workspace.vault_root())
         .env(IDENTITY_FILE_VARIABLE, identity_file)
         .stdin(Stdio::null())
         // Piped rather than inherited: the plaintext of a real secret is what

@@ -220,11 +220,11 @@ pub fn run(
 /// output with no value, answered the same way so the two cannot disagree about
 /// one entry.
 fn read_existing(workspace: &Workspace, relative: &str, key: &str) -> Result<Secret> {
-    let absolute = workspace.absolute(relative);
+    let absolute = workspace.vault_absolute(relative);
     if !absolute.exists() {
         return Ok(Secret::empty());
     }
-    let Some(text) = workspace.read_relative(relative)? else {
+    let Some(text) = workspace.read_vault_relative(relative)? else {
         return Ok(Secret::empty());
     };
     if document::keys_of(&text)?

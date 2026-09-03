@@ -378,7 +378,7 @@ impl Ceremony<'_> {
                 .governed_files()?
                 .managed
                 .iter()
-                .filter(|governed| self.workspace.absolute(governed).exists())
+                .filter(|governed| self.workspace.vault_absolute(governed).exists())
                 .cloned(),
         );
         let mut message = format!(
@@ -602,7 +602,7 @@ impl Ceremony<'_> {
 fn recipients_before(workspace: &Workspace) -> Result<Vec<(String, Vec<String>)>> {
     let mut found = Vec::new();
     for relative in &workspace.governed_files()?.managed {
-        let path = workspace.absolute(relative);
+        let path = workspace.vault_absolute(relative);
         if !path.exists() {
             continue;
         }
@@ -625,7 +625,7 @@ fn recipients_before(workspace: &Workspace) -> Result<Vec<(String, Vec<String>)>
 /// distinguish that from a narrowing the declarations asked for.
 fn refuse_lost_recipients(workspace: &Workspace, before: &[(String, Vec<String>)]) -> Result<()> {
     for (relative, had) in before {
-        let path = workspace.absolute(relative);
+        let path = workspace.vault_absolute(relative);
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };

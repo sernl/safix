@@ -468,14 +468,14 @@ fn run_one(
 fn holds_a_value(workspace: &Workspace, target: &Target) -> Result<bool> {
     match target {
         Target::Secret { file, key } => {
-            let Some(text) = workspace.read_relative(file)? else {
+            let Some(text) = workspace.read_vault_relative(file)? else {
                 return Ok(false);
             };
             Ok(document::keys_of(&text)?
                 .get(key)
                 .is_some_and(|state| !state.empty))
         }
-        Target::Public { file } => Ok(public::holds_a_value(&workspace.absolute(file))),
+        Target::Public { file } => Ok(public::holds_a_value(&workspace.vault_absolute(file))),
     }
 }
 
@@ -549,7 +549,7 @@ fn mint(
                     .unwrap_or(&input.name)
                     .to_owned();
                 let placement = workspace.resolve(user, &input.name)?;
-                let absolute = workspace.absolute(&placement.file);
+                let absolute = workspace.vault_absolute(&placement.file);
                 tree.add_dependency(
                     &producer,
                     &input.name,

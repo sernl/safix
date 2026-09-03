@@ -104,6 +104,15 @@ pub fn shim() -> &'static str {
         .as_str()
 }
 
+/// The git the commit-ordering drills point safix at, to refuse one root's
+/// `commit` invocation on purpose. See `tests/support/git-shim.rs`.
+pub fn git_shim() -> &'static str {
+    static PATH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        located("SAFIX_TEST_GIT_SHIM", env!("CARGO_BIN_EXE_safix-git-shim"))
+    });
+    PATH.as_str()
+}
+
 /// The card surface the enrollment tests are driven against.
 ///
 /// One binary with four roles. Nothing in this suite runs the real `ykman`, the
@@ -310,6 +319,12 @@ pub struct Fixture {
     /// fixture's default: nothing about the vault is set up until a test asks
     /// for it.
     vault: Option<PathBuf>,
+    /// The vault's disposable creation rules text, once
+    /// [`Fixture::set_vault_rules`] has rendered one. `None` is every
+    /// fixture's default and is what `write_fixtures` answers `null` with,
+    /// the same answer a consumer who has never heard of a vault evaluates
+    /// to.
+    vault_rules: Option<String>,
     extras: Vec<String>,
 }
 
@@ -397,6 +412,7 @@ impl Fixture {
             delegation: json!({ "managers": {}, "managedBy": {}, "groups": {} }),
             clan_flake: None,
             vault: None,
+            vault_rules: None,
             genplan: json!({
                 "alice": { "order": [], "outputs": {}, "inputs": {} },
                 "bob":   { "order": [], "outputs": {}, "inputs": {} },
@@ -462,6 +478,13 @@ impl Fixture {
         self.vault = Some(vault.clone());
         self.write_fixtures();
         vault
+    }
+
+    /// The vault's own path, once [`Fixture::declare_vault`] has stood one up.
+    pub fn vault_root(&self) -> PathBuf {
+        self.vault
+            .clone()
+            .expect("declare_vault before reading the vault's own path")
     }
 
     /// Declare a placement for a name with no generator.
@@ -1264,11 +1287,13 @@ impl Fixture {
             &self.work.join("vault-declared.json"),
             &json!(self.vault.is_some()),
         );
-        // A vault-declared fixture's disposable creation rules text: wave two
-        // owns rendering non-null content and the scratch-config plumbing
-        // that consumes it, so every fixture answers `null` for now, the same
-        // answer a consumer who has never heard of a vault evaluates to.
-        write_json(&self.work.join("vault-rules.json"), &json!(null));
+        // A vault-declared fixture's disposable creation rules text: `null`
+        // until a test calls `set_vault_rules`, the same answer a consumer
+        // who has never heard of a vault evaluates to.
+        write_json(
+            &self.work.join("vault-rules.json"),
+            &json!(self.vault_rules),
+        );
 
         // The subject name space, derived here the way `resolve.nix` derives it:
         // every declared person, every declared group, and every organization the
@@ -1831,8 +1856,19 @@ impl Fixture {
 
     /// One git question, answered in the fixture repository.
     pub fn git(&self, arguments: &[&str]) -> String {
+        self.git_at(&self.repo, arguments)
+    }
+
+    /// One git question, answered in the vault repository, once
+    /// [`Fixture::declare_vault`] has stood one up.
+    pub fn vault_git(&self, arguments: &[&str]) -> String {
+        self.git_at(&self.vault_root(), arguments)
+    }
+
+    /// One git question, answered in the named repository.
+    fn git_at(&self, root: &Path, arguments: &[&str]) -> String {
         let mut command = Command::new("git");
-        command.arg("-C").arg(&self.repo).args(arguments);
+        command.arg("-C").arg(root).args(arguments);
         command.env("HOME", &self.work);
         let output = command.output().expect("could not run git");
         assert!(
@@ -1919,6 +1955,30 @@ impl Fixture {
             .current_dir(&self.repo)
             .env("SOPS_AGE_KEY_FILE", &self.key_file);
         capture(&mut command)
+    }
+
+    /// One key's value, decrypted from the vault repository with the
+    /// identity minted for this fixture.
+    pub fn vault_value(&self, relative: &str, key: &str) -> String {
+        let mut command = Command::new("sops");
+        command
+            .arg("decrypt")
+            .arg("--extract")
+            .arg(format!("[\"{key}\"]"))
+            .arg(relative)
+            .current_dir(self.vault_root())
+            .env("SOPS_AGE_KEY_FILE", &self.key_file);
+        capture(&mut command)
+    }
+
+    /// Whether a file exists in the vault repository.
+    pub fn vault_exists(&self, relative: &str) -> bool {
+        self.vault_root().join(relative).exists()
+    }
+
+    /// The bytes of a vault repository file.
+    pub fn vault_read(&self, relative: &str) -> String {
+        std::fs::read_to_string(self.vault_root().join(relative)).unwrap()
     }
 
     /// Whether a file exists in the repository.
@@ -2017,6 +2077,60 @@ impl Fixture {
             .env("SOPS_AGE_KEY_FILE", &self.key_file);
         let encrypted = capture_bytes(&mut command);
         std::fs::write(self.repo.join(relative), encrypted).unwrap();
+    }
+
+    /// A file encrypted straight to the named recipients inside the vault
+    /// repository, going around the creation rules — the vault-rooted
+    /// counterpart of [`Fixture::encrypt_to`], for a document a test wants to
+    /// exist at [`Fixture::vault_root`] without going through `safix` itself.
+    pub fn encrypt_to_vault(&self, relative: &str, recipients: &[&str], contents: &str) {
+        let vault = self.vault_root();
+        let plain = self.work.join("vault-straight.yaml");
+        std::fs::write(&plain, contents).unwrap();
+        if let Some(parent) = vault.join(relative).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut command = Command::new("sops");
+        command
+            .arg("--config")
+            .arg("/dev/null")
+            .arg("encrypt")
+            .arg("--age")
+            .arg(recipients.join(","))
+            .arg("--input-type")
+            .arg("yaml")
+            .arg("--output-type")
+            .arg("yaml")
+            .arg(&plain)
+            .current_dir(&vault)
+            .env("SOPS_AGE_KEY_FILE", &self.key_file);
+        let encrypted = capture_bytes(&mut command);
+        std::fs::write(vault.join(relative), encrypted).unwrap();
+    }
+
+    /// The vault's disposable creation rules text: a literal, anchored rule
+    /// per call, granting `recipients` for the document at `relative`.
+    ///
+    /// Rendered the shape `renderVaultRules` (`modules/flake/safix/policy.nix`)
+    /// specifies rather than [`rules_block`]'s: no header, no `Audience:`
+    /// comment, no `keys:` anchor block, and each rule's `key_groups` lists
+    /// the raw recipient keys inline. `declare_vault` must run first, so a
+    /// vault-rooted document has somewhere to be created; every fixture with
+    /// no call to this answers `null`, the same answer a consumer who has
+    /// never heard of a vault evaluates to.
+    pub fn set_vault_rules(&mut self, relative: &str, recipients: &[&str]) {
+        let mut text = String::from("creation_rules:\n");
+        writeln!(
+            text,
+            "  - path_regex: ^{}$\n    key_groups:\n      - age:",
+            relative.replace('.', "\\.")
+        )
+        .unwrap();
+        for recipient in recipients {
+            writeln!(text, "          - {recipient}").unwrap();
+        }
+        self.vault_rules = Some(text);
+        self.write_fixtures();
     }
 
     /// Re-wrap a file to the creation rule that covers it, which is what

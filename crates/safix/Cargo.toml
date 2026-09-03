@@ -60,6 +60,15 @@ path = "tests/support/card-stubs.rs"
 name = "safix-transport-stub"
 path = "tests/support/transport-stub.rs"
 
+# The git the commit-ordering drills point safix at, to refuse one root's
+# `commit` invocation on purpose — the half-landed state a vault-first,
+# two-commit write must be shown to recover from. Rust for the reason every
+# other shim here is: it asserts which invocation it is refusing rather than
+# refusing the first one it sees.
+[[bin]]
+name = "safix-git-shim"
+path = "tests/support/git-shim.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true

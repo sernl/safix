@@ -354,7 +354,7 @@ fn get(arguments: &[String]) -> Result<ExitCode, Refusal> {
     };
 
     let placement = workspace.resolve(&user, &name)?;
-    let path = workspace.absolute(&placement.file);
+    let path = workspace.vault_absolute(&placement.file);
     if !path.exists() {
         return Err(Error::NoValueYet {
             file: placement.file.clone(),

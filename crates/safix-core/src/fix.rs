@@ -133,7 +133,7 @@ fn concurrency() -> NonZeroUsize {
 
 /// The line announcing what is about to happen to one file, or why nothing is.
 fn announce(workspace: &Workspace, relative: &str) -> String {
-    if workspace.absolute(relative).exists() {
+    if workspace.vault_absolute(relative).exists() {
         format!("==> sops updatekeys {relative}")
     } else {
         format!("==> {relative} does not exist yet; create it with: sops {relative}")
@@ -149,7 +149,7 @@ fn rewrap_one_at_a_time(
 ) -> Result<i32> {
     for relative in managed {
         log(progress, &announce(workspace, relative));
-        if !workspace.absolute(relative).exists() {
+        if !workspace.vault_absolute(relative).exists() {
             continue;
         }
         let status = workspace
@@ -185,7 +185,7 @@ fn rewrap_together(
     let sops = workspace.sops();
     let present: Vec<String> = managed
         .iter()
-        .filter(|relative| workspace.absolute(relative).exists())
+        .filter(|relative| workspace.vault_absolute(relative).exists())
         .cloned()
         .collect();
 

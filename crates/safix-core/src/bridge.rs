@@ -563,9 +563,9 @@ pub(crate) fn held_by_safix(
     let placement = workspace.resolve(user, name)?;
     let key = placement.key.clone();
     let relative = placement.file.clone();
-    let absolute = workspace.absolute(&relative);
+    let absolute = workspace.vault_absolute(&relative);
 
-    let Some(text) = workspace.read_relative(&relative)? else {
+    let Some(text) = workspace.read_vault_relative(&relative)? else {
         return Ok(None);
     };
     match document::keys_of(&text)?.get(&key) {

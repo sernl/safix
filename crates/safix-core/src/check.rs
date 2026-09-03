@@ -474,7 +474,7 @@ fn definitions(
             if !reported.insert(record.clone()) {
                 continue;
             }
-            let Some(text) = workspace.read_relative(&record)? else {
+            let Some(text) = workspace.read_vault_relative(&record)? else {
                 continue;
             };
             let Some(recorded) = definition::recorded(&text) else {
@@ -508,7 +508,7 @@ struct Documents {
 impl Documents {
     fn text(&mut self, workspace: &Workspace, file: &str) -> Result<Option<&String>> {
         if !self.text.contains_key(file) {
-            let text = workspace.read_relative(file)?;
+            let text = workspace.read_vault_relative(file)?;
             self.text.insert(file.to_owned(), text);
         }
         Ok(self.text.get(file).and_then(Option::as_ref))
