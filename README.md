@@ -941,6 +941,63 @@ A user with an empty generator order is unaffected either way, because the refus
 `examples/dendritic/` declares the identical fleet again, behind `flakeModules.default` in an ordinary flake-parts flake with one declaration per file.
 `modules/flake/checks/examples.nix` evaluates both and asserts they resolve the same fleet field for field, so copy `plain-nix` if your tree has no flake at all or a flake that does not use flake-parts, and `dendritic` if it already does; `examples/README.md` indexes both in more detail.
 
+## A vault: ciphertext in a second repository
+
+Everything above lands in the declaring flake's own tree.
+`flake.safix.vault` moves it to a second repository instead — every ciphertext document, every generated public value and every generator definition record, in place of this flake's own source — while the declarations, the recipient policy and everything you have read so far stay exactly where they are.
+
+```nix
+{
+  inputs.vault.url = "git+ssh://git@example.com/fleet-vault.git";
+  inputs.vault.flake = false;
+
+  outputs = inputs@{ safix, vault, ... }: {
+    # ... the rest of your flake ...
+    flake.safix.vault = {
+      root = inputs.vault;
+      namingKey = "<64 or more lowercase hexadecimal characters, minted with `openssl rand -hex 32`>";
+    };
+  };
+}
+```
+
+`SAFIX_VAULT_ROOT` names the operator's own working tree of that repository, the one a command actually writes and commits into — a different, mutable path from the locked, store-copied one the declaration resolves at evaluation, the same relationship `SAFIX_REPO_ROOT` already has to the declaring flake.
+Left unset with no vault declared, nothing here applies: `set`, `edit`, `get`, `generate` and every other verb behave byte for byte as they do today.
+
+**Every vault-rooted name is opaque.**
+Without a vault declared, the guest-list directories under [sharedWith](#sharedwith-i-hand-you-a-copy-of-my-thing) rely on a property stated plainly there: the path states who can open the file.
+A vault gives that up on purpose.
+Four kinds of name move under `root` — a ciphertext document's file name, the key inside it, a public value's file name, and a generator's definition-record path — each replaced by a hash of `namingKey`, a use-specific tag, and today's readable name, so a vault host or a reader holding only the vault learns none of the audience, key or secret names the declaring flake's own tree carries.
+The declaring flake still computes both forms and the mapping between them; only a vault-only view loses the readable one.
+
+**A vault document is not browsable by hand.**
+`.sops.yaml` never moves — it stays committed at the declaring flake's own source in every case, because the encryption tool reads it from there and because a vault host's own copy would be the richest document this scheme could hide — so a bare `sops <file>` run against a vault-rooted document finds no policy above it and no creation rule to fall back on.
+`safix set`, `safix edit` and `safix get` are the tools against a vault document; each renders the disposable creation rules the vault-rooted write needs, uses them, and removes them again before it returns.
+Renaming or re-audiencing an entry re-encrypts its leaf, exactly as it always has — a document's key path is bound into what it decrypts against, so a name is fixed at encryption time and a later rename is a fresh wrap, never a free move.
+
+**Two commits, in an order that matters, and a safe-to-re-run refusal.**
+A command that touches only the vault — `set`, `generate` — commits there alone.
+One that touches both roots — `adduser`, `group`, `enroll` — commits the vault first and the declaration root second, with a trailer on the second naming the first's commit.
+The order is a safety property rather than a convention: a declaration committed first could grant an audience the vault's own policy has not yet been re-wrapped for, and a `safix set` run against that gap would silently wrap a value to the *old*, narrower recipients.
+Committing the vault first means the opposite failure is the only one reachable — an unreferenced vault commit nobody's declaration points at yet, which costs nothing.
+If the vault commit lands and the declaration commit then fails, the run reports the vault commit's id and the pending declaration paths, and states plainly that re-running the same command completes the operation without repeating the vault commit.
+
+**A vault commit discloses the lock bump it needs.**
+A commit landing in the vault's own working tree does not update the declaring flake's lock file, so no consuming build sees it until that lock entry is bumped.
+Every command that commits to the vault says so afterward, and names the exact remedy — `nix flake lock --update-input <name>` — when the declaring flake's lock file settles on exactly one input matching the vault; otherwise it states the same requirement in words general enough to stay true without guessing a name.
+
+**What a vault host still sees, stated rather than implied.**
+Opacity is a property of names, not of shape: a vault host still sees how many documents there are, one per audience as always, how many keys each holds, one per secret; each ciphertext's length, since sops does not pad; every document's recipient public keys, listed in the clear as sops itself requires; and one commit per write, exactly as before.
+The naming key itself is not a secret held only by the vault's owner — it is an evaluation-time nix value, visible to anyone who can evaluate the declaring flake, which is every local user of a machine holding that flake in its nix store.
+What it withholds is narrower and still real: a vault host, or a reader holding only the vault and not the declaring flake, cannot recover an audience, a secret's name, or a generator's declaration from a name alone.
+
+**Adopting or abandoning a vault is `safix fix`'s job.**
+Declaring `flake.safix.vault` on a consumer that already has ciphertext at the declaration root does not move anything by itself; `safix fix` does, as part of its ordinary convergence, decrypting every readable-layout document, public output and definition record under your own identity and re-encrypting each into its opaque vault destination, then removing the readable-layout copy.
+An interrupted run is safe to resume: a destination already present is left alone, so a re-run picks up wherever it stopped rather than repeating work or losing anything.
+`safix fix --vault-rollback` runs the same move the other direction while the vault is still declared — the naming key needed to recover a vault-rooted entry's readable name is only reachable through that still-standing declaration — after which the declaration and `SAFIX_VAULT_ROOT` are yours to remove.
+Rotating the naming key is the identical migration, run again with a new key: every vault-rooted name is a function of the key, so there is no partial or incremental rotation, only a full re-run.
+Losing the naming key never loses a secret — the declarations regenerate every name deterministically from it — so keeping it only in your own record, never committed, is recoverable by re-declaring it; only a *changed* key is a rotation rather than a loss.
+
 ## The bridge to clan
 
 If your fleet also runs [clan](https://clan.lol), values can move between clan's vars and safix's entries in either direction.
@@ -1143,10 +1200,11 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the runtime as a library | `crates/safix-core/` |
 | the command, exposed as `packages.safix` | `crates/safix/` |
 | the integration suite the command is held to | `crates/safix/tests/` |
-| recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand |
-| encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/` |
-| public outputs, in a consumer's tree | `public/safix/` — plaintext, no creation rule, readable at evaluation |
-| the definition each generated value was minted under | `state/safix/definitions/` — plaintext, one digest per value |
+| recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand; stays at the declaration root even with a vault declared |
+| encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/`, or `secrets/<opaque-hash>.yaml` at the vault root when one is declared |
+| public outputs, in a consumer's tree | `public/safix/` — plaintext, no creation rule, readable at evaluation; `public/<opaque-hash>` at the vault root when one is declared |
+| the definition each generated value was minted under | `state/safix/definitions/` — plaintext, one digest per value; `state/<opaque-hash>` at the vault root when one is declared |
+| the vault, when `flake.safix.vault` is declared | a second git repository, at `root`; the operator's working tree of it is named by `SAFIX_VAULT_ROOT` |
 
 The option reference lives on the types themselves; this document is the narrative companion.
 
