@@ -166,6 +166,34 @@ pub struct Placement {
     /// [`Placement::key`] describe a document that is never written: a public
     /// value has no ciphertext, no recipients and no creation rule.
     pub public: Option<String>,
+    /// Where this entry's definition record lives, vault-rooted-relative,
+    /// when a vault is declared; `null` otherwise.
+    ///
+    /// Computed by the resolver from the same `namingKey` that opaques
+    /// [`Placement::file`], [`Placement::key`] and [`Placement::public`], so
+    /// that [`crate::definition::record_path`] never has to hash: it is the
+    /// one physical-name reversal site design V14 traces, and this field is
+    /// its disposition.
+    #[serde(rename = "definitionRecord")]
+    pub definition_record: Option<String>,
+    /// The readable, unhashed relative path [`Placement::file`] would carry
+    /// with no vault declared; `null` when no vault is declared.
+    ///
+    /// Carried alongside the opaque [`Placement::file`] so that a migration
+    /// or a rollback can enumerate both forms of one document without the
+    /// runtime computing either hash itself — nothing in `crates/safix-core`
+    /// hashes, per design V14.
+    #[serde(rename = "logicalFile")]
+    pub logical_file: Option<String>,
+    /// The readable, unhashed in-document key [`Placement::key`] would carry
+    /// with no vault declared; `null` when no vault is declared.
+    #[serde(rename = "logicalKey")]
+    pub logical_key: Option<String>,
+    /// The readable, unhashed relative public path [`Placement::public`]
+    /// would carry with no vault declared; `null` when either no vault is
+    /// declared or this entry has no public output.
+    #[serde(rename = "logicalPublic")]
+    pub logical_public: Option<String>,
 }
 
 /// `user -> name -> placement`, the whole of what the command resolves against.
@@ -994,7 +1022,9 @@ mod tests {
             "share": false, "validation": null
           },
           "key": "api-token", "origin": "private", "owner": "alice",
-          "public": null, "shared": false
+          "public": null, "shared": false,
+          "definitionRecord": null, "logicalFile": null,
+          "logicalKey": null, "logicalPublic": null
         }
       },
       "carol": {}

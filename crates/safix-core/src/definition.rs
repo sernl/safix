@@ -120,14 +120,23 @@ pub fn recorded(text: &str) -> Option<&str> {
     Some(digest)
 }
 
-/// Where the record for one entry lives, repository-relative.
+/// Where the record for one entry lives, repository-relative when no vault is
+/// declared, vault-rooted-relative when one is.
 ///
-/// Two shapes, because a shared entry is one value and a private one is a value
-/// per person. A shared name's record is keyed by the directory its audience
-/// reads — which is that audience's own name, joined in sorted order by the
-/// resolver — so that both carriers resolve one record for the one value they
-/// share. Keying it by the carrier would write one record per carrier and then
-/// report drift for whichever of them did not mint.
+/// In vault mode `placement.definition_record` is the opaque path
+/// `resolve.nix` already computed from the same `namingKey` that opaques
+/// [`Placement::file`], and it is returned as given: `placement.file`'s
+/// directory carries no audience to extract in that mode (design V14), so
+/// this crate never derives the path itself there — nothing in
+/// `crates/safix-core` computes a hash.
+///
+/// Otherwise, two shapes, because a shared entry is one value and a private
+/// one is a value per person. A shared name's record is keyed by the
+/// directory its audience reads — which is that audience's own name, joined
+/// in sorted order by the resolver — so that both carriers resolve one
+/// record for the one value they share. Keying it by the carrier would write
+/// one record per carrier and then report drift for whichever of them did
+/// not mint.
 ///
 /// Everything else is keyed by the entry's owner rather than by whoever holds
 /// it, so that a name one person owns and another was granted has one record
@@ -135,6 +144,9 @@ pub fn recorded(text: &str) -> Option<&str> {
 /// user, which is the ordinary case.
 #[must_use]
 pub fn record_path(name: &str, placement: &Placement) -> String {
+    if let Some(record) = &placement.definition_record {
+        return record.clone();
+    }
     if placement.shared {
         let audience = audience_directory(&placement.file);
         return format!("{PREFIX}shared/{audience}/{name}");
@@ -442,6 +454,27 @@ mod tests {
         serde_json::from_value(json!({
             "file": file, "key": "k", "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
+            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null,
+        }))
+        .expect("the fixture is the shape the resolver emits")
+    }
+
+    /// A placement in vault mode: `file` and `key` are already the opaque
+    /// forms `resolve.nix` computes, and `definitionRecord` is the opaque
+    /// record path computed alongside them.
+    fn vault_placement(
+        file: &str,
+        owner: &str,
+        shared: bool,
+        definition_record: &str,
+    ) -> Placement {
+        serde_json::from_value(json!({
+            "file": file, "key": "k", "origin": "private",
+            "owner": owner, "shared": shared, "generator": null, "public": null,
+            "definitionRecord": definition_record,
+            "logicalFile": "secrets/safix/users/alice/secrets.yaml",
+            "logicalKey": "api-token", "logicalPublic": null,
         }))
         .expect("the fixture is the shape the resolver emits")
     }
@@ -493,6 +526,46 @@ mod tests {
             assert!(path.starts_with(PREFIX), "{path} is outside {PREFIX}");
             assert!(!path.starts_with("secrets/"), "{path} is under secrets/");
             assert!(!path.starts_with(crate::public::PREFIX), "{path} is public");
+        }
+    }
+
+    /// In vault mode the nix-supplied `definitionRecord` is returned
+    /// directly, bypassing `audience_directory` entirely — design V14's
+    /// disposition for the one physical-name reversal site in this crate.
+    /// The no-vault half of this claim is
+    /// [`a_record_path_is_keyed_by_owner_or_by_audience`], byte-identical to
+    /// today's output because [`Placement::definition_record`] is `None`
+    /// there.
+    #[test]
+    fn a_vault_mode_record_path_is_the_nix_supplied_opaque_path() {
+        let opaque = "state/9f2c6c9e4d9b1c3a2e7f0a5b6c8d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d";
+        let shared_opaque =
+            "state/2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c";
+        let opaque_file =
+            "secrets/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b.yaml";
+
+        // A private entry: the nix-supplied record wins even though the
+        // opaque file's directory carries no audience `audience_directory`
+        // could have extracted instead.
+        assert_eq!(
+            record_path(
+                "api-token",
+                &vault_placement(opaque_file, "alice", false, opaque)
+            ),
+            opaque
+        );
+
+        // A shared entry: the nix-supplied record wins over the
+        // shared/audience derivation too, and both carriers resolve the one
+        // record nix computed for them.
+        for owner in ["alice", "bob"] {
+            assert_eq!(
+                record_path(
+                    "wifi-psk",
+                    &vault_placement(opaque_file, owner, true, shared_opaque)
+                ),
+                shared_opaque
+            );
         }
     }
 }
