@@ -46,6 +46,12 @@ Each distinct audience SHALL resolve to exactly one encrypted file, and every se
 - **THEN** the granted secret moves to the audience's own file
 - **AND** the owner's remaining secrets stay in the owner's file, unreadable by the grantee
 
+#### Scenario: A multi-member audience in vault mode
+
+- **WHEN** a secret's audience is several people and a vault is declared
+- **THEN** it still resolves to a file belonging to exactly that audience
+- **AND** the file's name is opaque rather than a directory named for its members in sorted order, so the path no longer states who can open it — that guarantee is scoped to the case with no vault declared
+
 ### Requirement: Carrying is not sharing
 
 Two users carrying one catalogue entry SHALL by default hold independent values in separate files.

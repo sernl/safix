@@ -53,6 +53,12 @@ Public outputs SHALL be stored under a top-level prefix distinct from the one ho
 - **THEN** a shared entry's path is keyed by its audience and a per-user entry's by its carrier
 - **AND** the leaf carries the output's name
 
+#### Scenario: A vault-mode leaf is opaque, not keyed by audience or carrier
+
+- **WHEN** a public output's path is computed and a vault is declared
+- **THEN** the leaf under the public prefix is a hash of the naming key and the output's readable identity, held as a single file rather than a `<name>/value` directory
+- **AND** prefix separation from the encrypted tree still holds: neither prefix is a prefix of the other, opaque or not
+
 ### Requirement: No generated creation rule matches any public path, and this is checked
 
 For every creation rule the policy renderer produces and every path the public store holds, a check SHALL assert that the rule does not match the path.

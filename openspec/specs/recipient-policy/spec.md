@@ -8,7 +8,8 @@ The recipient policy the encryption tool reads off disk: that it is generated fr
 
 ### Requirement: The policy file is generated and never hand-edited
 
-The recipient policy SHALL be rendered from the same declarations the resolver reads, SHALL be committed to the consumer's repository because the encryption tool reads it from the filesystem, and SHALL carry a header stating that it is generated and naming the command that regenerates it.
+The recipient policy SHALL be rendered from the same declarations the resolver reads, SHALL be committed to the declaring repository because the encryption tool reads the committed file from there — whether or not a vault is declared — and SHALL carry a header stating that it is generated and naming the command that regenerates it.
+For a command that needs creation rules to reach a vault-rooted document, the runtime SHALL additionally render a disposable, uncommitted copy of the rules into the vault working tree, scoped to that command alone.
 
 #### Scenario: One declaration, two projections
 
@@ -27,6 +28,18 @@ The recipient policy SHALL be rendered from the same declarations the resolver r
 - **WHEN** the policy is regenerated
 - **THEN** every declared person's rule is present in the output, because the people are the generator's input
 - **AND** regeneration cannot drop a rule that no declaration removed
+
+#### Scenario: A vault does not move the committed file
+
+- **WHEN** a consumer declares a vault
+- **THEN** the committed policy file still lives in the declaring repository, exactly where it lives with no vault declared
+- **AND** the vault repository never carries a committed policy file of its own
+
+#### Scenario: A vault-rooted command reads a disposable rendering, not the committed file
+
+- **WHEN** a command needs creation rules to encrypt or re-key a vault-rooted document
+- **THEN** it reads a rendering produced for that run alone, inside the vault working tree, never the committed file at the declaring root
+- **AND** that rendering is never committed
 
 ### Requirement: One rule per audience, naming exactly that audience's recipients
 
@@ -91,6 +104,12 @@ A pattern violating any of the three SHALL fail a check that names the offending
 - **WHEN** two people's rules coexist
 - **THEN** their patterns match disjoint directories
 - **AND** reordering the rules changes no file's recipients
+
+#### Scenario: A vault-mode rule matches one opaque file, not a directory wildcard
+
+- **WHEN** a rule is emitted for a vault-rooted, opaquely named document
+- **THEN** its pattern is the literal opaque filename, anchored at both ends
+- **AND** it still satisfies every clause of this requirement, because a single-file match is the limiting case of one directory level rather than an exception to it
 
 ### Requirement: No catch-all exists and an unmatched path fails closed
 
