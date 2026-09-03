@@ -42,7 +42,12 @@ pub struct Workspace {
     bridge: OnceLock<Bridge>,
     keepassxc: OnceLock<Keepassxc>,
     subjects: OnceLock<Subjects>,
+    vault_creation_rules_text: OnceLock<Option<String>>,
 }
+
+/// The scratch rules file's name, chosen to read unmistakably as generated
+/// and disposable rather than as a second `.sops.yaml` — design V10.
+pub const VAULT_RULES_FILE: &str = ".sops-vault-rules.yaml";
 
 impl Workspace {
     /// The repository this process is inside, with every driver taken from the
@@ -98,6 +103,7 @@ impl Workspace {
             bridge: OnceLock::new(),
             keepassxc: OnceLock::new(),
             subjects: OnceLock::new(),
+            vault_creation_rules_text: OnceLock::new(),
         }
     }
 
@@ -412,6 +418,52 @@ impl Workspace {
                 cause,
             }),
         }
+    }
+
+    /// The vault's disposable creation rules, `null` exactly when
+    /// [`Attribute::VaultDeclared`] is `false`.
+    ///
+    /// Cached like every other evaluation here, and read only by
+    /// [`Workspace::stage_vault_rules`] — a caller wanting to know whether a
+    /// vault is declared reads `vault_root() != root()` instead, which needs
+    /// no evaluation at all.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    fn vault_creation_rules_text(&self) -> Result<Option<&str>> {
+        cached(&self.vault_creation_rules_text, || {
+            self.nix
+                .eval_json(&self.root, Attribute::VaultCreationRulesText)
+        })
+        .map(Option::as_deref)
+    }
+
+    /// Render the vault's disposable creation rules to a scratch file inside
+    /// the vault working tree, registered for removal before it is created —
+    /// design V10's mechanism for reaching a vault-rooted document with
+    /// `encrypt` or `updatekeys` when no committed `.sops.yaml` sits there.
+    ///
+    /// `None` when no vault is declared, which is also when the caller's
+    /// `--config` argument is omitted rather than pointed at an empty file:
+    /// [`Attribute::VaultCreationRulesText`] answers `null` in exactly that
+    /// case, so nothing is written and nothing is registered.
+    ///
+    /// # Errors
+    ///
+    /// Whatever evaluating [`Attribute::VaultCreationRulesText`] failed with,
+    /// and [`Error::FileUnwritable`] when the scratch file cannot be written.
+    pub fn stage_vault_rules(&self) -> Result<Option<PathBuf>> {
+        let Some(text) = self.vault_creation_rules_text()? else {
+            return Ok(None);
+        };
+        let path = self.vault_absolute(VAULT_RULES_FILE);
+        crate::scratch::register_file(&path);
+        std::fs::write(&path, text).map_err(|cause| Error::FileUnwritable {
+            path: path.display().to_string(),
+            cause,
+        })?;
+        Ok(Some(path))
     }
 }
 

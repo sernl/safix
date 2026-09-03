@@ -751,6 +751,13 @@ fn validate(
 /// would assert a mint this repository never made, and a value committed without
 /// its record would be one `check` has nothing to say about until the next
 /// rotation.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the loop body is one file's whole write sequence — candidate, \
+              creation-or-copy, every key, the recipient-drift check — and \
+              splitting it loses the sequence a reader needs to see it as \
+              one atomic unit, the same tradeoff mint() above already takes"
+)]
 fn write(
     workspace: &Workspace,
     progress: &dyn Progress,
@@ -760,9 +767,18 @@ fn write(
     values: &[Secret],
     records: &Records,
 ) -> Result<Outcome> {
+    let config = if distinct
+        .iter()
+        .any(|relative| !workspace.vault_absolute(relative).exists())
+    {
+        workspace.stage_vault_rules()?
+    } else {
+        None
+    };
+
     let mut candidates = Vec::with_capacity(distinct.len());
     for relative in distinct {
-        let absolute = workspace.absolute(relative);
+        let absolute = workspace.vault_absolute(relative);
         let candidate = set::candidate_path(&absolute);
         scratch::register_file(&candidate);
 
@@ -813,10 +829,11 @@ fn write(
             );
             let _quiet = scratch::quiet();
             workspace.sops().create_empty_document(
-                workspace.root(),
+                workspace.vault_root(),
                 relative,
                 &first,
                 &candidate,
+                config.as_deref(),
             )?;
         }
 
@@ -850,7 +867,7 @@ fn write(
         .zip(distinct.iter())
         .chain(staged_records.iter().zip(records.paths.iter()))
     {
-        let absolute = workspace.absolute(relative);
+        let absolute = workspace.vault_absolute(relative);
         std::fs::rename(candidate, &absolute).map_err(|cause| Error::FileUnwritable {
             path: absolute.display().to_string(),
             cause,
@@ -863,7 +880,7 @@ fn write(
 
     git::commit_written_files(
         workspace.git(),
-        workspace.root(),
+        workspace.vault_root(),
         progress,
         message,
         &committed,
@@ -886,7 +903,7 @@ fn write(
 fn stage_records(workspace: &Workspace, records: &Records) -> Result<Vec<PathBuf>> {
     let mut staged = Vec::with_capacity(records.paths.len());
     for relative in &records.paths {
-        let absolute = workspace.absolute(relative);
+        let absolute = workspace.vault_absolute(relative);
         let mut name = absolute.as_os_str().to_owned();
         name.push(format!(".safix-tmp.{}", std::process::id()));
         let candidate = PathBuf::from(name);

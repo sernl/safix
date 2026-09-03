@@ -85,7 +85,10 @@ fn mint_command(mint: &Mint) -> String {
 /// paragraph that reads as a whole.
 fn push_finding(out: &mut String, finding: &Finding) {
     match finding {
-        Finding::PolicyMissing | Finding::PolicyDiffers | Finding::UngovernableExtra { .. } => {
+        Finding::PolicyMissing
+        | Finding::PolicyDiffers
+        | Finding::UngovernableExtra { .. }
+        | Finding::VaultGitignoreMissing => {
             push_policy(out, finding);
         }
         Finding::RecipientDrift { .. } => push_recipients(out, finding),
@@ -131,6 +134,15 @@ fn push_policy(out: &mut String, finding: &Finding) {
                 out,
                 "move it beside the secrets of the audience it belongs to, or drop it from flake.safix.extraGovernedFiles",
             );
+        }
+
+        Finding::VaultGitignoreMissing => {
+            headline(
+                out,
+                "the vault's .gitignore does not cover .sops-vault-rules.yaml, so a scratch \
+                 rendering left behind by an interrupted run could be staged and committed.",
+            );
+            remedy(out, "add .sops-vault-rules.yaml to the vault's .gitignore");
         }
 
         _ => {}

@@ -153,6 +153,13 @@ pub enum Finding {
         /// The repository-relative path of the record.
         record: String,
     },
+
+    /// A vault is declared, but its own `.gitignore` does not cover the
+    /// scratch creation rules file — design V10's second, independent
+    /// guarantee beside the scratch registry's own sweep-on-every-exit-path
+    /// guarantee, catching a scratch file that happens to still exist at the
+    /// moment `git add`/`git commit` runs.
+    VaultGitignoreMissing,
 }
 
 /// Every disagreement, in report order, for every user or for one.
@@ -174,8 +181,31 @@ pub fn run(workspace: &Workspace, only: Option<&str>) -> Result<Vec<Finding>> {
     let strays = shared(workspace, &mut documents, &mut findings)?;
     values(workspace, &mut documents, &strays, only, &mut findings)?;
     definitions(workspace, only, &mut findings)?;
+    vault_gitignore(workspace, &mut findings)?;
 
     Ok(findings)
+}
+
+/// The vault's `.gitignore` covers the scratch creation rules file.
+///
+/// A no-op when no vault is declared: `vault_root` equals `root` then, and
+/// nothing here is ever created for a `.gitignore` to have to cover.
+fn vault_gitignore(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result<()> {
+    if workspace.vault_root() == workspace.root() {
+        return Ok(());
+    }
+    let anchored = format!("/{}", crate::workspace::VAULT_RULES_FILE);
+    let covered = workspace
+        .read_vault_relative(".gitignore")?
+        .is_some_and(|text| {
+            text.lines()
+                .map(str::trim)
+                .any(|line| line == crate::workspace::VAULT_RULES_FILE || line == anchored)
+        });
+    if !covered {
+        findings.push(Finding::VaultGitignoreMissing);
+    }
+    Ok(())
 }
 
 /// The committed `.sops.yaml` against the one the declarations imply.

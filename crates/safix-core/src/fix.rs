@@ -39,6 +39,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -47,6 +48,7 @@ use tokio::sync::Semaphore;
 use crate::error::{Error, Result};
 use crate::nix::Attribute;
 use crate::progress::{Progress, log};
+use crate::scratch;
 use crate::workspace::Workspace;
 
 /// The environment variable bounding how many files are re-wrapped at once.
@@ -79,16 +81,20 @@ const NOT_REVOCATION: &str = "\n\
 /// [`Error::NixSchemaMismatch`] when the governed set is not the shape this
 /// reads.
 pub fn run(workspace: &Workspace, progress: &dyn Progress, assume_yes: bool) -> Result<i32> {
+    scratch::set_floor(workspace.vault_root());
+    let _guard = scratch::Guard;
+
     write_policy(workspace, progress)?;
     progress.write(NOT_REVOCATION);
 
     let managed = workspace.governed_files()?.managed.clone();
     let permits = concurrency();
+    let config = workspace.stage_vault_rules()?;
 
     if assume_yes && permits.get() > 1 {
-        rewrap_together(workspace, progress, &managed, permits)
+        rewrap_together(workspace, progress, &managed, permits, config.as_deref())
     } else {
-        rewrap_one_at_a_time(workspace, progress, &managed, assume_yes)
+        rewrap_one_at_a_time(workspace, progress, &managed, assume_yes, config.as_deref())
     }
 }
 
@@ -146,6 +152,7 @@ fn rewrap_one_at_a_time(
     progress: &dyn Progress,
     managed: &[String],
     assume_yes: bool,
+    config: Option<&Path>,
 ) -> Result<i32> {
     for relative in managed {
         log(progress, &announce(workspace, relative));
@@ -154,7 +161,7 @@ fn rewrap_one_at_a_time(
         }
         let status = workspace
             .sops()
-            .update_keys_command(workspace.root(), relative, assume_yes)
+            .update_keys_command(workspace.vault_root(), relative, assume_yes, config)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -181,6 +188,7 @@ fn rewrap_together(
     progress: &dyn Progress,
     managed: &[String],
     permits: NonZeroUsize,
+    config: Option<&Path>,
 ) -> Result<i32> {
     let sops = workspace.sops();
     let present: Vec<String> = managed
@@ -201,9 +209,10 @@ fn rewrap_together(
         for relative in present {
             let permit = Arc::clone(&semaphore);
             let mut command = tokio::process::Command::from(sops.update_keys_command(
-                workspace.root(),
+                workspace.vault_root(),
                 &relative,
                 true,
+                config,
             ));
             command
                 .stdin(Stdio::null())

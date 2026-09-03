@@ -160,6 +160,12 @@ impl Sops {
     /// beside the others. The document holds the target key with an empty value
     /// and no secret at all; the value arrives through [`Sops::set_key`].
     ///
+    /// `config` names a rendering to read creation rules from in place of the
+    /// upward search from `root` — design V10's disposable rules for a
+    /// vault-rooted document, whose vault working tree carries no committed
+    /// `.sops.yaml` at all. `None` for a declaration-rooted document, which
+    /// still has one to be found upward from `root`.
+    ///
     /// sops's standard error is captured rather than inherited, because one line
     /// of it is a refusal this runtime intercepts and rewords. The rest is
     /// carried into [`Error::SopsCreateFailed`] verbatim, and on success it is
@@ -176,6 +182,7 @@ impl Sops {
         relative: &str,
         key: &str,
         destination: &Path,
+        config: Option<&Path>,
     ) -> Result<()> {
         let document = serde_json::to_vec(&BTreeMap::from([(key, "")])).map_err(|cause| {
             Error::SopsKeyIndex {
@@ -192,7 +199,11 @@ impl Sops {
             cause,
         })?;
 
-        let mut child = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        if let Some(config) = config {
+            command.arg("--config").arg(config);
+        }
+        let mut child = command
             .arg("encrypt")
             .arg("--filename-override")
             .arg(relative)
@@ -289,11 +300,28 @@ impl Sops {
     /// interactive confirmation needs; run several at once and they are pipes,
     /// which is what ordering the output of a fan-out needs.
     ///
-    /// The working directory is the repository root because sops resolves a
-    /// rule's `path_regex` against the path relative to the config it read.
+    /// The working directory is `root`, which is the declaration root for a
+    /// declaration-rooted document and the vault root for a vault-rooted one:
+    /// sops resolves a rule's `path_regex` against the path relative to the
+    /// config it read, and `--filename-override` is not this command's, so
+    /// `root` alone is what makes that path the target's own. `config` is
+    /// `None` there, and sops discovers the committed `.sops.yaml` upward from
+    /// `root` exactly as it always has; `config` is `Some` for a vault-rooted
+    /// document, whose vault working tree carries no committed policy to
+    /// discover — design V10's disposable rendering names the scratch rules
+    /// there instead of relying on that upward search.
     #[must_use]
-    pub fn update_keys_command(&self, root: &Path, relative: &str, assume_yes: bool) -> Command {
+    pub fn update_keys_command(
+        &self,
+        root: &Path,
+        relative: &str,
+        assume_yes: bool,
+        config: Option<&Path>,
+    ) -> Command {
         let mut command = Command::new(&self.program);
+        if let Some(config) = config {
+            command.arg("--config").arg(config);
+        }
         command.arg("updatekeys");
         if assume_yes {
             command.arg("--yes");

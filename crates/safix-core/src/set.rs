@@ -117,7 +117,7 @@ pub fn run_committing(
 
     refuse_bad_repository_state(workspace, &relative)?;
 
-    let absolute = workspace.absolute(&relative);
+    let absolute = workspace.vault_absolute(&relative);
     let candidate = candidate_path(&absolute);
     scratch::register_file(&candidate);
 
@@ -151,13 +151,15 @@ pub fn run_committing(
                 "{relative} does not exist yet; creating it through sops so the creation rules apply."
             ),
         );
+        let config = workspace.stage_vault_rules()?;
         {
             let _quiet = scratch::quiet();
             workspace.sops().create_empty_document(
-                workspace.root(),
+                workspace.vault_root(),
                 &relative,
                 &key,
                 &candidate,
+                config.as_deref(),
             )?;
         }
         if let Some(status) = scratch::interrupted() {
@@ -195,7 +197,7 @@ pub fn run_committing(
 
     git::commit_written_files(
         workspace.git(),
-        workspace.root(),
+        workspace.vault_root(),
         progress,
         subject,
         std::slice::from_ref(&relative),
@@ -225,7 +227,7 @@ pub(crate) fn candidate_path(absolute: &Path) -> PathBuf {
 /// [`Error::UncommittedChanges`].
 pub fn refuse_bad_repository_state(workspace: &Workspace, relative: &str) -> Result<()> {
     let git = workspace.git();
-    let root = workspace.root();
+    let root = workspace.vault_root();
 
     if let Some(operation) = git.operation_in_progress(root)? {
         return Err(Error::MidOperation {
