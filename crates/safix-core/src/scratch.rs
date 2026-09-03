@@ -32,7 +32,7 @@ struct Registry {
     files: Vec<PathBuf>,
     dirs: Vec<PathBuf>,
     trees: Vec<PathBuf>,
-    floor: Option<PathBuf>,
+    floors: Vec<PathBuf>,
 }
 
 fn registry() -> &'static Mutex<Registry> {
@@ -74,13 +74,21 @@ pub fn register_tree(path: &Path) {
     with_registry(|registry| registry.trees.push(path.to_path_buf()));
 }
 
-/// The directory the upward sweep stops at, which is the repository root.
+/// The directories the upward sweep stops at — the repository root, and the
+/// vault root when the two differ.
 ///
-/// `rmdir -p` stops at the first ancestor that is not empty, and the repository
-/// root always holds `.git`, so this is belt and braces — but the sweep walks
-/// toward `/` and the cost of the belt is one comparison.
+/// `rmdir -p` stops at the first ancestor that is not empty, and every floor
+/// registered always holds a `.git`, so this is belt and braces — but the
+/// sweep walks toward `/` and the cost of the belt is one comparison per
+/// floor. Appending de-duplicated rather than replacing is what lets a
+/// cross-root operation register both floors without one silently
+/// overwriting the other.
 pub fn set_floor(path: &Path) {
-    with_registry(|registry| registry.floor = Some(path.to_path_buf()));
+    with_registry(|registry| {
+        if !registry.floors.iter().any(|floor| floor == path) {
+            registry.floors.push(path.to_path_buf());
+        }
+    });
 }
 
 /// Forget the registered directories, keeping them.
@@ -165,12 +173,12 @@ pub fn interrupted() -> Option<i32> {
 /// here must not mask the failure that led to it.
 pub fn cleanup() {
     let _quiet = quiet();
-    let (files, dirs, trees, floor) = with_registry(|registry| {
+    let (files, dirs, trees, floors) = with_registry(|registry| {
         (
             std::mem::take(&mut registry.files),
             std::mem::take(&mut registry.dirs),
             std::mem::take(&mut registry.trees),
-            registry.floor.clone(),
+            registry.floors.clone(),
         )
     });
 
@@ -181,7 +189,7 @@ pub fn cleanup() {
         sweep_tree(tree);
     }
     for dir in &dirs {
-        remove_empty_upwards(dir, floor.as_deref());
+        remove_empty_upwards(dir, &floors);
     }
 }
 
@@ -255,11 +263,11 @@ fn shred(path: &Path) {
 }
 
 /// `rmdir -p`: remove this directory and each empty ancestor, stopping at the
-/// first that is not empty and at the floor.
-fn remove_empty_upwards(leaf: &Path, floor: Option<&Path>) {
+/// first that is not empty and at any registered floor.
+fn remove_empty_upwards(leaf: &Path, floors: &[PathBuf]) {
     let mut current = leaf.to_path_buf();
     loop {
-        if floor == Some(current.as_path()) {
+        if floors.iter().any(|floor| floor == current.as_path()) {
             return;
         }
         if std::fs::remove_dir(&current).is_err() {
@@ -340,6 +348,51 @@ mod tests {
         );
         assert!(root.exists(), "the sweep walked past its floor");
         assert!(survivor.exists(), "a populated directory was emptied");
+
+        std::fs::remove_dir_all(&root).expect("the fixture can be removed");
+    }
+
+    /// A cross-root operation registers a floor per root, and the two are
+    /// swept independently: emptying one root's leaf never disturbs the
+    /// other's, and neither sweep walks past its own floor.
+    #[test]
+    fn two_floors_are_swept_independently() {
+        let _exclusive = exclusive();
+        let root =
+            std::env::temp_dir().join(format!("safix-scratch-floors-{}", std::process::id()));
+        let first = root.join("declaration");
+        let second = root.join("vault");
+        let first_leaf = first.join("deep").join("audience");
+        let second_leaf = second.join("deep").join("audience");
+        std::fs::create_dir_all(&first_leaf).expect("a temporary directory can be made");
+        std::fs::create_dir_all(&second_leaf).expect("a temporary directory can be made");
+
+        set_floor(&first);
+        set_floor(&second);
+        // A duplicate registration of an already-registered floor must not
+        // grow the list: the point of appending de-duplicated is that a
+        // caller floors at the same root twice — once per write path — and
+        // still sweeps to exactly the same place.
+        set_floor(&first);
+
+        register_dir(&first_leaf);
+        register_dir(&second_leaf);
+
+        cleanup();
+
+        assert!(!first_leaf.exists(), "the first root's leaf survived");
+        assert!(
+            !first.join("deep").exists(),
+            "the first root's empty ancestor survived, so its sweep did not walk up"
+        );
+        assert!(first.exists(), "the sweep walked past the first floor");
+
+        assert!(!second_leaf.exists(), "the second root's leaf survived");
+        assert!(
+            !second.join("deep").exists(),
+            "the second root's empty ancestor survived, so its sweep did not walk up"
+        );
+        assert!(second.exists(), "the sweep walked past the second floor");
 
         std::fs::remove_dir_all(&root).expect("the fixture can be removed");
     }

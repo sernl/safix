@@ -102,6 +102,7 @@ pub fn run(
     request: &Request,
 ) -> Result<()> {
     scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     refuse_bad_name(workspace, &request.name)?;

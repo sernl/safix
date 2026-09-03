@@ -322,7 +322,7 @@ pub fn sync(
     direction: Option<Direction>,
     only: &[String],
 ) -> Result<Run> {
-    scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     let mappings = selected(workspace, direction, only)?;
@@ -1060,7 +1060,7 @@ pub mod bridge_sync {
         direction: Option<Direction>,
         only: &[String],
     ) -> Result<Report> {
-        scratch::set_floor(workspace.root());
+        scratch::set_floor(workspace.vault_root());
         let _guard = scratch::Guard;
 
         let mappings: Vec<&Mapping> = selected(workspace, direction, only)?

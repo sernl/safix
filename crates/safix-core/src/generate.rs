@@ -144,7 +144,7 @@ pub fn run(
     name: Option<&str>,
     options: Options,
 ) -> Result<i32> {
-    scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     let placements = workspace.placements()?;

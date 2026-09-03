@@ -243,7 +243,7 @@ pub fn run(
     password: &mut dyn DatabasePassword,
     only: &[String],
 ) -> Result<Report> {
-    scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     let mirror = workspace.keepassxc()?;

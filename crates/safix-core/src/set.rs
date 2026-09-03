@@ -108,7 +108,7 @@ pub fn run_committing(
     name: &str,
     subject: &str,
 ) -> Result<i32> {
-    scratch::set_floor(workspace.root());
+    scratch::set_floor(workspace.vault_root());
     let _guard = scratch::Guard;
 
     let placement = workspace.resolve(user, name)?;
