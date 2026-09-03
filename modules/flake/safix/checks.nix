@@ -398,6 +398,12 @@ let
       groups ? { },
       organizations ? { },
       silos ? { },
+      # Accepted and otherwise unused: `default.nix`'s `registry` binding now
+      # carries `namingKey` alongside the other seven records (`null` when no
+      # vault is declared), and `mkChecks pkgs (registry // args)` forwards
+      # the whole thing. None of the checks this function builds are
+      # vault-aware, so the field is not read past this pattern.
+      namingKey ? null,
       committedPolicy ? null,
       materializations ? { },
       bridge ? {

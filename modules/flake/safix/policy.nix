@@ -232,6 +232,34 @@ let
       ) p.rules
     );
 
+  # A second, disposable rendering of the same `plan` value `renderPlan`
+  # already renders — not a derivation from the committed file, and not a
+  # second pass over the declarations (design V10). No header, no
+  # `Audience:` comments, no `keys:` anchors: each rule's `key_groups` lists
+  # its recipients' raw age public keys inline, because a disposable file
+  # with no anchor block has nothing for `*anchor` to reference. Each rule's
+  # `path_regex` is the literal opaque ciphertext filename `secretsFileOf`
+  # computes, because vault mode places exactly one flat file per audience
+  # directly under `secrets/`, with no per-audience subdirectory left to
+  # wildcard over (design V9).
+  renderVaultRules =
+    p: namingKey:
+    let
+      keyOfAnchor = lib.listToAttrs (map (a: lib.nameValuePair a.anchor a.key) p.anchors);
+    in
+    "creation_rules:\n"
+    + lib.concatStringsSep "\n" (
+      map (
+        r:
+        "  - path_regex: ^secrets/${
+            resolve.opaqueOf namingKey "secrets" (resolve.audienceFileOf r.audience)
+          }\\.yaml$\n"
+        + "    key_groups:\n"
+        + "      - age:\n"
+        + lib.concatMapStrings (a: "          - ${keyOfAnchor.${a}}\n") r.anchors
+      ) p.rules
+    );
+
   render = registry: renderPlan (plan registry);
 
   # What a consumer's drift check says when the committed policy and the
@@ -295,6 +323,7 @@ in
   inherit
     plan
     renderPlan
+    renderVaultRules
     render
     driftMessage
     driftScript

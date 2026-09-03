@@ -36,15 +36,26 @@ let
       organizations
       silos
       ;
+    # `null` when no vault is declared, which is what makes every
+    # `resolve.*Of registry` call — including the ones no check here has been
+    # taught about vaults — resolve exactly today's readable names. `bound`
+    # below merges this in too, so `namingKey` reaches `selectFor` and
+    # `materializeFor` through the one place the registry is assembled,
+    # rather than a second field threaded beside `root`.
+    namingKey = if cfg.vault != null then cfg.vault.namingKey else null;
   };
 
   audiences = resolve.audiencesOf registry;
 
   # Every entry's file is derived from its audience, and the result is a path
-  # under the flake source rather than a repository-relative string, because that
-  # is what the provisioner's `sopsFile` takes. It resolves the same from a
-  # standalone user profile and from a system configuration.
-  bound = args: args // registry // { root = self; };
+  # under the flake source rather than a repository-relative string, because
+  # that is what the provisioner's `sopsFile` takes. It resolves the same
+  # from a standalone user profile and from a system configuration.
+  #
+  # `root` flips to the vault's own root when one is declared (design V1);
+  # everything else `bound` carries, including `namingKey` by way of
+  # `registry` above, is unchanged by that flip.
+  bound = args: args // registry // { root = if cfg.vault != null then cfg.vault.root else self; };
 
   resolveSet = args: resolve.selectFor (bound args);
 
@@ -171,7 +182,16 @@ in
     # is empty while the custody half is not: a generator rule is a statement
     # about one user's resolved set, and there is no resolved set to state it
     # against until custody resolves.
-    violations = resolve.violations registry ++ resolve.generatorViolations registry;
+    violations =
+      resolve.violations registry
+      ++ resolve.generatorViolations registry
+      ++ resolve.vaultViolations cfg.vault;
+
+    # Whether a vault is declared, cross-checked by the command-line runtime
+    # against the `SAFIX_VAULT_ROOT` it was given (design V1). `true` the
+    # instant `flake.safix.vault` is set, independent of whether its naming
+    # key is well formed — that refusal is `vaultViolations`' own, above.
+    vaultDeclared = cfg.vault != null;
 
     # file -> { audience; dir; recipients; }: who can open each encrypted file a
     # secret is placed in. The recipient policy and the resolved entries are both
@@ -352,6 +372,19 @@ in
     # never something a build alone can satisfy.
     policyText = policy.render registry;
     policyPlan = policy.plan registry;
+
+    # A disposable rendering of the same `policyPlan` for the two sops
+    # invocations that need creation rules to reach a vault-rooted document
+    # (`encrypt`, `updatekeys`): no header, no `Audience:` comments, no
+    # `keys:` anchors, and a literal opaque `path_regex` per rule rather than
+    # a directory wildcard (design V10). `null` when no vault is declared,
+    # because the committed `.sops.yaml` at the declaration root is the only
+    # rules file that case ever needs.
+    vaultCreationRulesText =
+      if cfg.vault == null then
+        null
+      else
+        policy.renderVaultRules (policy.plan registry) cfg.vault.namingKey;
 
     # The check a consumer instantiates over its own committed policy file. Built
     # here so that its failure and the generated header name one command.

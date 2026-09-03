@@ -239,6 +239,92 @@ in
       '';
     };
 
+    vault = lib.mkOption {
+      default = null;
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            root = lib.mkOption {
+              type = lib.types.path;
+              example = lib.literalExpression "inputs.vault";
+              description = ''
+                The repository every audience file's `sopsFile`, every
+                generated public value and every generator definition record
+                resolves rooted at, in place of this flake's own source.
+
+                Typically a `flake = false` input's own path (`inputs.vault`),
+                fetched by nix and evaluated as a plain, read-only tree —
+                never itself evaluated as a flake, so nothing in this option
+                requires the vault to declare one. The command-line runtime
+                writes here too, at the operator-supplied working tree named
+                by `SAFIX_VAULT_ROOT`, a different, mutable path from the
+                locked, store-copied one this option resolves at evaluation.
+              '';
+            };
+
+            namingKey = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              example = "<64 or more lowercase hexadecimal characters>";
+              description = ''
+                A string of at least 64 lowercase hexadecimal characters — 32
+                bytes of entropy, hex-encoded — that every vault-rooted name
+                is a keyed hash of. Mint one with `openssl rand -hex 32`, or,
+                without openssl, `head -c 32 /dev/urandom | od -An -tx1 | tr
+                -d ' \n'`.
+
+                A `path`-typed option would be store-copied at evaluation
+                exactly like every other path in this flake, carrying the
+                identical exposure a string does while adding a second file
+                to keep in sync with this one — which is why this is typed
+                `str` rather than `path`, and never should be one.
+
+                The key is visible to anyone who can evaluate the declaring
+                flake: every local user of a machine that has it in the nix
+                store, because nix has no keyed hash and this key must
+                itself be an evaluation-time value. It hides a vault-rooted
+                name only from the vault's own host and from a reader
+                holding only the vault, never from the store or from this
+                repository.
+
+                Evaluation refuses a declared vault whose naming key is
+                unset, shorter than 64 characters, or contains a character
+                outside `[0-9a-f]`, naming this option and the failing
+                condition.
+              '';
+            };
+          };
+        }
+      );
+      example = lib.literalExpression ''
+        {
+          root = inputs.vault;
+          namingKey = "<64 or more lowercase hexadecimal characters>";
+        }
+      '';
+      description = ''
+        A separate repository every ciphertext document, generated public
+        value and generator definition record moves to, in place of this
+        flake's own source. `null` — the default — leaves every one of them
+        exactly where they sit today; setting a value moves them under
+        `root`, each renamed to an opaque hash of `namingKey`, a
+        use-specific tag and today's readable name, so that a vault host or
+        a reader holding only the vault learns none of the audience, key or
+        secret names the declaring flake's own tree carries.
+
+        The recipient policy, `.sops.yaml`, never moves: it stays committed
+        at this flake's own source in every case, because the encryption
+        tool reads the committed file from there and because a vault host's
+        own copy of it would be the richest document this scheme could
+        hide.
+
+        Naming a vault is not itself a nix evaluation of its tree: it is
+        fetched as a plain, `flake = false` tree and read as paths and file
+        contents, the same as this flake's own source is when no vault is
+        declared.
+      '';
+    };
+
     bridge = {
       clanFlake = lib.mkOption {
         default = null;

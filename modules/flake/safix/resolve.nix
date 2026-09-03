@@ -119,6 +119,12 @@ let
       groups ? { },
       organizations ? { },
       silos ? { },
+      # The vault's naming key, or `null` when no vault is declared. Threaded
+      # through the registry rather than as a separate parameter to every
+      # entry point, so a caller that has not been taught about vaults yet —
+      # every existing check in this tree — passes none and gets exactly
+      # today's readable names; the default is what makes that byte for byte.
+      namingKey ? null,
     }:
     {
       inherit
@@ -129,6 +135,7 @@ let
         groups
         organizations
         silos
+        namingKey
         ;
     };
 
@@ -167,6 +174,34 @@ let
   # agrees with this one by inspection.
   nameRegex = "[a-z0-9][a-z0-9_-]*";
   wellFormedName = n: builtins.match nameRegex n != null;
+
+  # The vault's naming key must be at least 64 lowercase hexadecimal
+  # characters — 32 bytes of entropy, hex-encoded — because it is the only
+  # thing standing between an opaque vault-rooted name and the readable one
+  # it is derived from: `opaqueOf` below folds it into `builtins.hashString`
+  # directly, with no keyed-hash construction to fall back on.
+  wellFormedNamingKey = k: builtins.stringLength k >= 64 && builtins.match "[0-9a-f]+" k != null;
+
+  # `vaultViolations`, following the shape `noRecipientKey` establishes below:
+  # one optional message per way a declared vault's naming key can fail to be
+  # well formed, concatenated rather than short-circuited so every failing
+  # clause is reported at once rather than only the first one reached.
+  vaultViolations =
+    vault:
+    lib.optionals (vault != null && vault.namingKey == "") [
+      "flake.safix.vault.namingKey is not set, but flake.safix.vault.root is; a vault requires a naming key of at least 64 lowercase hexadecimal characters, minted once with `openssl rand -hex 32`"
+    ]
+    ++
+      lib.optionals (vault != null && vault.namingKey != "" && builtins.stringLength vault.namingKey < 64)
+        [
+          "flake.safix.vault.namingKey is ${toString (builtins.stringLength vault.namingKey)} characters, short of the 64 lowercase hexadecimal characters a vault requires"
+        ]
+    ++
+      lib.optionals
+        (vault != null && vault.namingKey != "" && builtins.match "[0-9a-f]+" vault.namingKey == null)
+        [
+          "flake.safix.vault.namingKey contains a character outside [0-9a-f]; a vault's naming key is lowercase hexadecimal only"
+        ];
 
   # `audienceFileOf` joins an audience with this to name one directory, and that
   # join is injective only while no name can contain the separator. Two distinct
@@ -561,6 +596,42 @@ let
     else
       "public/safix/shared/${lib.concatStringsSep audienceSeparator audience}/${name}/value";
 
+  # Opaque names for the vault, computed only when a vault is declared.
+  # `namingKey` is the operator-minted key (V8); `tag` domain-separates the
+  # four uses below so that a coincidental collision between, say, a public
+  # output's logical path and a ciphertext's logical path never produces the
+  # same hash under two different meanings; `logicalPath` is the readable
+  # name the in-repository layout would have used, drawn from the same
+  # alphabet `audienceMarkers` already excludes `|` from. No two distinct
+  # `(namingKey, tag, logicalPath)` triples concatenate to the same string,
+  # which is what makes this join injective.
+  opaqueOf =
+    namingKey: tag: logicalPath:
+    builtins.hashString "sha256" "${namingKey}|${tag}|${logicalPath}";
+
+  # The vault-mode ciphertext name: one flat file directly under `secrets/`,
+  # never nested in an audience-named directory, because the directory name
+  # is exactly what opacity has to hide.
+  secretsFileOf =
+    namingKey: audience: "secrets/${opaqueOf namingKey "secrets" (audienceFileOf audience)}.yaml";
+
+  # The vault-mode public-output name: a single file rather than the
+  # readable layout's `<name>/value` directory, because the leaf no longer
+  # needs a directory to disambiguate once the name itself is a hash.
+  publicFileOfVault =
+    namingKey: audience: name:
+    "public/${opaqueOf namingKey "public" (publicFileOf audience name)}";
+
+  # The vault-mode in-document key. `logicalPath` closes over the same
+  # readable file identity `secretsFileOf` hashes, and `logicalKey` is
+  # today's `sopsKey`-or-name formula, so a key derived from a resolved
+  # entry and a key derived independently from a machine's grant of the
+  # same entry agree bit for bit. `#` plays the separator role `|` plays
+  # above and is likewise outside the name alphabet.
+  opaqueKeyOf =
+    namingKey: logicalPath: logicalKey:
+    opaqueOf namingKey "key" "${logicalPath}#${logicalKey}";
+
   placementsIn =
     r:
     lib.mapAttrs (
@@ -587,13 +658,49 @@ let
         let
           entry = entryOf src;
           audience = audienceOf r src.owner name;
+          shared = isShared r src.owner name;
+          isPublic = publiclyDeclared name;
+
+          # The readable names every consumer traced to before opacity, kept
+          # under their own logical fields below so that the migration this
+          # change's runtime performs later can enumerate the readable side of
+          # every opaque name without the runtime computing a hash itself.
+          logicalFile = audienceFileOf audience;
+          logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
+          logicalPublic = if isPublic then publicFileOf audience name else null;
+          logicalRecord =
+            if shared then
+              "shared/${lib.concatStringsSep audienceSeparator audience}/${name}"
+            else
+              "${src.owner}/${name}";
         in
         {
           inherit (src) origin owner;
-          file = audienceFileOf audience;
-          shared = isShared r src.owner name;
-          key = if entry.sopsKey != null then entry.sopsKey else name;
-          public = if publiclyDeclared name then publicFileOf audience name else null;
+          file = if r.namingKey != null then secretsFileOf r.namingKey audience else logicalFile;
+          inherit shared;
+          key = if r.namingKey != null then opaqueKeyOf r.namingKey logicalFile logicalKey else logicalKey;
+          public =
+            if !isPublic then
+              null
+            else if r.namingKey != null then
+              publicFileOfVault r.namingKey audience name
+            else
+              logicalPublic;
+
+          # Opaque and vault-only: `null` outside vault mode, exactly as the
+          # vault's own declaration is. `definitionRecord` is the record path
+          # `definition::record_path` reads directly instead of deriving one
+          # from `file`'s directory, which vault mode's flat layout leaves
+          # nothing to derive from. `logicalFile`/`logicalKey`/`logicalPublic`
+          # are the readable inputs the opaque names above were hashed from —
+          # carried here rather than recomputed by the runtime, because
+          # nothing in `crates/safix-core` may compute a hash.
+          definitionRecord =
+            if r.namingKey != null then "state/${opaqueOf r.namingKey "state" logicalRecord}" else null;
+          logicalFile = if r.namingKey != null then logicalFile else null;
+          logicalKey = if r.namingKey != null then logicalKey else null;
+          logicalPublic = if r.namingKey != null then logicalPublic else null;
+
           generator =
             if entry.generator == null then
               null
@@ -1979,6 +2086,7 @@ let
       groups ? { },
       organizations ? { },
       silos ? { },
+      namingKey ? null,
       root,
       user ? null,
       machine ? null,
@@ -2016,15 +2124,25 @@ let
           if entry.sopsFile != null then
             throw "safix placement: flake.safix.machines.${machine} resolves '${key}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${src.owner}.sharedWith instead"
           else
-            entry
-            // {
-              sopsFile = root + "/${audienceFileOf (audienceOf r src.owner src.name)}";
+            let
+              audience = audienceOf r src.owner src.name;
+              logicalFile = audienceFileOf audience;
 
               # The key inside the encrypted file is the entry's own name, which
               # parts company with the name the file is parked under as soon as a
               # service prefixes it. Left null the provisioner would read the
               # prefixed name as the key and find nothing there.
-              sopsKey = if entry.sopsKey != null then entry.sopsKey else src.name;
+              logicalKey = if entry.sopsKey != null then entry.sopsKey else src.name;
+            in
+            entry
+            // {
+              sopsFile = root + "/${if namingKey != null then secretsFileOf namingKey audience else logicalFile}";
+
+              # Recomputed here rather than read off `placementsIn`, which the
+              # owner resolved separately: both close over the same `audience`
+              # and `logicalKey`, so a key derived at one site and a key
+              # derived at the other agree bit for bit (design V9).
+              sopsKey = if namingKey != null then opaqueKeyOf namingKey logicalFile logicalKey else logicalKey;
             }
         ) (lib.filterAttrs (_key: src: !(publicOwned src)) sources);
 
@@ -2090,7 +2208,24 @@ let
           else if entry.sopsFile != null then
             throw "safix placement: flake.safix.users.${user} resolves '${name}' with a sopsFile of its own, but safix derives every entry's file from its audience; drop it and widen the audience through flake.safix.users.${owner}.sharedWith instead"
           else
-            entry // { sopsFile = root + "/${audienceFileOf (audienceOf r owner name)}"; }
+            let
+              audience = audienceOf r owner name;
+              logicalFile = audienceFileOf audience;
+              logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
+            in
+            entry
+            // {
+              sopsFile = root + "/${if namingKey != null then secretsFileOf namingKey audience else logicalFile}";
+            }
+            // lib.optionalAttrs (namingKey != null) {
+              # Set unconditionally on whether the entry declares its own
+              # `sopsKey`, because `placementsIn` writes the identical opaque
+              # value into the document regardless — leaving this unset in
+              # vault mode would have sops-nix default to the *readable*
+              # attribute name, defeating key opacity for every entry that
+              # does not carry a custom key (design V9's "in-document key").
+              sopsKey = opaqueKeyOf namingKey logicalFile logicalKey;
+            }
         ) selected;
     in
     if machine != null then
@@ -2246,7 +2381,7 @@ let
             inherit (secret) mode sopsFile;
           }
           // lib.optionalAttrs (secret.path != null) { path = secret.path cfg; }
-          // lib.optionalAttrs (secret.sopsKey != null) { key = secret.sopsKey; }
+          // lib.optionalAttrs (args.namingKey != null || secret.sopsKey != null) { key = secret.sopsKey; }
           // lib.optionalAttrs (args.scope == "system" && secret.owner != null) { inherit (secret) owner; }
           // lib.optionalAttrs (args.scope == "system" && secret.group != null) { inherit (secret) group; }
         ) resolved
@@ -2274,6 +2409,12 @@ in
     materializeFor
     unknownUserMessage
     unknownMachineMessage
+    opaqueOf
+    secretsFileOf
+    opaqueKeyOf
+    publicFileOfVault
+    wellFormedNamingKey
+    vaultViolations
     ;
 
   violations = entryPoint violationsIn;
