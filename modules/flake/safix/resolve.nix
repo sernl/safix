@@ -2381,7 +2381,9 @@ let
             inherit (secret) mode sopsFile;
           }
           // lib.optionalAttrs (secret.path != null) { path = secret.path cfg; }
-          // lib.optionalAttrs (args.namingKey or null != null || secret.sopsKey != null) { key = secret.sopsKey; }
+          // lib.optionalAttrs (args.namingKey or null != null || secret.sopsKey != null) {
+            key = secret.sopsKey;
+          }
           // lib.optionalAttrs (args.scope == "system" && secret.owner != null) { inherit (secret) owner; }
           // lib.optionalAttrs (args.scope == "system" && secret.group != null) { inherit (secret) group; }
         ) resolved
