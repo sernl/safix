@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: secrets/safix/users/alice/secrets.yaml did not decrypt under key api-token while relocating it; nothing there was changed, and re-running fix completes it once the cause is fixed.

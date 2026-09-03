@@ -465,6 +465,31 @@ impl Workspace {
         })?;
         Ok(Some(path))
     }
+
+    /// Whether the vault's `.gitignore` already covers the scratch rules
+    /// file [`Workspace::stage_vault_rules`] writes — design V10's second,
+    /// independent guarantee beside the scratch registry's own
+    /// sweep-on-every-exit-path guarantee.
+    ///
+    /// Read by both [`crate::check`]'s drift finding and [`crate::fix`]'s
+    /// migration-write half of task 5.8, so the two ask the same question
+    /// rather than two that could disagree. Always `false` where no vault is
+    /// declared, since nothing is ever created there for a `.gitignore` to
+    /// have to cover — a caller wanting that distinction reads
+    /// `vault_root() != root()` first.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::FileUnreadable`] when a `.gitignore` exists and cannot be
+    /// read.
+    pub fn vault_gitignore_covers_rules(&self) -> Result<bool> {
+        let anchored = format!("/{VAULT_RULES_FILE}");
+        Ok(self.read_vault_relative(".gitignore")?.is_some_and(|text| {
+            text.lines()
+                .map(str::trim)
+                .any(|line| line == VAULT_RULES_FILE || line == anchored)
+        }))
+    }
 }
 
 /// `$USER`, or what `id -un` says when it is unset or empty.

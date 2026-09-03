@@ -47,8 +47,10 @@ use tokio::sync::Semaphore;
 
 use crate::error::{Error, Result};
 use crate::nix::Attribute;
-use crate::progress::{Progress, log};
+use crate::progress::{Progress, log, note};
+use crate::relocation::{self, PlainLeaf, SecretDocument};
 use crate::scratch;
+use crate::set;
 use crate::workspace::Workspace;
 
 /// The environment variable bounding how many files are re-wrapped at once.
@@ -70,25 +72,51 @@ const NOT_REVOCATION: &str = "\n\
     value — safix generate --regenerate <user> <name>, or sops <file>.\n\
     \n";
 
+/// The note printed after `fix` relocates at least one document, output, or
+/// record — the commit order design V4 states, and the lock-bump cost design
+/// V6 discloses after an actual vault-root commit, neither of which `fix`
+/// performs itself: it writes and removes files and prints this rather than
+/// committing or disclosing.
+const RELOCATION_NOTE: &str = "\n\
+    Relocated content now sits at both roots, neither committed. Commit the\n\
+    vault root first, then the declaration root with a trailer naming the\n\
+    vault commit — Safix-Vault: <short-id> — and update the declaring\n\
+    flake's lock entry for the vault afterward; nothing here commits.\n";
+
 /// Regenerate the policy, then re-wrap every governed file to it.
 ///
-/// Returns zero, or the status `sops` exited with when a re-wrap failed.
+/// Returns zero, or the status `sops` exited with when a re-wrap or a
+/// relocation's write refused.
 ///
 /// A vault-root preflight over every managed file runs first, before the
 /// policy is regenerated or anything is re-wrapped — design V4's ordering,
 /// applied here vault-only since `fix` writes nothing at the declaration
 /// root that a commit governs.
 ///
+/// With a vault declared, this also relocates every readable-layout
+/// document, public output and definition record still at the declaration
+/// root into its opaque vault destination (design V13's dated note),
+/// through [`relocate`]. `rollback` runs the same move the other direction
+/// and skips the re-wrap entirely, since the files it would touch have just
+/// left the vault.
+///
 /// # Errors
 ///
 /// [`Error::MidOperation`], [`Error::ConflictEntries`] or
 /// [`Error::UncommittedChanges`] from the preflight;
 /// [`Error::NixEvalFailed`] when the policy cannot be evaluated,
-/// [`Error::FileUnwritable`] when it cannot be put in place, and
+/// [`Error::FileUnwritable`] when it cannot be put in place,
 /// [`Error::NixSchemaMismatch`] when the governed set is not the shape this
-/// reads.
-pub fn run(workspace: &Workspace, progress: &dyn Progress, assume_yes: bool) -> Result<i32> {
+/// reads, and [`Error::VaultRelocationUnreadable`] when a relocated
+/// document's source key will not decrypt.
+pub fn run(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    assume_yes: bool,
+    rollback: bool,
+) -> Result<i32> {
     scratch::set_floor(workspace.vault_root());
+    scratch::set_floor(workspace.root());
     let _guard = scratch::Guard;
 
     let managed = workspace.governed_files()?.managed.clone();
@@ -99,6 +127,20 @@ pub fn run(workspace: &Workspace, progress: &dyn Progress, assume_yes: bool) -> 
     crate::set::refuse_bad_repository_state(workspace, &touches)?;
 
     write_policy(workspace, progress)?;
+
+    match relocate(workspace, progress, rollback)? {
+        RelocateOutcome::Interrupted(status) => return Ok(status),
+        RelocateOutcome::Moved => progress.write(RELOCATION_NOTE),
+        RelocateOutcome::Nothing => {}
+    }
+    if rollback {
+        // The rollback direction only moves content back to the readable
+        // layout; it converges no policy and re-wraps nothing, because the
+        // files a re-wrap would touch have just left the vault it would
+        // touch them in.
+        return Ok(0);
+    }
+
     progress.write(NOT_REVOCATION);
 
     let permits = concurrency();
@@ -135,6 +177,323 @@ fn write_policy(workspace: &Workspace, progress: &dyn Progress) -> Result<()> {
         &format!("safix: wrote {}/.sops.yaml", root.display()),
     );
     Ok(())
+}
+
+/// What [`relocate`] did.
+enum RelocateOutcome {
+    /// Nothing was pending: every candidate's destination already existed,
+    /// or no vault is declared.
+    Nothing,
+    /// At least one document, output, or record moved.
+    Moved,
+    /// A subprocess was interrupted mid-move; the caller exits with this.
+    Interrupted(i32),
+}
+
+/// Move readable-layout content into a declared vault, or the reverse.
+///
+/// A no-op when no vault is declared: `vault_root` equals `root` then, and
+/// [`relocation::secret_documents`]/`public_leaves`/`record_leaves` find
+/// nothing to group, since design V14's `logical_*` fields are `null`
+/// outside vault mode.
+///
+/// Forward (`rollback: false`, the default): for every document, output, or
+/// record still present at the declaration root and absent from the vault,
+/// decrypt it under the operator's own identity and re-encrypt it into its
+/// opaque destination under the vault's disposable creation rules, then
+/// remove the readable-layout source. `rollback: true` runs the same move in
+/// the other direction, decrypting the vault's opaque form and re-encrypting
+/// it into the readable layout at the declaration root under the committed
+/// policy [`write_policy`] just regenerated.
+///
+/// A destination already present is left alone rather than re-created,
+/// which is what lets an interrupted run resume: the candidate that would
+/// have replaced it is registered with [`scratch`] before it exists, so a
+/// signal mid-call leaves the destination absent and the source untouched,
+/// and a re-run starts the same document over rather than half-finishing it
+/// twice.
+///
+/// Also writes the vault's `.gitignore` entry for the scratch rules file
+/// when it is missing, on every run with a vault declared — completing task
+/// 5.8's migration-write half, whether or not anything else was relocated.
+///
+/// # Errors
+///
+/// [`Error::MidOperation`] when the declaration root is mid a git
+/// operation, [`Error::VaultRelocationUnreadable`] when a source key will
+/// not decrypt, and whatever [`crate::sops::Sops::create_empty_document`]
+/// raises for a creation-rule refusal.
+fn relocate(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    rollback: bool,
+) -> Result<RelocateOutcome> {
+    if workspace.vault_root() == workspace.root() {
+        return Ok(RelocateOutcome::Nothing);
+    }
+    if let Some(operation) = workspace.git().operation_in_progress(workspace.root())? {
+        return Err(Error::MidOperation {
+            state: operation.state,
+            marker: operation.marker.display().to_string(),
+        });
+    }
+
+    let placements = workspace.placements()?;
+    let documents = relocation::secret_documents(placements);
+    let pending: Vec<&SecretDocument> = documents
+        .iter()
+        .filter(|document| document_move(workspace, rollback, document).is_some())
+        .collect();
+
+    let config = if rollback || pending.is_empty() {
+        None
+    } else {
+        workspace.stage_vault_rules()?
+    };
+
+    let mut moved = !pending.is_empty();
+    for document in pending {
+        if let Some(status) = relocate_document(workspace, rollback, document, config.as_deref())? {
+            return Ok(RelocateOutcome::Interrupted(status));
+        }
+        note(
+            progress,
+            &format!(
+                "relocated {} <-> {} ({} key{})",
+                document.logical_file,
+                document.opaque_file,
+                document.keys.len(),
+                if document.keys.len() == 1 { "" } else { "s" }
+            ),
+        );
+    }
+
+    for leaf in relocation::public_leaves(placements) {
+        moved |= relocate_leaf(workspace, rollback, &leaf)?;
+    }
+    for leaf in relocation::record_leaves(placements) {
+        moved |= relocate_leaf(workspace, rollback, &leaf)?;
+    }
+
+    ensure_vault_gitignore(workspace)?;
+
+    Ok(if moved {
+        RelocateOutcome::Moved
+    } else {
+        RelocateOutcome::Nothing
+    })
+}
+
+/// The `(source root, source relative, destination root, destination
+/// relative)` a document's relocation would touch, or `None` when there is
+/// nothing to do: the source is absent, or the destination already exists.
+fn document_move<'a>(
+    workspace: &'a Workspace,
+    rollback: bool,
+    document: &'a SecretDocument,
+) -> Option<(&'a Path, &'a str, &'a Path, &'a str)> {
+    named_move(
+        workspace,
+        rollback,
+        &document.opaque_file,
+        &document.logical_file,
+    )
+}
+
+/// The same shape [`document_move`] returns, for one plaintext leaf.
+fn leaf_move<'a>(
+    workspace: &'a Workspace,
+    rollback: bool,
+    leaf: &'a PlainLeaf,
+) -> Option<(&'a Path, &'a str, &'a Path, &'a str)> {
+    named_move(workspace, rollback, &leaf.opaque, &leaf.logical)
+}
+
+/// Resolve one opaque/readable pair to the roots and relative paths a move
+/// between them would touch, or `None` when the source is absent or the
+/// destination already exists.
+fn named_move<'a>(
+    workspace: &'a Workspace,
+    rollback: bool,
+    opaque: &'a str,
+    logical: &'a str,
+) -> Option<(&'a Path, &'a str, &'a Path, &'a str)> {
+    let (source_root, source_relative, dest_root, dest_relative) = if rollback {
+        (workspace.vault_root(), opaque, workspace.root(), logical)
+    } else {
+        (workspace.root(), logical, workspace.vault_root(), opaque)
+    };
+    if !source_root.join(source_relative).exists() || dest_root.join(dest_relative).exists() {
+        return None;
+    }
+    Some((source_root, source_relative, dest_root, dest_relative))
+}
+
+/// Relocate one ciphertext document: decrypt every key from the source under
+/// the operator's own identity, re-encrypt each into a candidate beside the
+/// destination, rename it into place, then remove the source.
+///
+/// Returns the sops exit status when a re-encrypt refused, and `None`
+/// otherwise — including when there was nothing pending, so a caller can
+/// call this unconditionally over every grouped document.
+fn relocate_document(
+    workspace: &Workspace,
+    rollback: bool,
+    document: &SecretDocument,
+    config: Option<&Path>,
+) -> Result<Option<i32>> {
+    let Some((source_root, source_relative, dest_root, dest_relative)) =
+        document_move(workspace, rollback, document)
+    else {
+        return Ok(None);
+    };
+    let Some((first_opaque_key, first_logical_key)) = document.keys.first() else {
+        return Ok(None);
+    };
+    let source_absolute = source_root.join(source_relative);
+    let dest_absolute = dest_root.join(dest_relative);
+
+    ensure_parent(&dest_absolute)?;
+    let candidate = set::candidate_path(&dest_absolute);
+    scratch::register_file(&candidate);
+
+    let first_dest_key = if rollback {
+        first_logical_key
+    } else {
+        first_opaque_key
+    };
+    {
+        let _quiet = scratch::quiet();
+        workspace.sops().create_empty_document(
+            dest_root,
+            dest_relative,
+            first_dest_key,
+            &candidate,
+            config,
+        )?;
+    }
+    if let Some(status) = scratch::interrupted() {
+        return Ok(Some(status));
+    }
+
+    for (opaque_key, logical_key) in &document.keys {
+        let (source_key, dest_key) = if rollback {
+            (opaque_key, logical_key)
+        } else {
+            (logical_key, opaque_key)
+        };
+        let decrypted = {
+            let _quiet = scratch::quiet();
+            workspace.sops().decrypt_key(&source_absolute, source_key)?
+        };
+        if decrypted.status != 0 {
+            return Err(Error::VaultRelocationUnreadable {
+                file: source_relative.to_owned(),
+                key: source_key.clone(),
+            });
+        }
+        if let Some(status) = scratch::interrupted() {
+            return Ok(Some(status));
+        }
+        let status = {
+            let _quiet = scratch::quiet();
+            workspace
+                .sops()
+                .set_key(&candidate, dest_key, &decrypted.value)?
+        };
+        if status != 0 {
+            return Ok(Some(status));
+        }
+        if let Some(status) = scratch::interrupted() {
+            return Ok(Some(status));
+        }
+    }
+
+    std::fs::rename(&candidate, &dest_absolute).map_err(|cause| Error::FileUnwritable {
+        path: dest_absolute.display().to_string(),
+        cause,
+    })?;
+    scratch::keep_dirs();
+    std::fs::remove_file(&source_absolute).map_err(|cause| Error::FileUnwritable {
+        path: source_absolute.display().to_string(),
+        cause,
+    })?;
+    Ok(None)
+}
+
+/// Relocate one plaintext leaf — a public output or a definition record — by
+/// a staged copy, a rename, and removal of the source; no sops is involved,
+/// since both are already plaintext.
+///
+/// Returns whether anything moved, so [`relocate`] can tell whether to print
+/// [`RELOCATION_NOTE`].
+fn relocate_leaf(workspace: &Workspace, rollback: bool, leaf: &PlainLeaf) -> Result<bool> {
+    let Some((source_root, source_relative, dest_root, dest_relative)) =
+        leaf_move(workspace, rollback, leaf)
+    else {
+        return Ok(false);
+    };
+    let source_absolute = source_root.join(source_relative);
+    let dest_absolute = dest_root.join(dest_relative);
+
+    ensure_parent(&dest_absolute)?;
+    let candidate = set::candidate_path(&dest_absolute);
+    scratch::register_file(&candidate);
+    std::fs::copy(&source_absolute, &candidate).map_err(|cause| Error::FileUnwritable {
+        path: candidate.display().to_string(),
+        cause,
+    })?;
+    std::fs::rename(&candidate, &dest_absolute).map_err(|cause| Error::FileUnwritable {
+        path: dest_absolute.display().to_string(),
+        cause,
+    })?;
+    scratch::keep_dirs();
+    std::fs::remove_file(&source_absolute).map_err(|cause| Error::FileUnwritable {
+        path: source_absolute.display().to_string(),
+        cause,
+    })?;
+    Ok(true)
+}
+
+/// Create `path`'s parent directory, registered for removal while still
+/// empty, when it does not already exist.
+fn ensure_parent(path: &Path) -> Result<()> {
+    let Some(directory) = path.parent() else {
+        return Ok(());
+    };
+    if directory.is_dir() {
+        return Ok(());
+    }
+    scratch::register_dir(directory);
+    std::fs::create_dir_all(directory).map_err(|cause| Error::FileUnwritable {
+        path: directory.display().to_string(),
+        cause,
+    })
+}
+
+/// Append `.gitignore` coverage for the vault's scratch creation rules file
+/// when it is missing — completes task 5.8's migration-write half; the
+/// check-finding half already exists as `Finding::VaultGitignoreMissing`.
+///
+/// A no-op when the vault's `.gitignore` already covers it.
+fn ensure_vault_gitignore(workspace: &Workspace) -> Result<()> {
+    if workspace.vault_gitignore_covers_rules()? {
+        return Ok(());
+    }
+    let path = workspace.vault_absolute(".gitignore");
+    let mut text = workspace
+        .read_vault_relative(".gitignore")?
+        .unwrap_or_default();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push('/');
+    text.push_str(crate::workspace::VAULT_RULES_FILE);
+    text.push('\n');
+    std::fs::write(&path, text).map_err(|cause| Error::FileUnwritable {
+        path: path.display().to_string(),
+        cause,
+    })
 }
 
 /// What the environment asks for, or [`DEFAULT_CONCURRENCY`].

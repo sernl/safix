@@ -510,6 +510,18 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Declare one user's held name as an arbitrary placement, JSON built by
+    /// the caller.
+    ///
+    /// The vault-migration tests' own tool: a document needing both an
+    /// opaque and a readable form populated together, in one shot, is not
+    /// any of the other seeders' job — each of those leaves the
+    /// `logical*`/`definitionRecord` fields `null`, the no-vault answer.
+    pub fn seed_vault_placement(&mut self, user: &str, name: &str, placement: Value) {
+        self.placements[user][name] = placement;
+        self.write_fixtures();
+    }
+
     /// The plaintext a public output holds, read straight off the repository.
     pub fn public_value(&self, path: &str) -> String {
         std::fs::read_to_string(self.repo.join(path))
@@ -2128,6 +2140,27 @@ impl Fixture {
         .unwrap();
         for recipient in recipients {
             writeln!(text, "          - {recipient}").unwrap();
+        }
+        self.vault_rules = Some(text);
+        self.write_fixtures();
+    }
+
+    /// [`Fixture::set_vault_rules`], generalized to cover several documents
+    /// at once — one rule per `(relative, recipients)` pair, in the same
+    /// shape — for a fixture relocating more than one document in the same
+    /// run.
+    pub fn set_vault_rules_many(&mut self, rules: &[(&str, &[&str])]) {
+        let mut text = String::from("creation_rules:\n");
+        for (relative, recipients) in rules {
+            writeln!(
+                text,
+                "  - path_regex: ^{}$\n    key_groups:\n      - age:",
+                relative.replace('.', "\\.")
+            )
+            .unwrap();
+            for recipient in *recipients {
+                writeln!(text, "          - {recipient}").unwrap();
+            }
         }
         self.vault_rules = Some(text);
         self.write_fixtures();

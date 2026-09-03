@@ -1463,7 +1463,9 @@ pub enum Error {
     /// build ever reads from.
     #[error(
         "SAFIX_VAULT_ROOT names {path}, but flake.safix.vault is not declared. Declare \
-        flake.safix.vault or unset SAFIX_VAULT_ROOT."
+        flake.safix.vault or unset SAFIX_VAULT_ROOT. A vault whose declaration was removed \
+        without first running the rollback is recovered the same way: re-declare \
+        flake.safix.vault and run `safix fix --vault-rollback` before removing it again."
     )]
     VaultRootWithoutDeclaration {
         /// The path `SAFIX_VAULT_ROOT` named.
@@ -1506,6 +1508,25 @@ pub enum Error {
         vault_commit: String,
         /// The declaration-root paths still staged and uncommitted.
         pending: Vec<String>,
+    },
+
+    /// A source key would not decrypt while `fix` relocated it into or out
+    /// of the vault — design V13's migration mechanism, task group 11.
+    ///
+    /// sops's own standard error is inherited by
+    /// [`crate::sops::Sops::decrypt_key`] and has already said why; this
+    /// names what was being moved. Nothing at the source was changed: the
+    /// candidate this document was building is swept by the scratch guard,
+    /// and the relocation is safe to re-run once the cause is fixed.
+    #[error(
+        "{file} did not decrypt under key {key} while relocating it; nothing there was \
+        changed, and re-running fix completes it once the cause is fixed."
+    )]
+    VaultRelocationUnreadable {
+        /// The repository-relative path being relocated.
+        file: String,
+        /// The key that failed to decrypt.
+        key: String,
     },
 }
 

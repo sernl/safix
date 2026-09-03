@@ -389,7 +389,7 @@ impl Ceremony<'_> {
         }
 
         self.workspace = reload(&self.workspace);
-        let status = fix::run(&self.workspace, self.progress, true)?;
+        let status = fix::run(&self.workspace, self.progress, true, false)?;
         if status != 0 {
             return Err(Error::RewrapUnschedulable {
                 cause: format!("a governed file's re-wrap exited {status}; nothing was committed"),

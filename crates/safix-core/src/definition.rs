@@ -154,6 +154,26 @@ pub fn record_path(name: &str, placement: &Placement) -> String {
     format!("{PREFIX}{owner}/{name}", owner = placement.owner)
 }
 
+/// Where the record for one entry would sit at the declaration root with no
+/// vault declared, mirroring [`record_path`]'s own fallback derivation but
+/// fed [`Placement::logical_file`] rather than the (opaque, in vault mode)
+/// [`Placement::file`].
+///
+/// `None` when [`Placement::logical_file`] is `None` — no vault is declared,
+/// so [`record_path`] already returns the readable path directly and this
+/// has nothing to add. This is what lets a relocation enumerate a
+/// definition record's readable and opaque forms without this crate
+/// computing a hash: see design V14.
+#[must_use]
+pub fn logical_record_path(name: &str, placement: &Placement) -> Option<String> {
+    let logical_file = placement.logical_file.as_deref()?;
+    if placement.shared {
+        let audience = audience_directory(logical_file);
+        return Some(format!("{PREFIX}shared/{audience}/{name}"));
+    }
+    Some(format!("{PREFIX}{owner}/{name}", owner = placement.owner))
+}
+
 /// The last component of the directory a file sits in, which for a shared
 /// entry's document is the audience's own name.
 ///
@@ -256,7 +276,9 @@ const fn kind_of(kind: crate::model::PromptKind) -> &'static str {
 mod tests {
     use serde_json::json;
 
-    use super::{FORMAT, PREFIX, canonical, digest, line, record_path, recorded};
+    use super::{
+        FORMAT, PREFIX, canonical, digest, line, logical_record_path, record_path, recorded,
+    };
     use crate::model::{Generator, Placement};
 
     /// The declaration every case below perturbs one field of, as the resolver
@@ -567,5 +589,49 @@ mod tests {
                 shared_opaque
             );
         }
+    }
+
+    /// The readable form mirrors `record_path`'s own fallback: private
+    /// entries key by owner, shared ones by the readable audience
+    /// `logical_file` names rather than by the opaque `file` a vault
+    /// declares.
+    #[test]
+    fn logical_record_path_is_keyed_by_owner_or_by_the_readable_audience() {
+        let private: Placement = serde_json::from_value(json!({
+            "file": "secrets/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b.yaml",
+            "key": "k", "origin": "private", "owner": "alice", "shared": false,
+            "generator": null, "public": null,
+            "definitionRecord": "state/opaque-private-record",
+            "logicalFile": "secrets/safix/users/alice/secrets.yaml",
+            "logicalKey": "api-token", "logicalPublic": null,
+        }))
+        .expect("the fixture is the shape the resolver emits");
+        assert_eq!(
+            logical_record_path("api-token", &private),
+            Some("state/safix/definitions/alice/api-token".to_owned())
+        );
+
+        let shared: Placement = serde_json::from_value(json!({
+            "file": "secrets/2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c.yaml",
+            "key": "k", "origin": "carries", "owner": "bob", "shared": true,
+            "generator": null, "public": null,
+            "definitionRecord": "state/opaque-shared-record",
+            "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
+            "logicalKey": "wifi-psk", "logicalPublic": null,
+        }))
+        .expect("the fixture is the shape the resolver emits");
+        assert_eq!(
+            logical_record_path("wifi-psk", &shared),
+            Some("state/safix/definitions/shared/alice,bob/wifi-psk".to_owned())
+        );
+    }
+
+    /// `None` with no vault declared: `logical_file` is `null` then, and
+    /// `record_path` already returns the readable path directly, so a
+    /// relocation caller has nothing to enumerate.
+    #[test]
+    fn logical_record_path_is_none_with_no_vault_declared() {
+        let no_vault = placement("secrets/safix/users/alice/secrets.yaml", "alice", false);
+        assert_eq!(logical_record_path("api-token", &no_vault), None);
     }
 }

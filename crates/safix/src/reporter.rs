@@ -674,6 +674,10 @@ mod tests {
                 vault_commit: "a1b2c3d".into(),
                 pending: vec!["safix/users/alice.nix".into(), ".sops.yaml".into()],
             },
+            Code::VaultRelocationUnreadable => Error::VaultRelocationUnreadable {
+                file: "secrets/safix/users/alice/secrets.yaml".into(),
+                key: "api-token".into(),
+            },
         }
     }
 

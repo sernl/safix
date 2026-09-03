@@ -88,7 +88,8 @@ fn push_finding(out: &mut String, finding: &Finding) {
         Finding::PolicyMissing
         | Finding::PolicyDiffers
         | Finding::UngovernableExtra { .. }
-        | Finding::VaultGitignoreMissing => {
+        | Finding::VaultGitignoreMissing
+        | Finding::VaultRelocationPending { .. } => {
             push_policy(out, finding);
         }
         Finding::RecipientDrift { .. } => push_recipients(out, finding),
@@ -143,6 +144,17 @@ fn push_policy(out: &mut String, finding: &Finding) {
                  rendering left behind by an interrupted run could be staged and committed.",
             );
             remedy(out, "add .sops-vault-rules.yaml to the vault's .gitignore");
+        }
+
+        Finding::VaultRelocationPending { file } => {
+            headline(
+                out,
+                &format!(
+                    "{file} is still at the declaration root, and a vault is declared: \
+                     `{PROGRAM} fix` has not yet moved it into the vault."
+                ),
+            );
+            remedy(out, &format!("{PROGRAM} fix"));
         }
 
         _ => {}

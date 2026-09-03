@@ -39,7 +39,7 @@ takes, because it is what a failed upstream command leaves behind.
 
 /// `safix fix -h`.
 pub const FIX: &str = "\
-safix fix [--yes]
+safix fix [--yes] [--vault-rollback]
 
 Regenerate .sops.yaml from the declarations, then re-wrap each governed file's
 data key to the audience that policy declares. --yes answers sops' confirmation.
@@ -55,6 +55,26 @@ It does not commit: re-wrapping every governed file is a diff worth reading
 first. It does not revoke either. A person removed from an audience has already
 read every value in the file, and re-wrapping the data key does not unread it;
 revoking means a new value, which is `generate --regenerate` or `sops <file>`.
+
+\u{2500}\u{2500} with a vault declared \u{2500}\u{2500}
+Before re-wrapping, this relocates every readable-layout document, public
+output and definition record still at the declaration root into its opaque
+vault destination: decrypted under your own identity, re-encrypted under the
+vault's disposable creation rules, then removed from the declaration root. A
+destination already present is left alone, so an interrupted run resumes
+where it stopped. This also writes the vault's own .gitignore entry for
+.sops-vault-rules.yaml when it is missing. Nothing here commits; a note
+names the commit order that follows — the vault first, then the
+declaration root with a Safix-Vault: <short-id> trailer — and the lock
+bump that comes after that.
+
+--vault-rollback runs the same move the other direction and skips the
+re-wrap: every document, output and record still in the vault is decrypted
+and re-encrypted into the readable layout at the declaration root, then
+removed from the vault. Run it while flake.safix.vault is still declared —
+the naming key needed to find a vault-rooted entry's readable name is only
+reachable through the still-standing declaration — then remove the
+declaration and unset SAFIX_VAULT_ROOT yourself once it finishes.
 ";
 
 /// `safix audit -h`.

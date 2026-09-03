@@ -443,19 +443,21 @@ fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(abort::exit_code(status))
 }
 
-/// The policy regenerated, and every governed file re-wrapped to it.
+/// The policy regenerated, every governed file re-wrapped to it, and — with
+/// a vault declared — readable-layout content relocated into or out of it.
 fn fix_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let assume_yes = match arguments {
-        [] => false,
-        [flag] if flag == "--yes" => true,
-        _ => {
-            return Err(Refusal::Usage {
-                form: "fix [--yes]",
-            });
+    const FORM: &str = "fix [--yes] [--vault-rollback]";
+    let mut assume_yes = false;
+    let mut rollback = false;
+    for argument in arguments {
+        match argument.as_str() {
+            "--yes" => assume_yes = true,
+            "--vault-rollback" => rollback = true,
+            _ => return Err(Refusal::Usage { form: FORM }),
         }
-    };
+    }
     let workspace = workspace()?;
-    let status = fix::run(&workspace, &Terminal, assume_yes)?;
+    let status = fix::run(&workspace, &Terminal, assume_yes, rollback)?;
     Ok(abort::exit_code(status))
 }
 

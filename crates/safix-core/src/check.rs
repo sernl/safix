@@ -160,6 +160,18 @@ pub enum Finding {
     /// guarantee, catching a scratch file that happens to still exist at the
     /// moment `git add`/`git commit` runs.
     VaultGitignoreMissing,
+
+    /// A vault is declared, and this readable-layout path — a ciphertext
+    /// document, a public output, or a definition record — still sits at
+    /// the declaration root rather than at its opaque vault destination.
+    ///
+    /// `fix` moves it: decrypting it under the operator's own identity and
+    /// re-encrypting it into the vault, or copying it directly when it is
+    /// already plaintext, then removing the readable-layout source.
+    VaultRelocationPending {
+        /// The declaration-root, repository-relative path still pending.
+        file: String,
+    },
 }
 
 /// Every disagreement, in report order, for every user or for one.
@@ -182,6 +194,7 @@ pub fn run(workspace: &Workspace, only: Option<&str>) -> Result<Vec<Finding>> {
     values(workspace, &mut documents, &strays, only, &mut findings)?;
     definitions(workspace, only, &mut findings)?;
     vault_gitignore(workspace, &mut findings)?;
+    vault_relocation(workspace, &mut findings)?;
 
     Ok(findings)
 }
@@ -194,17 +207,46 @@ fn vault_gitignore(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result
     if workspace.vault_root() == workspace.root() {
         return Ok(());
     }
-    let anchored = format!("/{}", crate::workspace::VAULT_RULES_FILE);
-    let covered = workspace
-        .read_vault_relative(".gitignore")?
-        .is_some_and(|text| {
-            text.lines()
-                .map(str::trim)
-                .any(|line| line == crate::workspace::VAULT_RULES_FILE || line == anchored)
-        });
-    if !covered {
+    if !workspace.vault_gitignore_covers_rules()? {
         findings.push(Finding::VaultGitignoreMissing);
     }
+    Ok(())
+}
+
+/// Every readable-layout path a vault migration has not yet moved.
+///
+/// A no-op when no vault is declared, for the reason [`vault_gitignore`]
+/// gives: every placement's `logical_*` field is `null` then (design V14),
+/// so [`crate::relocation`]'s enumerations find nothing to group.
+///
+/// One finding per distinct readable path — a ciphertext document, a public
+/// output, or a definition record — still present at the declaration root,
+/// deduplicated because a shared secret's readable file is one path named by
+/// every carrier's placement.
+fn vault_relocation(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result<()> {
+    if workspace.vault_root() == workspace.root() {
+        return Ok(());
+    }
+    let placements = workspace.placements()?;
+    let mut pending = BTreeSet::new();
+    for document in crate::relocation::secret_documents(placements) {
+        if workspace.absolute(&document.logical_file).exists() {
+            pending.insert(document.logical_file);
+        }
+    }
+    for leaf in crate::relocation::public_leaves(placements)
+        .into_iter()
+        .chain(crate::relocation::record_leaves(placements))
+    {
+        if workspace.absolute(&leaf.logical).exists() {
+            pending.insert(leaf.logical);
+        }
+    }
+    findings.extend(
+        pending
+            .into_iter()
+            .map(|file| Finding::VaultRelocationPending { file }),
+    );
     Ok(())
 }
 

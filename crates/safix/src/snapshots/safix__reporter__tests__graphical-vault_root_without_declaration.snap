@@ -5,4 +5,7 @@ expression: render_graphical(&refusal)
 safix::vault_root_without_declaration
 
   × SAFIX_VAULT_ROOT names /srv/vault, but flake.safix.vault is not declared.
-  │ Declare flake.safix.vault or unset SAFIX_VAULT_ROOT.
+  │ Declare flake.safix.vault or unset SAFIX_VAULT_ROOT. A vault whose
+  │ declaration was removed without first running the rollback is recovered
+  │ the same way: re-declare flake.safix.vault and run `safix fix --vault-
+  │ rollback` before removing it again.

@@ -81,6 +81,7 @@ pub mod nix;
 mod probe;
 pub mod progress;
 pub mod public;
+mod relocation;
 pub mod sandbox;
 pub mod scratch;
 mod secret;
