@@ -121,6 +121,75 @@
         # side by fiat instead of refusing when both moved fails it on
         # `both_sides_holding_different_values_with_no_agreement_is_a_conflict`.
         safix-bridge-sync-converge = claim "safix-bridge-sync-converge" "bridge_sync";
+
+        # `Workspace::discover`'s two-root resolution (design V1) and the
+        # vault-is-a-git-repository refusal (V2): the four
+        # `SAFIX_VAULT_ROOT`/`vaultDeclared` combinations, both mismatch
+        # refusals, and the plain-directory and subdirectory-of-a-repository
+        # cases held apart rather than collapsed into one message. Resolving
+        # `vault_root` to `root` whenever either signal is set, or merging the
+        # two git-repository refusals into one, turns this red.
+        safix-vault-workspace = claim "safix-vault-workspace" "vault_workspace";
+
+        # What a declared vault must not disturb (task group 8): nix
+        # evaluation, git author identity, and the onboarding and enroll
+        # hooks all stay at `declaration_root` regardless of `vault_root`.
+        # The stubbed evaluator itself refuses an evaluation naming any root
+        # but the declaration one, so routing any of these four sites through
+        # `vault_root` turns this red rather than merely untested.
+        safix-vault-invariants = claim "safix-vault-invariants" "vault_invariants";
+
+        # `edit`, `get`, `sync clan` and `sync keepassxc` each read a
+        # vault-rooted document (task 2.11) — the four call sites design V3's
+        # touch point 3 moved from `absolute`/`read_relative` to
+        # `vault_absolute`/`read_vault_relative`. Reverting any one of the
+        # four to the declaration-rooted accessor turns this red on that
+        # site alone.
+        safix-vault-reads = claim "safix-vault-reads" "vault_reads";
+
+        # Runtime reversibility over opaque paths (task group 10): a dropped
+        # carrier is reported as the same revocation whether the audience's
+        # physical path is readable or opaque-hex-shaped, because
+        # `check.rs`'s shared/stray logic and `refOfElement` are never fed a
+        # physical name in either mode. Reintroducing a parse of
+        # `placement.file`'s structure anywhere on that path turns this red.
+        safix-vault-opaque-names = claim "safix-vault-opaque-names" "vault_opaque_names";
+
+        # The vault's disposable creation rules (design V10, task group 5):
+        # `encrypt` and `updatekeys` reach a vault-rooted document through a
+        # scratch `--config` rendering that never survives the run, on
+        # normal return, on a forced sops failure, and on a signal mid-call,
+        # and `check` reports a vault's missing `.gitignore` entry for it.
+        # Staging the rules outside `vault_root`, or leaving the scratch file
+        # unregistered with the sweep, turns this red.
+        safix-vault-scratch-rules = claim "safix-vault-scratch-rules" "vault_scratch_rules";
+
+        # The vault-first commit order and its half-landed refusal (design
+        # V4, task group 6): a forced declaration-root commit failure
+        # reports the vault commit's id and completes on a retry with no
+        # second vault commit, and a single-root operation still commits
+        # once with no trailer. Committing the declaration root first, or
+        # repeating the vault commit on retry, turns this red.
+        safix-vault-commit-ordering = claim "safix-vault-commit-ordering" "vault_commit_ordering";
+
+        # The opaque-aware migration and its rollback (design V13, task
+        # group 11): a populated readable fixture migrates into a vault with
+        # every leaf decrypting to the same plaintext and every physical
+        # name matching the opaque form the placements declare, the rollback
+        # restores the readable layout, and an interrupted relocation leaves
+        # the destination absent for a re-run to complete. Skipping the
+        # already-present-destination check, or carrying the readable name
+        # across instead of re-encrypting, turns this red.
+        safix-vault-migration = claim "safix-vault-migration" "vault_migration";
+
+        # The lock-bump disclosure (design V6, task group 9): the exact
+        # `nix flake lock --update-input <name>` line when the declaring
+        # flake's lock file settles on exactly one input matching the vault
+        # root, the general phrasing when it names none or more than one,
+        # and silence when no vault is declared. Naming an input on an
+        # ambiguous or absent match, or disclosing anything with no vault
+        # declared, turns this red.
+        safix-vault-lock-bump = claim "safix-vault-lock-bump" "vault_lock_bump";
       }
       # The tmpfs rule, held against the kernel's own mount table rather than
       # against the probe that enforces it. The drill that exercises the refusal
