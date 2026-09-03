@@ -101,6 +101,56 @@ impl Attribute {
     }
 }
 
+/// One node of a flake's lock file, as `nix flake metadata --json` prints it
+/// under `.locks.nodes` — read for design V6's lock-bump disclosure alone.
+///
+/// The root node carries no `locked` field at all, which is exactly the case
+/// this makes representable rather than refusing to parse: [`FlakeMetadata::nodes`]
+/// is what skips it.
+#[derive(Debug, serde::Deserialize)]
+struct LockNode {
+    locked: Option<LockedSource>,
+}
+
+/// Where a locked input's source resolved to, as much of it as the
+/// lock-bump disclosure needs.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct LockedSource {
+    /// The local filesystem path this input resolved to: present for a
+    /// `path:`-typed input and for a `git`/`tarball` input fetched from a
+    /// `file://` reference, absent for anything fetched over the network.
+    pub(crate) path: Option<String>,
+    /// The NAR hash of the content this input resolved to. Every locked
+    /// input carries one, which is what makes it the fallback design V6
+    /// names when [`LockedSource::path`] cannot settle the question.
+    #[serde(rename = "narHash")]
+    pub(crate) nar_hash: Option<String>,
+}
+
+/// A flake's lock file, read for design V6's lock-bump disclosure alone:
+/// `.locks.nodes` rather than a `flake.safix.lib` attribute, which is why
+/// [`Nix::flake_metadata`] is a separate subprocess call from
+/// [`Nix::eval_json`] rather than a new [`Attribute`].
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct FlakeMetadata {
+    locks: LocksSection,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocksSection {
+    nodes: std::collections::BTreeMap<String, LockNode>,
+}
+
+impl FlakeMetadata {
+    /// Every lock node that names a locked source, by name.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = (&str, &LockedSource)> {
+        self.locks
+            .nodes
+            .iter()
+            .filter_map(|(name, node)| Some((name.as_str(), node.locked.as_ref()?)))
+    }
+}
+
 /// The nix binary, and how it is reached.
 ///
 /// `SAFIX_NIX` overrides the program so that a hermetic check can drive the
@@ -360,6 +410,56 @@ impl Nix {
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|status| status.success())
+    }
+
+    /// The flake metadata at `declaration_root`, read for design V6's
+    /// lock-bump disclosure alone — `.locks.nodes` rather than a
+    /// `flake.safix.lib` attribute, so a plain `nix flake metadata` call
+    /// rather than [`Nix::eval_json`]'s attribute machinery.
+    ///
+    /// `None` when nix cannot be run, exits non-zero, or prints something
+    /// that does not parse as this shape — the same graceful degradation
+    /// [`Nix::parses`] takes above, because a disclosure that cannot name
+    /// the exact remedy falls back to the general phrasing rather than
+    /// refusing a write that has already committed.
+    #[must_use]
+    pub(crate) fn flake_metadata(&self, declaration_root: &Path) -> Option<FlakeMetadata> {
+        let output = Command::new(&self.program)
+            .arg("flake")
+            .arg("metadata")
+            .arg(declaration_root)
+            .arg("--json")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        serde_json::from_slice(&output.stdout).ok()
+    }
+
+    /// The NAR hash of a path on disk, as `nix hash path` computes it by
+    /// default — the fallback design V6 names when no lock node's own
+    /// recorded path settles the lock-bump disclosure's match.
+    ///
+    /// `None` for the same reasons [`Nix::flake_metadata`] answers `None`.
+    #[must_use]
+    pub(crate) fn nar_hash(&self, path: &Path) -> Option<String> {
+        let output = Command::new(&self.program)
+            .arg("hash")
+            .arg("path")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8(output.stdout)
+            .ok()
+            .map(|text| text.trim().to_owned())
     }
 
     /// Standard error is inherited: nix's own diagnosis of a broken

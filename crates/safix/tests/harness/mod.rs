@@ -325,6 +325,12 @@ pub struct Fixture {
     /// the same answer a consumer who has never heard of a vault evaluates
     /// to.
     vault_rules: Option<String>,
+    /// The declaring flake's lock nodes task 9's disclosure reads back —
+    /// each a name and the local path its `locked` source names. Empty by
+    /// default, which is what `write_fixtures` answers with an empty
+    /// `.locks.nodes` object, the same lock file a consumer who has never
+    /// run `nix flake lock --update-input` for the vault carries.
+    flake_lock_nodes: Vec<(String, PathBuf)>,
     extras: Vec<String>,
 }
 
@@ -413,6 +419,7 @@ impl Fixture {
             clan_flake: None,
             vault: None,
             vault_rules: None,
+            flake_lock_nodes: Vec::new(),
             genplan: json!({
                 "alice": { "order": [], "outputs": {}, "inputs": {} },
                 "bob":   { "order": [], "outputs": {}, "inputs": {} },
@@ -1306,6 +1313,19 @@ impl Fixture {
             &self.work.join("vault-rules.json"),
             &json!(self.vault_rules),
         );
+        // The declaring flake's lock nodes task 9's disclosure searches —
+        // empty by default, which is the lock file naming no matching input.
+        let mut lock_nodes = serde_json::Map::new();
+        for (name, path) in &self.flake_lock_nodes {
+            lock_nodes.insert(
+                name.clone(),
+                json!({ "locked": { "path": path.display().to_string() } }),
+            );
+        }
+        write_json(
+            &self.work.join("flake-metadata.json"),
+            &json!({ "locks": { "nodes": Value::Object(lock_nodes) } }),
+        );
 
         // The subject name space, derived here the way `resolve.nix` derives it:
         // every declared person, every declared group, and every organization the
@@ -1839,6 +1859,10 @@ impl Fixture {
                 "SAFIX_FIXTURE_VAULT_RULES",
                 self.work.join("vault-rules.json"),
             )
+            .env(
+                "SAFIX_FIXTURE_FLAKE_METADATA",
+                self.work.join("flake-metadata.json"),
+            )
             // The two the developer's own shell almost certainly sets. A test
             // that inherited them would open whoever is running it into their
             // real editor, on a fixture value, and wait; and one that passed
@@ -2163,6 +2187,20 @@ impl Fixture {
             }
         }
         self.vault_rules = Some(text);
+        self.write_fixtures();
+    }
+
+    /// Declare the declaring flake's lock nodes for task 9's lock-bump
+    /// disclosure: each a name and the local path its `locked` source
+    /// names, replacing whatever this fixture named before — task 9.3 needs
+    /// exactly one node whose path matches [`Fixture::vault_root`], and 9.4
+    /// needs zero or more than one, so a method that accumulated across
+    /// calls would make one drill's fixture the next's residue.
+    pub fn set_flake_lock_nodes(&mut self, nodes: &[(&str, &Path)]) {
+        self.flake_lock_nodes = nodes
+            .iter()
+            .map(|(name, path)| ((*name).to_owned(), path.to_path_buf()))
+            .collect();
         self.write_fixtures();
     }
 

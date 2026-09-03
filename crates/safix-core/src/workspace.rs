@@ -490,6 +490,22 @@ impl Workspace {
                 .any(|line| line == VAULT_RULES_FILE || line == anchored)
         }))
     }
+
+    /// The lock-bump disclosure design V6 prints after a vault-root commit
+    /// lands: the requirement that a consuming build sees nothing until the
+    /// declaring flake's lock entry for the vault is updated, plus the exact
+    /// `nix flake lock --update-input` line when the declaring flake's lock
+    /// file settles on exactly one input matching [`Workspace::vault_root`].
+    ///
+    /// Callers guard this behind `vault_root() != root()` themselves rather
+    /// than this checking it internally: `set`, `generate` and `enroll` each
+    /// already know whether their commit landed at the vault root before
+    /// calling this, and a caller that answers `false` to that question has
+    /// nothing to disclose in the first place.
+    #[must_use]
+    pub fn disclose_lock_bump(&self) -> String {
+        crate::lock_bump::disclosure(&self.nix, &self.root, &self.vault_root)
+    }
 }
 
 /// `$USER`, or what `id -un` says when it is unset or empty.
@@ -575,7 +591,12 @@ fn verify_vault_repository(git: &Git, vault_root: &Path) -> Result<()> {
 /// A path git has just reported as a repository's top level is not expected
 /// to fail here; falling back to the path as given rather than propagating a
 /// second failure keeps this a comparison rather than a third refusal.
-fn canonicalized(path: &Path) -> PathBuf {
+///
+/// `pub(crate)` because [`crate::lock_bump`] reuses it for the same
+/// comparison against a lock node's own recorded path, which may not exist
+/// on disk at all — a stale or speculative entry — and must not fail to
+/// compare just because it does not resolve.
+pub(crate) fn canonicalized(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 

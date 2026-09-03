@@ -204,6 +204,9 @@ pub fn run_committing(
         std::slice::from_ref(&relative),
         Some(&identity),
     )?;
+    if workspace.vault_root() != workspace.root() {
+        progress.write(&workspace.disclose_lock_bump());
+    }
     Ok(0)
 }
 

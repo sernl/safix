@@ -889,6 +889,9 @@ fn write(
         &committed,
         Some(&identity),
     )?;
+    if workspace.vault_root() != workspace.root() {
+        progress.write(&workspace.disclose_lock_bump());
+    }
     Ok(Outcome::Ran)
 }
 

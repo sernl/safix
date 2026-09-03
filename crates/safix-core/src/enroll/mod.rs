@@ -436,6 +436,15 @@ impl Ceremony<'_> {
             &identity,
         )?;
 
+        // Only the vault-commit branch of `commit_two_roots` above actually
+        // landed a vault-root commit: `written_vault` empty means it
+        // degraded to a single declaration-root commit, per that function's
+        // own doc comment, and there is nothing to disclose about a lock
+        // that did not just move.
+        if self.workspace.vault_root() != self.workspace.root() && !written_vault.is_empty() {
+            self.progress.write(&self.workspace.disclose_lock_bump());
+        }
+
         Ok(stored)
     }
 

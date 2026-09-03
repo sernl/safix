@@ -20,6 +20,10 @@
 //! files git tracks, so a command that regenerates the policy before staging
 //! its scaffold writes a policy missing the person it has just declared. A
 //! stub emitting a fixed document passes either order and notices nothing.
+//!
+//! `nix flake metadata`'s own answer, `SAFIX_FIXTURE_FLAKE_METADATA`, is a
+//! separate command rather than an attribute of the table above — design
+//! V6's lock-bump disclosure reads `.locks.nodes`, never `flake.safix.lib`.
 
 use std::path::Path;
 use std::process::Command;
@@ -138,8 +142,40 @@ fn main() {
     match arguments.split_first() {
         Some((verb, rest)) if verb == "eval" => eval(rest),
         Some((verb, rest)) if verb == "shell" => shell(rest),
+        Some((verb, rest)) if verb == "flake" => flake(rest),
         _ => refuse(&format!("unexpected invocation: {}", arguments.join(" "))),
     }
+}
+
+/// Answer `nix flake metadata <root> --json` — design V6's lock-bump
+/// disclosure, distinct from [`eval`]'s attribute machinery because it reads
+/// `.locks.nodes` rather than a `flake.safix.lib` attribute.
+fn flake(arguments: &[String]) -> ! {
+    let [sub, root, flag] = arguments else {
+        refuse(&format!(
+            "expected `flake metadata <root> --json`, got: {}",
+            arguments.join(" ")
+        ));
+    };
+    if sub != "metadata" {
+        refuse(&format!("unexpected `flake` subcommand: {sub}"));
+    }
+    let expected_root = environment("SAFIX_REPO_ROOT");
+    if *root != expected_root {
+        refuse(&format!(
+            "the metadata call names '{root}' rather than the fixture repository '{expected_root}'"
+        ));
+    }
+    if flag != "--json" {
+        refuse(&format!(
+            "flake metadata was read '{flag}', and the runtime reads it --json"
+        ));
+    }
+    print!(
+        "{}",
+        read(Path::new(&environment("SAFIX_FIXTURE_FLAKE_METADATA")))
+    );
+    std::process::exit(0)
 }
 
 /// Answer one attribute, having asserted which one was asked for and how.
