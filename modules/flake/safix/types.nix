@@ -557,11 +557,11 @@ let
         description = ''
           The age public key this machine's system scope already decrypts with:
           `ssh-to-age` of the host's ed25519 key, which is the derivation clan
-          uses for its own machine recipients and the key sops-nix's NixOS module
-          reaches by defaulting `sops.age.sshKeyPaths` to the ed25519 host keys of
-          a host running sshd. Declaring a machine therefore mints no second
-          identity and adds no enrollment step; it names a key the host already
-          holds.
+          uses for its own machine recipients and the key safix's own NixOS
+          module reaches by deriving `safix.identity.sshKeyPaths` from the
+          ed25519 host keys of a host running sshd. Declaring a machine
+          therefore mints no second identity and adds no enrollment step; it
+          names a key the host already holds.
 
           A recipient, never an identity. Nothing here can decrypt anything, and
           no private half is named, escrowed or deployed by this field.

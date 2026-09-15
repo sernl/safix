@@ -510,13 +510,19 @@ in
                 lib = projection;
                 inherit hostname;
                 identity.sshKeyPaths = [ "/home/alice/.ssh/agenix" ];
-
                 # Named rather than defaulted: the default is `pkgs.safix`,
                 # which this flake's nixpkgs does not carry, and a fixture that
                 # left it unset would fail on that refusal the moment anything
-                # forced the manifest. The foreign-platform profiles below never
-                # force it, so the native package they name is never built.
+                # forced the manifest. The install-surface row below forces one
+                # — it reads the manifest's own JSON to say the profile
+                # installs in user mode — so the build-platform package is
+                # named too. Naming this flake's own build on a
+                # foreign-platform profile is sound because nothing here builds
+                # the manifest: a `writeTextFile`'s `text` is available to an
+                # evaluation on any system, and the check phase that would need
+                # the package to run is never run.
                 installer.package = self'.packages.safix;
+                installer.validationPackage = self'.packages.safix;
 
                 # Off for the same reason the system shape's is: this fleet's
                 # projection is rendered with an empty root, so every
@@ -809,14 +815,33 @@ in
               # because a profile with no unit still has to install, and that is
               # the half that makes the user scope exist on darwin at all rather
               # than half-exist.
+              #
+              # Presence is not the whole of the entry's claim, so the DAG
+              # placement is read beside it: an entry registered as a bare
+              # string becomes `entryAnywhere`, which installs secrets at a
+              # point home-manager is free to choose, and the install has to
+              # follow the write boundary or it writes into a profile
+              # home-manager has not laid down yet.
+              #
+              # And each platform's manifest says so itself. `userMode` is what
+              # the three omissions — the mount, the chown, the restart
+              # propagation — are driven by inside the installer, so a profile
+              # whose manifest lost the field would install as a system scope
+              # would and fail on the first privilege it lacks. Read out of the
+              # derivation's own text, which is the JSON a host would hand the
+              # program, rather than off the option it was built from.
               installSurface = {
                 linux = {
                   unit = linuxHome.systemd.user.services ? safix;
                   activation = linuxHome.home.activation ? safixInstall;
+                  ordering = linuxHome.home.activation.safixInstall.after;
+                  userMode = (builtins.fromJSON linuxHome.safix.installer.manifest.text).userMode;
                 };
                 darwin = {
                   unit = darwinHome.systemd.user.services ? safix;
                   activation = darwinHome.home.activation ? safixInstall;
+                  ordering = darwinHome.home.activation.safixInstall.after;
+                  userMode = (builtins.fromJSON darwinHome.safix.installer.manifest.text).userMode;
                 };
               };
 
@@ -930,10 +955,14 @@ in
                 linux = {
                   unit = true;
                   activation = true;
+                  ordering = [ "writeBoundary" ];
+                  userMode = true;
                 };
                 darwin = {
                   unit = false;
                   activation = true;
+                  ordering = [ "writeBoundary" ];
+                  userMode = true;
                 };
               };
 

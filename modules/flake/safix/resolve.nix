@@ -2368,7 +2368,7 @@ let
               # Set unconditionally on whether the entry declares its own
               # `sopsKey`, because `placementsIn` writes the identical opaque
               # value into the document regardless — leaving this unset in
-              # vault mode would have sops-nix default to the *readable*
+              # vault mode would have the installer default to the *readable*
               # attribute name, defeating key opacity for every entry that
               # does not carry a custom key (design V9's "in-document key").
               sopsKey = opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey;

@@ -9,6 +9,7 @@ The recipient policy the encryption tool reads off disk: that it is generated fr
 ### Requirement: The policy file is generated and never hand-edited
 
 The recipient policy SHALL be rendered from the same declarations the resolver reads, SHALL be committed to the declaring repository because the encryption tool reads the committed file from there — whether or not a vault is declared — and SHALL carry a header stating that it is generated and naming the command that regenerates it.
+Every path the header's worked examples spell SHALL be derived from the configured storage roots, because a committed header documenting a layout the repository does not have is a false statement in the one file a reviewer reads to learn who can open what.
 For a command that needs creation rules to reach a vault-rooted document, the runtime SHALL additionally render a disposable, uncommitted copy of the rules into the vault working tree, scoped to that command alone.
 
 #### Scenario: One declaration, two projections
@@ -28,6 +29,13 @@ For a command that needs creation rules to reach a vault-rooted document, the ru
 - **WHEN** the policy is regenerated
 - **THEN** every declared person's rule is present in the output, because the people are the generator's input
 - **AND** regeneration cannot drop a rule that no declaration removed
+
+#### Scenario: A renamed encrypted root moves the rules and the header together
+
+- **WHEN** the encrypted root is renamed and the policy is regenerated
+- **THEN** every rule's pattern is anchored under the new root
+- **AND** every path the header's worked examples spell names the new root
+- **AND** the drift check reports the committed file until it is regenerated
 
 #### Scenario: A vault does not move the committed file
 

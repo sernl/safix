@@ -8,8 +8,9 @@ Three requirements move as a result — the one that enumerates the verbs, the o
 
 ### Requirement: One command covers the lifecycle, by name and never by file
 
-The package SHALL provide a single command named `safix` with the subcommands `set`, `get`, `list`, `generate`, `check`, `fix`, `keygen`, `adduser`, and `install`.
+The package SHALL provide a single command named `safix` with the subcommands `set`, `edit`, `get`, `view`, `list`, `generate`, `check`, `fix`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group`, `upload`, and `install`.
 Every subcommand that addresses a secret SHALL address it by name, and SHALL NOT require the operator to name a file.
+Where a subcommand offers the operator a choice among the entries a user holds, that choice SHALL be among names, and choosing SHALL be equivalent to having named the chosen entry.
 `install` is the one exception and SHALL name a file, because a manifest is its whole input and no declaration names it.
 
 #### Scenario: Addressing a secret
@@ -17,6 +18,12 @@ Every subcommand that addresses a secret SHALL address it by name, and SHALL NOT
 - **WHEN** an operator sets, reads, or generates a value
 - **THEN** they name the secret
 - **AND** the file and the key within it are resolved from the declarations
+
+#### Scenario: Choosing is a way of naming
+
+- **WHEN** an operator chooses an entry from those offered rather than typing its name
+- **THEN** the run proceeds exactly as though the chosen name had been given as an argument
+- **AND** no file is named at any point
 
 #### Scenario: The subcommand set is closed
 

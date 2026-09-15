@@ -113,6 +113,7 @@
         ./modules/flake/checks/bridge.nix
         ./modules/flake/checks/bridge-sync.nix
         ./modules/flake/checks/cli.nix
+        ./modules/flake/checks/consume-namespace.nix
         ./modules/flake/checks/consumption.nix
         ./modules/flake/checks/custody.nix
         ./modules/flake/checks/entrypoints.nix

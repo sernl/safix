@@ -60,37 +60,15 @@ The module SHALL obtain the resolved declarations through an option the consumer
 - **THEN** evaluation fails naming the option and the likely cause
 - **AND** the message belongs to this package
 
-### Requirement: Each consumption module ships in a form that imports the provisioner and a form that does not
-
-The package SHALL export, for each scope, one module that imports the secret provisioner's module and one that declares the same namespace and imports nothing.
-
-#### Scenario: A tree without the provisioner
-
-- **WHEN** a consumer whose tree does not already import the provisioner imports the default form
-- **THEN** the provisioner's options are available and the profile evaluates
-- **AND** the consumer writes one import rather than two
-
-#### Scenario: A tree that already pins its own provisioner
-
-- **WHEN** a consumer already imports the provisioner at a revision of their own
-- **THEN** they import the form that imports nothing
-- **AND** the namespace and the behaviour are identical to the default form
-
-#### Scenario: The fact the two forms exist for
-
-- **WHEN** two distinct copies of one option-declaring module are imported into a single evaluation
-- **THEN** evaluation fails naming the option and both files
-- **AND** this is held by a check rather than stated only in prose, because no option can repair it after the fact — imports cannot depend on configuration
-
 ### Requirement: A profile that resolves nothing is inert
 
-When the resolved set is empty, the module SHALL define nothing: no secrets, no identity configuration, no activation entry, and no unit.
+When the resolved set is empty, the module SHALL define nothing: no resolved entries, no identity configuration, no manifest, no activation entry, and no unit.
 
 #### Scenario: Nothing resolved
 
 - **WHEN** a profile imports the module and the person it serves resolves no secret on that host
 - **THEN** the profile's activation entries contain no entry from this package
-- **AND** no secret-provisioning unit exists on that profile
+- **AND** no unit of this package's exists on that profile, at either scope
 
 #### Scenario: The enable default follows the resolution
 
@@ -98,10 +76,16 @@ When the resolved set is empty, the module SHALL define nothing: no secrets, no 
 - **THEN** it is on exactly when the resolved set is non-empty
 - **AND** the whole of the module's configuration is conditional on it
 
+#### Scenario: Inertness is now a statement about this package alone
+
+- **WHEN** the reason inertness is checkable is documented
+- **THEN** it states that every entry, unit and manifest the check looks for belongs to this package
+- **AND** the change is recorded: inertness previously also meant leaving another framework's secrets option empty, and this package no longer writes that option at all
+
 ### Requirement: Wiring mistakes are refused as this package's evaluation errors
 
 A missing or malformed binding SHALL fail evaluation with a message naming the option of this package that is wrong.
-A custody violation SHALL be reported by this package, in full, rather than as the provisioner's first failure.
+A custody violation SHALL be reported by this package, in full, rather than as some other component's first failure.
 
 #### Scenario: Bound but unaddressed
 
@@ -113,7 +97,7 @@ A custody violation SHALL be reported by this package, in full, rather than as t
 
 - **WHEN** the declarations a profile is bound to carry custody violations
 - **THEN** evaluation fails listing every violation
-- **AND** the failure names this package rather than arising from inside the provisioner's own evaluation
+- **AND** the failure names this package, which is now the only component that could raise it
 
 #### Scenario: Configured but bound to nothing
 
@@ -268,3 +252,26 @@ These SHALL be selection and decryption only: none of them declares a secret, a 
 - **WHEN** the derivation switch is turned off
 - **THEN** the identity is exactly what the consumer named
 - **AND** nothing about which entries resolve, or who may read them, changes
+
+### Requirement: One module per scope, published under both names
+
+The package SHALL publish one consumption module per scope, reachable under both the scope's plain name and its default name, with both names naming the same value.
+Each SHALL import nothing outside its own file.
+
+#### Scenario: The two names are one value
+
+- **WHEN** a scope's two published module names are compared
+- **THEN** they name the same value
+- **AND** both names remain published, so an existing import of either keeps resolving
+
+#### Scenario: Every form is dependency-free
+
+- **WHEN** any published consumption module's import list is inspected
+- **THEN** it names no flake input and no file outside this package's own consumption directory
+- **AND** a check holds this over every published name rather than over a chosen one, because a form that quietly regains a dependency is exactly what the retired two-form split was compensating for
+
+#### Scenario: Importing one declaring module twice is still an evaluation error
+
+- **WHEN** two distinct copies of this package's own declaring module are imported into a single evaluation
+- **THEN** evaluation fails naming the option and both files
+- **AND** this is held by a check rather than stated only in prose, because no option can repair it after the fact — imports cannot depend on configuration

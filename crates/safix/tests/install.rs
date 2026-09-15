@@ -20,7 +20,7 @@
 
 mod harness;
 
-use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use harness::{Fixture, mint_identity, recipient_of};
@@ -131,6 +131,12 @@ impl Store {
 /// What a path's mode is, without its file type.
 fn mode_of(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// Which filesystem a path is on, which is how "nothing was mounted here"
+/// is stated without reading the mount table.
+fn device_of(path: &Path) -> u64 {
+    std::fs::metadata(path).unwrap().dev()
 }
 
 #[test]
@@ -330,6 +336,123 @@ fn a_user_mode_install_lands_under_the_runtime_directory_and_rotates_its_generat
         !store.runtime.join("safix.d").join("1").exists(),
         "keepGenerations = 1 leaves one generation"
     );
+}
+
+#[test]
+fn a_doubled_per_cent_in_a_declared_path_installs_one_literal_per_cent() {
+    let store = Store::new("literal");
+    let mut manifest = store.manifest();
+    // `%%` is the escape, so a path meaning to carry a per cent of its own
+    // writes two. The entry is a third one beside the fixture's two, because
+    // the expansion runs over every declared path and the claim is about what
+    // reaches the filesystem rather than about the one path the store root is.
+    manifest["secrets"]
+        .as_array_mut()
+        .unwrap()
+        .push(store.entry(
+            "literal-token",
+            "alice-alone",
+            "%r/100%% sure/token",
+            "0400",
+        ));
+    let path = store.write("literal", &manifest);
+
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_success("the install");
+
+    let literal = store.runtime.join("100% sure").join("token");
+    assert_eq!(
+        std::fs::read_link(&literal).unwrap(),
+        store.store_root().join("literal-token"),
+        "%% became one literal per cent and %r expanded around it"
+    );
+    assert!(
+        !store.runtime.join("100%% sure").exists(),
+        "and the doubled spelling is nowhere on disk"
+    );
+}
+
+#[test]
+fn a_user_mode_install_mounts_nothing_chowns_nothing_and_restarts_nothing() {
+    let store = Store::new("omissions");
+    // The fixture's entries each declare `restartUnits`, so there is something
+    // to propagate and the silence below is a decision rather than an empty
+    // set. Both are also written afresh, so every entry reads as changed.
+    let path = store.write("omissions", &store.manifest());
+
+    // `systemctl` is resolved off PATH, so a script ahead of the real one on
+    // PATH is what turns "no restart" into an observation. The environment
+    // variable is the one that selects `systemctl` over the activation lists,
+    // set so that the run would reach the shim if it propagated at all —
+    // without it the omission could be the unit's registration path instead.
+    let calls = store.fixture.tmpdir().join("systemctl-calls");
+    let bin = store.fixture.tmpdir().join("omissions-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let systemctl = bin.join("systemctl");
+    std::fs::write(
+        &systemctl,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\n", calls.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let runtime = store.runtime.display().to_string();
+    let identity = store.identity.display().to_string();
+    let search_path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    store
+        .fixture
+        .run_env(
+            &["install", path.to_str().unwrap()],
+            None,
+            &[
+                ("XDG_RUNTIME_DIR", &runtime),
+                ("SOPS_AGE_KEY_FILE", &identity),
+                ("PATH", &search_path),
+                ("SOPS_RESTART_UNITS_VIA_SYSTEMCTL", "1"),
+            ],
+        )
+        .expect_success("an unprivileged user-mode install");
+
+    assert!(
+        !calls.exists(),
+        "a user-mode install propagated a restart, to units it declared but cannot own"
+    );
+
+    // Nothing was mounted over the store's root: a memory-backed filesystem
+    // there would give the mount point a device of its own, and the runtime
+    // directory it was made under is the device it has.
+    let mount_point = store.runtime.join("safix.d");
+    assert_eq!(
+        device_of(&mount_point),
+        device_of(&store.runtime),
+        "a user-mode install mounted a filesystem over its store root"
+    );
+
+    // Nothing was chowned: the manifest declares uid 0 and gid 0 on every
+    // entry, and what is on disk is the account that ran the install. This is
+    // the one assertion the runner's own privileges could make vacuous, so the
+    // two are compared rather than 0 being asserted absent — under a root
+    // runner the claim is the VM test's, which installs system-scope and
+    // measures the chown happening.
+    let me = (
+        rustix::process::getuid().as_raw(),
+        rustix::process::getgid().as_raw(),
+    );
+    let generation = store.runtime.join("safix.d").join("1");
+    for path in [generation.clone(), generation.join("alice-alone")] {
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(
+            (metadata.uid(), metadata.gid()),
+            me,
+            "{} changed hands, against a manifest in user mode",
+            path.display()
+        );
+    }
 }
 
 #[test]
