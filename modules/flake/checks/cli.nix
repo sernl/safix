@@ -554,9 +554,12 @@
           "a_user_holding_nothing_is_refused_rather_than_offered_an_empty_list";
 
       # Typing a query that narrows to one entry and pressing enter reads that
-      # one and no other: choosing is a way of naming. Attaching the test's
-      # pseudoterminal to standard input alone — drill 7.17 — turns this red,
-      # because the picker draws where it reads.
+      # one and no other: choosing is a way of naming.
+      # Dropping `--ctty` from the run the test spawns — drill 7.17 — turns
+      # this red, because the picker draws on the controlling terminal and a
+      # run without one has nothing to draw on.
+      # Standard output is a pipe in every picker run, which is what drill
+      # 7.17 established the old draw-on-stdout branch was holding: nothing.
       checks.safix-view-selection =
         mode "safix-view-selection" "picker"
           "a_typed_query_and_enter_prints_the_chosen_value";

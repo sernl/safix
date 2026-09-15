@@ -63,6 +63,46 @@ fn decrypts(spool: &Path) -> usize {
         .count()
 }
 
+/// The keys the recorded sops was asked to decrypt, in the order it was asked.
+///
+/// A sequence rather than a count, because the entry a highlight moved through
+/// and the entry it rested on are the same count and a different claim. Each
+/// invocation is recorded as its whole argument vector, one argument per line,
+/// so a `decrypt --extract ["key"]` is three consecutive lines.
+fn decrypted_keys(spool: &Path) -> Vec<String> {
+    let recorded = std::fs::read_to_string(spool.join("argv")).unwrap_or_default();
+    let lines: Vec<&str> = recorded.lines().collect();
+    lines
+        .windows(3)
+        .filter(|window| window[0] == "decrypt" && window[1] == "--extract")
+        .filter_map(|window| {
+            window[2]
+                .strip_prefix("[\"")
+                .and_then(|index| index.strip_suffix("\"]"))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// The lines a picker drew, with the terminal decoration taken off.
+///
+/// The frame is one string of lines: a status line, the query line, then the
+/// aligned table, whose highlighted line is wrapped in the reverse-video pair.
+/// Only that wrapping and the screen-clearing sequence the frame opens with are
+/// removed, so what a caller compares is the picker's own bytes.
+fn drawn_lines(drawn: &str) -> Vec<String> {
+    drawn
+        .lines()
+        .map(|line| {
+            line.trim_start_matches("\x1b[?1049h")
+                .trim_start_matches("\x1b[H\x1b[2J")
+                .trim_start_matches("\x1b[7m")
+                .trim_end_matches("\x1b[0m")
+                .to_owned()
+        })
+        .collect()
+}
+
 /// Three values distinct enough that a rendering can be told from its
 /// neighbours.
 fn three_values(fixture: &Fixture) {
@@ -114,7 +154,7 @@ fn a_typed_query_and_enter_prints_the_chosen_value() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["view"],
-        keystrokes: &["mail\r"],
+        keystrokes: &[&["mail\r"]],
         ..Pick::default()
     });
     assert!(
@@ -146,7 +186,7 @@ fn cancelling_writes_nothing_and_restores_the_terminal() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["view"],
-        keystrokes: &["\x1b"],
+        keystrokes: &[&["\x1b"]],
         graphical: true,
         ..Pick::default()
     });
@@ -200,12 +240,11 @@ fn the_preview_never_reaches_stdout_or_stderr() {
     let fixture = Fixture::new();
     three_values(&fixture);
 
-    // The terminal is standard input alone here, so both other streams are
-    // pipes this test can read.
+    // The terminal is standard input alone, so both other streams are pipes
+    // this test can read.
     let picked = fixture.pick(&Pick {
         arguments: &["view"],
-        keystrokes: &["", "\x1b"],
-        draw_on_stdout: false,
+        keystrokes: &[&[], &["\x1b"]],
         ..Pick::default()
     });
     // The first entry alice holds, which is the one the highlight rested on.
@@ -236,7 +275,7 @@ fn no_preview_decrypts_nothing_until_a_choice_is_made() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["view", "--no-preview"],
-        keystrokes: &["", "\x1b"],
+        keystrokes: &[&[], &["\x1b"]],
         extra: &observed(&spool, &sops),
         ..Pick::default()
     });
@@ -249,6 +288,13 @@ fn no_preview_decrypts_nothing_until_a_choice_is_made() {
 }
 
 /// Moving decrypts nothing; resting decrypts one thing.
+///
+/// The movements arrive as separate reads less than the quiet period apart,
+/// which is what leaves the quiet period as the only thing holding the
+/// moved-through entry back. Two movements in one read would be held apart by
+/// the read boundary instead — the draw loop settles once per read — and this
+/// test would then hold over a runtime with no quiet period at all; that is
+/// 7.18 in this change's tasks.
 #[test]
 fn moving_through_entries_without_pausing_decrypts_only_where_the_highlight_rests() {
     let fixture = Fixture::new();
@@ -256,20 +302,27 @@ fn moving_through_entries_without_pausing_decrypts_only_where_the_highlight_rest
     let spool = fixture.scratch("movement-spool");
     let sops = real_sops();
 
-    // Two movements in one chunk, so they arrive together and no quiet period
-    // elapses between them; then a pause, which is the rest; then leaving. The
-    // highlight comes to rest on `mail-password`, which holds a value.
+    // A rest before anything is typed, so the picker is reading by the time the
+    // movements arrive and each of them is a read of its own; then the two
+    // movements, one write each and no rest between them; then the group's own
+    // rest, which is the highlight coming to rest on `mail-password`; then
+    // leaving.
     let picked = fixture.pick(&Pick {
         arguments: &["view"],
-        keystrokes: &["\x1b[B\x1b[B", "\x1b"],
+        keystrokes: &[&[], &["\x1b[B", "\x1b[B"], &["\x1b"]],
         extra: &observed(&spool, &sops),
         ..Pick::default()
     });
     assert_eq!(picked.run.code, Some(1), "leaving the picker exited oddly");
+    // alice's entries in the order the placements carry them: the highlight
+    // starts on `aliased-secret`, whose key is `custom-key`, moves through
+    // `api-token` without resting, and comes to rest on `mail-password`.
     assert_eq!(
-        decrypts(&spool),
-        1,
-        "the entries moved through were decrypted as well as the one rested on"
+        decrypted_keys(&spool),
+        vec!["custom-key".to_owned(), "mail-password".to_owned()],
+        "an entry was decrypted somewhere other than where the highlight \
+         rested\n{}",
+        picked.drawn
     );
 }
 
@@ -292,7 +345,7 @@ fn edit_with_no_name_reaches_the_editor_for_the_chosen_entry() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["edit"],
-        keystrokes: &["api\r"],
+        keystrokes: &[&["api\r"]],
         extra: &[("EDITOR", &script)],
         ..Pick::default()
     });
@@ -324,7 +377,7 @@ fn edit_with_no_editor_refuses_before_offering_anything() {
     // The fixture removes both variables itself, so this run has neither.
     let picked = fixture.pick(&Pick {
         arguments: &["edit"],
-        keystrokes: &["\x1b"],
+        keystrokes: &[&["\x1b"]],
         graphical: true,
         ..Pick::default()
     });
@@ -345,7 +398,7 @@ fn edit_with_no_editor_refuses_before_offering_anything() {
     holder.seed_holder_of_nothing("carol");
     let empty = holder.pick(&Pick {
         arguments: &["edit", "carol"],
-        keystrokes: &["\x1b"],
+        keystrokes: &[&["\x1b"]],
         graphical: true,
         ..Pick::default()
     });
@@ -367,7 +420,7 @@ fn edit_never_offers_a_public_output() {
 
     let editing = fixture.pick(&Pick {
         arguments: &["edit", "--no-preview"],
-        keystrokes: &["\x1b"],
+        keystrokes: &[&["\x1b"]],
         extra: &[("EDITOR", &editor(&fixture, "never-run", "true"))],
         ..Pick::default()
     });
@@ -384,7 +437,7 @@ fn edit_never_offers_a_public_output() {
 
     let reading = fixture.pick(&Pick {
         arguments: &["view", "--no-preview"],
-        keystrokes: &["\x1b"],
+        keystrokes: &[&["\x1b"]],
         ..Pick::default()
     });
     assert!(
@@ -403,7 +456,7 @@ fn nothing_is_staged_by_a_preview() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["view"],
-        keystrokes: &["", "\x1b"],
+        keystrokes: &[&[], &["\x1b"]],
         ..Pick::default()
     });
     assert!(
@@ -421,4 +474,51 @@ fn nothing_is_staged_by_a_preview() {
         fixture.scratch_files().is_empty(),
         "a preview left a file beside a target"
     );
+}
+
+/// The row the picker draws for an entry is the line `list` prints for it.
+///
+/// Read off the terminal rather than out of `render`, because that is where the
+/// claim lives: the picker's unit test holds `render::listing` against
+/// `render::listing_row`, which are both `render`'s own, so a row built inside
+/// the picker instead of by `list`'s builder stays green there. This compares
+/// the bytes an operator sees against the bytes `safix list` prints, which is
+/// 3.15 in this change's tasks.
+#[test]
+fn the_row_the_picker_draws_is_the_line_list_prints() {
+    let fixture = Fixture::new();
+    three_values(&fixture);
+
+    let listed = fixture
+        .run(&["list", "alice"])
+        .expect_success("listing what alice holds");
+    // No preview, so the run decrypts nothing to draw one frame; the picker
+    // offers every entry `list` prints, so both tables are aligned over the
+    // same rows and a column width is not a difference between them.
+    let picked = fixture.pick(&Pick {
+        arguments: &["view", "--no-preview"],
+        keystrokes: &[&["\x1b"]],
+        ..Pick::default()
+    });
+    let drawn = drawn_lines(&picked.drawn);
+
+    for name in ["aliased-secret", "api-token", "mail-password", "wifi-psk"] {
+        let printed = listed
+            .output()
+            .lines()
+            .find(|line| line.split_whitespace().next() == Some(name))
+            .map_or_else(
+                || panic!("`list` printed no line for {name}"),
+                str::to_owned,
+            );
+        assert!(
+            drawn.contains(&printed),
+            "the picker's row for {name} is not the line `list` prints\n\
+             list:   {printed:?}\npicker: {:?}",
+            drawn
+                .iter()
+                .filter(|line| line.contains(name))
+                .collect::<Vec<&String>>()
+        );
+    }
 }

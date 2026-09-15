@@ -160,26 +160,6 @@ pub fn transport_stub() -> &'static str {
     .as_str()
 }
 
-/// The real clan command, where a check put one in the environment.
-///
-/// Nothing falls back here, and that is the point: there is no compiled-in path
-/// to a real clan, and a `None` is what `real_clan.rs` turns into a stated
-/// absence rather than into a green test.
-pub fn real_clan() -> Option<String> {
-    named_program("SAFIX_TEST_REAL_CLAN")
-}
-
-/// The throwaway clan a check built for the real command to answer out of.
-pub fn real_clan_seed() -> Option<String> {
-    named_program("SAFIX_TEST_REAL_CLAN_SEED")
-}
-
-fn named_program(variable: &str) -> Option<String> {
-    std::env::var(variable)
-        .ok()
-        .filter(|value| !value.is_empty())
-}
-
 /// Where one of the three programs the suite drives is.
 ///
 /// `CARGO_BIN_EXE_*` is an absolute path fixed when the test was compiled, and
@@ -811,10 +791,8 @@ impl Fixture {
     /// Name the flake the mappings' clan side lives in.
     ///
     /// Every mapping declares one `clanFlake`, and a stubbed clan does not read
-    /// it, so the fixture repository is the harmless default. A run against a
-    /// real clan needs the real thing, and `real_clan.rs` is where that matters:
-    /// clan resolves the flake, evaluates the machine, and answers out of the
-    /// store it finds there. Call this before [`Fixture::seed_mapping`].
+    /// it, so the fixture repository is the harmless default. Call this before
+    /// [`Fixture::seed_mapping`].
     pub fn clan_flake_is(&mut self, flake: &Path) {
         self.clan_flake = Some(flake.to_owned());
         self.bridge["clanFlake"] = json!(flake.to_string_lossy());
@@ -1709,15 +1687,21 @@ impl Fixture {
         }
     }
 
-    /// `view` or `edit` driven through a picker, on a terminal it both draws on
+    /// `view` or `edit` driven through a picker, on the terminal it draws on
     /// and reads from.
     ///
     /// [`Fixture::set_on_a_terminal`]'s sibling, and it differs in what the
     /// pseudoterminal is attached to: a prompt reads from a terminal and writes
     /// its own prompt to standard error, so that helper attaches the slave to
-    /// standard input alone; a picker draws where it reads, so this one attaches
-    /// it to standard input and standard output both and keeps standard error a
-    /// pipe, which is what leaves a refusal separable from the drawing.
+    /// standard input alone; a picker reads keystrokes from the terminal too,
+    /// so this one attaches the slave to standard input and keeps both other
+    /// streams pipes, which is what leaves a refusal and anything written to
+    /// standard output separable from the drawing.
+    ///
+    /// The drawing needs no stream of its own: the run is a session leader that
+    /// has claimed the pseudoterminal, so the picker's own `/dev/tty` is that
+    /// terminal and every frame reaches the master whatever the standard
+    /// streams are.
     ///
     /// This is the `behavioural-suite` requirement this change adds: the picker
     /// is driven by keystrokes on a real terminal rather than through a
@@ -1726,7 +1710,7 @@ impl Fixture {
     pub fn pick_on_a_terminal(&self, arguments: &[&str], keystrokes: &str) -> Run {
         self.pick(&Pick {
             arguments,
-            keystrokes: &[keystrokes],
+            keystrokes: &[&[keystrokes]],
             ..Pick::default()
         })
         .run
@@ -1801,11 +1785,7 @@ impl Fixture {
         Picked {
             run: Run {
                 code: status.code(),
-                stdout: if pick.draw_on_stdout {
-                    drawn.clone()
-                } else {
-                    piped
-                },
+                stdout: piped,
                 stderr: String::from_utf8_lossy(&refusals).into_owned(),
             },
             drawn: String::from_utf8_lossy(&drawn).into_owned(),
@@ -1859,16 +1839,14 @@ impl Fixture {
         for (variable, value) in pick.extra {
             command.env(variable, value);
         }
+        // Standard input is the only stream the terminal is: the run claims the
+        // pseudoterminal as its controlling terminal, so the picker's `/dev/tty`
+        // is that terminal whatever the other two are, and a pipe on each of
+        // them keeps what a run writes to a stream separable from what it drew.
         command.stdin(Stdio::from(
             slave.try_clone().expect("the slave cannot be duplicated"),
         ));
-        if pick.draw_on_stdout {
-            command.stdout(Stdio::from(
-                slave.try_clone().expect("the slave cannot be duplicated"),
-            ));
-        } else {
-            command.stdout(Stdio::piped());
-        }
+        command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
         command
     }
@@ -2930,22 +2908,30 @@ fn open_without_claiming(path: &Path) -> std::fs::File {
 /// How long a picker run is given before it is ended for hanging.
 const PICKER_DEADLINE: &str = "20";
 
-/// How long each chunk of keystrokes is followed by nothing.
+/// How long each group of keystrokes is followed by nothing.
 ///
-/// Longer than the runtime's own quiet period, so a chunk followed by this is a
-/// highlight that came to rest and a chunk sent without one is a highlight that
+/// Longer than the runtime's own quiet period, so a group followed by this is
+/// a highlight that came to rest and a key sent inside one is a highlight that
 /// moved on.
-const PICKER_PAUSE: std::time::Duration = std::time::Duration::from_millis(500);
+const PICKER_REST: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How long one keystroke inside a group is followed by nothing.
+///
+/// Shorter than the runtime's quiet period, so a group's keys reach the picker
+/// as separate reads without a rest between any two of them. That separation
+/// is what makes the quiet period the only thing suppressing a decrypt per
+/// movement: the draw loop settles once per read, so keys arriving in one read
+/// would be held apart by the read boundary whatever the quiet period were.
+const PICKER_KEY_GAP: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// How one picker run is driven.
+#[derive(Default)]
 pub struct Pick<'a> {
     /// The arguments after `safix`.
     pub arguments: &'a [&'a str],
-    /// What is typed at it: one chunk per pause, so a test can distinguish
-    /// moving from resting.
-    pub keystrokes: &'a [&'a str],
-    /// Whether standard output is the terminal too, rather than a pipe.
-    pub draw_on_stdout: bool,
+    /// What is typed at it: one group per rest, and inside a group one write
+    /// per key, so a test can distinguish moving from resting.
+    pub keystrokes: &'a [&'a [&'a str]],
     /// Whether a refusal is rendered with its code.
     pub graphical: bool,
     /// A signal, and how many seconds into the run it is sent.
@@ -2953,19 +2939,6 @@ pub struct Pick<'a> {
     /// Something in the environment the fixture does not set: an editor, a
     /// recording sops.
     pub extra: &'a [(&'a str, &'a str)],
-}
-
-impl Default for Pick<'_> {
-    fn default() -> Self {
-        Self {
-            arguments: &[],
-            keystrokes: &[],
-            draw_on_stdout: true,
-            graphical: false,
-            interrupt: None,
-            extra: &[],
-        }
-    }
 }
 
 /// What a picker run left behind.
@@ -2991,23 +2964,29 @@ fn session_of_its_own() -> String {
     binary_on_path("setsid")
 }
 
-/// Type at a picker, one chunk per pause.
+/// Type at a picker, one group per rest and one write per key.
 ///
-/// The first chunk is sent without waiting for the picker to draw, the way a
+/// The first group is sent without waiting for the picker to draw, the way a
 /// person's typing that arrives before a program is ready waits in the
-/// terminal's own buffer. Each chunk is followed by a pause longer than the
-/// runtime's quiet period, which is how a test distinguishes moving through
-/// entries from coming to rest on one: keys inside one chunk arrive together,
-/// and a chunk boundary is a rest.
-fn type_at(terminal: &mut std::fs::File, keystrokes: &[&str]) {
-    for chunk in keystrokes {
-        if !chunk.is_empty() {
+/// terminal's own buffer; a test that needs its keys read one at a time asks
+/// for an empty first group, whose rest is the picker's chance to start.
+///
+/// Each group is followed by a pause longer than the runtime's quiet period
+/// and each key inside a group by one shorter than it, which is how a test
+/// distinguishes moving through entries from coming to rest on one: a group
+/// boundary is a rest, and a key boundary is not.
+fn type_at(terminal: &mut std::fs::File, keystrokes: &[&[&str]]) {
+    for group in keystrokes {
+        for (index, key) in group.iter().enumerate() {
+            if index > 0 {
+                std::thread::sleep(PICKER_KEY_GAP);
+            }
             terminal
-                .write_all(chunk.as_bytes())
+                .write_all(key.as_bytes())
                 .expect("the keystrokes cannot be written");
             terminal.flush().expect("the keystrokes cannot be flushed");
         }
-        std::thread::sleep(PICKER_PAUSE);
+        std::thread::sleep(PICKER_REST);
     }
 }
 
