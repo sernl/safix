@@ -39,11 +39,17 @@
         # expected values: without them `safix-rs-test` runs against no
         # expectation and passes by writing one, which is a green check over an
         # assertion nobody made.
+        # `tests/support/*.json` is admitted for the same reason as the `.snap`
+        # files: `crates/safix/tests/install.rs` embeds a hand-written manifest
+        # fixture with `include_str!`, so a source without it does not compile.
         src = pkgs.lib.cleanSourceWith {
           src = ../..;
           name = "source";
           filter =
-            path: type: (builtins.match ".*\\.snap$" path != null) || (craneLib.filterCargoSources path type);
+            path: type:
+            (builtins.match ".*\\.snap$" path != null)
+            || (builtins.match ".*/tests/support/[^/]*\\.json$" path != null)
+            || (craneLib.filterCargoSources path type);
         };
 
         # Named here rather than read from the root manifest, which is a virtual

@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::install_document_unparsable
+
+  × /nix/store/xxx-secrets.yaml decrypted to something this runtime does not
+  │ read: expected value at line 1 column 1

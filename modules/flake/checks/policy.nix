@@ -166,8 +166,14 @@
 
           # Every rule is start-anchored, extension-terminated and one directory
           # level, and no rule is a catch-all.
+          # The anchor is compared against the configured encrypted root, not
+          # against a literal. Left literal this reads as an anchoring check
+          # while actually asserting one spelling, and it would fail on any
+          # root rename for a reason that has nothing to do with anchoring.
           rulesWellFormed = builtins.all (
-            r: lib.hasPrefix "^secrets/" r.pathRegex && lib.hasSuffix "/[^/]*\\.yaml$" r.pathRegex
+            r:
+            lib.hasPrefix "^${resolve.defaultStorage.encrypted}/" r.pathRegex
+            && lib.hasSuffix "/[^/]*\\.yaml$" r.pathRegex
           ) (planOf granted).rules;
 
           # The audience separator is interpolated into a generated path_regex,

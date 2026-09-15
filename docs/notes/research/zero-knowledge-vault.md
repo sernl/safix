@@ -6,7 +6,7 @@ title: Zero-knowledge direction for the separate secrets vault
 
 Research note, 2026-09-03.
 It feeds the decision on the open change `openspec/changes/separate-secrets-vault/` and builds on the 2026-09-02 finding that ciphertext in the nix store is never plaintext and that the vault change is neutral on store exposure.
-Sources were read at the revisions safix pins (sops 3.13.3, sops-nix a8627b21, clan-core 56e35624, nix 2.34.8, age 1.3.1, age-plugin-yubikey 0.5.1, age Rust crate 0.12.1) or at the dates given.
+Sources were read at the revisions safix pins (sops 3.13.3, clan-core 56e35624, nix 2.34.8, age 1.3.1, age-plugin-yubikey 0.5.1, age Rust crate 0.12.1) or at the dates given, and at sops-nix a8627b21 where a finding rests on the installer safix replaced.
 
 ## Question
 
@@ -18,7 +18,7 @@ Zero-knowledge in the sense every vendor uses it means the party storing the dat
 safix already has that property against every host it touches, because sops writes AES-256-GCM payloads with data keys wrapped to age recipients and nothing else, and moving the ciphertext into a separate vault changes nothing about it.
 The property that is not held is metadata opacity: the vault as designed would give its host the complete guest list (`.sops.yaml` with every person, age public key, YubiKey serial, organization anchor and free-text note), audience-named directories with kind markers, every secret's name, every document's recipient list, the plaintext public outputs and the definition digests.
 The pattern is mainstream by the vendors' own numbers, but no mainstream product hides that class of metadata either: Bitwarden, 1Password, Keeper, Proton Drive, Tresorit and Filen all expose counts, tree shape, share membership and (mostly) sizes to their operator, and in the infrastructure segment the leaders are not zero-knowledge at all.
-An opaque vault is feasible today with sops and sops-nix for three of four ingredients (keyed opaque file names computed at evaluation, opaque key names, creation rules supplied out of band), and impossible for the fourth (hiding recipient public keys) without leaving the sops document format.
+An opaque vault is feasible today with sops and safix's own installer for three of four ingredients (keyed opaque file names computed at evaluation, opaque key names, creation rules supplied out of band), and impossible for the fourth (hiding recipient public keys) without leaving the sops document format.
 Its guarantee is bounded: it hides names from the vault host and from anyone holding only the vault; it hides nothing from anyone who can evaluate the declaring flake, which includes every local user of a machine that has it in the store, because nix has no keyed hash and the naming key must be an evaluation-time value.
 Recommendation: keep the vault change, amend it before applying so that the policy file never enters the vault and the vault layout is opaque by construction, and do not pursue recipient hiding.
 
@@ -89,13 +89,13 @@ Four ingredients, with what the pinned sources allow.
 
 1. Opaque file names computed at evaluation.
 `builtins.hashString "sha256"` is pure, hashes the string's raw bytes and returns lowercase hex; string context on the hashed value is discarded (nix 2.34.8 `src/libexpr/primops.cc:4593-4605`).
-A `flake = false` input's `outPath` is a store-path string, `vault + "/" + name` is a string that `builtins.pathExists` and `builtins.readFile` accept in pure mode, and sops-nix's validation accepts a store-prefixed string as `sopsFile` (`sops-nix modules/sops/manifest-for.nix:11-28`).
+A `flake = false` input's `outPath` is a store-path string, `vault + "/" + name` is a string that `builtins.pathExists` and `builtins.readFile` accept in pure mode, and safix's own manifest builder accepts a store-prefixed string as `sopsFile` (`modules/consume/installer.nix`'s store-membership refusal, under `safix.installer.validate`).
 Verified end to end on a throwaway flake.
 Physical names are produced at exactly two nix functions, `audienceFileOf` and `publicFileOf` (`resolve.nix:486-491`, `557-562`), and one Rust constant (`crates/safix-core/src/definition.rs:13-14`); every other consumer takes their output.
 Nix has no HMAC, so the construction is `hashString "sha256" (key + "/" + logicalPath)` with a per-vault naming key declared in the declaring flake; the key is therefore visible to anyone who can evaluate the declarations, and the opacity holds only against the vault host and vault-only readers.
 2. Opaque key names inside documents.
 sops accepts any top-level key except `sops` (sops `stores/stores.go:29-30`) and binds the key path into the AES-GCM associated data (`sops.go:604-611`), so an opaque key name is fixed at encrypt time.
-sops-nix's `key` is a free string with `/` nesting and `name`/`path` decide `/run/secrets/<logical>` independently (`modules/sops/default.nix:56-82`); `-check-mode=sopsfile` verifies the opaque key exists in the ciphertext (`pkgs/sops-install-secrets/main.go:556-563`).
+An entry's `key` is a free string with `/` nesting and `name`/`path` decide where it arrives independently (`modules/consume/common.nix`'s `secretEntryType`); `safix install --check-mode=document` verifies the opaque key resolves in the ciphertext.
 `materializeFor` already emits `key` separately from the attribute name (`resolve.nix:2244-2252`).
 3. Creation rules supplied out of band.
 The global `--config` flag disables discovery and may point anywhere (sops `cmd/sops/main.go:1845-1849`); `updatekeys` matches `path_regex` against the absolute document path, or the config-relative path when the document sits under the config's directory (`config/config.go:576-602`); `encrypt --age r1,r2` needs no rule at all (`main.go:2482-2508`); `decrypt` never consults rules (`main.go:1944-1949`).
@@ -105,7 +105,7 @@ The committed policy file stays at the declaring root, where the drift check and
 4. Hiding recipient public keys.
 Not available in the sops format: every document lists `recipient` and `enc` per age key with no `omitempty` (sops `age/keysource.go:285-290`; `stores/stores.go:106-109`) and `updatekeys` reads those groups.
 Age-native files hide X25519 recipients (the stanza carries only an ephemeral share, `age.md` "X25519 recipient stanza"), but age-plugin-yubikey 0.5.1 emits a static 4-byte tag equal to `SHA-256(recipient)[:4]` (`src/p256.rs:71-74`), and ssh-key stanzas carry the same kind of fingerprint (age `agessh/agessh.go:35-38`).
-sops-nix cannot consume age-native files (`decrypt.File` requires sops metadata, `pkgs/sops-install-secrets/main.go:340-346`), so this leg means an agenix-style activation module, one secret per file, and losing per-key extraction, the build-time key check and templates.
+No sops-consuming installer can read age-native files — safix's own installer drives `sops decrypt`, which requires sops metadata, as `sops-nix`'s Go decoder did (`decrypt.File`, `pkgs/sops-install-secrets/main.go:340-346`) — so this leg means an agenix-style activation module, one secret per file, and losing per-key extraction and the build-time key check.
 Machine recipients are derived from ssh host keys that any connecting client can scan, so hiding them from the vault host buys little.
 
 What an opaque vault would still show its host: the number of documents (one per audience), the number of keys per document (one per secret), each leaf's plaintext length (sops does not pad), each document's recipient public keys, and one commit per write.
@@ -129,7 +129,7 @@ World-readability of ciphertext in the store remains; the only mechanism found t
 O1. Apply `separate-secrets-vault` as written: the vault host sees the same metadata the declaring repository holds today; appropriate only when both repositories sit on hosts you trust equally.
 O2. Amend the change before applying so the policy file never enters the vault (ingredient 3 alone): removes the single richest document, the serials and the notes from the vault host at the cost of one flag on two sops commands and two spec amendments; the audience directories and key names still name everyone.
 O3. Amend the change before applying so the vault layout is opaque by construction (ingredients 1 to 3), leaving the in-repository layout readable when no vault is declared: the vault can then sit on a host that is not trusted with the guest list; costs the code and spec work above.
-O4. Add age-native documents for recipient hiding: rejected, because sops-nix cannot consume them, YubiKey recipients stay tagged, and machine keys are scannable anyway.
+O4. Add age-native documents for recipient hiding: rejected, because no sops-consuming installer can read them, YubiKey recipients stay tagged, and machine keys are scannable anyway.
 O5. Drop the vault: not recommended; it is the only mechanism for separate access control and retention, and it is the seam an opaque layout needs.
 
 Recommendation: O3 if the vault will ever live on a host or with collaborators not trusted with the declarations, otherwise O2; in both cases amend before applying, because no vault exists yet and a second layout migration after adoption would cost more than a larger first change.

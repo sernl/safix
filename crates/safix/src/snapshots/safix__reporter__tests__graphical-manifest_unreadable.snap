@@ -1,0 +1,9 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::manifest_unreadable
+
+  × could not read the installer manifest at /nix/store/xxx-safix-
+  │ manifest.json
+  ╰─▶ entity not found

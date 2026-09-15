@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: /nix/store/xxx-secrets.yaml decrypted to something this runtime does not read: expected value at line 1 column 1

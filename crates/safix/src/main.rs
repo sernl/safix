@@ -40,21 +40,23 @@
 //! whatever it had written but not yet moved into place; see [`abort`].
 
 mod abort;
+mod picker;
 mod prompt;
 mod render;
 mod reporter;
 mod stream;
 mod table;
+mod tty;
 mod usage;
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
-    keygen, model::Direction, nix::Nix, set, sync, upload,
+    install, keygen, model::Direction, nix::Nix, set, sync, upload,
 };
 
 use reporter::Refusal;
@@ -131,6 +133,11 @@ const VERBS: &[Verb] = &[
         run: get,
     },
     Verb {
+        name: "view",
+        help: usage::VIEW,
+        run: view_command,
+    },
+    Verb {
         name: "list",
         help: usage::LIST,
         run: list,
@@ -184,6 +191,16 @@ const VERBS: &[Verb] = &[
         name: "upload",
         help: usage::UPLOAD,
         run: upload_command,
+    },
+    // Last, and not interleaved with the verbs above it: `VERBS`' order is the
+    // operator-facing lifecycle order, and `install` is the only machine-facing
+    // verb in the table — an activation script runs it and a person never types
+    // it. Placing it at the end states that, where a position among the others
+    // would claim it is one of them.
+    Verb {
+        name: "install",
+        help: usage::INSTALL,
+        run: install_command,
     },
 ];
 
@@ -375,6 +392,106 @@ fn get(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(abort::exit_code(decrypted.status))
 }
 
+/// Which arm a `[<user>] [<name>]` argument list takes.
+///
+/// The rule `generate`, `view` and the nameless `edit` share, named once: a
+/// lone argument is a user when the declarations declare a user by that name,
+/// and an entry's name otherwise, so an entry whose name is also a person's is
+/// reachable by naming both.
+enum Grammar<'a> {
+    /// No user and no name: choose from what the default user holds.
+    PickForDefault,
+    /// This user and no name: choose from what they hold.
+    PickFor(&'a str),
+    /// The default user's entry, by name.
+    NamedForDefault(&'a str),
+    /// This user's entry, by name.
+    Named(&'a str, &'a str),
+    /// More arguments than the form takes.
+    Unusable,
+}
+
+/// Read an argument list against the declarations.
+fn grammar<'a>(placements: &safix_core::model::Placements, arguments: &'a [String]) -> Grammar<'a> {
+    match arguments {
+        [] => Grammar::PickForDefault,
+        [only] if placements.declares(only) => Grammar::PickFor(only),
+        [only] => Grammar::NamedForDefault(only),
+        [user, name] => Grammar::Named(user, name),
+        _ => Grammar::Unusable,
+    }
+}
+
+/// One key, decrypted to the terminal, named or chosen.
+///
+/// The stream is the distinction between this and [`get`]: `get` writes the
+/// value to standard output and is what a pipeline calls, and this writes it to
+/// the terminal. Standard output is the fallback where no terminal opens, so
+/// `view <name>` in a pipeline is a working invocation rather than a refusal —
+/// and nothing the picker drew can land in a redirected stream either way,
+/// because the picker draws on the terminal alone and is not reached at all
+/// when a name was given.
+fn view_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "view [--no-preview] [<user>] [<name>]";
+    let mut options = picker::Options::default();
+    let mut rest = arguments;
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            "--no-preview" => options.preview = false,
+            // The form rather than `Refusal::UnknownOption`, whose message
+            // hard-codes the two options `adduser` takes.
+            flag if flag.starts_with('-') => return Err(Refusal::Usage { form: FORM }),
+            _ => break,
+        }
+        rest = tail;
+    }
+
+    let workspace = workspace()?;
+    let (user, name) = match grammar(workspace.placements()?, rest) {
+        Grammar::PickForDefault => {
+            let user = workspace.default_user()?;
+            let chosen = picker::choose(&workspace, &user, picker::Scope::Everything, options)?;
+            (user, chosen)
+        }
+        Grammar::PickFor(user) => {
+            let chosen = picker::choose(&workspace, user, picker::Scope::Everything, options)?;
+            (user.to_owned(), chosen)
+        }
+        Grammar::NamedForDefault(name) => (workspace.default_user()?, name.to_owned()),
+        Grammar::Named(user, name) => (user.to_owned(), name.to_owned()),
+        Grammar::Unusable => return Err(Refusal::Usage { form: FORM }),
+    };
+
+    let placement = workspace.resolve(&user, &name)?;
+    let path = workspace.vault_absolute(&placement.file);
+    if !path.exists() {
+        return Err(Error::NoValueYet {
+            file: placement.file.clone(),
+            name,
+            user,
+        }
+        .into());
+    }
+
+    let decrypted = workspace.sops().decrypt_key(&path, &placement.key)?;
+    let written = if let Some(terminal) = tty::probe() {
+        let mut out: &std::fs::File = &terminal;
+        decrypted
+            .value
+            .write_to(&mut out)
+            .and_then(|()| out.flush())
+    } else {
+        let mut stdout = std::io::stdout().lock();
+        decrypted
+            .value
+            .write_to(&mut stdout)
+            .and_then(|()| stdout.flush())
+    };
+    written.map_err(|cause| Error::SecretRead { cause })?;
+
+    Ok(abort::exit_code(decrypted.status))
+}
+
 /// One value, typed twice or piped once, written and committed.
 fn set_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let workspace = workspace()?;
@@ -411,9 +528,17 @@ fn value_source() -> Box<dyn set::ValueSource> {
 }
 
 /// One value, opened in the operator's editor, written and committed.
+///
+/// The editor is settled before anything else happens, including before the
+/// picker opens on the nameless form: a refusal after a person has browsed a
+/// list and had values decrypted for a preview is a refusal that wasted their
+/// time and decrypted values for nothing. [`edit::run`] keeps its own identical
+/// call, so a second embedder of the library gets the same ordering without
+/// depending on this caller's discipline.
 fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "edit [--allow-disk-staging] [<user>] <name>";
+    const FORM: &str = "edit [--allow-disk-staging] [--no-preview] [<user>] <name>";
     let mut options = edit::Options::default();
+    let mut offered = picker::Options::default();
     let mut positional: Vec<String> = Vec::new();
     let mut rest = arguments;
 
@@ -422,6 +547,7 @@ fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
             flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
                 options.allow_disk_staging = true;
             }
+            "--no-preview" => offered.preview = false,
             option if option.starts_with('-') => {
                 return Err(Refusal::UnknownOption {
                     option: option.to_owned(),
@@ -433,7 +559,16 @@ fn edit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     }
 
     let workspace = workspace()?;
+    // Settled before the picker opens. `edit::run` reads it again, and that
+    // duplication is deliberate: it keeps the ordering guarantee the library's
+    // own rather than this caller's.
+    edit::Editor::from_environment()?;
     let (user, name) = match positional.as_slice() {
+        [] => {
+            let user = workspace.default_user()?;
+            let chosen = picker::choose(&workspace, &user, picker::Scope::Editable, offered)?;
+            (user, chosen)
+        }
         [name] => (workspace.default_user()?, name.clone()),
         [user, name] => (user.clone(), name.clone()),
         _ => return Err(Refusal::Usage { form: FORM }),
@@ -516,11 +651,11 @@ fn generate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     let workspace = workspace()?;
     let (user, name) = match rest {
         [] => (workspace.default_user()?, None),
-        // The one argument is a user when it names one, and a secret otherwise.
-        // A secret whose name is also a person's is reachable by naming both:
-        // this is the only subcommand whose single optional argument could be
-        // either, because it is the only one that means something with no secret
-        // named at all.
+        // The one argument is a user when the declarations declare a user by
+        // that name, and a secret's name otherwise. `generate`, `view` and the
+        // nameless `edit` share the rule, because all three mean something with
+        // no secret named at all; an entry whose name is also a person's is
+        // reachable by naming both.
         [only] if workspace.placements()?.declares(only) => (only.clone(), None),
         [only] => (workspace.default_user()?, Some(only.clone())),
         [user, name] => (user.clone(), Some(name.clone())),
@@ -1011,6 +1146,53 @@ fn upload_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// One manifest's entries installed, as an activation runs it.
+///
+/// The three flags are read in any order around the one positional, which is
+/// the manifest. `NIXOS_ACTION=dry-activate` implies `--dry-run` and the
+/// ownership forcing `--ignore-passwd` performs, because a dry activation
+/// runs as whatever the switch runs as and must not change the store.
+fn install_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "install <manifest> [--check-mode=off|manifest|document] \
+                        [--ignore-passwd] [--dry-run]";
+
+    let mut options = install::Options::default();
+    let mut manifest: Option<String> = None;
+
+    for argument in arguments {
+        match argument.as_str() {
+            "--ignore-passwd" => options.ignore_passwd = true,
+            "--dry-run" => options.dry_run = true,
+            other => {
+                if let Some(named) = other.strip_prefix("--check-mode=") {
+                    // The usage form rather than an unknown-option refusal:
+                    // the option is known and its value is not, and the form
+                    // is where the three accepted spellings are written down
+                    // once.
+                    options.check_mode =
+                        install::CheckMode::parse(named).ok_or(Refusal::Usage { form: FORM })?;
+                } else if other.starts_with('-') || manifest.is_some() {
+                    return Err(Refusal::Usage { form: FORM });
+                } else {
+                    manifest = Some(other.to_owned());
+                }
+            }
+        }
+    }
+
+    let Some(manifest) = manifest else {
+        return Err(Refusal::Usage { form: FORM });
+    };
+
+    if install::dry_activation_requested() {
+        options.dry_run = true;
+        options.ignore_passwd = true;
+    }
+
+    install::run(Path::new(&manifest), &options, &Terminal)?;
+    Ok(ExitCode::SUCCESS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{VERBS, usage};
@@ -1050,6 +1232,119 @@ mod tests {
             }
             previous = Some((at, name));
         }
+    }
+
+    /// `view` sits between `get` and `list`, in the table and on the page.
+    ///
+    /// The read paths in operator order. The test above already fails when the
+    /// scaffold omits a verb, so this one holds the position rather than the
+    /// presence: a `view` row appended to the end of either list would leave
+    /// that one green.
+    #[test]
+    fn view_sits_between_get_and_list_among_the_read_paths() {
+        let names: Vec<&str> = VERBS.iter().map(|verb| verb.name).collect();
+        let at = |name: &str| names.iter().position(|declared| *declared == name);
+        assert_eq!(
+            at("view").and_then(|view| at("get").map(|get| get < view)),
+            Some(true),
+            "the table declares `view` before `get`"
+        );
+        assert_eq!(
+            at("view").and_then(|view| at("list").map(|list| view < list)),
+            Some(true),
+            "the table declares `view` after `list`"
+        );
+
+        let row = |name: &str| usage::SCAFFOLD.find(&format!("safix {name}"));
+        assert_eq!(
+            row("view").and_then(|view| row("get").map(|get| get < view)),
+            Some(true),
+            "the scaffold lists `view` before `get`"
+        );
+        assert_eq!(
+            row("view").and_then(|view| row("list").map(|list| view < list)),
+            Some(true),
+            "the scaffold lists `view` after `list`"
+        );
+    }
+
+    /// The declarations a lone argument is read against.
+    ///
+    /// `alice` is a declared user and also the name of an entry she holds,
+    /// which is the collision the rule resolves in the user's favour.
+    fn declarations() -> safix_core::model::Placements {
+        use safix_core::model::{Origin, Placement, Placements};
+        let placement = |file: &str| Placement {
+            file: file.to_owned(),
+            key: "value".to_owned(),
+            origin: Origin::Private,
+            owner: "alice".to_owned(),
+            shared: false,
+            generator: None,
+            public: None,
+            definition_record: "records/alice/one".to_owned(),
+            logical_file: None,
+            logical_key: None,
+            logical_public: None,
+            logical_record: None,
+        };
+        let mut held = std::collections::BTreeMap::new();
+        held.insert("alice".to_owned(), placement("secrets/alice.yaml"));
+        held.insert("grafana-token".to_owned(), placement("secrets/alice.yaml"));
+        let mut users = std::collections::BTreeMap::new();
+        users.insert("alice".to_owned(), held);
+        Placements(users)
+    }
+
+    /// The argument list, as the verbs receive it.
+    fn words(arguments: &[&str]) -> Vec<String> {
+        arguments.iter().map(|word| (*word).to_owned()).collect()
+    }
+
+    #[test]
+    fn no_argument_picks_for_the_default_user() {
+        let given = words(&[]);
+        assert!(matches!(
+            super::grammar(&declarations(), &given),
+            super::Grammar::PickForDefault
+        ));
+    }
+
+    #[test]
+    fn a_lone_argument_naming_a_user_picks_for_that_user() {
+        let given = words(&["alice"]);
+        assert!(matches!(
+            super::grammar(&declarations(), &given),
+            super::Grammar::PickFor("alice")
+        ));
+    }
+
+    #[test]
+    fn a_lone_argument_naming_no_user_is_an_entry() {
+        let given = words(&["grafana-token"]);
+        assert!(matches!(
+            super::grammar(&declarations(), &given),
+            super::Grammar::NamedForDefault("grafana-token")
+        ));
+    }
+
+    /// The collision is reachable by naming both.
+    #[test]
+    fn an_entry_whose_name_is_a_persons_is_reached_by_naming_both() {
+        let given = words(&["alice", "alice"]);
+        assert!(matches!(
+            super::grammar(&declarations(), &given),
+            super::Grammar::Named("alice", "alice")
+        ));
+    }
+
+    #[test]
+    fn a_third_argument_is_a_usage_refusal() {
+        let given = words(&["alice", "alice", "extra"]);
+        assert!(matches!(
+            super::grammar(&declarations(), &given),
+            super::Grammar::Unusable
+        ));
     }
 
     /// The boundary sentence is one string, and the help text carries that one.

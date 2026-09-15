@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::install_decrypt_failed
+
+  × sops exited 128 decrypting /nix/store/xxx-secrets.yaml

@@ -1,0 +1,7 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::manifest_owner_unknown
+
+  × alice-alone names owner 'alice', and this host declares no such user

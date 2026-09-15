@@ -75,6 +75,7 @@ pub mod generate;
 pub mod git;
 pub mod group;
 pub mod inputs;
+pub mod install;
 pub mod keygen;
 mod lock_bump;
 pub mod model;

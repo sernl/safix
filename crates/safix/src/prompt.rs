@@ -190,8 +190,8 @@ fn affirmative(answer: Option<&str>) -> bool {
 /// `{ : >/dev/tty; } 2>/dev/null` does, and then opened again for reading — the
 /// two are separate descriptions and the write probe is discarded.
 fn open_source(announcement: &str) -> Source {
-    if File::options().write(true).open("/dev/tty").is_ok()
-        && let Ok(terminal) = File::options().read(true).open("/dev/tty")
+    if File::options().write(true).open(crate::tty::DEVICE).is_ok()
+        && let Ok(terminal) = File::options().read(true).open(crate::tty::DEVICE)
     {
         return Source::Terminal(terminal);
     }

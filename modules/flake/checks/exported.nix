@@ -230,7 +230,9 @@ in
           # probe is a path no declaration places anything in, and an uppercase
           # element keeps them outside the name alphabet, so no fleet can turn
           # one into a real directory.
-          catchAllDrill = namesOneOf [ "^.*\\.yaml$" ] (safixChecks.catchAllMessagesOf catchAllPlan);
+          catchAllDrill = namesOneOf [ "^.*\\.yaml$" ] (
+            safixChecks.catchAllMessagesOf resolve.defaultStorage catchAllPlan
+          );
 
           # 8.7 — the separator on each side of what it has to be. Inside the
           # name alphabet, two audiences reach one directory; a regex

@@ -34,6 +34,25 @@ use crate::workspace::{Workspace, login_name};
 /// The environment variable naming the identity file, overriding the default.
 pub const KEY_FILE_VARIABLE: &str = "SAFIX_AGE_KEY_FILE";
 
+/// The environment variable naming the `age-keygen` binary, overriding the
+/// default.
+///
+/// The same shape [`crate::sops::Sops::from_environment`] gives `SAFIX_SOPS`,
+/// and for the same reason: a hermetic check drives the runtime against a
+/// script of its own, and a check that could only run where a real
+/// `age-keygen` is on `PATH` would be measuring the host as much as the
+/// runtime. It is also what makes the home-scope key-generation switch
+/// testable at all, since that switch's whole behaviour is invoking this
+/// binary.
+pub const KEYGEN_BINARY_VARIABLE: &str = "SAFIX_AGE_KEYGEN";
+
+/// The binary [`KEYGEN_BINARY_VARIABLE`] names, or `age-keygen`.
+#[must_use]
+pub fn keygen_binary() -> PathBuf {
+    std::env::var_os(KEYGEN_BINARY_VARIABLE)
+        .map_or_else(|| PathBuf::from("age-keygen"), PathBuf::from)
+}
+
 /// The line `age-keygen` writes its public half on.
 const PUBLIC_KEY_PREFIX: &str = "Public key: ";
 
@@ -223,7 +242,7 @@ fn append_identity(keyfile: &std::path::Path) -> Result<Option<String>> {
             cause,
         })?;
 
-    let mut child = Command::new("age-keygen")
+    let mut child = Command::new(keygen_binary())
         .stdin(Stdio::null())
         .stdout(Stdio::from(sink))
         .stderr(Stdio::piped())

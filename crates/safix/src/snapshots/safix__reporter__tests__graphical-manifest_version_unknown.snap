@@ -1,0 +1,8 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::manifest_version_unknown
+
+  × the installer manifest declares schema version 2, and this safix reads
+  │ version 1

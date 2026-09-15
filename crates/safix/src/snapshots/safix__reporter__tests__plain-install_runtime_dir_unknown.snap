@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: XDG_RUNTIME_DIR names no runtime directory, so %r in a user-mode manifest has nothing to expand to

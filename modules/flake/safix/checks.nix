@@ -225,34 +225,43 @@ let
   # anywhere nothing is placed". A refactor that weakened one is unlikely to
   # weaken both.
   #
-  # The definition-record tree is the third top-level prefix and is here for the
-  # same reason, with one difference: nothing in nix computes its paths, because
-  # nothing in nix reads a record. `crates/safix-core/src/definition.rs` is its
-  # one implementation, and these two probes are the shape it writes.
-  catchAllProbes = [
+  # The definition-record tree is the third and is here for the same reason. It
+  # is no longer the case that nothing in nix computes its paths: the resolver
+  # emits `definitionRecord` on every placement (design S8), so these two probes
+  # now guard a tree nix itself places rather than describing the shape Rust
+  # writes.
+  #
+  # The six tree-shaped probes are derived from the configured roots and must
+  # stay so. Left literal while the roots are the consumer's, this check would
+  # probe trees nothing uses and stop probing the trees the consumer has: green,
+  # and meaningless. A silently lost check is worse than a broken one (design
+  # S10). The four non-tree probes stay literal, because what they are about is
+  # paths outside every tree.
+  catchAllProbesOf = storage: [
     "x.yaml"
     "UNCLAIMED.yaml"
     "UNCLAIMED/x.yaml"
-    "secrets/safix/users/UNCLAIMED/x.yaml"
-    "secrets/safix/shared/UNCLAIMED/x.yaml"
+    "${storage.encrypted}/users/UNCLAIMED/x.yaml"
+    "${storage.encrypted}/shared/UNCLAIMED/x.yaml"
     "some/other/place/UNCLAIMED.yaml"
-    "public/safix/users/UNCLAIMED/x/value"
-    "public/safix/shared/UNCLAIMED/x/value"
-    "state/safix/definitions/UNCLAIMED/x"
-    "state/safix/definitions/shared/UNCLAIMED/x"
+    "${storage.plaintextOutputs}/users/UNCLAIMED/x/value"
+    "${storage.plaintextOutputs}/shared/UNCLAIMED/x/value"
+    "${storage.generatorRecords}/UNCLAIMED/x"
+    "${storage.generatorRecords}/shared/UNCLAIMED/x"
   ];
 
   catchAllMessagesOf =
-    plan:
+    storage: plan:
     lib.concatMap (
       r:
       map (
         p:
         "${r.pathRegex} matches ${p}, which no declaration places anything in, so it is a catch-all granting ${lib.concatStringsSep ", " r.audience} custody of whatever lands there"
-      ) (lib.filter (matches r.pathRegex) catchAllProbes)
+      ) (lib.filter (matches r.pathRegex) (catchAllProbesOf storage))
     ) plan.rules;
 
-  catchAllMessages = registry: catchAllMessagesOf (policy.plan registry);
+  catchAllMessages =
+    registry: catchAllMessagesOf (registry.storage or resolve.defaultStorage) (policy.plan registry);
 
   mkNoCatchAllCheck =
     pkgs: registry:
@@ -269,9 +278,10 @@ let
   # would do so at the moment somebody ran `sops` against the path rather than at
   # a point anyone was watching.
   #
-  # The rules are anchored under `secrets/safix/` and terminate on `\.yaml$`, so
-  # a `value` file under `public/` cannot match either clause — but relying on
-  # that is relying on two independent accidents staying true. Asserted by
+  # The rules are anchored under `flake.safix.storage.encrypted` and terminate
+  # on `\.yaml$`, so a `value` file under the plaintext-output root cannot match
+  # either clause — but relying on that is relying on two independent accidents
+  # staying true. Asserted by
   # matching each rule against each real public path rather than by reading a
   # pattern as a string: a pattern read as text says what it looks like, and a
   # match says what sops will do with it.
@@ -404,6 +414,11 @@ let
       # the whole thing. None of the checks this function builds are
       # vault-aware, so the field is not read past this pattern.
       namingKey ? null,
+      # Read, unlike `namingKey`: `safix-no-catch-all`'s tree-shaped probes and
+      # every generated `pathRegex` follow the configured roots, so a check
+      # built here over a renamed root must probe the renamed tree (design
+      # S10).
+      storage ? resolve.defaultStorage,
       committedPolicy ? null,
       materializations ? { },
       bridge ? {
@@ -426,6 +441,7 @@ let
           groups
           organizations
           silos
+          storage
           ;
       };
     in
@@ -464,7 +480,7 @@ in
     ruleShapeMessagesOf
     catchAllMessages
     catchAllMessagesOf
-    catchAllProbes
+    catchAllProbesOf
     publicRuleMessages
     publicRuleMessagesOf
     separatorMessages

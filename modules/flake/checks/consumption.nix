@@ -5,17 +5,25 @@
 # The claim is that a profile naming a person and a host establishes exactly what
 # the hand-written wiring establishes. So two home-manager configurations are
 # evaluated over one fixture fleet: one in the consumer form — import, `safix.lib`,
-# `safix.user`, `safix.hostname`, `safix.identity.sshKeyPaths` — and one wiring the
-# resolver into sops-nix directly, in the shape of the file the module replaces.
-# Both are read back through sops-nix's own option types, entry by entry and field
-# by field, so a field safix stopped emitting or started emitting shows up.
+# `safix.user`, `safix.hostname`, `safix.identity.sshKeyPaths` — and one calling
+# the resolver by hand against the same profile, in the shape a consumer would
+# write it. Both are read back through safix's own entry type, entry by entry and
+# field by field, so a field safix stopped emitting or started emitting shows up,
+# and so does a default the type stopped carrying.
+#
+# The premise moved with the dependency. It used to be "the module form equals
+# the sops-nix wiring", read back through that framework's option types; it is
+# now "the module form equals the resolver output read back through safix's own
+# entry type", which is the only type either side passes through.
 #
 # ── the ordering ──
 # The preflight's failure message claims that nothing was linked. That claim is
 # entirely a claim about where the entry sorts, so the activation DAG of a real
-# profile is topologically sorted and the index held: safix's entry before
-# `checkLinkTargets`, sops-nix's own entry after it. The second half is the reason
-# the first exists and is asserted rather than described.
+# profile is topologically sorted and the index held: safix's preflight before
+# `checkLinkTargets`, and safix's own install entry after `writeBoundary` and so
+# after `checkLinkTargets`. The second half is the reason the first exists and is
+# asserted rather than described — the install is late, and a refusal that waited
+# for it would be a refusal after the profile had been linked.
 #
 # ── which person appears at which scope ──
 # The system-scope configuration resolves bob rather than alice. alice's
@@ -31,18 +39,22 @@
 #
 # ── severity, one drill per claim, each observed red ──
 # A module that establishes anything other than what the resolver selected — the
-# drill filters one name out of `sops.secrets` — fails `equivalence`, `established`
-# and `selectionIsScopeFree` together.
+# drill filters one name out of `safix.secrets`' definition — fails
+# `equivalence`, `established` and `selectionIsScopeFree` together.
 # `equivalence` alone is deliberately not the whole of it, and the drill that shows
 # why is dropping `key` from `materializeFor`: both forms call that function, so
 # they still agree, and what goes red is the `entry` literal beside them, which was
-# written independently and reads sops-nix's own default for the field that
-# vanished. The pair is the claim; either alone is half of it.
+# written independently and reads safix's own declared default for the field that
+# vanished. The pair is the claim; either alone is half of it. That is also the
+# drill the re-point had to survive: the hand form now goes through the same type
+# the module form does, so `equivalence` is vacuous under a `materializeFor`
+# mutation by construction, and the literal is what is not.
 # Replacing `entryBefore [ "checkLinkTargets" ]` with a bare string fails
-# `safixBeforeCheckLinkTargets`; the sops-nix half of that pair fails if sops-nix
-# ever pins its own entry, which is the day this guard stops being needed.
+# `safixBeforeCheckLinkTargets`; registering `safixInstall` as a bare string
+# rather than `entryAfter [ "writeBoundary" ]` fails `installAfterWriteBoundary`,
+# which is the half that says the install is late on purpose.
 # `inert` is held by two independent gates — `mkIf cfg.enable` outside and
-# `sopsCfg.secrets != { }` on the preflight — so removing either alone leaves
+# `cfg.secrets != { }` on the preflight — so removing either alone leaves
 # `inert.preflight` green and removing both turns it red. That is the drill, and
 # the redundancy is deliberate: the inner gate is what covers a consumer who sets
 # `safix.enable = true` by hand over an empty resolution. `inert.identity`
@@ -54,8 +66,8 @@
 # Dropping the user-scope identity refusal fails `noIdentity.refuses` and
 # nothing else, and only because that field is read off a profile evaluated
 # without home-manager's assertion wrapper: a wrapped profile refuses under the
-# drill too, on sops-nix's key-source assertion, which is the defect the refusal
-# exists to pre-empt rather than evidence of it. Making the refusal
+# drill too, on the module's own assertion collection, which is the defect the
+# refusal exists to pre-empt rather than evidence of it. Making the refusal
 # unconditional instead — throwing whenever anything resolved — leaves
 # `noIdentity.refuses` green and fails `noIdentity.withIdentity`.
 # Dropping the user-scope ownership refusal fails `userScopeRefusesOwnership`, and
@@ -73,9 +85,9 @@
 # `undeclaredUser.refuses`, and only that field: the profile still fails
 # either way, but as `attribute 'zed' missing` against a line of resolve.nix,
 # which `fires` over safix's own option does not catch and no message names.
-# Pointing the second collision copy at the first's path fails `twoPaths`, which
-# is the drill for the check that the export shape rests on: it is only evidence
-# while the two paths really are two.
+# Pointing the second collision copy at the first's path fails `twoPaths` and
+# `declaringModule.twoPaths`, which is the drill for the check that the export
+# shape rests on: it is only evidence while the two paths really are two.
 # The system-scope inert probes have one drill per mechanism, each moving the
 # real definition outside the enable gate while keeping its own selection
 # condition: the ungated activation entry fails `inert.activationHost.step`
@@ -106,10 +118,15 @@ let
   collisionA = copyOf "safix-collision-a" ./collision-fixture;
   collisionB = copyOf "safix-collision-b" ./collision-fixture;
 
-  # sops-nix's own home-manager module, copied to a second store path. This is
-  # what a consumer pinning a different sops-nix revision produces, and it is
-  # measured against the real module rather than against the synthetic one above.
-  sopsHomeCopy = copyOf "sops-nix-home-copy" "${inputs.sops-nix}/modules/home-manager";
+  # safix's own consumption directory, copied to a second store path. This is
+  # what a consumer reaching one declaring module by two routes produces — a
+  # vendored copy beside a flake input, two flake inputs at different
+  # revisions — and it is the module the collision fact now has to be about,
+  # since safix is the only declaring module either published name carries.
+  # The whole directory is copied rather than the one file, because
+  # `nixos.nix` imports `./installer.nix` relatively.
+  consumeCopyA = copyOf "safix-consume-a" ../../consume;
+  consumeCopyB = copyOf "safix-consume-b" ../../consume;
 
 in
 {
@@ -178,44 +195,61 @@ in
           }
         ];
 
-      # The wiring the module replaces, in the shape of the file it replaces:
-      # sops-nix imported directly, the identity set on sops-nix's own options,
-      # and the resolver called and assigned into `sops.secrets`.
+      # The wiring the module replaces, in the shape a consumer would write by
+      # hand: a plain home-manager profile with no module of safix's in it at
+      # all, handed to the resolver directly, with the result left as the
+      # resolver produced it. The profile is real rather than an attrset,
+      # because `alice-alone` declares its path as a function of
+      # `cfg.home.homeDirectory` and that is the configuration it is a
+      # function of.
+      #
+      # There is no second framework to import any more, and the point of the
+      # arm is that the module form adds nothing to the resolver's answer
+      # rather than that two modules agree.
       handForm =
         user:
-        mkHome user [
-          inputs.sops-nix.homeManagerModules.sops
-          (
-            { config, ... }:
-            {
-              sops = {
-                age.keyFile = null;
-                age.sshKeyPaths = [ "/home/${user}/.ssh/agenix" ];
-                secrets = safix.materialize {
-                  inherit user hostname;
-                  tags = [ ];
-                  scope = "user";
-                } config;
-              };
-            }
-          )
-        ];
+        safix.materialize {
+          inherit user hostname;
+          tags = [ ];
+          scope = "user";
+        } (mkHome user [ ]).config;
 
-      # Every field of every entry as sops-nix's own option type resolved it,
-      # with the encrypted file reduced to its path within this flake's source
-      # so the comparison is not against a store hash.
+      # The cfg safix's entry type's `path` default is a function of, and the
+      # only thing it reads outside its own fields.
+      entryCfg.installer.symlinkPath = "/run/safix";
+
+      # Every field of every entry as safix's own entry type resolved it — the
+      # type `modules/consume/nixos.nix` hands `common.sharedOptions` as its
+      # `secretsType` argument — with the encrypted file reduced to its path
+      # within this flake's source so the comparison is not against a store
+      # hash.
+      #
+      # The whole set goes through one `attrsOf` rather than each entry
+      # through the submodule alone, because `name`'s default is the attribute
+      # key and only `attrsOf` supplies it.
       viewOf =
         secrets:
-        lib.mapAttrs (
-          _name: secret:
-          lib.filterAttrs (n: _: n != "_module" && n != "sopsFile") secret
-          // {
-            sopsFile = lib.removePrefix (toString self) (toString secret.sopsFile);
-          }
-        ) secrets;
+        lib.mapAttrs
+          (
+            _name: secret:
+            lib.filterAttrs (n: _: n != "_module" && n != "sopsFile") secret
+            // {
+              sopsFile = lib.removePrefix (toString self) (toString secret.sopsFile);
+            }
+          )
+          (lib.evalModules {
+            modules = [
+              {
+                options.secrets = lib.mkOption {
+                  type = lib.types.attrsOf (systemCommon.secretEntryType { cfg = entryCfg; });
+                };
+              }
+              { inherit secrets; }
+            ];
+          }).config.secrets;
 
-      moduleView = viewOf (moduleForm "alice").config.sops.secrets;
-      handView = viewOf (handForm "alice").config.sops.secrets;
+      moduleView = viewOf (moduleForm "alice").config.safix.secrets;
+      handView = viewOf (handForm "alice");
 
       # A person who resolves nothing on this host: carol records a recipient
       # and holds no entry, so every audience excludes them.
@@ -243,7 +277,7 @@ in
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
 
       # bob declares ownership fields, which the user scope has no axis for.
-      bobUserProfile = (moduleForm "bob").config.sops.secrets;
+      bobUserProfile = (moduleForm "bob").config.safix.secrets;
 
       names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
 
@@ -294,17 +328,20 @@ in
         tags = [ ];
       };
 
-      # safix's own module and sops-nix's own module, evaluated without
-      # home-manager's assertion wrapper.
+      # safix's own module, evaluated without home-manager's assertion
+      # wrapper.
       #
       # The wrapper is what makes this instrument necessary rather than
       # fussy. `homeManagerConfiguration` forces `config.assertions` on any
       # access to `config` and throws every failed one together, so a profile
       # evaluated through it reports that something refused and never which
-      # module refused — sops-nix's key-source assertion and safix's identity
-      # refusal are one observation there, and `builtins.tryEval` reports
-      # neither's text. Forcing safix's own option here makes the refusal
-      # safix's by construction.
+      # assertion refused, and `builtins.tryEval` reports none of their text.
+      # Forcing safix's own option here makes the refusal safix's by
+      # construction. That was the instrument's reason before the dependency
+      # went — where the other observation was a second framework's
+      # key-source assertion — and it is its reason still, since safix's own
+      # wiring assertions sit outside the enable gate and would be collected
+      # together with the identity refusal.
       #
       # `_module.check = false` admits the home-manager option paths the module
       # defines and this evaluation does not declare; none of them are forced.
@@ -313,7 +350,6 @@ in
         lib.evalModules {
           modules = [
             ../../consume/home.nix
-            inputs.sops-nix.homeManagerModules.sops
             {
               options.home = {
                 username = lib.mkOption { type = lib.types.str; };
@@ -412,11 +448,11 @@ in
       inertSystem = nixosFor "carol";
       inertSystemdSystem = nixosWith "carol" [ { services.userborn.enable = true; } ];
 
-      # Read off `safix.installed` rather than `sops.secrets`: the system scope
-      # no longer delivers through the provisioner's option, which safix leaves
-      # empty so that exactly one installer — safix's own — acts on the
-      # resolved set.
-      systemView = viewOf (nixosFor "bob").config.safix.installed;
+      # The system scope delivers through safix's own single option, which is
+      # the whole of what it reports arrived, and it is the only option any
+      # installer on the host is built from: safix writes no secrets option of
+      # any other framework's at all.
+      systemView = viewOf (nixosFor "bob").config.safix.secrets;
 
       sortNames = lib.sort (a: b: a < b);
     in
@@ -454,12 +490,15 @@ in
                 # The identity fields the user-scope probe also reads. Limited
                 # severity here, recorded rather than implied: an ungated
                 # identity definition writes the same values these defaults
-                # already hold — a null keyFile, and a derived list equal to
-                # the provisioner's own openssh default — so the two mechanism
-                # probes above are what carry the requirement.
+                # already hold — a null keyFile, and the list safix's own
+                # host-key derivation produces — so the two mechanism probes
+                # above are what carry the requirement. `derivedHostKeys` is
+                # where that derivation lives now, and `sshKeyPaths` is the
+                # consumer's own list, which this fixture leaves empty.
                 identity = {
-                  keyFile = inertSystem.config.sops.age.keyFile;
-                  sshKeyPaths = inertSystem.config.sops.age.sshKeyPaths;
+                  keyFile = inertSystem.config.safix.identity.keyFile;
+                  named = inertSystem.config.safix.identity.sshKeyPaths;
+                  derived = inertSystem.config.safix.identity.derivedHostKeys;
                 };
               };
 
@@ -500,7 +539,8 @@ in
                 };
                 identity = {
                   keyFile = null;
-                  sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                  named = [ ];
+                  derived = [ "/etc/ssh/ssh_host_ed25519_key" ];
                 };
               };
 
@@ -509,11 +549,13 @@ in
           };
         }
         // {
-          # The fact both export forms exist for. Asserted about the module system
+          # The fact the export shape rests on. Asserted about the module system
           # rather than about safix, because that is where it lives, and about
-          # sops-nix's real module as well as a synthetic one, because the
+          # safix's own declaring module as well as a synthetic one, because the
           # synthetic one could agree with a module system that had grown a
-          # special case for large modules.
+          # special case for small modules — and because safix's own module is
+          # now the only declaring module either published name carries, so it
+          # is the one a consumer can import twice.
           safix-module-collision = mkStructuralCheck {
             name = "safix-module-collision";
             actual = {
@@ -538,40 +580,44 @@ in
                 ];
               };
 
-              provisionerSamePathTwice = declaresOnce {
+              # safix's own declaring module, reached by two routes. The option
+              # forced is one `modules/consume/nixos.nix` declares through
+              # `common.sharedOptions`, so the collision is on safix's own
+              # declaration rather than on a fixture's.
+              declaringModuleSamePathTwice = declaresOnce {
                 option = [
-                  "sops"
-                  "defaultSopsFormat"
+                  "safix"
+                  "lib"
                 ];
                 modules = [
-                  inputs.sops-nix.homeManagerModules.sops
-                  inputs.sops-nix.homeManagerModules.sops
+                  "${consumeCopyA}/nixos.nix"
+                  "${consumeCopyA}/nixos.nix"
                 ];
               };
-              provisionerTwoPaths = declaresOnce {
+              declaringModuleTwoPaths = declaresOnce {
                 option = [
-                  "sops"
-                  "defaultSopsFormat"
+                  "safix"
+                  "lib"
                 ];
                 modules = [
-                  inputs.sops-nix.homeManagerModules.sops
-                  "${sopsHomeCopy}/sops.nix"
+                  "${consumeCopyA}/nixos.nix"
+                  "${consumeCopyB}/nixos.nix"
                 ];
               };
             };
             expected = {
               samePathTwice = true;
               twoPaths = false;
-              provisionerSamePathTwice = true;
-              provisionerTwoPaths = false;
+              declaringModuleSamePathTwice = true;
+              declaringModuleTwoPaths = false;
             };
           };
 
           safix-consumption = mkStructuralCheck {
             name = "safix-consumption";
             actual = {
-              # The consumer form and the wiring it replaces, entry by entry and
-              # field by field, through sops-nix's own option types.
+              # The consumer form and the hand-written wiring it replaces, entry
+              # by entry and field by field, through safix's own entry type.
               equivalence = moduleView == handView;
               established = sortNames (builtins.attrNames moduleView);
               entry = moduleView.alice-alone;
@@ -589,19 +635,19 @@ in
 
               # A person who resolves nothing defines nothing.
               #
-              # `identity` is the severe half. The fixture profile names an ssh
-              # key path, and sops-nix's own defaults for both fields are the
-              # empty ones, so these read as untouched only while the enable gate
-              # holds — dropping it puts the named path here.
+              # `install` is the severe half, and it is safix's own definition
+              # rather than another framework's option left empty: the entry
+              # exists exactly where the resolution is non-empty, so dropping
+              # the enable gate puts it on carol's profile. The identity fields
+              # are not probed here any more, because safix defines none — they
+              # are the consumer's own `safix.identity.*` values and reading
+              # them back would assert what the fixture wrote.
               inert = {
-                secrets = inertProfile.config.sops.secrets;
+                secrets = inertProfile.config.safix.secrets;
                 preflight = inertProfile.config.home.activation ? safixIdentityPreflight;
-                unit = inertProfile.config.systemd.user.services ? sops-nix;
+                install = inertProfile.config.home.activation ? safixInstall;
+                unit = inertProfile.config.systemd.user.services ? safix;
                 evaluates = builtins.isAttrs inertProfile.config.home.activation;
-                identity = {
-                  keyFile = inertProfile.config.sops.age.keyFile;
-                  sshKeyPaths = inertProfile.config.sops.age.sshKeyPaths;
-                };
               };
 
               # The user-scope half of the ownership asymmetry. The system half is
@@ -624,24 +670,34 @@ in
                 "wg-private"
               ];
               selectionIsScopeFree = true;
+              # Safix's own declared defaults, every one of them. The values are
+              # unchanged from what a deleted dependency's type used to supply,
+              # and their source is not: `format`, `mode`, `owner`, `group`,
+              # `uid`, `gid`, `restartUnits` and `reloadUnits` are now
+              # `common.secretEntryType`'s own defaults, so a literal that
+              # silently agreed with somebody else's default cannot go
+              # unnoticed here.
               entry = {
                 format = "yaml";
+                gid = 0;
+                group = null;
                 key = "alice_alone";
                 mode = "0440";
                 name = "alice-alone";
+                owner = null;
                 path = "/home/alice/.config/safix-fixture/alice-alone";
+                reloadUnits = [ ];
+                restartUnits = [ ];
                 sopsFile = "/secrets/safix/users/alice/secrets.yaml";
+                uid = 0;
               };
 
               inert = {
                 secrets = { };
                 preflight = false;
+                install = false;
                 unit = false;
                 evaluates = true;
-                identity = {
-                  keyFile = null;
-                  sshKeyPaths = [ ];
-                };
               };
 
               userScopeRefusesOwnership = true;
@@ -664,7 +720,7 @@ in
                 # configuration would be tautologically true: deep-forcing a
                 # home-manager configuration reaches options no fixture profile
                 # defines, and would report a refusal on every profile.
-                refuses = fires unaddressedProfile.config.sops.secrets;
+                refuses = fires unaddressedProfile.config.safix.secrets;
                 namesTheOption = names [ "safix.hostname" ] (
                   failedMessages homeCommon {
                     configured = true;
@@ -708,16 +764,15 @@ in
                       hostname = null;
                     };
                   } == [ ];
-                establishesNothing = unwiredProfile.config.sops.secrets == { };
+                establishesNothing = unwiredProfile.config.safix.secrets == { };
                 enable = unwiredProfile.config.safix.enable;
               };
-
               # Configured and bound to nothing: `safix.flake` omitted. The
               # profile refuses rather than building an empty resolution in
               # silence, and the message names the option that supplies the
               # binding.
               flakeless = {
-                refuses = fires flakelessProfile.config.sops.secrets;
+                refuses = fires flakelessProfile.config.safix.secrets;
                 namesTheOption =
                   names
                     [
@@ -771,13 +826,14 @@ in
 
               # A profile whose declarations resolve and which names no
               # identity. `refuses` is read off the bare instrument rather than
-              # off a home-manager profile deliberately: the profile refuses
-              # either way — sops-nix's key-source assertion fires when safix's
-              # throw does not — so a `fires` over the wrapped profile is green
-              # under the drill that removes safix's guard. Forcing safix's own
-              # option is what attributes the refusal, and `withIdentity` is
-              # what says the guard reads the identity rather than refusing
-              # every profile that resolves anything.
+              # off a home-manager profile deliberately: `homeManagerConfiguration`
+              # collects every failed assertion and throws them together, so a
+              # `fires` over the wrapped profile is green under the drill that
+              # removes safix's guard — safix's own wiring assertions fire
+              # instead. Forcing safix's own option is what attributes the
+              # refusal, and `withIdentity` is what says the guard reads the
+              # identity rather than refusing every profile that resolves
+              # anything.
               noIdentity = {
                 refuses = fires identityFreeProfile.config.safix.secrets;
                 namesTheOptions =
@@ -892,22 +948,27 @@ in
               # The guarantee the preflight's own message rests on.
               safixBeforeCheckLinkTargets = before aliceOrder "safixIdentityPreflight" "checkLinkTargets";
 
-              # The reason it has to exist: sops-nix's entry is registered as a
-              # bare string, so it sorts wherever the DAG puts it, which is after
-              # the point at which a refusal would still be atomic.
-              provisionerAfterCheckLinkTargets = before aliceOrder "checkLinkTargets" "sops-nix";
+              # The reason it has to exist: safix's own install entry is
+              # registered `entryAfter [ "writeBoundary" ]`, and `writeBoundary`
+              # is itself after `checkLinkTargets`, so the install is on the far
+              # side of the point at which a refusal would still be atomic.
+              # Registering it as a bare string — which becomes `entryAnywhere`
+              # and gives home-manager no edge to sort on — is what
+              # `installAfterWriteBoundary` refuses.
+              installAfterWriteBoundary = before aliceOrder "writeBoundary" "safixInstall";
+              installAfterCheckLinkTargets = before aliceOrder "checkLinkTargets" "safixInstall";
 
-              # The stronger fact home.nix's non-atomicity prose rests on: the
-              # provisioner runs after the generation is linked, so a failure
-              # there is loud but late.
-              provisionerAfterLinkGeneration = before aliceOrder "linkGeneration" "sops-nix";
+              # The pair the preflight's own message rests on, stated as one
+              # fact rather than left to be inferred from the two above.
+              preflightBeforeInstall = before aliceOrder "safixIdentityPreflight" "safixInstall";
 
               # Read, do not decrypt: the script names each configured identity and
-              # exits non-zero, and it invokes no decryptor. `runsTheDecryptor`
-              # matches the binary in the closure rather than the program's name,
-              # because the name appears in the remediation prose — which is the
-              # other claim here: the message narrows itself to what it checked
-              # rather than implying that a readable identity can open the files.
+              # exits non-zero, and it invokes no installer. `runsTheInstaller`
+              # matches a store path ending in the installer's own binary rather
+              # than the program's name, because the name appears in the
+              # remediation prose — which is the other claim here: the message
+              # narrows itself to what it checked rather than implying that a
+              # readable identity can open the files.
               script =
                 let
                   text = (moduleForm "alice").config.home.activation.safixIdentityPreflight.data;
@@ -915,39 +976,40 @@ in
                 {
                   namesTheIdentity = lib.hasInfix "/home/alice/.ssh/agenix" text;
                   refuses = lib.hasInfix "exit 1" text;
-                  runsTheDecryptor = lib.hasInfix "bin/sops-install-secrets" text;
+                  runsTheInstaller = lib.any (
+                    line: builtins.match ".*${builtins.storeDir}/[^[:space:]]+/bin/safix.*" line != null
+                  ) (lib.splitString "\n" text);
                   statesItsLimit = lib.hasInfix "readability" text && lib.hasInfix "not a recipient" text;
                 };
             }
-            # The same claim about the systemd daemon reload is linux's alone.
-            # home-manager registers `reloadSystemd` from its `systemd.user`
-            # module, and the DAG this check reads on aarch64-darwin is
-            # `checkFilesChanged checkLinkTargets writeBoundary installPackages
-            # linkGeneration onFilesChange setupLaunchAgents` — read off the
-            # pinned home-manager on that platform — and carries no such entry.
-            # `before` answers false for a name it cannot find, so asserting the
-            # ordering there is asserting a step's absence rather than its
-            # position. darwin's analogue is `setupLaunchAgents`, and the claim is
-            # not moved onto it, because where sops-nix's entry sorts against that
-            # one has not been established.
+            # The user unit is linux's alone: `systemd.user.services.safix` is
+            # what safix registers where the platform has a user manager, and
+            # darwin's home-manager DAG — `checkFilesChanged checkLinkTargets
+            # writeBoundary installPackages linkGeneration onFilesChange
+            # setupLaunchAgents`, read off the pinned home-manager there —
+            # carries no `reloadSystemd` for a unit to be ordered against.
+            # `before` answers false for a name it cannot find, so asserting
+            # that ordering on darwin would be asserting a step's absence
+            # rather than its position.
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-              provisionerAfterReloadSystemd = before aliceOrder "reloadSystemd" "sops-nix";
+              unitExists = (moduleForm "alice").config.systemd.user.services ? safix;
             };
 
             expected = {
               present = true;
               safixBeforeCheckLinkTargets = true;
-              provisionerAfterCheckLinkTargets = true;
-              provisionerAfterLinkGeneration = true;
+              installAfterWriteBoundary = true;
+              installAfterCheckLinkTargets = true;
+              preflightBeforeInstall = true;
               script = {
                 namesTheIdentity = true;
                 refuses = true;
-                runsTheDecryptor = false;
+                runsTheInstaller = false;
                 statesItsLimit = true;
               };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-              provisionerAfterReloadSystemd = true;
+              unitExists = true;
             };
           };
         };

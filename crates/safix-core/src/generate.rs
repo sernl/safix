@@ -380,9 +380,7 @@ fn run_one(
         if !holds_a_value(workspace, &target)? {
             missing = missing.saturating_add(1);
         }
-        records
-            .paths
-            .push(definition::record_path(output, placement));
+        records.paths.push(definition::record_path(placement));
         targets.push(target);
     }
 

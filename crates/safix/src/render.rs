@@ -465,6 +465,42 @@ fn push_definition(out: &mut String, finding: &Finding) {
     }
 }
 
+/// The six facts `list` reports about one entry, in column order.
+///
+/// Named once because two tables show them: `list`'s own output and the
+/// picker's candidate rows. Two tables claiming to show the same six facts,
+/// built by two pieces of code, drift on the first column that gains a rule —
+/// the `GENERATOR` column's description/`yes`/`-` fallback below is already
+/// such a rule.
+const LISTING_COLUMNS: [&str; 6] = ["NAME", "ORIGIN", "SHARED", "GENERATOR", "KEY", "FILE"];
+
+/// The header row `list` and the picker both align their columns against.
+#[must_use]
+pub fn listing_header() -> Vec<String> {
+    LISTING_COLUMNS.into_iter().map(str::to_owned).collect()
+}
+
+/// One held name, as the row `list` aligns and the picker offers.
+#[must_use]
+pub fn listing_row(name: &str, placement: &safix_core::model::Placement) -> Vec<String> {
+    vec![
+        name.to_owned(),
+        placement.origin.as_str().to_owned(),
+        if placement.shared { "yes" } else { "-" }.to_owned(),
+        placement.generator.as_ref().map_or_else(
+            || "-".to_owned(),
+            |generator| {
+                generator
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| "yes".to_owned())
+            },
+        ),
+        placement.key.clone(),
+        placement.file.clone(),
+    ]
+}
+
 /// One user's held names, as the rows `list` aligns.
 ///
 /// The header is a row like any other, which is what makes the column widths
@@ -473,30 +509,11 @@ fn push_definition(out: &mut String, finding: &Finding) {
 pub fn listing(
     held: &std::collections::BTreeMap<String, safix_core::model::Placement>,
 ) -> Vec<Vec<String>> {
-    let mut rows = vec![
-        ["NAME", "ORIGIN", "SHARED", "GENERATOR", "KEY", "FILE"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<String>>(),
-    ];
-    for (name, placement) in held {
-        rows.push(vec![
-            name.clone(),
-            placement.origin.as_str().to_owned(),
-            if placement.shared { "yes" } else { "-" }.to_owned(),
-            placement.generator.as_ref().map_or_else(
-                || "-".to_owned(),
-                |generator| {
-                    generator
-                        .description
-                        .clone()
-                        .unwrap_or_else(|| "yes".to_owned())
-                },
-            ),
-            placement.key.clone(),
-            placement.file.clone(),
-        ]);
-    }
+    let mut rows = vec![listing_header()];
+    rows.extend(
+        held.iter()
+            .map(|(name, placement)| listing_row(name, placement)),
+    );
     rows
 }
 

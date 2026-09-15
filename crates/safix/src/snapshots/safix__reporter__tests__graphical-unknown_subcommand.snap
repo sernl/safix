@@ -4,6 +4,7 @@ expression: render_graphical(&refusal)
 ---
 safix::unknown_subcommand
 
-  × unknown subcommand 'rotate' (expected set, edit, get, list, generate,
-  │ check, fix, audit, sync, keygen, adduser, enroll, group or upload)
+  × unknown subcommand 'rotate' (expected set, edit, get, view, list,
+  │ generate, check, fix, audit, sync, keygen, adduser, enroll, group, upload
+  │ or install)
   help: `safix <subcommand> -h` explains one of them.

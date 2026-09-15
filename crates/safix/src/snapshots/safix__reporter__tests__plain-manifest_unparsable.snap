@@ -1,0 +1,5 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: /nix/store/xxx-safix-manifest.json is not an installer manifest this runtime reads: unknown field `templates`

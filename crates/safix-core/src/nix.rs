@@ -20,6 +20,14 @@ use crate::error::{Error, Result};
 use crate::sandbox::{self, Confinement};
 
 /// An attribute of `flake.safix.lib` the runtime reads.
+///
+/// There is deliberately no variant for the generator-record root, nor for
+/// any other `flake.safix.storage` value. A definition record's path
+/// reaches the runtime already computed, on
+/// [`crate::model::Placement::definition_record`], through `Placements`
+/// below — so evaluating the root separately would buy a second `nix eval`
+/// in order to rebuild a string the runtime was handed, and would put the
+/// layout back in two languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Attribute {
     /// `user -> name -> placement`.

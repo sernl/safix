@@ -40,6 +40,12 @@ pub const TERMINATED: i32 = 143;
 /// A failure to install is not fatal. The signals keep their default
 /// dispositions, which means an interrupted write can leave its candidate
 /// document behind — the same outcome as a `SIGKILL`, which nothing can catch.
+///
+/// The terminal is put back before the sweep and not after. This handler ends
+/// the process with [`std::process::exit`], so no `Drop` runs and the picker's
+/// raw-mode guard never restores anything on this path; and the sweep waits on
+/// whatever `sops` subprocess is in flight, which is a wait the operator must
+/// not sit through looking at a terminal with no echo and no `^C`.
 pub fn catch_signals() {
     let Ok(mut signals) = Signals::new([SIGINT, SIGTERM]) else {
         return;
@@ -53,6 +59,9 @@ pub fn catch_signals() {
         } else {
             TERMINATED
         };
+        // Before anything that can block: a picker's raw mode is this thread's
+        // to undo, because the exit below runs no destructor.
+        crate::tty::restore();
         // Announced before the sweep, because the sweep waits for whatever
         // subprocess is in flight and the run's own thread checks this the
         // moment that subprocess is waited on. Whichever of the two reaches the

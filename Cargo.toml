@@ -48,7 +48,7 @@ zeroize = "1"
 # plugin through one, because each reads a credential from a terminal and from
 # nowhere else, and an argument vector is not a channel a PIN may travel. All are
 # safe wrappers over what would otherwise be `unsafe` in a crate that forbids it.
-rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs", "process", "pty"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs", "process", "pty", "mount"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 insta = "1"

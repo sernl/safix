@@ -190,6 +190,25 @@
         # ambiguous or absent match, or disclosing anything with no vault
         # declared, turns this red.
         safix-vault-lock-bump = claim "safix-vault-lock-bump" "vault_lock_bump";
+
+        # `safix install`, driven as an activation drives it: the schema mode
+        # over absent documents, the two check modes disagreeing over one
+        # manifest, an unknown mode, an unknown version, an unknown field, a
+        # full user-mode install with generation rotation and pruning, the dry
+        # run, the host's own dry-activation signal, the one-subprocess-per-
+        # document count, the destructive branch at the store root, and the
+        # committed fixture manifest beside a mutation of it. One claim of
+        # several windows, so the whole target runs rather than one test of it,
+        # the way `safix-bridge-sync-converge` does.
+        #
+        # Its drills: making `CheckMode::Manifest` decrypt turns the two-tier
+        # disagreement red; ignoring `NIXOS_ACTION` turns exactly the
+        # dry-activation test red on the symlink having moved. The booted-host
+        # half of the same sequence is `safix-installer-vm`, which is where
+        # mounting, chowning and restart propagation are measured — none of
+        # which a test process may do, and all of which the manifest's own
+        # `userMode` field omits here.
+        safix-install = claim "safix-install" "install";
       }
       # The tmpfs rule, held against the kernel's own mount table rather than
       # against the probe that enforces it. The drill that exercises the refusal
@@ -212,6 +231,27 @@
       # red-capable on both platforms.
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         safix-memory-backing = claim "safix-memory-backing" "memory_backing";
+
+        # The picker, whole: the six claims `./cli.nix` names one at a time
+        # plus the three no per-mode entry names — an interrupt mid-selection
+        # exiting 130 with the terminal's attributes back, a preview staging
+        # nothing and leaving no staging root behind, and a suppressed preview
+        # decrypting nothing at all. Removing the signal-path restore leaves
+        # every guard-path check green and turns the interrupt one red, which
+        # is why the whole target is claimed here as well as per mode.
+        #
+        # `crates/safix/tests/picker.rs` needs no `[[test]]` entry in
+        # `crates/safix/Cargo.toml`: test targets there are auto-discovered
+        # and only the six support binaries are declared, so the compiled
+        # suite installs this target to `$out/bin/picker` through the existing
+        # `modules/flake/rust.nix` path with no change of its own.
+        #
+        # linux only, for the reason `../checks/integration.nix` gives where it
+        # puts `util-linux` on the same platform alone: a picker opens
+        # `/dev/tty`, so the run has to claim the test's pseudoterminal as its
+        # controlling terminal through `setsid --ctty`, and darwin has no
+        # `setsid` to do it with.
+        safix-picker = claim "safix-picker" "picker";
       };
     };
 }

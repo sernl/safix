@@ -483,12 +483,13 @@
         mode "safix-generate-public" "generators"
           "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
 
-      # The definition record, and the drift `check` reports over it. A mint leaves
-      # one line under state/safix/definitions/ carrying a digest and none of the
-      # value; an edit to the declaration afterwards is reported naming the entry
-      # and both remedies and no value; regenerating clears it, with the refreshed
-      # record riding that commit; and a hand-set entry, a record in a format this
-      # version does not write, and an absent record each produce nothing.
+      # The definition record, and the drift `check` reports over it. A mint
+      # leaves one line under `flake.safix.storage.generatorRecords` carrying a
+      # digest and none of the value; an edit to the declaration afterwards is
+      # reported naming the entry and both remedies and no value; regenerating
+      # clears it, with the refreshed record riding that commit; and a hand-set
+      # entry, a record in a format this version does not write, and an absent
+      # record each produce nothing.
       checks.safix-generate-definition-drift =
         mode "safix-generate-definition-drift" "generators"
           "a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it";
@@ -524,6 +525,66 @@
       checks.safix-edit-argv =
         mode "safix-edit-argv" "editor"
           "the_editor_receives_the_path_and_never_the_value";
+
+      # The five picker entries below that drive a terminal need `setsid
+      # --ctty`, which is why `./integration.nix` carries `util-linux` on linux
+      # alone: a picker opens `/dev/tty`, so the run has to claim the test's
+      # pseudoterminal as its controlling terminal, and darwin has no `setsid`
+      # to do it with. There the harness refuses by name rather than skipping,
+      # because a check that stops asserting without failing is the failure this
+      # page's conventions exist to prevent.
+      # `safix-view-no-terminal` is the exception: it needs no terminal at all.
+
+      # A selection asked for where no terminal can be opened is refused before
+      # anything is decrypted, naming both remedies: name the entry, or list
+      # what the user holds. This case needs no pseudoterminal — pipes on all
+      # three streams is what a sandbox provides anyway — and pointing the
+      # refusal at enrollment's own no-terminal prose turns the reporter
+      # snapshot red rather than this.
+      checks.safix-view-no-terminal =
+        mode "safix-view-no-terminal" "picker"
+          "a_run_with_no_terminal_is_refused_naming_both_remedies";
+
+      # A user who holds nothing is refused naming them rather than offered an
+      # empty list: holding nothing is a state of the declarations where no
+      # terminal is a state of the session, so the two are distinct refusals.
+      # Reusing either code for the other turns this red.
+      checks.safix-view-nothing-to-pick =
+        mode "safix-view-nothing-to-pick" "picker"
+          "a_user_holding_nothing_is_refused_rather_than_offered_an_empty_list";
+
+      # Typing a query that narrows to one entry and pressing enter reads that
+      # one and no other: choosing is a way of naming. Attaching the test's
+      # pseudoterminal to standard input alone — drill 7.17 — turns this red,
+      # because the picker draws where it reads.
+      checks.safix-view-selection =
+        mode "safix-view-selection" "picker"
+          "a_typed_query_and_enter_prints_the_chosen_value";
+
+      # Leaving the selection writes no value, commits nothing, stages nothing,
+      # exits non-zero, and puts the terminal's attributes back. Dropping the
+      # restore-on-drop guard turns this red on the attributes alone.
+      checks.safix-view-cancelled =
+        mode "safix-view-cancelled" "picker"
+          "cancelling_writes_nothing_and_restores_the_terminal";
+
+      # Nothing the selection drew reaches standard output or standard error:
+      # the rows and the preview go to `/dev/tty` and nowhere else, which is
+      # what keeps `view <name> | cat` honest. Drawing on standard error
+      # instead turns this red.
+      checks.safix-view-preview-streams =
+        mode "safix-view-preview-streams" "picker"
+          "the_preview_never_reaches_stdout_or_stderr";
+
+      # `edit` with no name offers the same selection and opens the editor on
+      # the entry chosen, with the staged path reaching the editor and the
+      # edited value landing. Passing `Scope::Everything` from `edit` — drill
+      # 6.9 — turns the sibling public-output test red instead, and moving the
+      # editor probe after the selection — drill 6.8 — turns the no-editor test
+      # red; both of those run under `safix-picker`.
+      checks.safix-edit-nameless =
+        mode "safix-edit-nameless" "picker"
+          "edit_with_no_name_reaches_the_editor_for_the_chosen_entry";
 
       # The union `fix` acts on, from both sides. A consumer-named file in step
       # with the rule that covers it is not a finding of any kind; the same file

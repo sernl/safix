@@ -43,6 +43,12 @@ let
     # `materializeFor` through the one place the registry is assembled,
     # rather than a second field threaded beside `root`.
     namingKey = if cfg.vault != null then cfg.vault.namingKey else null;
+
+    # The three declared storage roots, threaded exactly the way `namingKey`
+    # is: one field on the registry, so every `resolve.*Of registry` entry
+    # point reaches them without a second plumbing mechanism. `bound` merges
+    # `registry` in, so `selectFor` and `materializeFor` read the same value.
+    inherit (cfg) storage;
   };
 
   audiences = resolve.audiencesOf registry;
@@ -73,6 +79,8 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "secrets/safix/users/alice/ops-tooling.yaml" ];
+      # The example uses the default `flake.safix.storage.encrypted` spelling;
+      # a consumer who has renamed that root writes their own here.
       description = ''
         Encrypted files a consumer wants governed that no declaration implies,
         as repository-relative paths.
@@ -185,7 +193,8 @@ in
     violations =
       resolve.violations registry
       ++ resolve.generatorViolations registry
-      ++ resolve.vaultViolations cfg.vault;
+      ++ resolve.vaultViolations cfg.vault
+      ++ resolve.storageViolations cfg.storage;
 
     # Whether a vault is declared, cross-checked by the command-line runtime
     # against the `SAFIX_VAULT_ROOT` it was given (design V1). `true` the
@@ -384,7 +393,7 @@ in
       if cfg.vault == null then
         null
       else
-        policy.renderVaultRules (policy.plan registry) cfg.vault.namingKey;
+        policy.renderVaultRules cfg.storage (policy.plan registry) cfg.vault.namingKey;
 
     # The check a consumer instantiates over its own committed policy file. Built
     # here so that its failure and the generated header name one command.

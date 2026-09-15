@@ -11,7 +11,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::definition;
 use crate::model::{Placement, Placements};
 
 /// One ciphertext document's two names, and the `(opaque key, readable key)`
@@ -86,26 +85,22 @@ pub(crate) fn public_leaves(placements: &Placements) -> Vec<PlainLeaf> {
 
 /// Every definition record a vault-mode fleet holds, in opaque-path order.
 ///
-/// Deduplicated by opaque path: a shared entry's record is one file both
-/// carriers resolve (design V14's `record_path`), so their two placements
-/// must not each queue a copy of the same move.
+/// Empty when no vault is declared: `logical_record` is `None` then, which
+/// is the field that gates this the way `logical_file` gates
+/// [`secret_documents`]. [`Placement::definition_record`] is set in both
+/// modes and so cannot be the gate.
+///
+/// Deduplicated by opaque path, and here that dedup is load-bearing rather
+/// than cosmetic: a shared entry's record is one file both carriers
+/// resolve, so their two placements must not each queue a copy of the same
+/// move.
 pub(crate) fn record_leaves(placements: &Placements) -> Vec<PlainLeaf> {
-    let mut leaves: BTreeMap<String, String> = BTreeMap::new();
-    for user in placements.users() {
-        for (name, placement) in placements.held_by(user).into_iter().flatten() {
-            let Some(opaque) = &placement.definition_record else {
-                continue;
-            };
-            let Some(logical) = definition::logical_record_path(name, placement) else {
-                continue;
-            };
-            leaves.insert(opaque.clone(), logical);
-        }
-    }
-    leaves
-        .into_iter()
-        .map(|(opaque, logical)| PlainLeaf { opaque, logical })
-        .collect()
+    leaves_by(placements, |placement| {
+        Some((
+            placement.definition_record.clone(),
+            placement.logical_record.clone()?,
+        ))
+    })
 }
 
 /// The shape [`public_leaves`] and [`record_leaves`] share: derive one
@@ -144,9 +139,10 @@ mod tests {
         json!({
             "file": file, "key": key, "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
-            "definitionRecord": null,
+            "definitionRecord": "state/opaque-record",
             "logicalFile": "secrets/safix/users/alice/secrets.yaml",
             "logicalKey": logical_key, "logicalPublic": null,
+            "logicalRecord": "state/safix/definitions/alice/api-token",
         })
     }
 
@@ -154,8 +150,9 @@ mod tests {
         json!({
             "file": file, "key": key, "origin": "private",
             "owner": owner, "shared": false, "generator": null, "public": null,
-            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-            "logicalPublic": null,
+            "definitionRecord": "state/safix/definitions/alice/api-token",
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
         })
     }
 
@@ -220,9 +217,10 @@ mod tests {
             "file": "secrets/opaque.yaml", "key": "k", "origin": "private",
             "owner": "alice", "shared": false, "generator": null,
             "public": "public/opaque-output",
-            "definitionRecord": null,
+            "definitionRecord": "state/opaque-record",
             "logicalFile": "secrets/safix/users/alice/secrets.yaml",
             "logicalKey": "k", "logicalPublic": "public/safix/users/alice/host-key/value",
+            "logicalRecord": "state/safix/definitions/alice/host-key",
         });
         let held = placements(json!({ "alice": { "host-key": entry } }));
         let leaves = public_leaves(&held);
@@ -242,6 +240,7 @@ mod tests {
             "definitionRecord": "state/opaque-record",
             "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
             "logicalKey": "fleet-token", "logicalPublic": null,
+            "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
         });
         let bob = json!({
             "file": "secrets/shared-opaque.yaml", "key": "opaque-key", "origin": "carries",
@@ -249,6 +248,7 @@ mod tests {
             "definitionRecord": "state/opaque-record",
             "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
             "logicalKey": "fleet-token", "logicalPublic": null,
+            "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
         });
         let held = placements(json!({
             "alice": { "fleet-token": alice },

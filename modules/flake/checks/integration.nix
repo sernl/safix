@@ -48,6 +48,14 @@ let
   ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     pkgs.bubblewrap
     pkgs.strace
+    # `setsid`, for the picker runs alone.
+    # A picker opens `/dev/tty`, so the run has to be a session leader that has
+    # claimed the test's pseudoterminal as its controlling terminal;
+    # `setsid --ctty` is what does that, and a sandbox has no controlling
+    # terminal to inherit one from.
+    # linux-only in this list because darwin has no `setsid` at all, which is
+    # the same reason the picker's own checks are linux-only.
+    pkgs.util-linux
   ];
 
   # The suite stages plaintext, and it verifies its scratch directory is

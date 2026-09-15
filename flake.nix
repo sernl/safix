@@ -23,15 +23,6 @@
     advisory-db.url = "github:rustsec/advisory-db";
     advisory-db.flake = false;
 
-    # sops-nix is what a consumer's NixOS or home-manager profile reads, so the
-    # checks that prove a resolved entry is consumable have to build against it.
-    # It is also imported by `homeModules.default` and `nixosModules.default`, so
-    # for those two outputs it is a runtime dependency as well; the `.safix`
-    # variants of both import nothing and leave the choice of revision to the
-    # consumer.
-    sops-nix.url = "github:Mic92/sops-nix";
-    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-
     # A check dependency only, and no output references it. Proving that the
     # identity preflight sorts ahead of `checkLinkTargets` means topologically
     # sorting a real profile's activation DAG, which needs a real home-manager
@@ -58,21 +49,55 @@
   };
 
   outputs =
-    inputs@{ flake-parts, sops-nix, ... }:
+    inputs@{ flake-parts, ... }:
     let
-      # One definition, two published names. sops-nix's own flake publishes both
-      # `homeManagerModules` and `homeModules` for one module value, so a
-      # consumer pinning either name reaches the same thing. A second copy of
-      # the attrset would be a second place for the `.safix`/`.default` split to
-      # drift out of step; a shared binding cannot.
-      homeModules = {
-        safix = ./modules/consume/home.nix;
-        default = {
-          imports = [
-            sops-nix.homeManagerModules.sops
-            ./modules/consume/home.nix
-          ];
+      # One file per scope, published under both its names. The two names are
+      # kept so that every `imports` line written against the previous surface
+      # keeps resolving, which is what makes this a collapse rather than a
+      # rename.
+      #
+      # Each published name is the file plus one wrapper whose whole content is
+      # a default: `safix.installer.package`. The consumption modules import
+      # nothing and hold no flake input, by contract, so they cannot reach
+      # safix's own build themselves — their own default is `pkgs.safix`,
+      # which is what a genuinely flakeless tree has to supply. Here
+      # `packages` is in scope, so the flake supplies it, at `mkDefault`, and
+      # a consumer of any published name needs no line of their own.
+      # `validationPackage` is the build-platform build for the same reason
+      # `installer.nix` splits the two: the manifest's check phase runs inside
+      # the build where the activation runs on the host.
+      #
+      # The bare files stay importable with no flake at all: the wrapper's
+      # `imports` names one file inside this package's own consumption
+      # directory and nothing else.
+      installerPackageDefaults =
+        { pkgs, lib, ... }:
+        {
+          safix.installer.package =
+            lib.mkDefault
+              inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.safix;
+          safix.installer.validationPackage =
+            lib.mkDefault
+              inputs.self.packages.${pkgs.stdenv.buildPlatform.system}.safix;
         };
+
+      homeModule = {
+        imports = [
+          ./modules/consume/home.nix
+          installerPackageDefaults
+        ];
+      };
+
+      nixosModule = {
+        imports = [
+          ./modules/consume/nixos.nix
+          installerPackageDefaults
+        ];
+      };
+
+      homeModules = {
+        safix = homeModule;
+        default = homeModule;
       };
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -96,6 +121,7 @@
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/gate-guard.nix
         ./modules/flake/checks/generators.nix
+        ./modules/flake/checks/installer-vm.nix
         ./modules/flake/checks/installer.nix
         ./modules/flake/checks/keepassxc.nix
         ./modules/flake/checks/materialization.nix
@@ -104,6 +130,7 @@
         ./modules/flake/checks/portability.nix
         ./modules/flake/checks/real-clan.nix
         ./modules/flake/checks/single-runtime.nix
+        ./modules/flake/checks/storage.nix
         ./modules/flake/checks/subjects.nix
         ./modules/flake/checks/vault-projection.nix
         ./modules/flake/checks/vault.nix
@@ -122,25 +149,28 @@
         flakeModules.default = ./modules/flake/safix;
 
         # The modules a consumer imports into a profile, where resolved secrets
-        # arrive. Each ships twice, and the choice is made at import time because
-        # `imports` cannot depend on an option: the `.default` forms import
-        # sops-nix for a tree that has not got one, and the `.safix` forms import
-        # nothing, for a tree that pins its own revision — or has no flake at all,
-        # which is what makes the `.safix` forms importable by plain path.
-        # Importing two distinct copies of one declaring module is an evaluation
-        # error rather than a merge — `safix-module-collision` holds that fact —
-        # and no configuration can repair it after the fact.
+        # arrive. Each scope publishes one module under both names — `.safix`
+        # and `.default` are one value — and every published form imports
+        # nothing outside its own file, so any of them is importable as a plain
+        # file path with no flake in the tree.
+        #
+        # Both names are retained so that every `imports` line written against
+        # the previous surface keeps resolving. The split existed for one
+        # reason: `imports` cannot depend on an option, so a tree without the
+        # secret provisioner needed a form that imported it and a tree pinning
+        # its own needed a form that did not. With no provisioner to import the
+        # distinction has no content, and what is left is strictly the stronger
+        # of the two properties it used to offer separately.
+        #
+        # Importing two distinct copies of one declaring module is an
+        # evaluation error rather than a merge — `safix-module-collision` holds
+        # that fact — and no configuration can repair it after the fact.
         inherit homeModules;
         homeManagerModules = homeModules;
 
         nixosModules = {
-          safix = ./modules/consume/nixos.nix;
-          default = {
-            imports = [
-              sops-nix.nixosModules.sops
-              ./modules/consume/nixos.nix
-            ];
-          };
+          safix = nixosModule;
+          default = nixosModule;
         };
       };
     };

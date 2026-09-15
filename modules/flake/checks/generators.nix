@@ -399,7 +399,7 @@
               plan = reachingPlan;
               publicPaths = resolve.publicPathsOf publicFleet;
             } != [ ];
-          reachingRuleFailsCatchAll = checks.catchAllMessagesOf reachingPlan != [ ];
+          reachingRuleFailsCatchAll = checks.catchAllMessagesOf resolve.defaultStorage reachingPlan != [ ];
 
           publicMessages = violationsOf fixtures.publicOutput;
           publicPaths = resolve.publicPathsOf publicFleet;

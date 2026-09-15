@@ -1,0 +1,75 @@
+{
+  "ageKeyFile": null,
+  "ageSshKeyPaths": [
+    "/etc/ssh/safix-fixture-identity"
+  ],
+  "keepGenerations": 1,
+  "logging": {
+    "keyImport": false,
+    "secretChanges": false
+  },
+  "manifestInputHash": null,
+  "secrets": [
+    {
+      "format": "yaml",
+      "gid": 0,
+      "group": "staff",
+      "key": "bob-service",
+      "mode": "0400",
+      "name": "bob-service",
+      "owner": "bob",
+      "path": "/var/lib/safix-fixture/bob-service",
+      "reloadUnits": [],
+      "restartUnits": [],
+      "sopsFile": "secrets/safix/users/bob/secrets.yaml",
+      "uid": 0
+    },
+    {
+      "format": "yaml",
+      "gid": 0,
+      "group": null,
+      "key": "ops-handover",
+      "mode": "0400",
+      "name": "ops-handover",
+      "owner": null,
+      "path": "/run/safix/ops-handover",
+      "reloadUnits": [],
+      "restartUnits": [],
+      "sopsFile": "secrets/safix/shared/alice,bob/secrets.yaml",
+      "uid": 0
+    },
+    {
+      "format": "yaml",
+      "gid": 0,
+      "group": null,
+      "key": "ops_tooling",
+      "mode": "0400",
+      "name": "ops-tooling",
+      "owner": null,
+      "path": "/run/safix/ops-tooling",
+      "reloadUnits": [],
+      "restartUnits": [],
+      "sopsFile": "secrets/safix/users/bob/secrets.yaml",
+      "uid": 0
+    },
+    {
+      "format": "yaml",
+      "gid": 0,
+      "group": null,
+      "key": "team-vault",
+      "mode": "0400",
+      "name": "team-vault",
+      "owner": null,
+      "path": "/run/safix/team-vault",
+      "reloadUnits": [],
+      "restartUnits": [],
+      "sopsFile": "secrets/safix/shared/alice,bob/secrets.yaml",
+      "uid": 0
+    }
+  ],
+  "secretsMountPoint": "/run/safix.d",
+  "symlinkPath": "/run/safix",
+  "useTmpfs": false,
+  "userMode": false,
+  "version": 1
+}

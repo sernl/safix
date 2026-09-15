@@ -1460,9 +1460,11 @@
           # binding and drops the second without a word.
           markedElementsAreDistinct = map (p: {
             inherit (p) label;
-            distinct = resolve.audienceFileOf p.a != resolve.audienceFileOf p.b;
-            fileA = resolve.audienceFileOf p.a;
-            fileB = resolve.audienceFileOf p.b;
+            distinct =
+              resolve.audienceFileOf resolve.defaultStorage p.a
+              != resolve.audienceFileOf resolve.defaultStorage p.b;
+            fileA = resolve.audienceFileOf resolve.defaultStorage p.a;
+            fileB = resolve.audienceFileOf resolve.defaultStorage p.b;
           }) markedPairs;
 
           markersOutsideNameAlphabet = lib.mapAttrs (

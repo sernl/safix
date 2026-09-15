@@ -200,7 +200,7 @@ A consumer sets `storage.plaintextOutputs` to a path a creation rule elsewhere i
 
 A consumer picks a hidden root (`.safix/…`) and later audits with `rg` or `fd`, both of which skip dot-directories by default → stated in the option descriptions and the README, not refused. It cuts both ways: fewer accidental ciphertext matches, and an audit needs `--hidden`. Refusing a valid choice because one tool's default surprises is worse than documenting the surprise.
 
-The S5 opaque-name break lands on any consumer already running a vault from the unreleased branch → `safix check` reports every affected document as pending relocation and `safix fix` relocates, which is the machinery the vault migration already ships (`check.rs:217-260`, `fix.rs:215-285`); the changelog entry states the break under `[Unreleased]` and names the command.
+The S5 opaque-name break lands on any consumer already running a vault from the unreleased branch → corrected after implementation (task 8.3): the break is partial (definition records keep their opaque names, since the `state` input was already root-relative) and the relocation machinery cannot express an opaque-to-opaque move, so `safix check` reports every entry as holding no value at its new name rather than as pending relocation; the migration order is `safix fix --vault-rollback` before the update, then `safix fix` after it, and the changelog entry states exactly that.
 
 The overlap refusal rejects a configuration someone considers reasonable — nesting the records tree inside the ciphertext tree, say → the refusal message names both options and both values, and the `generatorRecords` description states why the tree is separate. A consumer who genuinely wants a record inside the encrypted tree wants a different feature (encrypted records), which this change does not provide and does not foreclose.
 
@@ -223,12 +223,13 @@ No re-encryption: a sops document does not embed its own path, and readable-mode
 
 **For a consumer running an unreleased vault (the S5 break):**
 
-1. Update the input.
-2. `safix check` — reports every ciphertext document, public leaf and definition record as pending relocation, because the opaque names all changed.
-3. `safix fix` — relocates through the existing vault relocation path (`fix.rs:215-285`), which is resumable and re-runnable because `named_move` returns `None` when the source is absent or the destination already exists.
+1. `safix fix --vault-rollback` while still on the pre-change input, which recovers every leaf into the readable layout under the old names.
+2. Update the input.
+3. `safix fix` — adopts the vault again through the existing relocation path (`fix.rs:215-285`), now under the root-relative names.
 
-Because the in-document key names change too, this relocation is a decrypt-and-re-encrypt, which is exactly what the vault migration path already performs — not a new branch.
+Updating first is recoverable but not automatic: the old opaque names are neither readable-layout sources `check` can queue nor destinations `named_move` recognises, so a vault carried across the update in place reports every entry as holding no value until the operator downgrades, rolls back, and repeats the order above.
+`crates/safix/tests/vault_migration.rs` asserts both that the break is visible and that nothing relocates itself.
 
 **Rollback:** reverting the change restores the literal roots and the full-path hash input.
 A readable-mode consumer who has renamed a root reverses it with `git mv` and `safix fix`.
-A vault consumer who has run step 3 reverses it by reverting and re-running `safix fix`, which relocates back by the same mechanism.
+A vault consumer who has run step 3 reverses it in the same order: `safix fix --vault-rollback` on the new input, revert, `safix fix` on the old one.

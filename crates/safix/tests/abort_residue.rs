@@ -47,7 +47,12 @@ fn a_signal_at_the_value_prompt_leaves_the_repository_as_it_found_it() {
 
     let run = fixture.interrupt_after("2", "INT", &["set", "alice", "wifi-psk"], "", &[]);
 
-    assert_eq!(run.code, Some(130), "an interrupted run exits 130");
+    assert_eq!(
+        run.code,
+        Some(130),
+        "an interrupted run exits 130; stderr: {}",
+        run.stderr
+    );
     assert_pristine(&fixture, &before, "CANARY-never-typed");
     assert!(
         !fixture.exists(SHARED_DIR),
@@ -73,7 +78,12 @@ fn a_signal_at_the_confirmation_leaves_no_trace_of_the_value_already_typed() {
         &[],
     );
 
-    assert_eq!(run.code, Some(130), "an interrupted run exits 130");
+    assert_eq!(
+        run.code,
+        Some(130),
+        "an interrupted run exits 130; stderr: {}",
+        run.stderr
+    );
     run.silent_about("CANARY-typed-once");
     assert_pristine(&fixture, &before, "CANARY-typed-once");
 }
@@ -137,7 +147,12 @@ fn a_signal_during_encryption_stops_before_the_rename() {
         ],
     );
 
-    assert_eq!(run.code, Some(130), "an interrupted run exits 130");
+    assert_eq!(
+        run.code,
+        Some(130),
+        "an interrupted run exits 130; stderr: {}",
+        run.stderr
+    );
     assert_eq!(
         fixture.read(ALICE_FILE),
         untouched,

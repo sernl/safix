@@ -513,6 +513,11 @@ mod tests {
             Code::OtpRefused => Error::OtpRefused,
             Code::TouchPolicyNever => Error::TouchPolicyNever,
             Code::NoTerminal => Error::NoTerminal,
+            Code::PickerNeedsTerminal => Error::PickerNeedsTerminal,
+            Code::NothingToPick => Error::NothingToPick {
+                user: "dave".into(),
+            },
+            Code::SelectionCancelled => Error::SelectionCancelled,
             Code::PtyUnusable => Error::PtyUnusable {
                 cause: io::Error::from(io::ErrorKind::PermissionDenied),
             },
@@ -677,6 +682,59 @@ mod tests {
             Code::VaultRelocationUnreadable => Error::VaultRelocationUnreadable {
                 file: "secrets/safix/users/alice/secrets.yaml".into(),
                 key: "api-token".into(),
+            },
+            Code::ManifestUnreadable => Error::ManifestUnreadable {
+                path: "/nix/store/xxx-safix-manifest.json".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::ManifestUnparsable => Error::ManifestUnparsable {
+                path: "/nix/store/xxx-safix-manifest.json".into(),
+                cause: "unknown field `templates`".into(),
+            },
+            Code::ManifestVersionUnknown => Error::ManifestVersionUnknown {
+                found: 2,
+                supported: 1,
+            },
+            Code::ManifestModeUnparsable => Error::ManifestModeUnparsable {
+                name: "alice-alone".into(),
+                mode: "0o400".into(),
+            },
+            Code::ManifestOwnerUnknown => Error::ManifestOwnerUnknown {
+                name: "alice-alone".into(),
+                owner: "alice".into(),
+            },
+            Code::ManifestGroupUnknown => Error::ManifestGroupUnknown {
+                name: "alice-alone".into(),
+                group: "keys".into(),
+            },
+            Code::ManifestKeyMissing => Error::ManifestKeyMissing {
+                name: "alice-alone".into(),
+                document: "/nix/store/xxx-secrets.yaml".into(),
+                key: "services/nginx/token".into(),
+            },
+            Code::IdentityKeyFileUnreadable => Error::IdentityKeyFileUnreadable {
+                path: "/var/lib/safix/keys.txt".into(),
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::InstallSshKeyUnconvertible => Error::InstallSshKeyUnconvertible {
+                path: "/etc/ssh/ssh_host_rsa_key".into(),
+                reason: "ssh-to-age exited 1".into(),
+            },
+            Code::InstallDecryptFailed => Error::InstallDecryptFailed {
+                document: "/nix/store/xxx-secrets.yaml".into(),
+                status: 128,
+            },
+            Code::InstallDocumentUnparsable => Error::InstallDocumentUnparsable {
+                document: "/nix/store/xxx-secrets.yaml".into(),
+                cause: "expected value at line 1 column 1".into(),
+            },
+            Code::InstallMountFailed => Error::InstallMountFailed {
+                path: "/run/safix.d".into(),
+                filesystem: "ramfs".into(),
+                cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::InstallRuntimeDirUnknown => Error::InstallRuntimeDirUnknown {
+                asked: "XDG_RUNTIME_DIR".into(),
             },
         }
     }

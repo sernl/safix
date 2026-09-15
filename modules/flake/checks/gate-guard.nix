@@ -32,28 +32,36 @@
     let
       mkStructuralCheck = import ./mk-structural-check.nix pkgs;
 
-      # Every check that is legitimately Linux-only today, per D9's own
-      # measurement of the checked-out tree before this change (13 names: the
-      # eight `safix-installer-*` checks, `safix-bridge-real-clan`,
-      # `safix-generate-envelope`, `safix-memory-backing`,
-      # `safix-consumption-system`, and `safix-portability`) with
-      # `safix-portability`'s own split folded in — `safix-portability-system`
-      # keeps the one shape of that check that still needs a `nixosSystem`,
-      # `safix-portability-home` no longer belongs on this list at all. Every
-      # other check is expected on every system.
+      # Every check that is legitimately Linux-only today: the nine
+      # `safix-installer-*` checks (each of which evaluates a real
+      # `nixosSystem`), the VM test (which boots one),
+      # `safix-bridge-real-clan`, `safix-generate-envelope`,
+      # `safix-memory-backing`, `safix-consumption-system` and
+      # `safix-portability-system`. Every other check is expected on every
+      # system — including `safix-portability-user-manifest`, which builds a
+      # home-scope manifest and needs no NixOS evaluation at all.
       linuxOnlyChecks = [
         "safix-bridge-real-clan"
         "safix-consumption-system"
         "safix-generate-envelope"
         "safix-installer-coexistence"
         "safix-installer-identity"
-        "safix-installer-manifest"
-        "safix-installer-mechanism"
         "safix-installer-ordering"
+        "safix-installer-overrides"
         "safix-installer-refusals"
+        "safix-installer-roundtrip"
+        "safix-installer-schema"
         "safix-installer-sole"
         "safix-installer-store"
+        "safix-installer-type"
+        "safix-installer-vm"
         "safix-memory-backing"
+
+        # Not this change's check: `safix-picker` needs a controlling
+        # terminal, which `setsid --ctty` supplies and darwin has no `setsid`
+        # for at all. Listed here by the slice that noticed the guard reddening
+        # on it rather than left for the next one to trip over.
+        "safix-picker"
         "safix-portability-system"
       ];
 

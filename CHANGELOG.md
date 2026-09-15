@@ -19,6 +19,104 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### **BREAKING** (nix surface): safix owns its installer and declares no sops-nix input
+
+safix declares no sops-nix input.
+`nix flake metadata` shows exactly one `sops-nix` node in the lock and it is `clan-core`'s, reached through a check-only input; the root flake's own input set is `advisory-db`, `clan-core`, `crane`, `flake-parts`, `home-manager`, `nixpkgs` and `treefmt-nix`.
+`sops` the binary is unchanged and still performs every encryption and decryption as a subprocess: the document format, its MAC, its IV-reuse rule and its key wrapping remain upstream's.
+
+The secret-entry type is safix's own.
+`modules/consume/common.nix` declares `secretEntryType`, a submodule of twelve fields — `name`, `key`, `path`, `mode`, `owner`, `group`, `uid`, `gid`, `sopsFile`, `format`, `restartUnits`, `reloadUnits` — and the system scope types `safix.secrets` with it instead of reading another framework's option declaration out of the same evaluation, which was what made that framework's module a required import for an entrypoint whose contract is that it imports nothing.
+`path` defaults to `''${safix.installer.symlinkPath}/<name>`, folding the per-entry mint the system module used to perform into the type, so the store root and that default cannot move apart.
+`sopsFileHash` is gone, and the ciphertext-edit-causes-a-rebuild behaviour it carried is not: the manifest now carries one `manifestInputHash` over every distinct document it names, emitted under `safix.installer.validate`, which the installer ignores entirely.
+
+The manifest schema is safix's own, versioned, and defined once as `Manifest` in `crates/safix-core/src/install.rs`, refusing an unknown field rather than ignoring it.
+`templates`, `placeholderBySecretName`, `gnupgHome` and `sshKeyPaths` are dropped — the first two were emitted empty for schema parity alone, the last two served a gnupg identity safix has never been able to declare — and a `version` field makes a future migration a diagnosis rather than a silent field-drop.
+
+`safix install <manifest> [--check-mode=off|manifest|document] [--ignore-passwd] [--dry-run]` is a new verb, the sixteenth, and the only machine-facing one: an activation runs it, an operator does not.
+It also honours `NIXOS_ACTION=dry-activate` as implying `--dry-run`, which performs every step except the atomic symlink swap.
+
+`safix.installer.{package,validationPackage,validate,keepGenerations,useTmpfs,log,environment,agePlugins}` replace every `sops.*` read, and `safix.identity.generateKey` replaces `sops.age.generateKey` at home scope.
+The migration is a rename table, in `README.md` under "Migrating from the sops-nix-backed surface"; the new namespace is a superset of what was read, so no configuration becomes inexpressible.
+No new line is required of a consumer: each published module name carries safix's own build as a `mkDefault` for `safix.installer.package`, and the build-platform build for `safix.installer.validationPackage`. A tree that imports `modules/consume/nixos.nix` as a plain file path with no flake supplies `pkgs.safix` or names the option, which is what that module's own refusal asks for.
+
+The user scope stops delegating.
+`modules/consume/home.nix` builds its own manifest with `userMode = true`, registers `systemd.user.services.safix` on linux and `home.activation.safixInstall` — `entryAfter [ "writeBoundary" ]`, not a bare string — on both platforms, and stops writing `sops.secrets`, `sops.age.keyFile` and `sops.age.sshKeyPaths` into a consumer's tree.
+A person's secrets move from `~/.config/sops-nix/secrets/<name>` to `%r/safix/<name>`: `$XDG_RUNTIME_DIR/safix/<name>` on linux and `$(getconf DARWIN_USER_TEMP_DIR)/safix/<name>` on darwin.
+That is a runtime directory rather than a home directory, so a user-scope secret no longer survives a reboot without a login, and anything referencing the old path has to move.
+A user-mode install mounts no filesystem, chowns nothing, and propagates no restart or reload.
+
+The two published module names per scope are one value.
+`homeModules.default` and `homeModules.safix` are the same file, as are `nixosModules.default` and `nixosModules.safix`, with `homeManagerModules` still an alias of `homeModules`; both names stay published, so every existing `imports` line keeps resolving, and every published entrypoint now imports nothing outside its own file.
+
+Templates, `neededForUsers`/`secrets-for-users` relocation and gnupg identities are unsupported, and each is now a refusal rather than an omission: the manifest's `deny_unknown_fields` rejects a `templates` or `neededForUsers` field, and a gnupg-only identity fails evaluation in safix's own words.
+safix never supported any of the three; what changes is that the workaround closes — a safix-resolved entry can no longer be reached by another framework's template or relocation, even on a host where that framework is also installed.
+A consumer's gnupg configuration also stops suppressing safix's own no-identity refusal, which it previously did on the strength of a configuration safix neither wrote nor could use.
+
+`sopsFileOutsideStoreMessage`'s remedy now names `safix.installer.validate` where it named `sops.validateSopsFiles`; the rest of the sentence is unchanged.
+
+### A read verb with a picker, and a nameless `edit`
+
+`safix view [--no-preview] [<user>] [<name>]` is new, dispatched between `get` and `list` — the read paths in operator order — and listed there in `safix -h` too.
+Given a name it decrypts that one entry and writes it to the terminal, falling back to standard output where no terminal opens; given none it offers every entry the named user holds for selection, showing the same six columns `safix list` prints, and choosing one proceeds exactly as though that name had been given.
+`get` is unchanged: it still writes the value to standard output, with the same exit codes, and is still what a pipeline calls.
+Both verbs' help now says which is which.
+
+`safix edit`'s form widens to `edit [--allow-disk-staging] [--no-preview] [<user>] [<name>]`.
+With no argument it previously printed a usage line and now opens the same selection, over the entries that user holds excluding every public placement — a public value is not editable, and a refusal reachable by selection is one the choice should never have offered.
+That is recorded here under the widened verb rather than as a break: no form that worked before behaves differently.
+`edit` now determines the operator's editor before the selection opens, so neither editor variable set is refused before anything is browsed or decrypted.
+
+The preview decrypts the highlighted entry after a quiet period rather than on a keystroke, holds exactly one decrypted value at a time, is drawn in a region the terminal clears on exit so no value enters scrollback, and stages nothing: no plaintext of a previewed value reaches a file.
+A rendering is bounded to the region it is drawn in, control bytes are shown as placeholders, truncation is marked, and a value that is not valid text is described by its size.
+`--no-preview` on either verb offers the same list and decrypts nothing until a choice is made.
+
+Three new refusal codes: `safix::picker_needs_terminal`, `safix::nothing_to_pick` and `safix::selection_cancelled`.
+Each has its own prose, and none reuses the one enrollment raises for a missing terminal.
+
+`safix-core` gains one interface: `Secret::preview_into(&self, sink, lines, columns)`, its third and last egress, shaped as a sink rather than a return so that the plaintext's lifetime is the write's lifetime.
+The type's prohibitions on debugging, displaying and serializing a value are unchanged.
+
+No dependency was added for any of this — the matcher, the terminal handling and the draw loop are in-crate over `rustix::termios` — and `deny.toml`, `Cargo.lock` and the supply-chain spec are unedited.
+`openspec/changes/add-view-picker/design.md` records why a third-party picker was rejected, and which crate to reach for if the scorer's ranking ever becomes a maintenance burden.
+
+One gap is recorded rather than closed: the verb counts in `README.md` and `examples/README.md` are prose and nothing checks them.
+The one count that is machine-checkable is `safix -h`'s own, which the usage scaffold's snapshot holds.
+
+### The three storage roots are the consumer's to name
+
+`flake.safix.storage` is new: a submodule of three `str` options — `encrypted`, `plaintextOutputs` and `generatorRecords` — defaulting to `secrets/safix`, `public/safix` and `state/safix/definitions`, today's spellings.
+Additive: an existing consumer who sets nothing resolves every path, every generated rule and every committed byte exactly as before.
+Setting one moves that tree; every readable path safix computes — the `sopsFile` of each audience, each public output's `value` leaf, each generator-definition record, each generated `path_regex`, the `.sops.yaml` header's two worked examples, and the catch-all check's tree-shaped probes — is derived from the roots rather than from a literal.
+A consumer who wants one parent for all three writes three strings sharing it.
+
+Two refusals come with it, both at evaluation rather than at check time.
+A root that is empty, absolute, ends in `/` or carries a `..` component is refused naming the option and the value.
+Two roots that are equal, or one nested in another at a `/` component boundary, are refused naming both options and both values; comparison is on component boundaries, so `secrets/safix` and `secrets/safix-public` are accepted while `secrets/safix` and `secrets/safix/pub` are not.
+The trees' disjointness was previously an accident of three string literals not overlapping, asserted in four scattered places; it is now an invariant that holds for every configuration.
+
+The resolver also emits `definitionRecord` on every placement rather than only in vault mode, which leaves exactly one implementation of the layout.
+`safix-core` no longer constructs a record path: `definition::PREFIX`, `definition::logical_record_path`, `definition::audience_directory`, `public::PREFIX`, `public::LEAF` and `public::is_public_path` are deleted.
+
+### **BREAKING** (vault only): a vault-rooted name now hashes a root-relative readable name
+
+Every opaque file name, public leaf, definition record and in-document key in a declared vault is derived from the readable name *relative to its configured storage root* — `users/alice/secrets.yaml` rather than `secrets/safix/users/alice/secrets.yaml` — so that renaming a storage root moves nothing inside a vault.
+Without this, a root rename would re-hash every in-document key, and because sops binds a leaf's ciphertext to its key path as associated data, that is a decrypt-and-re-encrypt rather than a rename — forever, rather than once.
+
+The break is one-time and partial: every ciphertext document, every in-document key and every public leaf changes its opaque name, while a definition record keeps its own, because the `state` hash input was already root-relative.
+The relocation machinery cannot move a document from its old opaque name to its new one — it resolves a readable declaration-root path against an opaque vault path, never opaque against opaque — so a vault updated in place shows up in `safix check` as every entry holding no value at its new, still-empty name.
+The working order is therefore `safix fix --vault-rollback` before taking this update, then the update, then `safix fix`, which re-adopts the vault under the new names; `crates/safix/tests/vault_migration.rs` holds both the visibility of the break and the fact that nothing relocates itself.
+No released consumer is affected: the vault feature is itself unreleased, under `[Unreleased]` above.
+
+### One option for what arrived at system scope
+
+**BREAKING** (nix surface): `config.safix.installed` is gone, with no alias and no hidden retention, so reading it is an evaluation error naming the option rather than a silent empty set.
+`config.safix.secrets` is now the whole of what a system configuration reports: typed by the secret provisioner's own entry type — its mode, owner, group, uid and gid coercions, its `sopsFile` default and its `sopsFileHash` default — carrying the path each entry will arrive at, and the exact set safix's installer manifest is built from.
+The two options were one set read twice, and the one a consumer was told to read was the one the installer did not use; a consumer reading `config.safix.installed` reads `config.safix.secrets` instead and gets the same attribute set, with the same typing and the same minted paths.
+The user scope is unchanged: its `safix.secrets` is still the untyped projection, and `sops.secrets` is still where it lands.
+Per entry the system-scope change is additive — every field that was there is still there — with one exception worth naming: an entry that declared no path of its own now carries one, `<safix.installer.symlinkPath>/<name>`, so a consumer relying on a path attribute being absent sees it present.
+The old name legitimately survives in one place only, `openspec/changes/archive/`, whose records are accurate history as of their own change.
+
 ### A secrets vault, opaque by construction, in a second repository
 
 `flake.safix.vault` is new: `nullOr (submodule { root; namingKey; })`, additive at `null` — the default — so every existing consumer is unaffected until a vault is declared.

@@ -125,6 +125,10 @@ let
       # every existing check in this tree — passes none and gets exactly
       # today's readable names; the default is what makes that byte for byte.
       namingKey ? null,
+      # The three declared storage roots. Defaulted here for the same reason
+      # `namingKey` is: a caller that has not been taught about the option
+      # passes none and gets exactly today's spellings, byte for byte.
+      storage ? defaultStorage,
     }:
     {
       inherit
@@ -136,6 +140,7 @@ let
         organizations
         silos
         namingKey
+        storage
         ;
     };
 
@@ -202,6 +207,86 @@ let
         [
           "flake.safix.vault.namingKey contains a character outside [0-9a-f]; a vault's naming key is lowercase hexadecimal only"
         ];
+
+  # ── the three storage roots ──
+  # Today's spellings, as the option defaults. Named here as well as in
+  # `options.nix` because every entry point defaults `storage` to this, so a
+  # caller that has not been taught about the option — a fixture registry
+  # written as a bare `{ users = …; }` — resolves exactly today's layout.
+  defaultStorage = {
+    encrypted = "secrets/safix";
+    plaintextOutputs = "public/safix";
+    generatorRecords = "state/safix/definitions";
+  };
+
+  # A root is a repository-relative directory path, following the shape
+  # `wellFormedNamingKey` establishes: one predicate, and the messages naming
+  # which clause failed live in `storageViolations` below.
+  #
+  # The trailing slash is refused rather than normalised. A normalised value
+  # makes the overlap comparison depend on a rewriting the operator cannot see
+  # in their own declaration, and every path in this system is joined with an
+  # explicit `/`, so a root that carries one would double it.
+  wellFormedStorageRoot =
+    root:
+    root != ""
+    && !(lib.hasPrefix "/" root)
+    && !(lib.hasSuffix "/" root)
+    && !(builtins.elem ".." (lib.splitString "/" root));
+
+  # Overlap on component boundaries rather than on raw string prefixes. The
+  # `/` suffix is the whole of that distinction: `secrets/safix` and
+  # `secrets/safix-public` are two directories neither of which contains the
+  # other, while `secrets/safix` and `secrets/safix/pub` are one tree inside
+  # another. Without it the first pair is refused, which is a legal
+  # configuration turned away.
+  storageOverlap = a: b: a == b || lib.hasPrefix "${a}/" b || lib.hasPrefix "${b}/" a;
+
+  # The two refusals the three roots carry (design S4), reported at evaluation
+  # rather than at check time: an overlapping configuration would otherwise
+  # place a plaintext output inside a tree a creation rule governs, and the
+  # operator would learn of it from `nix flake check` rather than from the line
+  # they wrote. Refusing here is also what makes the invariant free for the
+  # default configuration — it holds without anyone running a check.
+  #
+  # Concatenated rather than short-circuited, the way `vaultViolations` is, so
+  # three malformed roots are three messages rather than the first one reached.
+  storageViolations =
+    storage:
+    let
+      roots = [
+        "encrypted"
+        "plaintextOutputs"
+        "generatorRecords"
+      ];
+
+      # Ordered pairs, each unordered pair once: the message names both options,
+      # so reporting `(a, b)` and `(b, a)` would be one fault stated twice.
+      pairs = [
+        {
+          a = "encrypted";
+          b = "plaintextOutputs";
+        }
+        {
+          a = "encrypted";
+          b = "generatorRecords";
+        }
+        {
+          a = "plaintextOutputs";
+          b = "generatorRecords";
+        }
+      ];
+    in
+    lib.concatMap (
+      name:
+      lib.optional (!(wellFormedStorageRoot storage.${name}))
+        "flake.safix.storage.${name} is '${storage.${name}}', which is not a repository-relative directory path; a storage root is non-empty, does not begin with '/', does not end with '/', and carries no '..' component"
+    ) roots
+    ++ lib.concatMap (
+      p:
+      lib.optional (storageOverlap storage.${p.a} storage.${p.b})
+        "flake.safix.storage.${p.a} ('${storage.${p.a}}') and flake.safix.storage.${p.b} ('${storage.${p.b}}') overlap; the three storage roots must be disjoint trees, because what each one holds is a different promise — ciphertext, plaintext outputs a module reads, and value-free bookkeeping — and a rule, an exclusion or a search scoped to one would reach the other"
+    ) pairs;
 
   # `audienceFileOf` joins an audience with this to name one directory, and that
   # join is injective only while no name can contain the separator. Two distinct
@@ -295,10 +380,11 @@ let
   # One shell nuance rides the organization marker and is accepted: zsh expands a
   # word that *begins* with `=` (EQUALS expansion), so a user cd'd into shared/
   # typing `cat =acme/…` unquoted needs a quote or noequals there. As a path
-  # component after `secrets/…/` — every rendered use — no shell touches it, and
-  # the candidates that avoid the quirk each trip something stronger: `~` and `!`
-  # expand in more shells in more positions, `+` and `.` and `^` are regex atoms
-  # the policy's own path_regex would then have to escape.
+  # component under the configured encrypted root — every rendered use — no
+  # shell touches it, and the candidates that avoid the quirk each trip
+  # something stronger: `~` and `!` expand in more shells in more positions, `+`
+  # and `.` and `^` are regex atoms the policy's own path_regex would then have
+  # to escape.
   audienceMarkers =
     let
       markers = {
@@ -519,11 +605,11 @@ let
   # — and the branch is here so that the invariant does not rest on that staying
   # true.
   audienceFileOf =
-    audience:
+    storage: audience:
     if builtins.length audience == 1 && !(isMarkedElement (builtins.head audience)) then
-      "secrets/safix/users/${builtins.head audience}/secrets.yaml"
+      "${storage.encrypted}/users/${builtins.head audience}/secrets.yaml"
     else
-      "secrets/safix/shared/${lib.concatStringsSep audienceSeparator audience}/secrets.yaml";
+      "${storage.encrypted}/shared/${lib.concatStringsSep audienceSeparator audience}/secrets.yaml";
 
   # file -> { audience; recipients; dir; }, over every secret anyone owns. Keyed
   # on the file because that is what the recipient policy writes rules for and
@@ -542,9 +628,9 @@ let
       lib.listToAttrs (
         map (
           audience:
-          lib.nameValuePair (audienceFileOf audience) {
+          lib.nameValuePair (audienceFileOf r.storage audience) {
             inherit audience;
-            dir = builtins.dirOf (audienceFileOf audience);
+            dir = builtins.dirOf (audienceFileOf r.storage audience);
             recipients = audienceRecipients r audience;
           }
         ) (lib.unique owned)
@@ -585,47 +671,80 @@ let
   # Where a public output's plaintext lives, derived from the same audience
   # computation `audienceFileOf` uses so the two cannot place one entry in two
   # places. The leaf is a directory named for the output holding a file named
-  # `value`, which is clan's shape; the prefix is a top-level sibling of the
-  # ciphertext tree rather than a path inside it, so the two are separable by
-  # prefix — which is what a `.gitignore`, an `rsync --exclude`, a backup policy
-  # and a reviewer all actually operate on.
+  # `value`, which is clan's shape.
+  #
+  # The two trees are separable — which is what a `.gitignore`, an
+  # `rsync --exclude`, a backup policy and a reviewer all actually operate on —
+  # and that separability no longer rests on two string literals happening not
+  # to overlap. `storageViolations` refuses at evaluation any configuration
+  # whose roots coincide or nest, for every configuration rather than for the
+  # default one. What the name promises is the consumer's to choose:
+  # `storage.encrypted` is the option carrying "everything under here is
+  # ciphertext", and a consumer who renames it to something that does not say so
+  # has moved that promise onto their own name (design S3).
   publicFileOf =
-    audience: name:
+    storage: audience: name:
     if builtins.length audience == 1 && !(isMarkedElement (builtins.head audience)) then
-      "public/safix/users/${builtins.head audience}/${name}/value"
+      "${storage.plaintextOutputs}/users/${builtins.head audience}/${name}/value"
     else
-      "public/safix/shared/${lib.concatStringsSep audienceSeparator audience}/${name}/value";
+      "${storage.plaintextOutputs}/shared/${lib.concatStringsSep audienceSeparator audience}/${name}/value";
 
   # Opaque names for the vault, computed only when a vault is declared.
-  # `namingKey` is the operator-minted key (V8); `tag` domain-separates the
-  # four uses below so that a coincidental collision between, say, a public
-  # output's logical path and a ciphertext's logical path never produces the
-  # same hash under two different meanings; `logicalPath` is the readable
-  # name the in-repository layout would have used, drawn from the same
-  # alphabet `audienceMarkers` already excludes `|` from. No two distinct
+  # `namingKey` is the operator-minted key (V8); `logicalPath` is the readable
+  # name relative to its own configured root — `users/alice/secrets.yaml`, not
+  # `secrets/safix/users/alice/secrets.yaml` — so that renaming a root renames
+  # nothing in the vault (design S5). It is drawn from the same alphabet
+  # `audienceMarkers` already excludes `|` from.
+  #
+  # `tag` domain-separates the four uses below. While the full path was hashed
+  # the roots did most of that work and the tags were a convenience; now that
+  # the input is root-relative they are the only separator, because two roots'
+  # relative names can coincide exactly — `users/alice/wg-public/value` under
+  # the plaintext-output root and the same string under any other root are one
+  # input, and only the tag tells them apart. No two distinct
   # `(namingKey, tag, logicalPath)` triples concatenate to the same string,
   # which is what makes this join injective.
   opaqueOf =
     namingKey: tag: logicalPath:
     builtins.hashString "sha256" "${namingKey}|${tag}|${logicalPath}";
 
+  # A path stripped of the root it was joined under, which is the input every
+  # opaque name is hashed from. Written once rather than at each of the four
+  # call sites, so the stripping rule cannot drift between them; `wellFormedRoot`
+  # refusing a trailing slash is what makes the `"${root}/"` prefix exact.
+  relativeTo = root: path: lib.removePrefix "${root}/" path;
+
   # The vault-mode ciphertext name: one flat file directly under `secrets/`,
   # never nested in an audience-named directory, because the directory name
   # is exactly what opacity has to hide.
+  #
+  # This `secrets/` is the vault's own bucket and is deliberately not
+  # `storage.encrypted`: the vault is a dedicated repository whose root is the
+  # vault root, so a second naming layer inside it buys a consumer nothing, and
+  # with the hash input root-relative there is no coupling left to configure
+  # away (design S6).
   secretsFileOf =
-    namingKey: audience: "secrets/${opaqueOf namingKey "secrets" (audienceFileOf audience)}.yaml";
+    storage: namingKey: audience:
+    "secrets/${
+      opaqueOf namingKey "secrets" (relativeTo storage.encrypted (audienceFileOf storage audience))
+    }.yaml";
 
   # The vault-mode public-output name: a single file rather than the
   # readable layout's `<name>/value` directory, because the leaf no longer
-  # needs a directory to disambiguate once the name itself is a hash.
+  # needs a directory to disambiguate once the name itself is a hash. `public/`
+  # is the vault's own bucket, literal for the same reason `secrets/` is.
   publicFileOfVault =
-    namingKey: audience: name:
-    "public/${opaqueOf namingKey "public" (publicFileOf audience name)}";
+    storage: namingKey: audience: name:
+    "public/${
+      opaqueOf namingKey "public" (
+        relativeTo storage.plaintextOutputs (publicFileOf storage audience name)
+      )
+    }";
 
   # The vault-mode in-document key. `logicalPath` closes over the same
-  # readable file identity `secretsFileOf` hashes, and `logicalKey` is
-  # today's `sopsKey`-or-name formula, so a key derived from a resolved
-  # entry and a key derived independently from a machine's grant of the
+  # root-relative readable file identity `secretsFileOf` hashes, and
+  # `logicalKey` is today's `sopsKey`-or-name formula, so a key derived from a
+  # resolved entry and a key derived independently from a machine's grant of the
   # same entry agree bit for bit. `#` plays the separator role `|` plays
   # above and is likewise outside the name alphabet.
   opaqueKeyOf =
@@ -665,41 +784,61 @@ let
           # under their own logical fields below so that the migration this
           # change's runtime performs later can enumerate the readable side of
           # every opaque name without the runtime computing a hash itself.
-          logicalFile = audienceFileOf audience;
+          #
+          # Each is a full repository-relative path under its own configured
+          # root, and each opaque name below hashes the same value stripped of
+          # that root by `relativeTo`, so a root rename leaves every vault name
+          # untouched (design S5).
+          logicalFile = audienceFileOf r.storage audience;
           logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
-          logicalPublic = if isPublic then publicFileOf audience name else null;
+          logicalPublic = if isPublic then publicFileOf r.storage audience name else null;
           logicalRecord =
             if shared then
-              "shared/${lib.concatStringsSep audienceSeparator audience}/${name}"
+              "${r.storage.generatorRecords}/shared/${lib.concatStringsSep audienceSeparator audience}/${name}"
             else
-              "${src.owner}/${name}";
+              "${r.storage.generatorRecords}/${src.owner}/${name}";
         in
         {
           inherit (src) origin owner;
-          file = if r.namingKey != null then secretsFileOf r.namingKey audience else logicalFile;
+          file = if r.namingKey != null then secretsFileOf r.storage r.namingKey audience else logicalFile;
           inherit shared;
-          key = if r.namingKey != null then opaqueKeyOf r.namingKey logicalFile logicalKey else logicalKey;
+          key =
+            if r.namingKey != null then
+              opaqueKeyOf r.namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey
+            else
+              logicalKey;
           public =
             if !isPublic then
               null
             else if r.namingKey != null then
-              publicFileOfVault r.namingKey audience name
+              publicFileOfVault r.storage r.namingKey audience name
             else
               logicalPublic;
 
-          # Opaque and vault-only: `null` outside vault mode, exactly as the
-          # vault's own declaration is. `definitionRecord` is the record path
-          # `definition::record_path` reads directly instead of deriving one
-          # from `file`'s directory, which vault mode's flat layout leaves
-          # nothing to derive from. `logicalFile`/`logicalKey`/`logicalPublic`
-          # are the readable inputs the opaque names above were hashed from —
-          # carried here rather than recomputed by the runtime, because
-          # nothing in `crates/safix-core` may compute a hash.
+          # `definitionRecord` is the path `definition::record_path` returns
+          # verbatim. Emitted on every placement rather than only in vault mode
+          # (design S8): the resolver is the one implementation of the layout,
+          # and a root the consumer names is a root nothing in
+          # `crates/safix-core` could reconstruct. No `nix.rs` `Attribute`
+          # variant carries it — it rides the `placements` attribute the runtime
+          # already evaluates, which is why the temptation to add one is a
+          # second channel for a value that already has one.
+          #
+          # `logicalFile`/`logicalKey`/`logicalPublic`/`logicalRecord` are the
+          # readable inputs the opaque names above were hashed from, and stay
+          # vault-only: outside vault mode the readable name *is* the emitted
+          # one, so a second copy of it would be a field that can disagree with
+          # itself. They are carried here rather than recomputed by the runtime,
+          # because nothing in `crates/safix-core` may compute a hash.
           definitionRecord =
-            if r.namingKey != null then "state/${opaqueOf r.namingKey "state" logicalRecord}" else null;
+            if r.namingKey != null then
+              "state/${opaqueOf r.namingKey "state" (relativeTo r.storage.generatorRecords logicalRecord)}"
+            else
+              logicalRecord;
           logicalFile = if r.namingKey != null then logicalFile else null;
           logicalKey = if r.namingKey != null then logicalKey else null;
           logicalPublic = if r.namingKey != null then logicalPublic else null;
+          logicalRecord = if r.namingKey != null then logicalRecord else null;
 
           generator =
             if entry.generator == null then
@@ -1529,7 +1668,7 @@ let
           (
             name:
             "flake.safix.users.${user} declares '${name}', but flake.safix.users.${user}.recipient is null, so ${
-              audienceFileOf (audienceOf r user name)
+              audienceFileOf r.storage (audienceOf r user name)
             } has no recipient to encrypt it to"
           )
           (
@@ -1870,7 +2009,7 @@ let
                 + lib.concatMapStringsSep " and " (
                   group: "flake.safix.groups.${group} reaches ${lib.concatStringsSep ", " (reachedBy rows group)}"
                 ) groups
-                + ". ${audienceFileOf audience} is one file with one data key, so it would be readable from both."
+                + ". ${audienceFileOf r.storage audience} is one file with one data key, so it would be readable from both."
               )
             ) (lib.groupBy (row: row.silo) spans)
           )
@@ -2087,6 +2226,7 @@ let
       organizations ? { },
       silos ? { },
       namingKey ? null,
+      storage ? defaultStorage,
       root,
       user ? null,
       machine ? null,
@@ -2103,6 +2243,7 @@ let
           groups
           organizations
           silos
+          storage
           ;
       };
 
@@ -2126,7 +2267,7 @@ let
           else
             let
               audience = audienceOf r src.owner src.name;
-              logicalFile = audienceFileOf audience;
+              logicalFile = audienceFileOf r.storage audience;
 
               # The key inside the encrypted file is the entry's own name, which
               # parts company with the name the file is parked under as soon as a
@@ -2136,13 +2277,18 @@ let
             in
             entry
             // {
-              sopsFile = root + "/${if namingKey != null then secretsFileOf namingKey audience else logicalFile}";
+              sopsFile =
+                root + "/${if namingKey != null then secretsFileOf r.storage namingKey audience else logicalFile}";
 
               # Recomputed here rather than read off `placementsIn`, which the
               # owner resolved separately: both close over the same `audience`
               # and `logicalKey`, so a key derived at one site and a key
               # derived at the other agree bit for bit (design V9).
-              sopsKey = if namingKey != null then opaqueKeyOf namingKey logicalFile logicalKey else logicalKey;
+              sopsKey =
+                if namingKey != null then
+                  opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey
+                else
+                  logicalKey;
             }
         ) (lib.filterAttrs (_key: src: !(publicOwned src)) sources);
 
@@ -2210,12 +2356,13 @@ let
           else
             let
               audience = audienceOf r owner name;
-              logicalFile = audienceFileOf audience;
+              logicalFile = audienceFileOf r.storage audience;
               logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
             in
             entry
             // {
-              sopsFile = root + "/${if namingKey != null then secretsFileOf namingKey audience else logicalFile}";
+              sopsFile =
+                root + "/${if namingKey != null then secretsFileOf r.storage namingKey audience else logicalFile}";
             }
             // lib.optionalAttrs (namingKey != null) {
               # Set unconditionally on whether the entry declares its own
@@ -2224,7 +2371,7 @@ let
               # vault mode would have sops-nix default to the *readable*
               # attribute name, defeating key opacity for every entry that
               # does not carry a custom key (design V9's "in-document key").
-              sopsKey = opaqueKeyOf namingKey logicalFile logicalKey;
+              sopsKey = opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey;
             }
         ) selected;
     in
@@ -2417,6 +2564,11 @@ in
     publicFileOfVault
     wellFormedNamingKey
     vaultViolations
+    defaultStorage
+    relativeTo
+    wellFormedStorageRoot
+    storageOverlap
+    storageViolations
     ;
 
   violations = entryPoint violationsIn;

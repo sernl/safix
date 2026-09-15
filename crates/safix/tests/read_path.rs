@@ -174,14 +174,16 @@ fn a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations() {
 /// `modules/consume/home.nix` refuses a home activation whose identity paths are
 /// missing or unreadable, and its own message states the limit of that — "a key
 /// that exists and is readable but is not a recipient of these files still fails
-/// later, in sops-install-secrets". Everything `add-consumption-modules` verified
+/// later, inside safix's own installer, when it decrypts". Everything
+/// `add-consumption-modules` verified
 /// was an evaluation, so the sentence about what happens later was the one claim
 /// on that path no check held.
 ///
 /// This holds it against fixture ciphertext instead of against an activation:
 /// nothing here switches a profile, and the decryption boundary a run reaches is
-/// the same sops reading the same `SOPS_AGE_KEY_FILE` that `sops-install-secrets`
-/// reads. What is not asserted is the activation itself — the ordering is
+/// the same sops reading the same `SOPS_AGE_KEY_FILE` that the installer's own
+/// identity assembly writes and exports. What is not asserted is the activation
+/// itself — the ordering is
 /// `safix-consumption-ordering`'s, against a real home-manager evaluation.
 ///
 /// The stranger's identity is shown to open a document it is a recipient of

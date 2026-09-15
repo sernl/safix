@@ -1,0 +1,26 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::picker_needs_terminal
+
+  × choosing needs a terminal, and there is none to offer one on. Nothing was
+  │ decrypted.
+  │ 
+  │ A picker draws a list, reads single keystrokes, and redraws — so it needs
+  │ /dev/tty and it needs to put it in raw mode. Where either is unavailable
+  │ there
+  │ is no reduced picker to fall back to: a list that cannot be moved through
+  │ is a
+  │ list, which is safix list, and a prompt that reads a line is not what was
+  │ asked
+  │ for. So this refuses rather than degrading.
+  │ 
+  │ Two ways on. Name the entry, which never needs a terminal and is what a
+  │ pipeline wants:
+  │ 
+  │     safix view <name>
+  │ 
+  │ Or see what is there first, and then name it:
+  │ 
+  │     safix list [<user>]

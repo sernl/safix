@@ -56,6 +56,17 @@
 # sweep mechanisms use. Verified by reverting only the `materializeFor`
 # guard against a scratch copy and observing `consumptionResolves` stay
 # green.
+# 7.12: the four root-relative hash inputs are independently held. Reverting
+# `secretsFileOf`'s input to the root-prefixed path while leaving the other
+# three relative turns `renamedRootsResolveIdentically.<n>.file` `false` for
+# every name and leaves `.key`, `.public` and `.definitionRecord` `true`, and
+# reddens `opaque.<n>.file` alongside. Verified against a scratch copy.
+# 7.13: with the hash input root-relative, `opaqueOf`'s four tags are the only
+# separator left. Collapsing `"public"` onto `"secrets"` inside `opaqueOf`
+# itself turns `tagsAreTheOnlySeparator` `false`; verified against a scratch
+# copy. Note that `leakedFragments` stays `[ ]` under that perturbation — a
+# collision is not a leak, which is why the tag claim needs its own row rather
+# than riding the opacity scan.
 { lib, ... }:
 {
   perSystem =
@@ -167,6 +178,22 @@
         };
       };
 
+      # The same fleet and the same naming key, with all three storage roots
+      # renamed to spellings sharing no component with the defaults. Every
+      # vault-rooted name it resolves must equal `withVault`'s.
+      renamedStorage = {
+        encrypted = "cipher";
+        plaintextOutputs = "clear";
+        generatorRecords = "bookkeeping";
+      };
+      withVaultRenamed = projectionOf {
+        vault = {
+          root = vaultRootPath;
+          namingKey = namingKey;
+        };
+        storage = renamedStorage;
+      };
+
       # 1.6's own claim, over `sopsFile` itself rather than the
       # root-independent `placements.*.file` — `resolveSet` is what
       # `selectFor` returns once `root` is joined in. `toString` avoids
@@ -189,22 +216,37 @@
       logicalPublicOf = name: noVault.placements.alice.${name}.public;
       audienceOfFile = file: noVault.audiences.${file}.audience;
 
-      logicalRecordOf =
-        name:
-        let
-          placement = noVault.placements.alice.${name};
-        in
-        if placement.shared then
-          "shared/${lib.concatStringsSep resolve.audienceSeparator (audienceOfFile placement.file)}/${name}"
-        else
-          "${placement.owner}/${name}";
+      # The readable record path, read off the no-vault projection — which is
+      # now where it comes from: `placementsIn` emits `definitionRecord`
+      # unconditionally (design S8), so the readable form is no longer
+      # reconstructed here from `shared`/`owner`.
+      logicalRecordOf = name: noVault.placements.alice.${name}.definitionRecord;
+
+      # Every opaque name hashes its readable identity *relative to the root it
+      # sits under* (design S5), so `relativeTo` appears here exactly as it does
+      # in the resolver. The `secrets/`, `public/` and `state/` joins stay
+      # literal: those are the vault's own flat buckets, not `storage.*`.
+      relative = root: resolve.relativeTo root;
+      storage = resolve.defaultStorage;
 
       expectedOpaqueFile =
-        name: "secrets/${resolve.opaqueOf namingKey "secrets" (logicalFileOf name)}.yaml";
-      expectedOpaqueKey = name: resolve.opaqueKeyOf namingKey (logicalFileOf name) (logicalKeyOf name);
-      expectedOpaquePublic = name: "public/${resolve.opaqueOf namingKey "public" (logicalPublicOf name)}";
+        name:
+        "secrets/${
+          resolve.opaqueOf namingKey "secrets" (relative storage.encrypted (logicalFileOf name))
+        }.yaml";
+      expectedOpaqueKey =
+        name:
+        resolve.opaqueKeyOf namingKey (relative storage.encrypted (logicalFileOf name)) (logicalKeyOf name);
+      expectedOpaquePublic =
+        name:
+        "public/${
+          resolve.opaqueOf namingKey "public" (relative storage.plaintextOutputs (logicalPublicOf name))
+        }";
       expectedDefinitionRecord =
-        name: "state/${resolve.opaqueOf namingKey "state" (logicalRecordOf name)}";
+        name:
+        "state/${
+          resolve.opaqueOf namingKey "state" (relative storage.generatorRecords (logicalRecordOf name))
+        }";
 
       names = [
         "solo-token"
@@ -251,7 +293,10 @@
       renderedRegexes = map (l: lib.removePrefix "  - path_regex: " l) pathRegexLines;
 
       expectedRegexOf =
-        name: "^secrets/${resolve.opaqueOf namingKey "secrets" (logicalFileOf name)}\\.yaml$";
+        name:
+        "^secrets/${
+          resolve.opaqueOf namingKey "secrets" (relative storage.encrypted (logicalFileOf name))
+        }\\.yaml$";
 
       expectedRegexes = lib.sort (a: b: a < b) (
         map expectedRegexOf [
@@ -307,17 +352,26 @@
           # output, so a routing bug on the readable side would show up
           # here too.
           readableMatchesFormula = {
-            soloFile = noVault.placements.alice.solo-token.file == resolve.audienceFileOf [ "alice" ];
+            soloFile = noVault.placements.alice.solo-token.file == resolve.audienceFileOf storage [ "alice" ];
             teamFile =
               noVault.placements.alice.team-secret.file
-              == resolve.audienceFileOf (audienceOfFile noVault.placements.alice.team-secret.file);
+              == resolve.audienceFileOf storage (audienceOfFile noVault.placements.alice.team-secret.file);
             wgPublicValue =
-              noVault.placements.alice.wg-public.public == resolve.publicFileOf [ "alice" ] "wg-public";
+              noVault.placements.alice.wg-public.public == resolve.publicFileOf storage [ "alice" ] "wg-public";
+
+            # `definitionRecord` parts company with the other three here: it is
+            # emitted on every placement (design S8), so readable mode carries
+            # the readable record path rather than `null`, while the three
+            # `logical*` fields stay vault-only because outside vault mode the
+            # emitted name *is* the readable one.
+            readableRecord =
+              noVault.placements.alice.solo-token.definitionRecord
+              == "${storage.generatorRecords}/alice/solo-token";
             noneOpaque = {
-              definitionRecord = noVault.placements.alice.solo-token.definitionRecord;
               logicalFile = noVault.placements.alice.solo-token.logicalFile;
               logicalKey = noVault.placements.alice.solo-token.logicalKey;
               logicalPublic = noVault.placements.alice.wg-public.logicalPublic;
+              logicalRecord = noVault.placements.alice.solo-token.logicalRecord;
             };
           };
 
@@ -326,7 +380,7 @@
           # with one, and never the other way around.
           rootFlip = {
             noVault =
-              soloSopsFile noVault == "${toString declarationRoot}/${resolve.audienceFileOf [ "alice" ]}";
+              soloSopsFile noVault == "${toString declarationRoot}/${resolve.audienceFileOf storage [ "alice" ]}";
             withVault =
               soloSopsFile withVault == "${toString vaultRootPath}/${expectedOpaqueFile "solo-token"}";
           };
@@ -408,13 +462,68 @@
           };
 
           # 12.3 — a vault-mode public leaf is a single opaque file, not a
-          # `<name>/value` directory, and the two top-level prefixes stay
-          # disjoint the way `public-outputs`' unamended requirement already
-          # holds.
+          # `<name>/value` directory, and the vault's own top-level buckets
+          # stay disjoint the way `public-outputs`' unamended requirement
+          # already holds.
+          #
+          # This is a property of the vault's three literal buckets
+          # (`secrets/`, `public/`, `state/`), which stay literal at the vault
+          # root (design S6). It is not the declaration-side disjointness:
+          # that one is now a property of three values a consumer names, and
+          # `resolve.storageViolations` refuses it at evaluation for every
+          # configuration rather than asserting it of three constants.
           publicLeafIsAFile = !(lib.hasSuffix "/value" withVault.placements.alice.wg-public.public);
           prefixesStayDisjoint =
             !(lib.hasPrefix "secrets/" withVault.placements.alice.wg-public.public)
             && !(lib.hasPrefix "public/" withVault.placements.alice.solo-token.file);
+
+          # 7.10 — renaming all three storage roots changes no vault-rooted
+          # name. This is the whole point of making the hash input
+          # root-relative, and the one assertion a missed `relativeTo` fails:
+          # every opaque file, in-document key, public leaf and definition
+          # record is compared against the same fixture under the defaults,
+          # tree by tree, so a site left root-prefixed reddens exactly its own
+          # row.
+          renamedRootsResolveIdentically = lib.genAttrs names (
+            name:
+            let
+              d = withVault.placements.alice.${name};
+              n = withVaultRenamed.placements.alice.${name};
+            in
+            {
+              file = d.file == n.file;
+              key = d.key == n.key;
+              public = d.public == n.public;
+              definitionRecord = d.definitionRecord == n.definitionRecord;
+            }
+          );
+
+          # The readable side of the same fixture does move, which is what
+          # makes the row above a claim rather than a fixture that renamed
+          # nothing.
+          renamedRootsMoveTheReadableSide = {
+            file = withVaultRenamed.placements.alice.solo-token.logicalFile;
+            public = withVaultRenamed.placements.alice.wg-public.logicalPublic;
+            record = withVaultRenamed.placements.alice.solo-token.logicalRecord;
+          };
+
+          # 7.11 — the four tags are the only separator now. While the full
+          # path was hashed, the roots kept the four uses apart on their own;
+          # with the input root-relative, two roots' relative names can
+          # coincide exactly, and only the tag distinguishes them. Asserted by
+          # feeding one root-relative identity through all four tags and
+          # requiring four distinct names.
+          tagsAreTheOnlySeparator =
+            let
+              shared = relative storage.encrypted (logicalFileOf "solo-token");
+              hashes = map (tag: resolve.opaqueOf namingKey tag shared) [
+                "secrets"
+                "public"
+                "state"
+                "key"
+              ];
+            in
+            builtins.length (lib.unique hashes) == 4;
 
           # 12.4 — a vault does not move the committed policy: the text
           # `.sops.yaml` is rendered from is identical whether or not a
@@ -440,11 +549,12 @@
             soloFile = true;
             teamFile = true;
             wgPublicValue = true;
+            readableRecord = true;
             noneOpaque = {
-              definitionRecord = null;
               logicalFile = null;
               logicalKey = null;
               logicalPublic = null;
+              logicalRecord = null;
             };
           };
           rootFlip = {
@@ -482,6 +592,18 @@
           };
           publicLeafIsAFile = true;
           prefixesStayDisjoint = true;
+          renamedRootsResolveIdentically = lib.genAttrs names (_name: {
+            file = true;
+            key = true;
+            public = true;
+            definitionRecord = true;
+          });
+          renamedRootsMoveTheReadableSide = {
+            file = "cipher/users/alice/secrets.yaml";
+            public = "clear/users/alice/wg-public/value";
+            record = "bookkeeping/alice/solo-token";
+          };
+          tagsAreTheOnlySeparator = true;
           committedPolicyUnmoved = true;
           noVaultHasNoRulesText = null;
           rules = {

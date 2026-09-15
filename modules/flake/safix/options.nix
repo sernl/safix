@@ -239,6 +239,122 @@ in
       '';
     };
 
+    storage = lib.mkOption {
+      default = { };
+      type = lib.types.submodule {
+        options = {
+          encrypted = lib.mkOption {
+            type = lib.types.str;
+            default = "secrets/safix";
+            example = ".safix/encrypted";
+            description = ''
+              The repository-relative directory holding every ciphertext
+              document safix places: one file per distinct audience, in a
+              directory named for that audience.
+
+              Everything under it is ciphertext, without qualification. That is
+              the sentence a backup policy, an `rsync --exclude` and a reviewer
+              are written against, and it is the only reason a tree of
+              unreadable bytes is safe to commit. The name is yours, so the
+              promise is yours too: call this something that does not say
+              "encrypted" and you have moved that promise onto whatever name
+              you picked, with nothing in safix restating it for you.
+
+              A consumer who wants one parent for all three trees writes three
+              strings sharing it — `.safix/encrypted`,
+              `.safix/plaintext-outputs`, `.safix/generator-records` — and gets
+              one ignore entry, one backup rule and one directory to move. Note
+              that `rg` and `fd` skip dot-directories by default, so auditing a
+              hidden root needs `--hidden`.
+
+              Evaluation refuses a root that is empty, absolute, ends in `/` or
+              carries a `..` component, and refuses any two of the three roots
+              that are equal or nested.
+            '';
+          };
+
+          plaintextOutputs = lib.mkOption {
+            type = lib.types.str;
+            default = "public/safix";
+            example = ".safix/plaintext-outputs";
+            description = ''
+              The repository-relative directory holding generator outputs
+              declared `secret = false`: written in the clear so a nix module
+              can read one at evaluation, never handed to sops, and never given
+              a creation rule.
+
+              It is a separate tree from the encrypted one so that a rule, an
+              exclusion or a search scoped to one cannot reach the other. Note
+              that a creation rule in a `.sops.yaml` you wrote yourself is
+              yours: safix refuses only its own generated rules reaching these
+              paths, and `safix check` reports a file it cannot govern.
+
+              A consumer who wants one parent for all three trees writes three
+              strings sharing it — `.safix/encrypted`,
+              `.safix/plaintext-outputs`, `.safix/generator-records` — and gets
+              one ignore entry, one backup rule and one directory to move. Note
+              that `rg` and `fd` skip dot-directories by default, so auditing a
+              hidden root needs `--hidden`.
+
+              Evaluation refuses a root that is empty, absolute, ends in `/` or
+              carries a `..` component, and refuses any two of the three roots
+              that are equal or nested.
+            '';
+          };
+
+          generatorRecords = lib.mkOption {
+            type = lib.types.str;
+            default = "state/safix/definitions";
+            example = ".safix/generator-records";
+            description = ''
+              The repository-relative directory holding one plaintext line per
+              generated value: a digest of the generator definition that minted
+              it, carrying no value and no derivative of a value — which is
+              what licenses committing it in the clear — so that `safix check`
+              can answer definition drift without decrypting anything.
+
+              It is a separate tree from the plaintext-output one because that
+              tree means "declared public outputs a nix module reads", and
+              bookkeeping placed there would dilute it into "plaintext things
+              safix wrote".
+
+              A consumer who wants one parent for all three trees writes three
+              strings sharing it — `.safix/encrypted`,
+              `.safix/plaintext-outputs`, `.safix/generator-records` — and gets
+              one ignore entry, one backup rule and one directory to move. Note
+              that `rg` and `fd` skip dot-directories by default, so auditing a
+              hidden root needs `--hidden`.
+
+              Evaluation refuses a root that is empty, absolute, ends in `/` or
+              carries a `..` component, and refuses any two of the three roots
+              that are equal or nested.
+            '';
+          };
+        };
+      };
+      example = lib.literalExpression ''
+        {
+          encrypted        = ".safix/encrypted";
+          plaintextOutputs = ".safix/plaintext-outputs";
+          generatorRecords = ".safix/generator-records";
+        }
+      '';
+      description = ''
+        Where safix keeps the three trees it places files in, each a
+        repository-relative directory with today's spelling as its default, so
+        that leaving this unset changes nothing.
+
+        Three independent roots rather than one parent: a consumer who wants one
+        parent expresses it by sharing one, while no single-parent option could
+        express "the public tree lives where a static-site build can read it".
+
+        The vault's own flat buckets are not these and are not configurable: a
+        vault is a dedicated repository whose root is the vault root, and a
+        vault-rooted name is a hash of an entry's identity rather than of any
+        tree's spelling.
+      '';
+    };
+
     vault = lib.mkOption {
       default = null;
       type = lib.types.nullOr (

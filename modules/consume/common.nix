@@ -79,10 +79,9 @@ let
 
       Every one of these is a statement about flake.safix.* in the flake
       safix.flake names, and none of them is repairable from here. They are
-      reported together, and by safix, because the resolver would otherwise
-      raise the first of them from inside the secret provisioner's own
-      evaluation, where the trace names the provisioner and not the declaration
-      that broke.
+      reported together, and at once, because the resolver would otherwise
+      raise the first of them from inside the manifest build, where the trace
+      names a derivation and not the declaration that broke.
     '';
 
   # User scope only, and named here rather than in ./home.nix for the same
@@ -111,23 +110,23 @@ let
       or set safix.identity.keyFile to an age key file this machine holds.
 
       Neither has a default at user scope, and that is not an omission.
-      sops-nix's home-manager module has no identity of its own to fall back on:
-      its NixOS module defaults sops.age.sshKeyPaths to the ed25519 keys of
-      config.services.openssh.hostKeys, and a person is not a host, so there is
-      no per-user equivalent to take. safix cannot supply one either — where a
-      person's key lives is a property of how their machine was provisioned, and
-      a keyFile that is set and turns out to be absent is fatal inside
-      sops-install-secrets rather than skipped, so a guessed default would abort
+      A person is not a host: the system scope derives an identity from the
+      host's ed25519 ssh keys, and there is no per-user equivalent to derive,
+      because where a person's key lives is a property of how their machine was
+      provisioned rather than of anything safix can see. Nor would a guess be
+      free: safix's own installer treats a keyFile that is set and turns out to
+      be unreadable as fatal, naming the path, where a missing ssh key path is
+      written to stderr and skipped — so a non-null default would abort
       activation on every machine that lacks the path.
 
       Set safix.enable = false to keep the declarations and suppress their
       arrival here.
 
-      safix refuses first so that the refusal names these two options. The next
-      thing to refuse would be sops-nix's own key-source assertion, whose
-      condition tests four of its options, whose message names three, and whose
-      block's two assertions together name four distinct options — none of them
-      safix's.
+      safix refuses here, at evaluation, so that the refusal names these two
+      options while nothing has been applied. The installer's own check is
+      later and narrower: it runs at activation and reports presence and
+      readability of the paths it was given, which is no help to a profile that
+      named no path at all.
     '';
   # Whether a consumer wrote a definition for an option, rather than the
   # option's own default standing in for one.
@@ -146,12 +145,11 @@ let
   # System scope only, beside `noIdentityMessage` for the same reason: a check
   # can read the string without evaluating a module. The system scope has its
   # own message because its identity story differs twice over — an identity is
-  # usually derivable from the host's ssh keys, and the refusal that would
-  # otherwise fire does not: the provisioner's key-source assertion sits
-  # inside `mkIf (cfg.secrets != { })` (`modules/sops/default.nix:432-441`),
-  # and safix now leaves that option empty, so without safix's own refusal
-  # nothing refuses at all and the configuration evaluates green while
-  # installing nothing decryptable.
+  # usually derivable from the host's ssh keys, and nothing else refuses at
+  # all: safix is the only installer on this path, and its own installer's
+  # check runs at activation over the paths it was given, so a configuration
+  # that named none would otherwise evaluate green and install nothing
+  # decryptable.
   noSystemIdentityMessage =
     { cfg, resolved }:
     let
@@ -169,53 +167,225 @@ let
       leave safix.identity.deriveHostKeys on and let openssh manage host keys
       outside safix's own store, which is what the derivation reads.
 
-      safix refuses first because nothing else will: the secret provisioner's
-      key-source assertion is conditional on its own secrets option, which
-      safix leaves empty, so without this refusal the configuration evaluates
-      green and installs nothing decryptable.
+      safix refuses at evaluation because nothing later will refuse usefully:
+      the installer's own check reports presence and readability of the paths
+      it was handed, and a configuration that named none hands it nothing to
+      report on, so the configuration would evaluate green and install nothing
+      decryptable.
     '';
 
-  # The two refusals safix's manifest builder copies from the provisioner's
-  # (`manifest-for.nix:11-28`), named here for the reason every message above
-  # is: a check can read what a consumer would see, where a string assembled
-  # inside a `throw` is one nothing can hold. Without this copy nothing
-  # refuses at all — the type these entries pass through carries neither
-  # refusal, and the builder that does lives in the provisioner's tree, which
-  # safix no longer calls.
+  # The two refusals safix's manifest builder carries, named here for the
+  # reason every message above is: a check can read what a consumer would see,
+  # where a string assembled inside a `throw` is one nothing can hold.
+  # They are safix's own, declared here because safix's own entry type carries
+  # neither of them: the type coerces and defaults fields and asks nothing
+  # about the filesystem, so a document that does not exist or lies outside the
+  # store passes it unchanged and is refused by the manifest builder in
+  # `./installer.nix` instead, under `safix.installer.validate`.
   sopsFileMissingMessage =
     { name, file }: "safix: cannot find '${file}', the sops file of resolved entry '${name}'";
 
   sopsFileOutsideStoreMessage =
     { name, file }:
-    "safix: '${file}', the sops file of resolved entry '${name}', is not in the Nix store. Add it to the Nix store or set sops.validateSopsFiles to false";
+    "safix: '${file}', the sops file of resolved entry '${name}', is not in the Nix store. Add it to the Nix store or set safix.installer.validate to false";
 
-  # System scope only: the resolved set typed by the secret provisioner's own
-  # entry type, read off the provisioner's option declaration in the same
-  # evaluation rather than restated, so every entry carries the provisioner's
-  # mode, owner, group, uid and gid coercions, its `sopsFile` default, and its
-  # `sopsFileHash` default, which forces `builtins.hashFile "sha256"` under
-  # `sops.validateSopsFiles`.
+  # The refusal a consumer meets where safix's own binary is not in their
+  # package set. Named here for the same reason as every message above, and it
+  # is a refusal rather than a default because there is nothing honest to
+  # default to: this module imports nothing, so it holds no input to read a
+  # package out of, and a package it guessed from a name in the consumer's tree
+  # would make that tree's layout part of safix's interface.
+  installerPackageMessage = ''
+    safix: safix.installer.package is unset and `pkgs.safix` does not exist in
+    this configuration's package set, so there is no `safix install` to run at
+    activation.
+
+    Set it to the build this tree already has:
+
+      safix.installer.package = inputs.safix.packages.''${pkgs.stdenv.hostPlatform.system}.safix;
+
+    or add safix to `nixpkgs.overlays` and leave this option alone. Under a
+    cross build set safix.installer.validationPackage as well: the manifest's
+    own check runs on the build platform, where the activation runs on the
+    host's.
+  '';
+
+  # The type every resolved entry at system scope passes through: safix's own,
+  # declared here rather than read off another framework's option tree in the
+  # same evaluation, which is what made that framework's module a required
+  # import for a module whose contract is that it imports nothing.
   #
-  # The type carries exactly that and no more, settled by evaluating it: an
-  # entry whose `sopsFile` lies outside the nix store passes this type
-  # unchanged, because the provisioner's `pathNotInStore` is declared at
-  # `modules/sops/default.nix:19-25` and applied at one site, `sops.age.keyFile`
-  # (`:338`), never to a secret entry, whose `sopsFile` is plain
-  # `lib.types.path` (`:137`) — and the store-membership refusal lives at
-  # `manifest-for.nix:19-23`, inside the builder safix does not call. What
-  # refuses instead is the copy of that block in `./installer.nix`.
-  installedOptionFor =
-    options:
-    mkOption {
-      type = options.sops.secrets.type;
-      default = { };
-      description = ''
-        What safix resolved for this system configuration, typed by the secret
-        provisioner's own entry type and read back by safix's installer. This
-        is where the resolved set arrives: safix builds its installer manifest
-        from this option and leaves the provisioner's `sops.secrets` empty.
-      '';
-    };
+  # It carries exactly the twelve fields the installer manifest carries, and
+  # the manifest schema in `crates/safix-core/src/install.rs` refuses a
+  # thirteenth, so a field added here without the schema moving is a failing
+  # check rather than a field the reader drops.
+  #
+  # `sopsFileHash` is deliberately absent. The provisioner's type defaulted it
+  # to `builtins.hashFile "sha256" sopsFile` under its own validation switch,
+  # which is what made editing a ciphertext file change the manifest
+  # derivation. safix keeps that behaviour and moves it: `./installer.nix`
+  # emits one `manifestInputHash` over every distinct document under
+  # `safix.installer.validate`, which is the same guarantee for one
+  # `hashFile` per document rather than one per entry, and the installer
+  # ignores the field entirely.
+  #
+  # `cfg` is the system-scope `config.safix`, and the only thing read off it is
+  # `cfg.installer.symlinkPath`, inside `path`'s default, so a check can call
+  # this with a stub carrying that one field.
+  secretEntryType =
+    { cfg }:
+    types.submodule (
+      { config, ... }:
+      {
+        options = {
+          name = mkOption {
+            type = types.str;
+            default = config._module.args.name;
+            defaultText = lib.literalMD "the attribute name";
+            description = ''
+              The entry's name: the attribute this entry was declared under, and
+              the file name it arrives under inside safix's store. The installer
+              reads it to name the file it writes and to diff this generation
+              against the previous one.
+            '';
+          };
+
+          key = mkOption {
+            type = types.str;
+            default = config.name;
+            defaultText = lib.literalExpression "config.name";
+            description = ''
+              Which key inside the sops document holds this entry's value, as a
+              `/`-nested path. The installer resolves it against the decrypted
+              document and refuses, naming entry, document and key, when any
+              segment is absent.
+            '';
+          };
+
+          path = mkOption {
+            type = types.str;
+            default = "${cfg.installer.symlinkPath}/${config.name}";
+            defaultText = lib.literalExpression "\"\${config.safix.installer.symlinkPath}/\${name}\"";
+            description = ''
+              Where this entry arrives on the host. The installer writes every
+              entry into the generation directory and then symlinks any entry
+              whose path is not `''${symlinkPath}/<name>` to where its path
+              names.
+
+              The default is `''${safix.installer.symlinkPath}/<name>`, and it
+              lives here rather than in either consumption module on purpose:
+              the store root and this default have to move together. A root
+              moved without the default would make every entry a symlink
+              target outside safix's store — writing safix's links into
+              whatever store owns the old root, instead of colliding with it
+              where a collision would be visible.
+            '';
+          };
+
+          mode = mkOption {
+            type = types.str;
+            default = "0400";
+            example = "0440";
+            description = ''
+              The permission bits the installer creates this entry's file with,
+              as an octal string. Parsed as octal by the installer, which
+              refuses a string that is not, naming the entry and the string.
+            '';
+          };
+
+          owner = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "nginx";
+            description = ''
+              The user the installer chowns this entry's file to, or null for
+              `uid`. Resolved against the host's user database at activation, so
+              a name no database knows is a refusal naming the entry and the
+              name. Ignored under a user-mode install, which chowns nothing.
+            '';
+          };
+
+          group = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "nginx";
+            description = ''
+              The group the installer chowns this entry's file to, or null for
+              `gid`. Resolved and refused exactly as `owner` is.
+            '';
+          };
+
+          uid = mkOption {
+            type = types.int;
+            default = 0;
+            description = ''
+              The numeric owner the installer uses where `owner` is null. Zero
+              by default, which is what a system-scope store of root-readable
+              files wants, and what makes a sandboxed check need no user
+              database at all.
+            '';
+          };
+
+          gid = mkOption {
+            type = types.int;
+            default = 0;
+            description = ''
+              The numeric group the installer uses where `group` is null, with
+              the same reasoning as `uid`.
+            '';
+          };
+
+          sopsFile = mkOption {
+            type = types.path;
+            description = ''
+              The sops document this entry's value is read out of. No default:
+              every resolved entry carries one the resolver derived from the
+              entry's audience, so a default would be a value no declaration can
+              produce.
+
+              The installer decrypts each distinct document once, so entries
+              sharing an audience share one subprocess.
+            '';
+          };
+
+          format = mkOption {
+            type = types.enum [ "yaml" ];
+            default = "yaml";
+            description = ''
+              The document's format. A single-member enum because safix's
+              resolver mints yaml documents and nothing else, and the recipient
+              policy's own rules match on a `.yaml` suffix — so a second format
+              is a value no declaration here can produce. It widens compatibly
+              if one ever becomes resolvable.
+            '';
+          };
+
+          restartUnits = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "nginx.service" ];
+            description = ''
+              Units the installer restarts when this entry is new or its value
+              changed since the previous generation. Propagated through
+              `systemctl` from the unit mechanism and through
+              `/run/nixos/activation-restart-list` from an activation script.
+              Skipped wholesale under a user-mode install, which restarts
+              nothing.
+            '';
+          };
+
+          reloadUnits = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "nginx.service" ];
+            description = ''
+              Units the installer reloads rather than restarts, on the same
+              new-or-changed condition as `restartUnits`.
+            '';
+          };
+        };
+      }
+    );
 in
 {
   inherit
@@ -224,15 +394,16 @@ in
     violationMessage
     noIdentityMessage
     noSystemIdentityMessage
+    installerPackageMessage
+    secretEntryType
     sopsFileMissingMessage
     sopsFileOutsideStoreMessage
-    installedOptionFor
     wasSet
     ;
 
-  # The options that read the same in either scope. The four arguments are what
+  # The options that read the same in either scope. The five arguments are what
   # the scopes disagree about, passed in rather than branched on, so a scope that
-  # cannot derive a default says so in its own file.
+  # cannot derive a default or a type says so in its own file.
   sharedOptions =
     {
       cfg,
@@ -240,6 +411,7 @@ in
       userDefaultText,
       hostnameDefault,
       hostnameDefaultText,
+      secretsType,
     }:
     {
       enable = mkOption {
@@ -326,10 +498,10 @@ in
 
           A machine holds what people have granted it, and that is the whole of
           what arrives here: a machine declares no secrets of its own. What it
-          decrypts with is the identity it already had — at system scope the
-          provisioner defaults to the host's ed25519 keys, which is the same key
-          `flake.safix.machines.<m>.recipient` is the age form of, so a machine
-          entry needs no identity named here.
+          decrypts with is the identity it already had — at system scope
+          `safix.identity.deriveHostKeys` takes the host's ed25519 keys, which
+          is the same key `flake.safix.machines.<m>.recipient` is the age form
+          of, so a machine entry needs no identity named here.
 
           It has no default. safix holds no host inventory and derives no machine
           from a hostname, because a hostname is not an identity: two hosts can
@@ -377,17 +549,24 @@ in
       };
 
       secrets = mkOption {
-        type = types.attrsOf types.raw;
+        type = secretsType;
         readOnly = true;
         description = ''
-          What safix resolved for this profile, in the shape the secret
-          provisioner's own option tree takes. Read-only: it is a projection of
+          What safix resolved for this profile. Read-only: it is a projection of
           `flake.safix.*` for this person on this host at this scope.
 
           Empty whenever the profile is unbound — no `safix.lib`, no
           `safix.user` or no `safix.hostname` — which is what lets the
           assertions below report the mistake instead of a resolution throwing
           before they are reached.
+
+          Typed per scope, because the typing each scope needs is its own: at
+          system scope this is `common.secretEntryType`, safix's own entry
+          submodule, so every entry carries safix's own defaults and the path
+          the entry will arrive at; at user scope it is the untyped projection,
+          and the user-mode manifest `home.nix` builds is where each entry's
+          twelve fields are filled, since a second typing pass would restate
+          the same defaults.
         '';
       };
 
@@ -400,18 +579,18 @@ in
             An age key file this machine decrypts with, or null.
 
             Null is the default because the two identity sources fail
-            differently. `sops-install-secrets` treats a set-but-unreadable key
-            file as fatal — "cannot read keyfile '%s'", inside `installSecrets`
-            — whereas a missing ssh key path is written to stderr and skipped.
-            A non-null default would therefore abort activation on every machine
-            that happens to lack the path, while an unset one costs nothing.
+            differently. safix's own installer treats a set-but-unreadable key
+            file as fatal, naming the path, where a missing ssh key path is
+            written to stderr and skipped. A non-null default would therefore
+            abort activation on every machine that happens to lack the path,
+            while an unset one costs nothing.
 
-            Set on the provisioner at normal priority whenever this module is
-            enabled, including when it is null. That is deliberate: a `mkDefault`
-            elsewhere in a consumer's tree loses to it, so the null cannot be
-            silently replaced by a path that re-arms the abort, and a plain
-            definition elsewhere conflicts loudly instead of one of them winning
-            by accident.
+            Read by safix's own installer manifest at both scopes, and by the
+            pre-decryption identity check that refuses before any document is
+            read. No option outside safix's namespace is defined from it: a
+            consumer who runs another secret-management framework for their own
+            secrets configures that framework's key sources themselves, and
+            safix neither reads nor writes them.
           '';
         };
 
@@ -420,17 +599,19 @@ in
           default = [ ];
           example = [ "/home/jane/.ssh/agenix" ];
           description = ''
-            ssh private keys this machine decrypts with. `sops-install-secrets`
-            runs each through ssh-to-age, so the age recipient the recipient
-            policy names is the converted public half.
+            ssh private keys this machine decrypts with. safix's own installer
+            runs each through `ssh-to-age` while assembling the identity it
+            hands the backend, so the age recipient the recipient policy names
+            is the converted public half.
 
-            Each path is individually skipped with a line to stderr when absent,
-            so these are load-bearing only collectively, and only while they are
-            the sole identity source.
+            Each path is individually skipped with a line to stderr when absent
+            or unconvertible, so these are load-bearing only collectively, and
+            only while they are the sole identity source.
 
-            Defined on the provisioner only when non-empty, so that a scope whose
-            provisioner derives its own default — the system scope, which takes
-            the host's ed25519 keys — keeps it.
+            At system scope, naming none of these and no `keyFile` leaves
+            `safix.identity.deriveHostKeys` to derive an identity from the
+            host's ed25519 keys outside safix's own store; at user scope there
+            is nothing to derive, and the resolution refuses instead.
           '';
         };
       };

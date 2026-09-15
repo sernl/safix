@@ -122,6 +122,56 @@ impl Sops {
         })
     }
 
+    /// Decrypt one whole document to JSON in memory.
+    ///
+    /// What the installer reads: one subprocess per distinct document rather
+    /// than one per entry, with the `/`-nested key lookup done here afterwards
+    /// — a host resolving eight entries out of one audience's file decrypts
+    /// once.
+    ///
+    /// `identity` names a file to export as `SOPS_AGE_KEY_FILE` for this child
+    /// alone. It is a child's environment rather than this process's because
+    /// `std::env::set_var` is `unsafe` under the 2024 edition and this
+    /// workspace forbids unsafe code; the effect on sops is the same one an
+    /// exported variable would have had. `None` leaves whatever the caller's
+    /// own environment names, which is what the build-time check mode runs
+    /// under.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SopsUnavailable`] when the binary cannot be run, and
+    /// [`Error::SecretRead`] when its output cannot be read. A sops that runs
+    /// and refuses comes back in [`Decrypted::status`], as it does for
+    /// [`Sops::decrypt_key`].
+    pub fn decrypt_document_json(&self, file: &Path, identity: Option<&Path>) -> Result<Decrypted> {
+        let mut command = Command::new(&self.program);
+        command
+            .arg("decrypt")
+            .arg("--output-type")
+            .arg("json")
+            .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        if let Some(identity) = identity {
+            command.env("SOPS_AGE_KEY_FILE", identity);
+        }
+
+        let mut child = command.spawn().map_err(|cause| self.unavailable(cause))?;
+
+        let value = {
+            let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
+            Secret::read_from(&mut stdout)?
+        };
+
+        let status = child.wait().map_err(|cause| self.unavailable(cause))?;
+
+        Ok(Decrypted {
+            value,
+            status: status.code().unwrap_or(1),
+        })
+    }
+
     /// Decrypt one key of one file into a pipe, without waiting for it.
     ///
     /// What a generator's dependency travels down: the value goes from sops

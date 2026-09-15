@@ -48,7 +48,7 @@
 # `standalone.resolvesWithoutAHostname`.
 # Keying a service's entries by the bare name fails `serviceEntry` and
 # `servicePath` on every shape; leaving `sopsKey` unset for one fails
-# `serviceEntry.key`, which is the severe half — the provisioner would read the
+# `serviceEntry.key`, which is the severe half — the installer would read the
 # composed name as the key inside the document.
 # Dropping a service's ownership at user scope rather than refusing leaves
 # `serviceOwnership.system` green and fails its two home fields, which is the
@@ -143,9 +143,8 @@ let
     organizations.acme.custody.acme-escrow.key = keyOf "acme-escrow";
     silos.corp.groups = [ "oncall" ];
   };
-
   # The same declaration with the service claiming an account and a group. The
-  # system scope carries both to the provisioner; a user-scope profile has no axis
+  # system scope carries both into the manifest; a user-scope profile has no axis
   # for either and refuses rather than dropping the claim.
   owningService = lib.recursiveUpdate fleet {
     services.nginx = {
@@ -244,24 +243,31 @@ let
 in
 {
   perSystem =
-    { pkgs, system, ... }:
+    {
+      pkgs,
+      self',
+      system,
+      ...
+    }:
     let
       mkStructuralCheck = import ./mk-structural-check.nix pkgs;
 
       hostname = "server";
 
-      # Every field of a resolved entry that safix decides, read back through
-      # sops-nix's own option types on each shape so a field one shape stopped
-      # emitting shows up as a divergence rather than as a missing key.
+      # Every field of a resolved entry that safix decides, read back on each
+      # shape so a field one shape stopped emitting shows up as a divergence
+      # rather than as a missing key.
       #
-      # `path` is deliberately not among them, and `owner`, `group` and
-      # `sopsFileHash` are not either. The first is the provisioner's own default
-      # at each scope — a system runtime path and a home one — and an entry that
-      # declares its own declares it as a function of the configuration it lands
-      # in, which is the one thing that legitimately differs between a home
+      # `path` is deliberately not among them, and `owner` and `group` are not
+      # either. The first is safix's own default at each scope — a system
+      # runtime path and a runtime-directory one — and an entry that declares
+      # its own declares it as a function of the configuration it lands in,
+      # which is the one thing that legitimately differs between a home
       # directory and a system. The ownership axis exists only at system scope,
-      # which `safix-consumption` holds on its own. And `sopsFileHash` reads the
-      # ciphertext, which no fixture fleet has.
+      # which `safix-consumption` holds on its own. `sopsFileHash` is not
+      # excluded any more because it no longer exists: safix's own entry type
+      # does not carry it, and the ciphertext-edit-causes-a-rebuild behaviour it
+      # served is one `manifestInputHash` field of the manifest instead.
       decided = [
         "format"
         "key"
@@ -270,7 +276,35 @@ in
         "sopsFile"
       ];
 
-      viewOf = lib.mapAttrs (_name: lib.getAttrs decided);
+      systemCommon = import ../../consume/common.nix {
+        inherit lib;
+        scope = "system";
+      };
+
+      # The configuration the entry type's `path` default is a function of, and
+      # the only thing it reads outside its own fields.
+      entryCfg.installer.symlinkPath = "/run/safix";
+
+      # Every shape's resolved set, read back through safix's own entry type
+      # before any field of it is compared. The system scope is already typed
+      # by that type and the user scope is typed `raw`, so without this the
+      # three shapes would be compared across two different shapes of record —
+      # and `name` and `format`, which the type supplies and the resolver does
+      # not, would be missing on two of the three.
+      typedSet =
+        secrets:
+        (lib.evalModules {
+          modules = [
+            {
+              options.secrets = lib.mkOption {
+                type = lib.types.attrsOf (systemCommon.secretEntryType { cfg = entryCfg; });
+              };
+            }
+            { inherit secrets; }
+          ];
+        }).config.secrets;
+
+      viewOf = secrets: lib.mapAttrs (_name: lib.getAttrs decided) (typedSet secrets);
 
       # A NixOS system serving one subject.
       nixosFor =
@@ -293,6 +327,17 @@ in
               services.openssh.enable = true;
               safix = {
                 lib = safix;
+
+                # safix's own entry type carries no `sopsFileHash` default, so a
+                # deep force reaches no `builtins.hashFile` of a fixture
+                # ciphertext that does not exist. What `validate` still governs
+                # is the manifest builder's two document refusals and the
+                # `manifestInputHash` emission, both of which hash the fleet's
+                # sops files — paths into this flake that no committed file
+                # backs — so it is off here for the same reason it was off
+                # before: a `fires` probe's anti-vacuity margin must not depend
+                # on safix winning a race with a file hash.
+                installer.validate = false;
               }
               // subject;
             }
@@ -347,7 +392,7 @@ in
         {
           person =
             if nixos then
-              viewOf (nixosFor { user = "alice"; } projection).safix.installed
+              viewOf (nixosFor { user = "alice"; } projection).safix.secrets
             else
               viewOf
                 (home {
@@ -355,32 +400,29 @@ in
                     user = "alice";
                   }
                   // hostnameForHome;
-                }).sops.secrets;
+                }).safix.secrets;
           machine =
             if nixos then
-              viewOf (nixosFor { machine = "deck"; } projection).safix.installed
+              viewOf (nixosFor { machine = "deck"; } projection).safix.secrets
             else
               viewOf
                 (home {
                   subject = {
                     machine = "deck";
                   };
-                }).sops.secrets;
+                }).safix.secrets;
 
-          # The machine's arrival unstripped, which is where the path the
-          # provisioner parks each entry at is readable. It is outside `decided`
-          # because a system path and a home path legitimately differ; what is
-          # asserted over it is that the provisioner accepts a service's composed
-          # name and nests it, on each shape, rather than that the three agree.
-          machineRaw =
-            if nixos then
-              (nixosFor { machine = "deck"; } projection).safix.installed
-            else
-              (home {
-                subject = {
-                  machine = "deck";
-                };
-              }).sops.secrets;
+          # The machine's arrival unstripped, which is where the path a system
+          # entry is parked at is readable. It is outside `decided` because a
+          # system path and a user-scope one legitimately differ; what is
+          # asserted over it is that a service's composed name is accepted and
+          # nested, rather than that the three agree. Only the system shape is
+          # read here: safix's entry type mints the `<symlinkPath>/<name>`
+          # default at system scope, and the user scope's resolved set is typed
+          # `raw` and carries only what the resolver emitted, with every field
+          # filled in the user-mode manifest instead — which is where
+          # `safix-portability-user-manifest` reads the runtime-directory path.
+          machineRaw = if nixos then (nixosFor { machine = "deck"; } projection).safix.secrets else null;
         };
 
       homeShape = osConfig: args: homeFor (args // { safix = projection; } // { inherit osConfig; });
@@ -446,6 +488,57 @@ in
       owning = projectionOf owningService;
 
       refusalsResults = lib.genAttrs (builtins.attrNames broken) refusalsOf;
+
+      # The same user-scope profile on a named platform, evaluated through that
+      # platform's own nixpkgs. Only its structure is read, so a foreign
+      # platform's profile evaluates on any builder — which is the whole point:
+      # the darwin arm of the user scope must be reachable from a linux check
+      # or it is a claim only a darwin builder ever makes.
+      homeOn =
+        platform: subject:
+        (hmLib.homeManagerConfiguration {
+          pkgs = import inputs.nixpkgs { system = platform; };
+          modules = [
+            config.flake.homeModules.safix
+            {
+              home = {
+                username = "alice";
+                homeDirectory = "/home/alice";
+                stateVersion = "24.05";
+              };
+              safix = {
+                lib = projection;
+                inherit hostname;
+                identity.sshKeyPaths = [ "/home/alice/.ssh/agenix" ];
+
+                # Named rather than defaulted: the default is `pkgs.safix`,
+                # which this flake's nixpkgs does not carry, and a fixture that
+                # left it unset would fail on that refusal the moment anything
+                # forced the manifest. The foreign-platform profiles below never
+                # force it, so the native package they name is never built.
+                installer.package = self'.packages.safix;
+
+                # Off for the same reason the system shape's is: this fleet's
+                # projection is rendered with an empty root, so every
+                # `sopsFile` is a repository-relative path no committed file
+                # backs — which is what makes the placement expectations
+                # readable — and validation refuses exactly that.
+                installer.validate = false;
+              }
+              // subject;
+            }
+          ];
+        }).config;
+
+      linuxHome = homeOn "x86_64-linux" { user = "alice"; };
+      darwinHome = homeOn "aarch64-darwin" { user = "alice"; };
+
+      # The one profile below whose manifest is built rather than only
+      # evaluated, so it is the builder's own platform. It serves the machine
+      # `deck`, because `nginx/service-token` — the entry whose runtime-directory
+      # path is the migration note's own row — is granted to a service that runs
+      # there and appears in no person's set under that name.
+      nativeMachineHome = homeOn system { machine = "deck"; };
     in
     {
       # The system shape needs a real `nixosSystem`, which only evaluates on a
@@ -497,20 +590,22 @@ in
               };
 
               # The identity a machine's system scope opens those entries with is
-              # the one it already had. safix names none — the profile sets no
-              # `safix.identity.*` — and sops-nix's own default stands: the host's
-              # ed25519 keys, whose age form is what
-              # `flake.safix.machines.<m>.recipient` is. That is the whole of why
-              # declaring a machine needs no enrollment step, and it is a claim
-              # about the system scope alone, which is the one scope whose
-              # provisioner has a host identity to default to.
+              # the one it already had. The profile sets no `safix.identity.*`,
+              # and safix's own `derivedHostKeys` default stands: the host's
+              # ed25519 keys, excluding only safix's own store, whose age form is
+              # what `flake.safix.machines.<m>.recipient` is. That is the whole
+              # of why declaring a machine needs no enrollment step, and it is a
+              # claim about the system scope alone, which is the one scope with a
+              # host identity to default from. It is read off safix's own
+              # options, which is where that default now comes from.
               systemIdentity =
                 let
                   system = nixosFor { machine = "deck"; } projection;
                 in
                 {
-                  keyFile = system.sops.age.keyFile;
-                  sshKeyPaths = system.sops.age.sshKeyPaths;
+                  keyFile = system.safix.identity.keyFile;
+                  named = system.safix.identity.sshKeyPaths;
+                  derived = system.safix.identity.derivedHostKeys;
                   hostKeys = map (key: key.path) (
                     lib.filter (key: key.type == "ed25519") system.services.openssh.hostKeys
                   );
@@ -540,7 +635,7 @@ in
                 "owner"
                 "group"
                 "mode"
-              ] (nixosFor { machine = "deck"; } owning).safix.installed."nginx/service-token";
+              ] (nixosFor { machine = "deck"; } owning).safix.secrets."nginx/service-token";
 
               # The person's own resolution is unchanged by any of it: the
               # entries they granted outward are still theirs, in the files
@@ -615,7 +710,8 @@ in
 
               systemIdentity = {
                 keyFile = null;
-                sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                named = [ ];
+                derived = [ "/etc/ssh/ssh_host_ed25519_key" ];
                 hostKeys = [ "/etc/ssh/ssh_host_ed25519_key" ];
               };
 
@@ -704,9 +800,24 @@ in
                 homeInNixos = shapes.homeInNixos.machine."nginx/service-token";
                 standalone = shapes.standalone.machine."nginx/service-token";
               };
-              servicePath = {
-                homeInNixos = shapes.homeInNixos.machineRaw."nginx/service-token".path;
-                standalone = shapes.standalone.machineRaw."nginx/service-token".path;
+
+              # ── the install surface, per platform ──
+              # The same user-scope profile on the two platform families safix
+              # supports, evaluated rather than built. The linux one carries the
+              # user unit; the darwin one cannot, because there is no user
+              # manager to register one with. Both carry the activation entry,
+              # because a profile with no unit still has to install, and that is
+              # the half that makes the user scope exist on darwin at all rather
+              # than half-exist.
+              installSurface = {
+                linux = {
+                  unit = linuxHome.systemd.user.services ? safix;
+                  activation = linuxHome.home.activation ? safixInstall;
+                };
+                darwin = {
+                  unit = darwinHome.systemd.user.services ? safix;
+                  activation = darwinHome.home.activation ? safixInstall;
+                };
               };
 
               # The ownership asymmetry's home half: neither home shape has an
@@ -815,9 +926,15 @@ in
                 sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               });
 
-              servicePath = {
-                homeInNixos = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
-                standalone = "/home/alice/.config/sops-nix/secrets/nginx/service-token";
+              installSurface = {
+                linux = {
+                  unit = true;
+                  activation = true;
+                };
+                darwin = {
+                  unit = false;
+                  activation = true;
+                };
               };
 
               serviceOwnership = {
@@ -835,6 +952,59 @@ in
               };
             };
           };
+
+          # The user-mode manifest, read out of a built derivation rather than
+          # out of the expression that produced it. This is the one claim in
+          # this file that cannot be structural: the user scope's resolved set
+          # is typed `raw` and carries only what the resolver emitted, and
+          # every one of the twelve fields — including the
+          # `<symlinkPath>/<name>` path the migration note's own row states —
+          # is filled while the manifest is built.
+          #
+          # The path is the row design I13 publishes as what replaces the home
+          # directory a secret used to arrive in, and it is verified here
+          # against a real home-manager profile rather than against a fixture
+          # attrset, because the fixture is what produced the old literal.
+          safix-portability-user-manifest =
+            pkgs.runCommand "safix-portability-user-manifest"
+              {
+                nativeBuildInputs = [ pkgs.jq ];
+                manifest = nativeMachineHome.safix.installer.manifest;
+                meta.description = "the user-mode manifest's roots, its mode, and its runtime-directory paths";
+              }
+              ''
+                jq empty "$manifest"
+
+                [ "$(jq '.secrets | length' "$manifest")" -gt 0 ] || {
+                  echo "safix-portability-user-manifest: the profile resolved nothing, so nothing below is evidence"
+                  exit 1
+                }
+
+                [ "$(jq -r .userMode "$manifest")" = true ] || {
+                  echo "safix-portability-user-manifest: a user-scope manifest is not in user mode"
+                  exit 1
+                }
+                [ "$(jq -r .version "$manifest")" = 1 ] || {
+                  echo "safix-portability-user-manifest: the schema version is not the one this tree emits"
+                  exit 1
+                }
+                [ "$(jq -r .symlinkPath "$manifest")" = '%r/safix' ] || {
+                  echo "safix-portability-user-manifest: the user-scope symlink path is not the runtime-directory default"
+                  exit 1
+                }
+                [ "$(jq -r .secretsMountPoint "$manifest")" = '%r/safix.d' ] || {
+                  echo "safix-portability-user-manifest: the user-scope mount point is not the runtime-directory default"
+                  exit 1
+                }
+
+                path=$(jq -r '.secrets[] | select(.name == "nginx/service-token") | .path' "$manifest")
+                [ "$path" = '%r/safix/nginx/service-token' ] || {
+                  echo "safix-portability-user-manifest: the service entry parks at '$path', not the runtime-directory path the migration note publishes"
+                  exit 1
+                }
+
+                touch $out
+              '';
         };
     };
 }

@@ -373,17 +373,17 @@ impl Fixture {
             key_file,
             placements: json!({
                 "alice": {
-                    "api-token":      placement(ALICE_FILE, "api-token", "carries", "alice"),
-                    "mail-password":  placement(ALICE_FILE, "mail-password", "private", "alice"),
-                    "aliased-secret": placement(ALICE_FILE, "custom-key", "private", "alice"),
-                    "wifi-psk":       placement(SHARED_FILE, "wifi-psk", "shared", "bob"),
+                    "api-token":      placement(ALICE_FILE, "api-token", "api-token", "carries", "alice"),
+                    "mail-password":  placement(ALICE_FILE, "mail-password", "mail-password", "private", "alice"),
+                    "aliased-secret": placement(ALICE_FILE, "aliased-secret", "custom-key", "private", "alice"),
+                    "wifi-psk":       placement(SHARED_FILE, "wifi-psk", "wifi-psk", "shared", "bob"),
                     "no-rule-secret": placement(
-                        "secrets/safix/users/carol/secrets.yaml", "no-rule-secret", "private", "alice"),
+                        "secrets/safix/users/carol/secrets.yaml", "no-rule-secret", "no-rule-secret", "private", "alice"),
                     "not-yaml":       placement(
-                        "secrets/safix/users/alice/secret.age", "not-yaml", "private", "alice"),
+                        "secrets/safix/users/alice/secret.age", "not-yaml", "not-yaml", "private", "alice"),
                 },
                 "bob": {
-                    "wifi-psk": placement(SHARED_FILE, "wifi-psk", "private", "bob"),
+                    "wifi-psk": placement(SHARED_FILE, "wifi-psk", "wifi-psk", "private", "bob"),
                 },
             }),
             audiences: json!({
@@ -496,7 +496,7 @@ impl Fixture {
 
     /// Declare a placement for a name with no generator.
     pub fn seed_output(&mut self, name: &str, file: &str) {
-        self.placements["alice"][name] = placement(file, name, "private", "alice");
+        self.placements["alice"][name] = placement(file, name, name, "private", "alice");
         self.write_fixtures();
     }
 
@@ -511,8 +511,9 @@ impl Fixture {
             "file": ALICE_FILE, "key": name, "origin": "private",
             "owner": "alice", "shared": false, "generator": null,
             "public": path,
-            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-            "logicalPublic": null,
+            "definitionRecord": format!("state/safix/definitions/alice/{name}"),
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
         });
         self.write_fixtures();
     }
@@ -543,8 +544,13 @@ impl Fixture {
             self.placements[user][name] = json!({
                 "file": file, "key": name, "origin": "carries",
                 "owner": user, "shared": true, "generator": null, "public": null,
-                "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-                "logicalPublic": null,
+                // One record for the one value, keyed by the audience both
+                // carriers read rather than by either carrier, which is what
+                // the resolver emits and what keeps the two from reporting
+                // drift against each other.
+                "definitionRecord": format!("state/safix/definitions/shared/alice,bob/{name}"),
+                "logicalFile": null, "logicalKey": null,
+                "logicalPublic": null, "logicalRecord": null,
             });
         }
         self.write_fixtures();
@@ -656,8 +662,9 @@ impl Fixture {
             "file": file, "key": name, "origin": "private",
             "owner": "alice", "shared": false, "generator": record.clone(),
             "public": null,
-            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-            "logicalPublic": null,
+            "definitionRecord": format!("state/safix/definitions/alice/{name}"),
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
         });
 
         // Keyed by the declared name, which is how `resolve.nix` emits the plan
@@ -713,7 +720,7 @@ impl Fixture {
     /// resolve it afterwards.
     pub fn seed_card_custody(&mut self, serial: &str) {
         let name = format!("card-{serial}-piv-access");
-        self.placements["alice"][&name] = placement(ALICE_FILE, &name, "private", "alice");
+        self.placements["alice"][&name] = placement(ALICE_FILE, &name, &name, "private", "alice");
         self.write_fixtures();
     }
 
@@ -858,7 +865,7 @@ impl Fixture {
     fn ensure_private_placement(&mut self, user: &str, name: &str) {
         if self.placements[user].get(name).is_none() {
             let file = format!("secrets/safix/users/{user}/secrets.yaml");
-            self.placements[user][name] = placement(&file, name, "private", user);
+            self.placements[user][name] = placement(&file, name, name, "private", user);
         }
     }
     /// Declare one shared-placement bridge mapping: the clan side names a
@@ -919,8 +926,9 @@ impl Fixture {
         self.placements[user][companion.as_str()] = json!({
             "file": file, "key": companion, "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
-            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-            "logicalPublic": null,
+            "definitionRecord": format!("state/safix/definitions/{owner}/{companion}"),
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
         });
         self.write_fixtures();
     }
@@ -945,8 +953,9 @@ impl Fixture {
         self.placements[user][companion.as_str()] = json!({
             "file": file, "key": companion, "origin": "private",
             "owner": owner, "shared": shared, "generator": null, "public": null,
-            "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-            "logicalPublic": null,
+            "definitionRecord": format!("state/safix/definitions/{owner}/{companion}"),
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
         });
         self.write_fixtures();
     }
@@ -1698,6 +1707,170 @@ impl Fixture {
             stdout: output.stdout,
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         }
+    }
+
+    /// `view` or `edit` driven through a picker, on a terminal it both draws on
+    /// and reads from.
+    ///
+    /// [`Fixture::set_on_a_terminal`]'s sibling, and it differs in what the
+    /// pseudoterminal is attached to: a prompt reads from a terminal and writes
+    /// its own prompt to standard error, so that helper attaches the slave to
+    /// standard input alone; a picker draws where it reads, so this one attaches
+    /// it to standard input and standard output both and keeps standard error a
+    /// pipe, which is what leaves a refusal separable from the drawing.
+    ///
+    /// This is the `behavioural-suite` requirement this change adds: the picker
+    /// is driven by keystrokes on a real terminal rather than through a
+    /// selection seam in the binary, because a seam is a second code path
+    /// shipping to operators whose only caller is a test.
+    pub fn pick_on_a_terminal(&self, arguments: &[&str], keystrokes: &str) -> Run {
+        self.pick(&Pick {
+            arguments,
+            keystrokes: &[keystrokes],
+            ..Pick::default()
+        })
+        .run
+    }
+
+    /// One picker run, in whichever of its shapes a test needs.
+    pub fn pick(&self, pick: &Pick) -> Picked {
+        use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("no pseudo-terminal");
+        grantpt(&master).expect("could not grant the pseudo-terminal");
+        unlockpt(&master).expect("could not unlock the pseudo-terminal");
+        let name = ptsname(&master, Vec::new()).expect("the pair has no name");
+        let path = PathBuf::from(String::from_utf8_lossy(name.as_bytes()).into_owned());
+        // `NOCTTY`, and it is load-bearing: opening a terminal without it makes
+        // it this process's own controlling terminal wherever this process is a
+        // session leader, and the run's own session leader would then be unable
+        // to claim it — leaving the suite's own process in the terminal's
+        // foreground group, where the hangup the run's exit sends lands on the
+        // test rather than on the run.
+        let slave = open_without_claiming(&path);
+        let before = rustix::termios::tcgetattr(&slave).expect("the pair has no attributes");
+
+        let mut command = self.picker_command(pick, &slave);
+        let mut child = command.spawn().expect("could not spawn the command");
+
+        // Every description of the slave this process holds goes now, so the
+        // master's reads end when the run does rather than blocking on a
+        // terminal nobody is writing to — `command` keeps its own copies of
+        // whatever was handed to the child, so it goes too. The attributes are
+        // read back through a fresh opening of the same path afterwards, which
+        // the pair keeps for as long as `held` keeps the master open.
+        drop(command);
+        drop(slave);
+        let mut terminal =
+            std::fs::File::from(master.try_clone().expect("the master cannot be duplicated"));
+        let held = master.try_clone().expect("the master cannot be duplicated");
+        let reader = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                match rustix::io::read(&master, &mut buffer) {
+                    Ok(0) | Err(rustix::io::Errno::IO) => break,
+                    Ok(read) => seen.extend_from_slice(&buffer[..read]),
+                    Err(rustix::io::Errno::INTR) => (),
+                    Err(_) => break,
+                }
+            }
+            seen
+        });
+
+        type_at(&mut terminal, pick.keystrokes);
+
+        let mut piped = Vec::new();
+        if let Some(mut pipe) = child.stdout.take() {
+            let _ = pipe.read_to_end(&mut piped);
+        }
+        let mut refusals = Vec::new();
+        if let Some(mut pipe) = child.stderr.take() {
+            let _ = pipe.read_to_end(&mut refusals);
+        }
+        let status = child.wait().expect("the command did not finish");
+        drop(terminal);
+        let drawn = reader.join().unwrap_or_default();
+
+        let after = rustix::termios::tcgetattr(open_without_claiming(&path)).ok();
+        drop(held);
+        let restored = after.is_some_and(|after| {
+            after.local_modes == before.local_modes && after.input_modes == before.input_modes
+        });
+
+        Picked {
+            run: Run {
+                code: status.code(),
+                stdout: if pick.draw_on_stdout {
+                    drawn.clone()
+                } else {
+                    piped
+                },
+                stderr: String::from_utf8_lossy(&refusals).into_owned(),
+            },
+            drawn: String::from_utf8_lossy(&drawn).into_owned(),
+            restored,
+        }
+    }
+
+    /// The command one picker run is spawned as.
+    ///
+    /// `--ctty` is the whole point: a picker opens `/dev/tty`, and only a
+    /// session leader that has claimed this pseudoterminal has one. `-w`
+    /// passes the run's own status back, the way `set_on_a_terminal` relies
+    /// on it.
+    fn picker_command(&self, pick: &Pick, slave: &std::fs::File) -> Command {
+        let mut command = Command::new(session_of_its_own());
+        command.arg("-w").arg("-c");
+        match pick.interrupt {
+            // `timeout` signals the process it spawned, which is the runtime,
+            // and `--preserve-status` is what lets the runtime's own 130 be
+            // observed rather than timeout's 124.
+            Some((seconds, signal)) => {
+                command
+                    .arg("timeout")
+                    .arg("--preserve-status")
+                    .arg("-s")
+                    .arg(signal)
+                    .arg(seconds);
+            }
+            // A picker that never exits would hang the suite rather than fail
+            // it, and a hang says nothing about what went wrong. The deadline
+            // is far longer than any keystroke sequence a test sends.
+            None => {
+                command
+                    .arg("timeout")
+                    .arg("--preserve-status")
+                    .arg("-s")
+                    .arg("TERM")
+                    .arg(PICKER_DEADLINE);
+            }
+        }
+        command.arg(safix());
+        command.args(acknowledged(pick.arguments));
+        self.environment(
+            &mut command,
+            if pick.graphical {
+                Reporter::Graphical
+            } else {
+                Reporter::Plain
+            },
+        );
+        for (variable, value) in pick.extra {
+            command.env(variable, value);
+        }
+        command.stdin(Stdio::from(
+            slave.try_clone().expect("the slave cannot be duplicated"),
+        ));
+        if pick.draw_on_stdout {
+            command.stdout(Stdio::from(
+                slave.try_clone().expect("the slave cannot be duplicated"),
+            ));
+        } else {
+            command.stdout(Stdio::piped());
+        }
+        command.stderr(Stdio::piped());
+        command
     }
 
     /// The command's own environment, ready for a caller that needs to spawn it
@@ -2456,12 +2629,21 @@ fn roots_under(directory: &Path) -> Vec<PathBuf> {
 }
 
 /// One placement, in the shape `flake.safix.lib.placements` has.
-fn placement(file: &str, key: &str, origin: &str, owner: &str) -> Value {
+///
+/// `definitionRecord` is populated the way the resolver populates it for every
+/// placement — the readable path under the default
+/// `flake.safix.storage.generatorRecords` root, keyed by the entry's owner —
+/// because the runtime reads the record off the placement and derives nothing.
+/// A stub leaving it out would make every record-reading test fail to
+/// deserialize rather than silently pass, which is the point of it being
+/// non-nullable.
+fn placement(file: &str, name: &str, key: &str, origin: &str, owner: &str) -> Value {
     json!({
         "file": file, "key": key, "origin": origin,
         "owner": owner, "shared": false, "generator": null, "public": null,
-        "definitionRecord": null, "logicalFile": null, "logicalKey": null,
-        "logicalPublic": null,
+        "definitionRecord": format!("state/safix/definitions/{owner}/{name}"),
+        "logicalFile": null, "logicalKey": null,
+        "logicalPublic": null, "logicalRecord": null,
     })
 }
 
@@ -2734,6 +2916,99 @@ fn binary_on_path(name: &str) -> String {
             || panic!("{name} is not on PATH"),
             |path| path.display().to_string(),
         )
+}
+
+/// A terminal, opened without making it this process's controlling one.
+fn open_without_claiming(path: &Path) -> std::fs::File {
+    use rustix::fs::{Mode, OFlags, open};
+
+    let opened = open(path, OFlags::RDWR | OFlags::NOCTTY, Mode::empty())
+        .unwrap_or_else(|cause| panic!("{} could not be opened: {cause}", path.display()));
+    std::fs::File::from(opened)
+}
+
+/// How long a picker run is given before it is ended for hanging.
+const PICKER_DEADLINE: &str = "20";
+
+/// How long each chunk of keystrokes is followed by nothing.
+///
+/// Longer than the runtime's own quiet period, so a chunk followed by this is a
+/// highlight that came to rest and a chunk sent without one is a highlight that
+/// moved on.
+const PICKER_PAUSE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How one picker run is driven.
+pub struct Pick<'a> {
+    /// The arguments after `safix`.
+    pub arguments: &'a [&'a str],
+    /// What is typed at it: one chunk per pause, so a test can distinguish
+    /// moving from resting.
+    pub keystrokes: &'a [&'a str],
+    /// Whether standard output is the terminal too, rather than a pipe.
+    pub draw_on_stdout: bool,
+    /// Whether a refusal is rendered with its code.
+    pub graphical: bool,
+    /// A signal, and how many seconds into the run it is sent.
+    pub interrupt: Option<(&'a str, &'a str)>,
+    /// Something in the environment the fixture does not set: an editor, a
+    /// recording sops.
+    pub extra: &'a [(&'a str, &'a str)],
+}
+
+impl Default for Pick<'_> {
+    fn default() -> Self {
+        Self {
+            arguments: &[],
+            keystrokes: &[],
+            draw_on_stdout: true,
+            graphical: false,
+            interrupt: None,
+            extra: &[],
+        }
+    }
+}
+
+/// What a picker run left behind.
+pub struct Picked {
+    /// The run's own status and streams.
+    pub run: Run,
+    /// Everything that reached the terminal, read from the master end.
+    pub drawn: String,
+    /// Whether the terminal's attributes after the run are the ones it had
+    /// before.
+    pub restored: bool,
+}
+
+/// `setsid`, which is how a run gets a session and a controlling terminal of
+/// its own.
+///
+/// Unconditional here, unlike [`detached`]: a picker opens `/dev/tty`, and the
+/// only way that resolves to the terminal a test allocated — rather than to the
+/// developer's keyboard, or to nothing at all in a build sandbox — is for the
+/// run to be a session leader that has claimed the pseudoterminal with
+/// `--ctty`.
+fn session_of_its_own() -> String {
+    binary_on_path("setsid")
+}
+
+/// Type at a picker, one chunk per pause.
+///
+/// The first chunk is sent without waiting for the picker to draw, the way a
+/// person's typing that arrives before a program is ready waits in the
+/// terminal's own buffer. Each chunk is followed by a pause longer than the
+/// runtime's quiet period, which is how a test distinguishes moving through
+/// entries from coming to rest on one: keys inside one chunk arrive together,
+/// and a chunk boundary is a rest.
+fn type_at(terminal: &mut std::fs::File, keystrokes: &[&str]) {
+    for chunk in keystrokes {
+        if !chunk.is_empty() {
+            terminal
+                .write_all(chunk.as_bytes())
+                .expect("the keystrokes cannot be written");
+            terminal.flush().expect("the keystrokes cannot be flushed");
+        }
+        std::thread::sleep(PICKER_PAUSE);
+    }
 }
 
 /// `setsid`, when this process has a controlling terminal and so would hand one

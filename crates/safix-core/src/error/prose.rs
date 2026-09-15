@@ -526,6 +526,57 @@ An enrollment that could run unattended would be one whose card was generated
 with touch-policy never, which is a smartcard emulating a file. That is refused
 separately, and for the same reason.";
 
+/// A choice was needed and there is no terminal to offer it on.
+///
+/// Deliberately not [`NO_TERMINAL`]: that one is enrollment's, down to its
+/// touch-policy paragraph, and printing it at an operator who asked to read a
+/// secret would answer a question they did not ask.
+pub(super) const PICKER_NEEDS_TERMINAL: &str = "\
+choosing needs a terminal, and there is none to offer one on. Nothing was
+decrypted.
+
+A picker draws a list, reads single keystrokes, and redraws — so it needs
+/dev/tty and it needs to put it in raw mode. Where either is unavailable there
+is no reduced picker to fall back to: a list that cannot be moved through is a
+list, which is safix list, and a prompt that reads a line is not what was asked
+for. So this refuses rather than degrading.
+
+Two ways on. Name the entry, which never needs a terminal and is what a
+pipeline wants:
+
+\x20   safix view <name>
+
+Or see what is there first, and then name it:
+
+\x20   safix list [<user>]";
+
+/// A choice was needed and the user holds nothing to choose from.
+pub(super) fn nothing_to_pick(user: &str) -> String {
+    format!(
+        "flake.safix.users.{user} holds no secret, so there is nothing to choose\n\
+        from. Nothing was decrypted.\n\
+        \n\
+        This is a state of the declarations rather than of the session: the same\n\
+        run on a terminal, with a preview, over a user who holds something would\n\
+        have offered it. safix list {user} prints the same emptiness without\n\
+        refusing.\n\
+        \n\
+        safix edit additionally offers nothing for a user who holds only public\n\
+        outputs: a public output is refused for editing, so a choice that offered\n\
+        one would be offering a refusal."
+    )
+}
+
+/// The operator left the choice without making one.
+pub(super) const SELECTION_CANCELLED: &str = "\
+nothing was chosen, so nothing was read.
+
+The terminal is back in the state it was found in, no value was written
+anywhere, and whatever was decrypted for the preview was dropped rather than
+kept. Leaving is not a failure of the run, but it is not a success either, so
+the exit status is non-zero: a script that wrapped this would otherwise read a
+cancelled choice as a value it never got.";
+
 /// A PIN this run generated, or was given, that the card refused.
 pub(super) fn card_pin_rejected(serial: &str) -> String {
     format!(

@@ -1036,6 +1036,25 @@ pub enum Error {
     #[error("{NO_TERMINAL}")]
     NoTerminal,
 
+    /// A choice was needed and there is no terminal to offer it on.
+    ///
+    /// Not [`Error::NoTerminal`], which is enrollment's and whose prose is
+    /// about touching a card: the two refusals describe the same missing
+    /// device and have nothing in common past that.
+    #[error("{}", prose::PICKER_NEEDS_TERMINAL)]
+    PickerNeedsTerminal,
+
+    /// A choice was needed and the user holds nothing to choose from.
+    #[error("{}", prose::nothing_to_pick(user))]
+    NothingToPick {
+        /// The user whose entries were looked for.
+        user: String,
+    },
+
+    /// The operator left the choice without making one.
+    #[error("{}", prose::SELECTION_CANCELLED)]
+    SelectionCancelled,
+
     /// A pseudo-terminal could not be opened, read or written.
     #[error("could not drive a pseudo-terminal, so the generator's PIN prompt was not reached")]
     PtyUnusable {
@@ -1527,6 +1546,181 @@ pub enum Error {
         file: String,
         /// The key that failed to decrypt.
         key: String,
+    },
+
+    /// The installer manifest could not be read at all.
+    ///
+    /// An activation reaching this has been handed a path to something that
+    /// is not there or is not readable by the user running it, which is a
+    /// different failure from a manifest that is present and wrong — and the
+    /// two are worth telling apart on a host where the activation is the only
+    /// thing that ever names the file.
+    #[error("could not read the installer manifest at {path}")]
+    ManifestUnreadable {
+        /// The path the manifest was expected at.
+        path: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The installer manifest is not the shape this runtime reads.
+    ///
+    /// The schema denies unknown fields, so a field the nix half emits and
+    /// this half does not declare arrives here rather than being dropped:
+    /// silently ignoring it is how a schema change becomes a wrong
+    /// installation instead of a message.
+    #[error("{path} is not an installer manifest this runtime reads: {cause}")]
+    ManifestUnparsable {
+        /// The path the manifest was read from.
+        path: String,
+        /// What the deserializer objected to.
+        cause: String,
+    },
+
+    /// The manifest declares a schema version this binary does not know.
+    ///
+    /// Both numbers are named because the remedy differs by direction: a
+    /// manifest newer than the binary is a stale activation package, and one
+    /// older is a binary ahead of the modules that built it.
+    #[error(
+        "the installer manifest declares schema version {found}, and this safix reads version \
+        {supported}"
+    )]
+    ManifestVersionUnknown {
+        /// The version the manifest declares.
+        found: u32,
+        /// The version this binary reads.
+        supported: u32,
+    },
+
+    /// An entry's mode is not an octal file mode.
+    #[error("{name}'s mode '{mode}' is not an octal file mode")]
+    ManifestModeUnparsable {
+        /// The entry's name.
+        name: String,
+        /// The mode as the manifest spells it.
+        mode: String,
+    },
+
+    /// An entry names an owner this host does not declare.
+    #[error("{name} names owner '{owner}', and this host declares no such user")]
+    ManifestOwnerUnknown {
+        /// The entry's name.
+        name: String,
+        /// The owner as the manifest spells it.
+        owner: String,
+    },
+
+    /// An entry names a group this host does not declare.
+    #[error("{name} names group '{group}', and this host declares no such group")]
+    ManifestGroupUnknown {
+        /// The entry's name.
+        name: String,
+        /// The group as the manifest spells it.
+        group: String,
+    },
+
+    /// An entry names a key its document does not hold.
+    ///
+    /// The key path is `/`-nested, so this also covers a segment that resolves
+    /// to something other than an object and a leaf that is not a scalar: in
+    /// all three the declared path does not reach a value, which is the one
+    /// thing the installer needs of it.
+    #[error("{document} holds no value at key '{key}', which {name} names")]
+    ManifestKeyMissing {
+        /// The entry's name.
+        name: String,
+        /// The document the key was looked for in.
+        document: String,
+        /// The key path as the manifest spells it.
+        key: String,
+    },
+
+    /// The configured age key file could not be read.
+    ///
+    /// Fatal, where an ssh key that does not convert is one line on standard
+    /// error and a skip. The asymmetry is deliberate and is stated in both
+    /// options' own descriptions: a key file named and unreadable is a
+    /// configuration that cannot work, where a host with three ssh keys of
+    /// which one is unconvertible still decrypts with the other two.
+    #[error("could not read the age key file at {path}")]
+    IdentityKeyFileUnreadable {
+        /// The path the key file was named at.
+        path: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// An ssh key could not be converted to an age identity.
+    ///
+    /// Returned by [`crate::install::ssh_to_age`] and, inside the installer's
+    /// own identity assembly, printed as one line and skipped rather than
+    /// propagated — see [`Error::IdentityKeyFileUnreadable`] for the other
+    /// half of that asymmetry. It is a refusal value rather than a formatted
+    /// string so that an embedder converting one key gets the same data the
+    /// installer had.
+    #[error("{path} did not convert to an age identity: {reason}")]
+    InstallSshKeyUnconvertible {
+        /// The ssh private key that was being converted.
+        path: String,
+        /// What the converter said or how it failed to run.
+        reason: String,
+    },
+
+    /// sops ran and refused to decrypt a document the manifest names.
+    ///
+    /// sops's own standard error is inherited and has already said why; this
+    /// names which document and what it exited with, because an activation
+    /// decrypting several documents otherwise reports a status with nothing
+    /// attached to it.
+    #[error("sops exited {status} decrypting {document}")]
+    InstallDecryptFailed {
+        /// The document that did not decrypt.
+        document: String,
+        /// The status sops exited with.
+        status: i32,
+    },
+
+    /// A decrypted document is not the JSON `sops --output-type json` promises.
+    #[error("{document} decrypted to something this runtime does not read: {cause}")]
+    InstallDocumentUnparsable {
+        /// The document that was decrypted.
+        document: String,
+        /// What the deserializer objected to.
+        cause: String,
+    },
+
+    /// The secret store's own filesystem could not be mounted.
+    #[error("could not mount a {filesystem} at {path}")]
+    InstallMountFailed {
+        /// The mount point.
+        path: String,
+        /// The filesystem that was being mounted.
+        filesystem: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// A user-mode manifest names `%r` and there is no runtime directory to
+    /// expand it against.
+    ///
+    /// The store roots of a user-scope install are runtime-directory-relative,
+    /// so this is a session without one rather than a misconfiguration of the
+    /// profile: an activation run outside a login session is the usual cause.
+    #[error(
+        "{asked} names no runtime directory, so %r in a user-mode manifest has nothing to \
+        expand to"
+    )]
+    InstallRuntimeDirUnknown {
+        /// The variable or command that was asked for the runtime directory.
+        ///
+        /// Not spelled `source`: `thiserror` reads a field of that name as the
+        /// refusal's underlying error, and this is the name of a lookup rather
+        /// than a failure of one.
+        asked: String,
     },
 }
 

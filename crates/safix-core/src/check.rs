@@ -542,7 +542,7 @@ fn definitions(
             let Some((generator, declared)) = placements.producer_of(user, name) else {
                 continue;
             };
-            let record = definition::record_path(name, placement);
+            let record = definition::record_path(placement);
             if !reported.insert(record.clone()) {
                 continue;
             }

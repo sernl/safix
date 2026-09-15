@@ -4,7 +4,7 @@ safix is built for its operator's own fleet; that use case, not general adoption
 
 safix is a custody-first secrets manager for nix.
 Secrets are declared as attribute set options merged by the nix module system, the encrypted file each secret lives in is derived from the audience that can read it rather than authored by hand, and the `.sops.yaml` recipient policy is generated from those same declarations.
-It is tied to no framework and serves NixOS and home-manager alike through sops-nix.
+It is tied to no framework: it serves NixOS and home-manager alike through consumption modules of its own, and installs what they resolve with its own `safix install`.
 
 Its headline opinion: declarations may be scattered anywhere across your tree, one per file, because they are mergeable attrsets — but ciphertext placement is never scattered, because the audience picks the file.
 
@@ -54,8 +54,8 @@ The profile half is an import and four lines, in whichever module system alice's
 Every secret alice resolves on that host is now established there.
 
 `nixosModules.default` is the first three of those lines for a system configuration.
-The fourth is the user scope's alone: sops-nix's NixOS module defaults its age identity to the ed25519 keys of `config.services.openssh.hostKeys`, and its home-manager module has no per-person equivalent to fall back on, so a profile that resolves secrets and names no identity refuses at evaluation rather than establishing them.
-See [Establishing secrets in a profile](#establishing-secrets-in-a-profile) for the rest of the surface, including which of the two module forms to import.
+The fourth is the user scope's alone: at system scope safix derives an age identity from the ed25519 keys of `config.services.openssh.hostKeys` that lie outside its own store, and a person is not a host, so there is no per-person equivalent to derive — a profile that resolves secrets and names no identity refuses at evaluation rather than establishing them.
+See [Establishing secrets in a profile](#establishing-secrets-in-a-profile) for the rest of the surface.
 
 Declarations merge, so the flake block above can live in its own file imported alongside a hundred others; safix reads no path, no filename and no directory structure to find them.
 
@@ -122,6 +122,7 @@ $ sops secrets/safix/shared/alice,bob/secrets.yaml
 
 Think of it as a shared drawer between exactly those two.
 The directory name is the guest list: `alice,bob` means those two can open it and nobody else can.
+Every `sops <path>` command in this document uses the default `flake.safix.storage.encrypted` spelling; if you have renamed that root, the path is yours.
 `fix` regenerates the rule for the new audience file; moving the value in is a keyholder's act, which is why the second command is `sops` in your hands rather than something automatic.
 On the recipient's next rebuild the secret appears in their resolved set at their own path, and they declare nothing.
 
@@ -464,15 +465,17 @@ That is what a public key, a fingerprint or a derived identifier is for: a modul
 `flake.safix.lib.outputPath` answers for every output and is a path, never a value.
 Reaching for a value on a secret output fails with a sentence naming the entry and pointing at the path, rather than with nix's generic undefined-option message.
 
-The plaintext store sits under a top-level `public/` prefix rather than inside `secrets/`:
+The plaintext store is its own tree, named by `flake.safix.storage.plaintextOutputs` and defaulting to `public/safix`:
 
 ```
-public/safix/users/<user>/<name>/value
-public/safix/shared/<audience>/<name>/value
+<plaintextOutputs>/users/<user>/<name>/value
+<plaintextOutputs>/shared/<audience>/<name>/value
 ```
 
-A path named for secrets has to mean everything under it is encrypted, without qualification, because that is what every backup rule, sync exclusion and reviewer assumes about it.
-Two checks hold the trees apart: `safix-public-no-rule` matches every generated creation rule against every public path, and the catch-all check carries the public shape among its probes — together with the definition-record shape described below, for the same reason.
+A tree named for encryption has to mean everything under it is encrypted, without qualification, because that is what every backup rule, sync exclusion and reviewer assumes about it.
+Once the roots are yours to name, that promise is carried by the option's name — `storage.encrypted` — and by your own choice of value, not by a literal compiled into safix.
+What stays mechanically enforced is that the trees do not overlap: evaluation refuses any configuration whose roots are equal or nested, for every configuration rather than for the default one.
+Two checks hold them apart behaviourally as well: `safix-public-no-rule` matches every generated creation rule against every real public path, and the catch-all check probes each configured tree — together with the definition-record tree described below, for the same reason.
 
 The default is `secret = true`, not clan's `false`.
 A mistyped field that leaves a value encrypted is recoverable by fixing the typo; one that publishes a value is not.
@@ -532,9 +535,11 @@ A generated value carries nothing saying which declaration produced it, so editi
 `safix generate` therefore writes a digest of the declaration it ran, in the same commit as the value:
 
 ```
-state/safix/definitions/<user>/<name>
-state/safix/definitions/shared/<audience>/<name>
+<generatorRecords>/<user>/<name>
+<generatorRecords>/shared/<audience>/<name>
 ```
+
+— under `flake.safix.storage.generatorRecords`, which defaults to `state/safix/definitions`.
 
 One plaintext line each — a format tag and a digest — over everything that decides what a mint produces: the script, its `runtimeInputs`, its `network` grant, its prompts, its dependencies, the outputs it writes with their secrecy, and the validation fragment.
 No value and no derivative of a value is in it, which is what lets it be committed in the clear.
@@ -542,18 +547,48 @@ No value and no derivative of a value is in it, which is what lets it be committ
 The grant is in there because it changes what a mint *may* do: the value in the file came from a fragment that could not reach the network, and a declaration that grants one describes a different mint even when the script is identical.
 Covering it moved the tag from `v1` to `v2`, and a record carrying the older tag is read as no record at all — the same answer an absent one gets, for the same reason.
 
-A third top-level tree, because neither existing one can hold it.
-A path named for secrets has to mean everything under it is encrypted, without qualification; `public/` means declared public outputs a nix module reads at evaluation, and a bookkeeping file there would dilute that into "plaintext things safix wrote".
-`state/` says what it is: recorded state about the tree, neither a secret nor an output.
+Its own tree, because neither of the other two can hold it.
+The encrypted tree has to mean everything under it is encrypted, without qualification; the plaintext-output tree means declared public outputs a nix module reads at evaluation, and a bookkeeping file there would dilute that into "plaintext things safix wrote".
+The option's name says what this one holds, which is why the tree no longer has to be at the top level or spelled `state/` to say it.
 
 `safix check` reads it back, and reports a value whose declaration has changed since it was minted — naming regeneration and reverting the edit as the two remedies and recommending neither, because the tree holds a value and a declaration that disagree and nothing but you knows which was meant.
 A value with no record predates the record and is not a finding: no record, no claim.
 A record in a format the running safix does not write is not a finding either, which is what keeps a change to the digest's canonical form from reporting every value in the tree as drifted.
 
+## Browsing what is there: `safix view`
+
+```console
+$ safix view alice grafana-token   # that one, on the terminal
+$ safix view                       # choose from what alice holds, then read it
+```
+
+`safix get` writes the value to standard output and is what a pipeline calls.
+`safix view` writes it to the terminal, and needs one only when it has to offer a choice — given a name it writes to standard output where no terminal opens, so a `view` in a pipeline is a working invocation rather than a refusal.
+
+With no name, every entry the user holds is offered with the same six columns `safix list` prints: the name, where it came from, whether one value serves every carrier, whether a generator mints it, the key it is read under, and the file serving it.
+Type to narrow the list, move with the arrows or `^P` and `^N`, enter to read the highlighted entry, escape to leave.
+Choosing is a way of naming: the run proceeds exactly as though the chosen name had been given as an argument, through the same resolver every other verb uses.
+A lone argument is a user when `flake.safix.users` declares one by that name and an entry's name otherwise, so an entry whose name is also a person's is reachable by naming both.
+
+The highlighted entry's value is shown in a preview with four properties, each of them a property a preview of a secret has to have.
+It decrypts on a quiet period rather than on a keystroke, so moving through a dozen entries forks one `sops` subprocess instead of twelve and the entries passed through are not decrypted at all.
+It holds exactly one decrypted value at a time: the previous one is dropped — and zeroed — before the next is read, so nothing accumulates over a long browse.
+It is drawn in a region the terminal clears on exit, so no value enters scrollback, where it would outlive the process and the zeroing.
+And it stages nothing: a preview is drawn by safix itself, so there is no path to hand anybody and no plaintext reaches a file at any point.
+A value that does not decrypt is reported in the region and the list stays usable, because failing to show one value says nothing about your ability to choose another.
+
+`--no-preview` offers the same list and decrypts nothing until a choice is made, for a shared screen, a recording, or a session whose scrollback you do not control.
+
+Three refusals, each its own:
+no terminal to choose on, which names both remedies — name the entry, or `safix list` what the user holds;
+the user holds nothing, which is a state of the declarations rather than of the session;
+and leaving without choosing, which writes nothing, keeps nothing it decrypted, and leaves the terminal in the state it was found in.
+
 ## Editing a value: `safix edit`
 
 ```console
-$ safix edit alice grafana-token
+$ safix edit alice grafana-token   # that one
+$ safix edit                       # choose what to edit, then open it
 ```
 
 Opens `$VISUAL`, or `$EDITOR` when that is unset, on the entry's decrypted value.
@@ -568,6 +603,10 @@ An entry that holds no value yet opens on an empty buffer, so this is an authori
 The buffer lives in the same private staging directory generators use, and whatever the editor leaves beside it — swap files, backups, undo history — is removed with the directory.
 An editor configured to write undo history to a location of its own has put plaintext where safix does not look; that is the limit of the containment, and it is stated rather than left to be discovered.
 
+With no name, `edit` offers the same selection `safix view` offers, through the same code, less every public output: a public value is already plaintext in the repository and is not editable, so it is not among the choices either — a refusal reachable by selection is one the choice should never have offered.
+The editor is settled before the list opens, on every form, because a refusal after you have browsed a list and had values decrypted for a preview is a refusal that wasted your time and decrypted values for nothing.
+`--no-preview` suppresses the preview here too, and the three refusals are `safix view`'s.
+
 ## Values without declarations: the runtime extract
 
 Not every secret needs to land on disk.
@@ -579,6 +618,7 @@ settings.credsCommand = ''sops -d --extract '["dns-creds"]' secrets/safix/users/
 ```
 
 Think of it as reading a note without photocopying it.
+The path uses the default `flake.safix.storage.encrypted` spelling; rename that root and this one moves with it.
 Use this shape for credentials only a person invokes; use a declared secret for anything a service reads from a path.
 
 The file such a value lives in is not one safix placed, so it is not in the set `safix fix` re-wraps.
@@ -594,6 +634,7 @@ $ safix fix        # regenerate .sops.yaml and re-wrap files to match declaratio
 $ safix set NAME   # write one value (hidden prompt, confirmed, committed)
 $ printf '%s' "$TOKEN" | safix set NAME   # the same write, scripted
 $ safix get NAME   # read one value to stdout
+$ safix view       # browse what a person holds, preview one, read it
 $ safix generate   # mint whatever has a recipe
 $ safix audit      # report which declared mappings' two sides disagree
 $ safix sync       # converge declared clan and keepassxc relationships
@@ -758,7 +799,8 @@ Secrets are then declared against the projected names, and the two records stay 
 ## Establishing secrets in a profile
 
 Custody is declared once, at flake level, where every user is visible at the same time.
-Arrival is declared per profile, in the module system that profile is written in, through a `safix.*` namespace that sits beside sops-nix's `sops.*` and can select but never declare.
+Arrival is declared per profile, in the module system that profile is written in, through a `safix.*` namespace that can select but never declare.
+safix reads and defines no option outside that namespace, at either scope, so a tree that runs another secret-management framework for its own secrets keeps every option it set there and safix is unaffected by whichever revision of it that tree pins.
 
 That split is forced rather than stylistic.
 An audience is a function of every user's declarations at once — one person's `sharedWith` widens the file another person reads — and `.sops.yaml` is a single repository-global file the sops CLI reads off disk.
@@ -780,7 +822,16 @@ Both modules declare the same options, and none of them can add a secret, a reci
 | `safix.identity.sshKeyPaths` | `[ ]`; at user scope one of these two is required | ssh private keys this machine decrypts with |
 | `safix.enable` | whether anything resolved | the gate the whole module sits behind |
 | `safix.identityPreflight` | `true` | user scope only: install the activation guard below |
-| `safix.secrets` | read-only | what resolved, in the shape `sops.secrets` takes |
+| `safix.secrets` | read-only | what resolved; at system scope typed by safix's own entry submodule and carrying the path each entry arrives at |
+| `safix.identity.generateKey` | `false` | user scope only: mint `safix.identity.keyFile` at activation when it is absent |
+| `safix.installer.package` | safix's own build, from the flake you imported the module from | the safix build whose `safix install` runs |
+| `safix.installer.validationPackage` | the build-platform build of the same | what checks the manifest inside its own derivation |
+| `safix.installer.validate` | `true` | check the manifest against its documents at build time, and hash them into the manifest |
+| `safix.installer.keepGenerations` | `1` | how many generation directories to keep |
+| `safix.installer.log` | `[ ]` | which of `keyImport` and `secretChanges` reach the journal |
+| `safix.installer.secretsMountPoint` | `/run/safix.d`; `%r/safix.d` at user scope | where the generation directories live |
+| `safix.installer.symlinkPath` | `/run/safix`; `%r/safix` at user scope | where the current generation appears, and what an entry's default path is under |
+| `safix.installer.useTmpfs`, `.environment`, `.agePlugins` | `false`, `{ }`, `[ ]` | system scope only: a user-mode install mounts nothing and runs no unit environment of its own |
 
 `safix.flake` is the one thing a module cannot derive.
 A profile receives `config`, `lib`, `pkgs` and whatever its evaluator put in `extraSpecialArgs` or `specialArgs`; requiring a particular name there would make your evaluation seam part of safix's interface, which is the same assumption safix refuses to make about your user registry.
@@ -799,51 +850,53 @@ The last two are told apart by whether a definition for `safix.user` or `safix.h
 Naming a person no `flake.safix.users` entry declares refuses as well, listing the declared users.
 That refusal sits in the resolver rather than in either module, so a direct `safix.lib` call and the `safix` command reach the same sentence the profile does — and it is likelier than it looks, since `safix.user` defaults to the profile's own username and an account name need not match its declaration key.
 
-### Which of the two forms to import
+### The two published names
 
-Each module ships twice.
-`homeModules.default` and `nixosModules.default` import sops-nix along with safix, for a tree that has not got it.
-`homeModules.safix` and `nixosModules.safix` declare the same namespace and import nothing, for a tree that already imports sops-nix at a revision of its own.
-`homeManagerModules` is a published alias of `homeModules` — one definition, two names, matching sops-nix's own `flake.nix` — so `homeManagerModules.safix` and `homeManagerModules.default` are the identical values `homeModules.safix` and `homeModules.default` are.
-Only the `.safix` forms are importable with genuinely no flake anywhere in the importing tree: neither's import list names anything under `inputs.sops-nix`, unlike the `.default` forms, which do.
-`safix-module-entrypoints` holds both facts, and evaluates `modules/consume/home.nix` and `modules/consume/nixos.nix` bare, with no flake input in scope at all, to prove each still declares `options.safix.lib` on its own — which is what makes the `.safix` forms importable with no flake at all rather than merely no flake-parts.
+Each scope publishes one module, under both its plain name and its default name, and the two name the same value: `homeModules.safix` and `homeModules.default` are one file, as are `nixosModules.safix` and `nixosModules.default`.
+`homeManagerModules` is a published alias of `homeModules` — one definition, two names — so `homeManagerModules.safix` and `homeManagerModules.default` are the identical values `homeModules.safix` and `homeModules.default` are.
 
-Import the second if you already import sops-nix anywhere in that profile, because importing two distinct copies of one option-declaring module is not a merge and not a warning:
+Both names stay published so that every `imports` line written against the previous surface keeps resolving; this is a collapse rather than a rename.
+The split existed for exactly one reason: `imports` cannot depend on an option, so a tree without the secret provisioner needed a form that imported it and a tree pinning its own needed a form that did not.
+With no provisioner imported anywhere, every published form imports nothing outside its own file, which is strictly the stronger of the two properties the split used to offer separately.
+`safix-module-entrypoints` holds that symmetrically over all four published names, and evaluates `modules/consume/home.nix` and `modules/consume/nixos.nix` bare, with no flake input in scope at all, to prove each still declares `options.safix.lib` on its own — which is what makes either importable with no flake at all rather than merely no flake-parts.
+
+What has not changed is what happens if you import two distinct copies of one option-declaring module, which is not a merge and not a warning:
 
 ```
-error: The option `sops.secrets' in `/nix/store/…-sops-nix-b/modules/home-manager/sops.nix'
-       is already declared in `/nix/store/…-sops-nix-a/modules/home-manager/sops.nix'.
+error: The option `safix.secrets' in `/nix/store/…-safix-b/modules/consume/nixos.nix'
+       is already declared in `/nix/store/…-safix-a/modules/consume/nixos.nix'.
 ```
 
-Which option the error names is a property of the evaluation rather than of the defect, so read the block as illustrative.
-A duplicate declaration is detected when an option is merged, not when the module list is built, so it is reported against whichever of the colliding declarations the configuration forces first — `sops.secrets` for a home-manager profile, `sops.gnupg.home` for a NixOS configuration.
-
-`safix-module-collision` holds that fact, against sops-nix's real module rather than a synthetic one, which is why the choice is offered as two imports rather than as an option: `imports` cannot depend on configuration, so no flag could repair it after the fact.
-A consumer whose `sops-nix` input `follows` safix's resolves to one store path and is safe either way.
+Which option the error names is a property of the evaluation rather than of the defect, so read the block as illustrative: a duplicate declaration is detected when an option is merged, not when the module list is built, so it is reported against whichever of the colliding declarations the configuration forces first.
+`safix-module-collision` holds that fact over two distinct store paths of safix's own declaring module, which is why it cannot be repaired by configuration: `imports` cannot depend on configuration, so no flag could fix it after the fact.
+A consumer whose `safix` input resolves to one store path everywhere is safe.
 
 ### One declaration, both scopes
 
 The mode, the path and the key are identical in both scopes, and nothing in a declaration names one.
-The system scope additionally carries `owner` and `group`; the user scope refuses an entry that sets them rather than dropping it, because the user-scope provisioner has no ownership axis and a dropped ownership field reads afterwards as an ownership claim that was honoured.
+The system scope additionally carries `owner` and `group`; the user scope refuses an entry that sets them rather than dropping it, because a user-mode install runs as the person and chowns nothing, and a dropped ownership field reads afterwards as an ownership claim that was honoured.
+That axis is read off safix's own entry type, so the refusal depends on no other framework's option declaration being present.
 
 Two entries resolving onto one path are refused for either scope, since whichever declaration activates second unlinks the first's output.
 
 What is scope-specific is not the declaration but the configuration an entry's `path` is a function of: a `path` written as `cfg: "${cfg.home.homeDirectory}/…"` is a home-manager expression and will not materialize into a system configuration.
 
-The resolver's refusals surface as safix's own evaluation errors, listing every violation at once, rather than as the first of them raised from inside sops-nix's manifest generation.
+The resolver's refusals surface as safix's own evaluation errors, listing every violation at once, rather than as the first of them raised from inside a manifest derivation, where the trace would name a build and not the declaration that broke.
 
 ### The identity, and the guard
 
 `safix.identity.keyFile` defaults to null, and that default is not a preference.
-`sops-install-secrets` treats a set-but-unreadable key file as fatal, and skips a missing ssh key path with a line to stderr, so a non-null default would abort activation on every machine that happens to lack the path.
-Both identity options are defined onto `sops.age.*` at normal priority, so a `mkDefault` elsewhere in your tree loses to safix and a plain definition conflicts loudly — the alternative would let a base module's XDG default silently replace the null and re-arm the abort.
-At user scope `sshKeyPaths` is defined only when you name it.
-At system scope it is always defined: a named identity wins, and otherwise safix derives the ed25519 entries of `services.openssh.hostKeys` that lie outside its own store — its own rule with its own exclusion prefix, not the provisioner's default, whose exclusion names a store safix no longer writes.
+safix's own installer treats a set-but-unreadable key file as fatal, naming the path, and skips a missing or unconvertible ssh key path with a line to stderr, so a non-null default would abort activation on every machine that happens to lack the path.
+Both options are read by safix and defined into nothing else: safix writes no option outside its own namespace, so a tree that also runs sops-nix configures that framework's key sources itself and the two are independent.
+At system scope a named identity wins, and otherwise safix derives the ed25519 entries of `services.openssh.hostKeys` that lie outside its own store — its own rule with its own exclusion prefix, because the exclusion exists to avoid decrypting with a key this installer itself deploys, which is a statement about safix's store and not about `/run/secrets`, where a foreign store's keys are exactly the identity to decrypt with.
 `safix.identity.deriveHostKeys = false` turns the derivation off, and `safix-installer-identity` holds every case against the built manifest rather than against an intermediate option.
+
+A gnupg configuration counts for nothing at either scope.
+`safix.identity` carries a key file and a list of ssh keys, and nothing else is an identity safix can decrypt with, so a gnupg configuration belonging to another framework no longer suppresses safix's own no-identity refusal — which it previously did, on the strength of a configuration safix neither wrote nor could use.
 
 At user scope there is no such default to keep, and naming one of the two is therefore not optional.
 A profile whose declarations resolve and which names neither refuses at evaluation, with a message naming both options and stating why neither can be defaulted for a person.
-It refuses before sops-nix's own key-source assertion is reached, which is the whole reason it exists: that assertion's condition tests four of sops-nix's options, its message names three, and the block's two assertions together name four distinct options — none of them safix's.
+It refuses at evaluation, before anything is applied, which is the whole reason it exists: the installer's own check runs at activation and reports presence and readability of the paths it was handed, which is no help to a profile that named no path at all.
 `safix-consumption-refusals` holds the refusal, and holds it off a profile evaluated without home-manager's assertion wrapper — a wrapped profile refuses either way, and reports that something refused rather than which module did.
 
 At user scope, safix installs `home.activation.safixIdentityPreflight`.
@@ -851,31 +904,38 @@ It reads the configured identity, checks each path for presence and readability,
 It sorts `entryBefore [ "checkLinkTargets" ]`, which is what makes the refusal atomic: no home file linked, no user package installed, no user unit restarted, no secret written.
 
 That ordering is the whole of the guarantee, and it is held by `safix-consumption-ordering`, which topologically sorts a real profile's activation DAG.
-The same check holds the other half of the pair: sops-nix's own entry sorts *after* `checkLinkTargets`, which is why the guard exists.
-sops-nix registers it as a bare string, so home-manager treats it as `entryAnywhere` and it lands after `linkGeneration` and `reloadSystemd`; pinning it earlier is not available as a fix, because the unit it restarts is materialized by `linkGeneration` and made visible by `reloadSystemd`, so an early restart aborts on the first switch that introduces sops and thereafter restarts the previous generation's unit with no signal.
+The same check holds the placement of safix's own install entry, which is registered `entryAfter [ "writeBoundary" ]` rather than as a bare string — a bare string becomes `entryAnywhere`, which gives home-manager no ordering to reason about at all.
 
 The guard is narrower than it sounds, twice over, and its own failure message says so.
 Where home activation runs as a NixOS host's `home-manager-<user>.service`, systemd starts that unit after system activation has already switched the system generation, so a system switch is not undone by the refusal — only that user's home generation is held back.
-And presence and readability are all that were checked: a key that exists and is readable but is not a recipient of these files still fails later, in `sops-install-secrets`.
+And presence and readability are all that were checked: a key that exists and is readable but is not a recipient of these files still fails later, inside safix's own installer, when it decrypts.
 That sentence is held by `safix-identity-recipiency`, against fixture ciphertext rather than against an activation, which is the one claim on this path an evaluation cannot make.
 The identity it drives is shown to open a document it *is* a recipient of before it is shown not to open one it is not, so what the refusal reports is recipiency and not a key file that was simply unusable.
 
 The system scope installs no such guard, and that asymmetry is deliberate.
 No atomic refusal point at NixOS activation has been demonstrated, and safix does not document a guarantee that no code enforces.
-The failure is also rarer there, because safix derives a system-scope identity from the host's ssh keys, excluding only the ones inside its own store — and where nothing is derivable, evaluation refuses in safix's own words, since the provisioner's own key-source assertion is conditional on a secrets option safix leaves empty and would never fire.
+The failure is also rarer there, because safix derives a system-scope identity from the host's ssh keys, excluding only the ones inside its own store — and where nothing is derivable, evaluation refuses in safix's own words, since safix is the only installer on that path and nothing later would refuse usefully.
 Before decrypting, the installer itself checks each configured identity path and refuses naming the paths and the ordering options; `safix-installer-refusals` holds both refusals.
 
-### The installer the system scope owns
+### The installer safix owns, at both scopes
 
-At system scope safix builds its own installer manifest and runs `sops-install-secrets` against it, rather than assigning into `sops.secrets` and inheriting sops-nix's activation.
-`sops.secrets` stays empty, so the provisioner's activation entry, unit and assertions are inert and exactly one installer acts on the resolved set — `safix-installer-sole` holds that by scanning every activation step's text and every unit's `ExecStart` for invocations of the binary.
-The manifest is validated at build time by the same binary that will read it, in whichever checking mode `sops.validateSopsFiles` selects, and its field set is compared against the provisioner's own builder so a field sops-nix adds fails `safix-installer-manifest` on the commit that moves the pin rather than reaching a host.
+safix builds its own installer manifest and runs its own program against it: `safix install <manifest>`, a verb of the same command an operator uses for everything else, and the only one no operator types.
+`safix-installer-sole` holds that exactly one installer acts on the resolved set, by scanning every activation step's text and every unit's `ExecStart`.
+What arrived is read back at `config.safix.secrets`, the one option this package carries at either scope: at system scope it is the resolution typed by safix's own entry submodule, carrying the path each entry arrives at, and it is the exact set the manifest is built from, so what you read and what is installed cannot disagree.
+
+The manifest schema is safix's own, written down once as `Manifest` in `crates/safix-core/src/install.rs`, versioned, and refusing an unknown field rather than ignoring it.
+Both scopes emit exactly that shape, and `safix-installer-schema` holds the built manifest against an accepted snapshot so that a field added, removed or renamed on either side of the nix-to-program boundary fails on the commit that makes the change.
+It is validated at build time by the same program that will read it, in whichever mode `safix.installer.validate` selects: `document`, which opens each named document and verifies every declared key is in it, or `manifest`, which validates the schema, the version, every mode's octal parse and every owner and group resolution without opening a document at all.
+Neither mode decrypts — a sops document carries its mapping keys in the clear, so key presence is readable without an identity, which is what lets the stronger mode be the default inside a build sandbox that holds none.
+`safix-installer-roundtrip` runs the document mode over the built manifest and over four single-field mutations — an unknown version, a non-octal mode, a key absent from its document, an unknown top-level field — and asserts one acceptance and four refusals, each naming its field.
+With validation on, the manifest also carries one hash over every distinct document it names, so editing a ciphertext file changes the derivation and causes a rebuild; the installer ignores that field entirely, and making the derivation a function of the ciphertext is its whole purpose.
 
 The store is safix's own: generations under `/run/safix.d`, the current one at `/run/safix`, both movable through `safix.installer.secretsMountPoint` and `safix.installer.symlinkPath`.
-An entry that declares no path parks at `/run/safix/<name>`, and the root and that default are held as one claim by `safix-installer-store`, because the installer symlinks any entry path that is not `<symlinkPath>/<name>` — a root moved without the default writes into the foreign store instead of colliding with it.
-Nothing outside safix's store is written, removed, or mounted over, and `safix-installer-coexistence` demonstrates both halves against the real binary in a build sandbox: pointed at an ordinary directory it removes what it finds — the branch a live mount turns into `EBUSY` — and pointed at safix's roots it leaves a foreign directory byte-identical.
+An entry that declares no path parks at `/run/safix/<name>`, which is the entry type's own default, so the root and that default move together rather than being separately maintained — `safix-installer-store` holds the pair against an oracle independent of the default itself, because the installer symlinks any entry path that is not `<symlinkPath>/<name>` and a root moved without the default writes into the foreign store instead of colliding with it.
+Nothing outside safix's store is written, removed, or mounted over, and `safix-installer-coexistence` demonstrates both halves against safix's own binary in a build sandbox: pointed at an ordinary directory it removes what it finds — the branch a live mount turns into `EBUSY` — and pointed at safix's roots it leaves a foreign directory byte-identical.
+`safix-installer-vm` boots a machine and reads the installed store, which is the one thing no evaluation and no sandboxed invocation measures: generation `1` after the first activation, each entry at its declared mode and ownership, generation `2` and a pruned store after the second, and a unit named in `restartUnits` observed restarted.
 
-The installer registers as `system.activationScripts.safixInstallSecrets`, or as `systemd.services.safix-install-secrets` where systemd-sysusers or userborn manage users; the selection follows the host's own options, with `safix.installer.useSystemdActivation` as the override, and deliberately not `sops.useSystemdActivation`, which now governs an installer safix does not use.
+At system scope the installer registers as `system.activationScripts.safixInstallSecrets`, or as `systemd.services.safix-install-secrets` where systemd-sysusers or userborn manage users; the selection follows the host's own options, with `safix.installer.useSystemdActivation` as the override.
 The name is what makes ordering expressible at all — two packages defining one `setupSecrets` step merge into a single activation node with no edge to state — and the ordering is yours to name, in whichever mechanism the host uses:
 
 ```nix
@@ -884,20 +944,59 @@ safix.installer.afterUnits = [ "age-decrypt-secrets.service" ]; # its unit, unde
 ```
 
 Naming nothing is supported and leaves the installer unordered, and safix reads no option of another secret-management framework to discover its installer, for the same reason it reads no consumer's user registry.
-`safix-installer-ordering` holds all three configurations, and `safix-installer-mechanism` holds the facts the whole arrangement rests on, read out of the provisioner's and the platform's own sources.
+`safix-installer-ordering` holds all three configurations.
+
+At user scope the profile installs rather than delegating: the same manifest shape with `userMode = true`, a `systemd.user.services.safix` unit on linux, and a `home.activation.safixInstall` entry registered `entryAfter [ "writeBoundary" ]` on both platforms.
+The roots are runtime-directory-relative — `%r/safix.d` and `%r/safix` — and `%r` is expanded by the installer against `$XDG_RUNTIME_DIR` on linux and the output of `getconf DARWIN_USER_TEMP_DIR` on darwin, with `%%` yielding a literal `%`.
+A user-mode install mounts no filesystem, changes no file's ownership, and restarts or reloads no unit: each of the three needs a privilege the scope does not have, and each is a `userMode` branch in the installer rather than a field this scope leaves out.
+`safix.identity.generateKey` mints the configured key file at activation when it is absent, defaulting off, because a profile that has never been activated has no other way to get one into place before the first install runs — `safix keygen` is the operator-run alternative and the better one wherever a person can run a command.
+
+Three things are unsupported, and are stated rather than implied by a missing field: no template is rendered, no secret is relocated for early-boot user creation, and no gnupg identity is accepted.
+safix has never supported any of the three; what changes is that the workaround closes — an entry safix resolved can no longer be reached by another framework's template or relocation, even on a host where that framework is also installed — and each absence is a refusal rather than an omission, since the manifest's `deny_unknown_fields` rejects a `templates` or `neededForUsers` field and a gnupg-only identity fails evaluation in safix's own words.
 
 Two refusals cover the identity.
-Where the resolution is non-empty and nothing is configured or derivable, evaluation fails naming `safix.identity.sshKeyPaths`, `safix.identity.keyFile` and `safix.identity.deriveHostKeys` — nothing else would refuse, because sops-nix's key-source assertion is conditional on its own secrets option, which safix leaves empty.
+Where the resolution is non-empty and nothing is configured or derivable, evaluation fails naming `safix.identity.sshKeyPaths`, `safix.identity.keyFile` and `safix.identity.deriveHostKeys` — nothing else would refuse, because safix is the only installer on this path.
 Before decrypting, the installer checks each configured identity path for presence and readability and refuses naming each path and the two ordering options, since a foreign store that has not yet run is the usual cause; presence and readability are all it checked, and decryption is not.
 `safix-installer-refusals` holds both.
 
 The limit is stated rather than implied: this coexistence covers safix's own installer.
-A consumer who writes `sops.secrets` directly, beside safix, on a host that already runs another secret store still has the original collision, and safix neither detects nor repairs that.
+A consumer who writes another framework's secrets option directly, beside safix, on a host that already runs that framework's store still has the original collision, and safix neither detects nor repairs that.
+
+### Migrating from the sops-nix-backed surface
+
+safix declares no sops-nix input, and reads and defines no `sops.*` option.
+`sops` the binary is unchanged and still does every encryption and decryption, as a subprocess: the document format, its MAC, its IV-reuse rule and its key wrapping remain upstream's.
+
+Your whole migration is: change nothing about `.sops.yaml`, the file layout, `safix fix`, or any custody declaration; rename any option you tuned; and, at user scope, update anything that referenced the old secret path.
+
+| was | becomes |
+|---|---|
+| `sops.package` | `safix.installer.package` |
+| `sops.validationPackage` | `safix.installer.validationPackage` |
+| `sops.validateSopsFiles` | `safix.installer.validate` |
+| `sops.keepGenerations` | `safix.installer.keepGenerations` |
+| `sops.useTmpfs` | `safix.installer.useTmpfs` |
+| `sops.log` | `safix.installer.log` |
+| `sops.environment` | `safix.installer.environment` |
+| `sops.age.plugins` | `safix.installer.agePlugins` |
+| `sops.age.keyFile` | `safix.identity.keyFile` (already existed; safix stops defining the `sops` one from it) |
+| `sops.age.sshKeyPaths` | `safix.identity.sshKeyPaths` (already existed; likewise) |
+| `sops.age.generateKey` | `safix.identity.generateKey`, home scope only |
+| `sops.gnupg.home`, `sops.gnupg.sshKeyPaths`, `sops.gnupg.qubes-split-gpg.enable` | no equivalent; gnupg is not an identity safix accepts |
+| `sops.defaultSopsFile`, `sops.templates`, `sops.placeholder`, `sops.useSystemdActivation` | never read by safix; a consumer setting them was configuring their own sops-nix, which is unaffected |
+| `imports = [ safix.nixosModules.default ]` | unchanged; `.default` and `.safix` are now one value |
+| `~/.config/sops-nix/secrets/<name>` | `$XDG_RUNTIME_DIR/safix/<name>` on linux, `$(getconf DARWIN_USER_TEMP_DIR)/safix/<name>` on darwin |
+
+The whole table is `safix.*` on the right, which is the point: a consumer who also runs sops-nix for their own secrets keeps every `sops.*` value they set, and it now means only what they meant by it.
+
+The last row is the one that breaks something.
+A user-scope secret now arrives in a runtime directory rather than a home directory, so it does not survive a reboot without a login, and anything referencing the old path has to move.
+Nothing new is required of you here: every published module name carries safix's own build as a `mkDefault` for `safix.installer.package` and the build-platform one for `safix.installer.validationPackage`, so a consumer who imports `nixosModules.default`, `nixosModules.safix`, or either home-scope name names neither option. A tree that imports `modules/consume/nixos.nix` as a plain file path with no flake at all supplies `pkgs.safix` instead — or names the option, which is what the module's own refusal asks for.
 
 ## Without flake-parts, or without a flake
 
 Everything above assumes a flake-parts consumer.
-safix's evaluation rests on two narrower things: the nix module system, which a bare `lib.evalModules` call satisfies with no flake-parts machinery anywhere, and — for the thirteen attributes under `safix.lib.*` and `safix.*` the command reads, and thirteen of its fourteen verbs — a nix expression to evaluate, which does not have to be a flake output.
+safix's evaluation rests on two narrower things: the nix module system, which a bare `lib.evalModules` call satisfies with no flake-parts machinery anywhere, and — for the thirteen attributes under `safix.lib.*` and `safix.*` the command reads, and fifteen of its sixteen verbs — a nix expression to evaluate, which does not have to be a flake output.
 
 `flake.lib.mkVault` is the entrypoint for the first of those.
 It is a function of the form `{ modules, root } -> projection`, published at a new top-level `flake.lib.mkVault` rather than inside `flake.safix.lib` — the latter is a resolved value with a fixed shape, not a namespace a function can live inside without changing what every existing reader of it sees.
@@ -932,7 +1031,7 @@ Both are read as a leading global option ahead of any subcommand, alongside a gl
 Root discovery does not move: `Workspace::discover` still finds the repository through git, unaffected by `--entry`, and an entry file need not live inside the repository a run stages and commits into.
 `safix-cli` evaluates a fixture entry file through all thirteen attribute spellings, both under `--file` and against a flake target, asserting each succeeds either way, and separately asserts the three structured attributes — `generatorPlan`, `bridge`, `keepassxc` — resolve byte-identical between the two; it also asserts `--entry` overriding a conflicting `SAFIX_ENTRY`, and the workspace root staying git-discovered even when the entry file lives outside it.
 
-Thirteen of safix's fourteen verbs — `list`, `get`, `set`, `edit`, `fix`, `check`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group`, `upload` — read only nix values through those thirteen attributes and behave identically under `--entry` as under a flake.
+Fourteen of safix's fifteen verbs — `list`, `get`, `view`, `set`, `edit`, `fix`, `check`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group`, `upload` — read only nix values through those thirteen attributes and behave identically under `--entry` as under a flake.
 `generate` is the exception, and states why at evaluation rather than leaving it to be discovered: its sandbox resolves its own tools through `nix shell --inputs-from`, which needs a flake, so running it under `--entry` (or `SAFIX_ENTRY`) with neither `--nixpkgs` nor `SAFIX_NIXPKGS` declared refuses before the first fragment runs, naming both remedies — drop `--entry` and run against the declaring flake, or add `--nixpkgs <flake-ref>` (or `SAFIX_NIXPKGS`), which the sandbox then resolves `nixpkgs#<attribute>` against directly instead of through `--inputs-from`.
 A user with an empty generator order is unaffected either way, because the refusal sits after the existing empty-order return, not before it.
 `safix-cli` holds the refusal's presence, its absence for an empty-order user, and both remedies named in its message.
@@ -1132,6 +1231,37 @@ It reads both sides of every declared mapping, or the ones named, per its declar
 Each mapping is reported as agreeing, diverged, or unjudgeable, and a diverged mapping's own remedy is named: `safix sync keepassxc <mapping>`.
 Entries under the declared group that no mapping declares are reported alongside as lingering information, in the same shape `sync`'s own report already gives it, and never move the exit status.
 
+## The three storage roots
+
+Safix places files in exactly three trees, and each one is a repository-relative path you name:
+
+```nix
+flake.safix.storage = {
+  encrypted        = ".safix/encrypted";
+  plaintextOutputs = ".safix/plaintext-outputs";
+  generatorRecords = ".safix/generator-records";
+};
+```
+
+The defaults are `secrets/safix`, `public/safix` and `state/safix/definitions`, so leaving the option unset changes nothing.
+Three independent roots rather than one parent: a consumer who wants one parent writes three strings sharing it and gets one ignore entry, one backup rule and one directory to move, while no single-parent option could express "the public tree lives where a static-site build can read it".
+
+Evaluation refuses a root that is empty, absolute, ends in `/` or carries a `..` component, and refuses any two of the three that are equal or nested — naming both options and both values.
+Comparison is on component boundaries, so `secrets/safix` and `secrets/safix-public` are two disjoint trees while `secrets/safix` and `secrets/safix/pub` are one inside the other.
+
+**What your own ignore, backup and exclusion rules should say.**
+Safix writes no `.gitignore` at the declaration root, and exactly one at the vault root, covering only the scratch rules file.
+Everything else is yours: the encrypted tree is ciphertext without qualification and belongs in a backup; the plaintext-output tree holds values a module reads at evaluation and belongs in the repository; the generator-record tree holds digests with no value in them and belongs in the repository too.
+With all three under one parent, an `rsync --exclude` or a backup rule naming that parent covers all of them at once.
+One caveat on a hidden root: `rg` and `fd` skip dot-directories by default, so auditing `.safix/…` needs `--hidden`.
+
+**Renaming a root.**
+Change the option, `git mv` the tree, run `safix fix`, run `safix check`.
+No re-encryption is involved in readable mode: a sops document does not embed its own path, and the in-document key names do not change — `fix` rewrites `.sops.yaml` (new directory, new `path_regex`, new header prose) and nothing else.
+A half-finished rename is visible rather than silent: between the option change and the `git mv`, `safix check` reports every governed file the regenerated policy no longer names.
+
+With a vault declared, a rename moves nothing at all inside the vault: a vault-rooted name is a hash of the entry's identity relative to its root, not of the root's spelling.
+
 ## The checks safix hands you
 
 ```nix
@@ -1164,7 +1294,7 @@ An entry carrying a `sopsFile` of its own is refused, because such a file's reci
 There is no catch-all rule and the generator emits none.
 An unmatched path must fail closed with sops' own "no matching creation rules found" rather than silently acquiring a default recipient set.
 
-Every rule is start-anchored, extension-terminated, and one directory level.
+Every rule is start-anchored under `flake.safix.storage.encrypted`, extension-terminated, and one directory level.
 Without the anchor a rule also matches its own suffix under any prefix; without the extension it reaches encrypted material safix did not place, and a `sops updatekeys` sweep would then rewrite that material's recipients — unrecoverable without the original identities.
 
 The recipient policy is generated and committed, never hand-edited.
@@ -1201,9 +1331,19 @@ Activation decrypts non-interactively and a card needs a touch, so such an ident
 | the command, exposed as `packages.safix` | `crates/safix/` |
 | the integration suite the command is held to | `crates/safix/tests/` |
 | recipient policy, in a consumer's tree | `.sops.yaml` — written by `safix fix`, never by hand; stays at the declaration root even with a vault declared |
-| encrypted values, in a consumer's tree | `secrets/safix/users/<u>/` and `secrets/safix/shared/<audience>/`, or `secrets/<opaque-hash>.yaml` at the vault root when one is declared |
-| public outputs, in a consumer's tree | `public/safix/` — plaintext, no creation rule, readable at evaluation; `public/<opaque-hash>` at the vault root when one is declared |
-| the definition each generated value was minted under | `state/safix/definitions/` — plaintext, one digest per value; `state/<opaque-hash>` at the vault root when one is declared |
+
+And the three trees safix places files in, each named by an option:
+
+| tree | option | default | with a vault declared |
+|---|---|---|---|
+| encrypted values | `flake.safix.storage.encrypted` | `secrets/safix` — `users/<u>/secrets.yaml` and `shared/<audience>/secrets.yaml` below it | `secrets/<opaque-hash>.yaml` at the vault root |
+| public outputs | `flake.safix.storage.plaintextOutputs` | `public/safix` — `users/<u>/<name>/value` and `shared/<audience>/<name>/value` below it, no creation rule, readable at evaluation | `public/<opaque-hash>` at the vault root |
+| the definition each generated value was minted under | `flake.safix.storage.generatorRecords` | `state/safix/definitions` — `<u>/<name>` and `shared/<audience>/<name>` below it, one plaintext digest per value | `state/<opaque-hash>` at the vault root |
+
+The vault's own three buckets are not configurable: a vault-rooted name is a hash of an entry's identity, so renaming a storage root moves nothing inside a vault.
+
+| concern | file |
+|---|---|
 | the vault, when `flake.safix.vault` is declared | a second git repository, at `root`; the operator's working tree of it is named by `SAFIX_VAULT_ROOT` |
 
 The option reference lives on the types themselves; this document is the narrative companion.
@@ -1219,7 +1359,7 @@ The narrowing is the runner's and lives in the workflow: a Mac that can apply a 
 
 The runtime is rust, and `packages.safix` is that binary.
 `crates/` holds a cargo workspace — `safix-core`, the runtime as an embeddable library, and `safix`, a thin command over it — built, unit-tested, linted, formatted, licence-checked, advisory-scanned and integration-tested under `nix flake check`.
-It implements all thirteen subcommands: the read paths `list`, `get`, `check` and `audit`, the write paths `set`, `edit` and `fix`, the generator graph behind `generate`, `sync`'s two targets converging the clan bridge and the password-database mirror, and the three that touch custody itself, `keygen`, `adduser` and `enroll`, plus `group` for editing a group's declared membership.
+It implements all fifteen subcommands: the read paths `list`, `get`, `view`, `check` and `audit`, the write paths `set`, `edit` and `fix`, the generator graph behind `generate`, `sync`'s two targets converging the clan bridge and the password-database mirror, and the three that touch custody itself, `keygen`, `adduser` and `enroll`, plus `group` for editing a group's declared membership and `upload` for seeding a machine's own host identity.
 The nix half was never in scope and did not move; what was replaced is a shell runtime and two python helpers, all three now deleted.
 
 The port ran behind a differential harness comparing every subcommand against the shell runtime; the five places the two differ are recorded as decisions in the changelog's "Known differences".

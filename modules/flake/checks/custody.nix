@@ -731,9 +731,11 @@
           # these two by becoming unreadable fails here as well.
           audienceFilesDistinct = map (p: {
             inherit (p) label;
-            distinct = resolve.audienceFileOf p.a != resolve.audienceFileOf p.b;
-            fileA = resolve.audienceFileOf p.a;
-            fileB = resolve.audienceFileOf p.b;
+            distinct =
+              resolve.audienceFileOf resolve.defaultStorage p.a
+              != resolve.audienceFileOf resolve.defaultStorage p.b;
+            fileA = resolve.audienceFileOf resolve.defaultStorage p.a;
+            fileB = resolve.audienceFileOf resolve.defaultStorage p.b;
           }) collidingAudiences;
 
           # The premise that claim rests on: the separator is drawn from outside

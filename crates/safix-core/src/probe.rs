@@ -84,11 +84,24 @@ impl<T: for<'borrow> From<&'borrow str>> Implements<T> {
     pub const FROM_STR: bool = true;
 }
 
+/// The `false` case for the `ToString` probe.
+pub trait ToStringFallback {
+    /// Whether the probed type can be turned into an owned string.
+    const TO_STRING: bool = false;
+}
+
+impl<T: ?Sized> ToStringFallback for Implements<T> {}
+
+impl<T: ?Sized + std::string::ToString> Implements<T> {
+    /// Whether the probed type can be turned into an owned string.
+    pub const TO_STRING: bool = true;
+}
+
 // The probe's own severity, asserted in the library rather than in a test: a
 // probe that answers `false` unconditionally would satisfy every absence
-// assertion in this crate while detecting nothing. These three say it can also
-// answer `true`, and they are the reason the bounded constants above are
-// reachable in a build with no tests in it.
+// assertion in this crate while detecting nothing. Each assertion below says
+// its own probe can also answer `true`, and together they are the reason the
+// bounded constants above are reachable in a build with no tests in it.
 const _: () = assert!(
     Implements::<u8>::DEBUG,
     "the probe must report a Debug that is present"
@@ -109,12 +122,16 @@ const _: () = assert!(
     Implements::<String>::FROM_STR,
     "the probe must report a From<&str> that is present"
 );
+const _: () = assert!(
+    Implements::<u8>::TO_STRING,
+    "the probe must report a ToString that is present"
+);
 
 #[cfg(test)]
 mod tests {
     use super::{
         DebugFallback as _, DisplayFallback as _, FromStrFallback as _, FromStringFallback as _,
-        Implements, SerializeFallback as _,
+        Implements, SerializeFallback as _, ToStringFallback as _,
     };
 
     #[test]
@@ -126,6 +143,7 @@ mod tests {
         assert!(!Implements::<Bare>::SERIALIZE);
         assert!(!Implements::<Bare>::FROM_STRING);
         assert!(!Implements::<Bare>::FROM_STR);
+        assert!(!Implements::<Bare>::TO_STRING);
     }
 
     #[test]
@@ -135,5 +153,6 @@ mod tests {
         assert!(Implements::<u8>::SERIALIZE);
         assert!(Implements::<String>::FROM_STRING);
         assert!(Implements::<String>::FROM_STR);
+        assert!(Implements::<u8>::TO_STRING);
     }
 }

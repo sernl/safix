@@ -6,6 +6,13 @@
 //! things: what the entry holds afterwards, whether anything was committed, and
 //! that no staging root survived the run — because the buffer is plaintext in a
 //! directory, and a run that refused is exactly the one most likely to leave it.
+//!
+//! The nameless form — `safix edit` with no name, which opens a picker — is
+//! not here, and deliberately: the four outcomes above are the same four
+//! whichever way the entry was named, so `crates/safix/tests/picker.rs` holds
+//! only what the nameless form adds, which is that the editor is settled before
+//! anything is offered and that the chosen entry is the one staged. Adding the
+//! four-outcome assertions there again would be the same claim twice.
 
 // A test's failure is the point; see the note at the head of `harness/mod.rs`.
 #![allow(

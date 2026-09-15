@@ -166,16 +166,18 @@ pub struct Placement {
     /// [`Placement::key`] describe a document that is never written: a public
     /// value has no ciphertext, no recipients and no creation rule.
     pub public: Option<String>,
-    /// Where this entry's definition record lives, vault-rooted-relative,
-    /// when a vault is declared; `null` otherwise.
+    /// Where this entry's definition record lives: repository-relative under
+    /// `flake.safix.storage.generatorRecords` with no vault declared,
+    /// vault-rooted-relative and opaque when one is.
     ///
-    /// Computed by the resolver from the same `namingKey` that opaques
-    /// [`Placement::file`], [`Placement::key`] and [`Placement::public`], so
-    /// that [`crate::definition::record_path`] never has to hash: it is the
-    /// one physical-name reversal site design V14 traces, and this field is
-    /// its disposition.
+    /// Always set, because the resolver computes it the way it computes
+    /// [`Placement::file`] and [`Placement::public`] — from a configured
+    /// root rather than from a literal this crate could spell too. That is
+    /// what leaves one implementation of the layout, and it is why
+    /// [`crate::definition::record_path`] neither derives a path nor, in
+    /// vault mode, a hash.
     #[serde(rename = "definitionRecord")]
-    pub definition_record: Option<String>,
+    pub definition_record: String,
     /// The readable, unhashed relative path [`Placement::file`] would carry
     /// with no vault declared; `null` when no vault is declared.
     ///
@@ -194,6 +196,15 @@ pub struct Placement {
     /// declared or this entry has no public output.
     #[serde(rename = "logicalPublic")]
     pub logical_public: Option<String>,
+    /// The readable, unhashed relative record path
+    /// [`Placement::definition_record`] would carry with no vault declared;
+    /// `null` when no vault is declared.
+    ///
+    /// Carried for the same reason [`Placement::logical_file`] is: a
+    /// migration enumerates both forms of one record without this crate
+    /// computing either hash.
+    #[serde(rename = "logicalRecord")]
+    pub logical_record: Option<String>,
 }
 
 /// `user -> name -> placement`, the whole of what the command resolves against.
@@ -1023,8 +1034,9 @@ mod tests {
           },
           "key": "api-token", "origin": "private", "owner": "alice",
           "public": null, "shared": false,
-          "definitionRecord": null, "logicalFile": null,
-          "logicalKey": null, "logicalPublic": null
+          "definitionRecord": "state/safix/definitions/alice/api-token",
+          "logicalFile": null,
+          "logicalKey": null, "logicalPublic": null, "logicalRecord": null
         }
       },
       "carol": {}

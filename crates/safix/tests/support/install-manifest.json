@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "secrets": [
+    {
+      "name": "alice-alone",
+      "key": "alice-alone",
+      "path": "/run/safix/alice-alone",
+      "owner": null,
+      "group": null,
+      "uid": 0,
+      "gid": 0,
+      "sopsFile": "/nix/store/00000000000000000000000000000000-secrets.yaml",
+      "format": "yaml",
+      "mode": "0400",
+      "restartUnits": [],
+      "reloadUnits": []
+    },
+    {
+      "name": "team-vault",
+      "key": "services/nginx/token",
+      "path": "/etc/nginx/token",
+      "owner": null,
+      "group": null,
+      "uid": 0,
+      "gid": 0,
+      "sopsFile": "/nix/store/00000000000000000000000000000000-shared.yaml",
+      "format": "yaml",
+      "mode": "0440",
+      "restartUnits": ["nginx.service"],
+      "reloadUnits": []
+    }
+  ],
+  "secretsMountPoint": "/run/safix.d",
+  "symlinkPath": "/run/safix",
+  "keepGenerations": 1,
+  "ageKeyFile": "/var/lib/safix/keys.txt",
+  "ageSshKeyPaths": ["/etc/ssh/ssh_host_ed25519_key"],
+  "useTmpfs": false,
+  "userMode": false,
+  "logging": { "keyImport": false, "secretChanges": false },
+  "manifestInputHash": null
+}

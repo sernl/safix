@@ -1,23 +1,21 @@
-# The installer safix owns at system scope: the manifest the provisioner's
-# binary will read, built by safix rather than by the provisioner's module.
+# The installer safix owns at system scope: the manifest safix builds, and the
+# program safix ships to read it.
 #
-# safix no longer uses the provisioner's installer, and still couples to the
-# `sops.*` settings a consumer tunes it with: `package`, `validationPackage`,
-# `validateSopsFiles`, `log`, `keepGenerations`, `useTmpfs`, `placeholder`,
-# `environment`, `gnupg.home`, `gnupg.sshKeyPaths` and `age.plugins` are read
-# from the provisioner's namespace rather than redeclared, so one option
-# surface tunes both packages and safix does not mint a second copy of it.
+# Every value read here is `safix.*` or the host's own. The installer's
+# settings are declarations of safix's below rather than another framework's
+# namespace read out of the same evaluation, which is what makes
+# `nixosModules.safix` importable with no flake in the tree and what keeps a
+# consumer's own use of another secrets framework independent of safix: they
+# keep every option they set, and it means only what they meant by it.
 #
-# The two store roots are manifest fields rather than NixOS options —
-# `sops-install-secrets` reads `secretsMountPoint` and `symlinkPath` from the
-# manifest JSON and consults no option — and the provisioner's builder merges
-# its `extraJson` argument over its hardcoded values (`manifest-for.nix:52`),
-# which is how its own `secrets-for-users` submodule relocates the same two
-# fields. safix does not call that builder: `nixosModules.safix` imports
-# nothing by contract, so `${inputs.sops-nix}` is not reachable from here, and
-# the copy below is instead held against the provisioner's own builder by
-# `safix-installer-manifest`, which the flake — which does have the input —
-# builds over one fixture from both builders and compares.
+# The two store roots are manifest fields as well as options — `safix install`
+# reads `secretsMountPoint` and `symlinkPath` out of the manifest JSON and
+# consults no option — and the manifest's whole schema is written down once, as
+# `Manifest` in `crates/safix-core/src/install.rs`, which refuses an unknown
+# field rather than ignoring it. A field added on this side without that
+# struct moving is therefore a failing check rather than a value the installer
+# silently drops, which is what the schema snapshot and round-trip checks in
+# `modules/flake/checks/installer.nix` hold.
 {
   config,
   options,
@@ -32,15 +30,16 @@ let
   };
 
   cfg = config.safix;
-  sopsCfg = config.sops;
 
-  # The provisioner's activation-path environment (`modules/sops/default.nix:32-44`,
-  # `with-environment.nix`): the consumer's `sops.environment`, with HOME set
-  # because sops otherwise searches an unset $HOME for ssh keys and warns, and
-  # the age plugins put on PATH because an activation script has none.
-  activationEnvironment = sopsCfg.environment // {
+  # safix's own activation-path environment: the consumer's
+  # `safix.installer.environment`, with HOME set because sops otherwise
+  # searches an unset $HOME for ssh keys and warns, and the age plugins put on
+  # PATH because an activation script has none. The plugins are the one thing
+  # that has to be found by name — sops execs them itself — so PATH carries
+  # them and nothing else.
+  activationEnvironment = cfg.installer.environment // {
     HOME = "/var/empty";
-    PATH = lib.makeBinPath sopsCfg.age.plugins;
+    PATH = lib.makeBinPath cfg.installer.agePlugins;
   };
 
   installerCall = ''
@@ -54,17 +53,26 @@ let
 
   # ── the pre-decryption identity check ──
   # The same shape as the user scope's preflight in `./home.nix`, run by the
-  # installer itself so both mechanisms carry it. A keyFile the consumer set
-  # is fatal to the binary when unreadable, so it is required on its own; ssh
-  # key paths are individually skipped by the binary with a line to stderr, so
-  # they are load-bearing only collectively and only while they are the sole
-  # source; a gnupg source decrypts on its own.
-  requiredIdentities = lib.optional (sopsCfg.age.keyFile != null && !sopsCfg.age.generateKey) {
-    path = toString sopsCfg.age.keyFile;
+  # installer script itself so both mechanisms carry it. A keyFile the consumer
+  # set is fatal to the installer when unreadable, so it is required on its
+  # own; ssh key paths are individually skipped with a line to stderr, so they
+  # are load-bearing only collectively and only while they are the sole source.
+  #
+  # A gnupg configuration counts for nothing. It is not an identity safix can
+  # decrypt with — `safix.identity` carries a key file and ssh keys and nothing
+  # else — so tolerating one would suppress safix's own refusal on the strength
+  # of a configuration safix neither wrote nor reads.
+  requiredIdentities = lib.optional (cfg.identity.keyFile != null) {
+    path = toString cfg.identity.keyFile;
     origin = "safix.identity.keyFile";
   };
 
-  hasGnupgSource = sopsCfg.gnupg.home != null || sopsCfg.gnupg.sshKeyPaths != [ ];
+  # The ssh keys this scope decrypts with: the ones a consumer named, or the
+  # ones derived from the host's own where they named none. One binding, read
+  # by the preflight, by the manifest and by the unit's mount requirements, so
+  # those three cannot disagree about what the identity is.
+  identitySshKeyPaths =
+    if cfg.identity.sshKeyPaths != [ ] then cfg.identity.sshKeyPaths else cfg.identity.derivedHostKeys;
 
   sshKeyOrigin =
     i:
@@ -73,11 +81,11 @@ let
     else
       "derived from services.openssh.hostKeys";
 
-  sufficientIdentities = lib.optionals (sopsCfg.age.keyFile == null && !hasGnupgSource) (
+  sufficientIdentities = lib.optionals (cfg.identity.keyFile == null) (
     lib.imap0 (i: p: {
       path = toString p;
       origin = sshKeyOrigin i;
-    }) sopsCfg.age.sshKeyPaths
+    }) identitySshKeyPaths
   );
 
   note = identity: state: lib.escapeShellArg "${identity.path}  (${state}) — ${identity.origin}";
@@ -101,7 +109,7 @@ let
 
   preflightRemediation = ''
 
-    ${toString (builtins.length installedEntries)} secret(s) are declared to arrive in ${cfg.installer.symlinkPath}, and none
+    ${toString (builtins.length resolvedEntries)} secret(s) are declared to arrive in ${cfg.installer.symlinkPath}, and none
     of the paths above is a readable decryption identity.
 
     On a host where another secret store places the identity, the usual cause
@@ -113,7 +121,7 @@ let
 
     Presence and readability were checked; decryption was not. A key that
     exists and is readable but is not a recipient of these files still fails
-    afterwards, in sops-install-secrets.
+    afterwards, inside safix's own installer, when it decrypts.
   '';
 
   installerScript = pkgs.writeShellScript "safix-install-secrets" ''
@@ -138,22 +146,53 @@ let
 
     unset safixIdentityFailures safixIdentityCandidates safixIdentityUsable
 
-    exec ${sopsCfg.package}/bin/sops-install-secrets ${manifest}
+    # Both tools by store path rather than through PATH. An activation script
+    # inherits no PATH worth relying on, and the backend must be the build
+    # safix pinned rather than whatever the caller happens to have: a
+    # divergence in creation-rule interpretation or MAC handling is a silently
+    # re-encrypted secret.
+    export SAFIX_SOPS=${pkgs.sops}/bin/sops
+    export SAFIX_SSH_TO_AGE=${pkgs.ssh-to-age}/bin/ssh-to-age
+
+    exec ${cfg.installer.package}/bin/safix install ${manifest}
   '';
 
-  # Read from the typed set rather than from the raw resolution, so every
-  # entry has passed the provisioner's own `secretType`
-  # (`modules/sops/default.nix:46`): its mode, owner, group, uid and gid
-  # coercions, its `sopsFile` default, and the `sopsFileHash` default that
-  # forces `builtins.hashFile "sha256"` under `validateSopsFiles` (`:51-53`).
-  installedEntries = builtins.attrValues config.safix.installed;
+  # The option a consumer reads and the set this manifest is built from are one
+  # value, not two computations of one contract: `config.safix.secrets` is the
+  # whole of what safix reports arrived at this scope, typed by
+  # `common.secretEntryType` — safix's own submodule, which is where each
+  # entry's twelve manifest fields and their defaults live, including the path
+  # the entry arrives at.
+  resolvedEntries = builtins.attrValues config.safix.secrets;
 
-  # Copied from the provisioner's builder (`manifest-for.nix:11-28`), under the
-  # same `validateSopsFiles` gate it carries there. The copy is load-bearing:
-  # neither refusal travels with the provisioner's option type — `pathNotInStore`
-  # is applied to `sops.age.keyFile` and never to a secret entry, whose
-  # `sopsFile` is plain `lib.types.path` — so leaving the builder behind leaves
-  # both refusals behind with it.
+  # The documents the manifest names, each once. The installer decrypts per
+  # document rather than per entry, and the hash below is per document for the
+  # same reason: one audience gets one file, so the set is small by
+  # construction and shared by construction.
+  distinctSopsFiles = lib.unique (map (secret: secret.sopsFile) resolvedEntries);
+
+  # What replaces the per-entry `sopsFileHash` safix's own type deliberately
+  # does not carry: one hash over every distinct document, which is what makes
+  # this derivation a function of the ciphertext and so makes editing a
+  # document cause a rebuild. The installer never reads the field — `Manifest`
+  # deserializes it into an option it ignores — so its only purpose is the
+  # derivation hash, and it is emitted only under the same switch that gates
+  # the two refusals below, because a consumer who turned validation off has
+  # asked not to read the documents at build time at all.
+  manifestInputHash =
+    if cfg.installer.validate then
+      builtins.hashString "sha256" (
+        lib.concatMapStrings (file: builtins.hashFile "sha256" file) distinctSopsFiles
+      )
+    else
+      null;
+
+  # safix's own two refusals, under `safix.installer.validate`. They live in
+  # the builder rather than in the entry type because the type asks nothing
+  # about the filesystem: an entry whose document is absent, or lies outside
+  # the nix store, passes the type unchanged. Without this block nothing
+  # refuses at all and the installer meets the missing document at activation
+  # instead, on a host, where a build is where it should have been caught.
   failedAssertions = builtins.foldl' (
     acc: secret:
     acc
@@ -175,71 +214,222 @@ let
             file = secret.sopsFile;
           }
         )
-  ) [ ] installedEntries;
+  ) [ ] resolvedEntries;
 
   manifest =
-    if sopsCfg.validateSopsFiles && failedAssertions != [ ] then
+    if cfg.installer.validate && failedAssertions != [ ] then
       throw "\nFailed assertions:\n${lib.concatStringsSep "\n" (map (x: "- ${x}") failedAssertions)}"
     else
       pkgs.writeTextFile {
         name = "safix-manifest.json";
         text = builtins.toJSON {
-          secrets = installedEntries;
+          # The schema version `Manifest::validate_version` reads. A manifest
+          # naming a version the binary does not know is refused naming both
+          # numbers, rather than decoded field by field on a best-effort
+          # basis, which is the whole reason the field exists.
+          version = 1;
 
-          # safix has no template concept; the field is carried for schema
-          # parity with the provisioner's builder, whose emitted field set
-          # `safix-installer-manifest` holds this file to.
-          templates = [ ];
+          secrets = resolvedEntries;
 
           secretsMountPoint = cfg.installer.secretsMountPoint;
           symlinkPath = cfg.installer.symlinkPath;
-          keepGenerations = sopsCfg.keepGenerations;
-          gnupgHome = sopsCfg.gnupg.home;
-          sshKeyPaths = sopsCfg.gnupg.sshKeyPaths;
-          ageKeyFile = sopsCfg.age.keyFile;
-          ageSshKeyPaths = sopsCfg.age.sshKeyPaths;
-          useTmpfs = sopsCfg.useTmpfs;
+          keepGenerations = cfg.installer.keepGenerations;
+          ageKeyFile = cfg.identity.keyFile;
+          ageSshKeyPaths = identitySshKeyPaths;
+          useTmpfs = cfg.installer.useTmpfs;
 
-          # Read for schema parity and empty in practice: the provisioner
-          # defines `placeholder` only under `mkIf (config.sops.templates != { })`
-          # and maps it over `config.sops.secrets`
-          # (`modules/sops/templates/default.nix:116`, `:130-134`), and safix
-          # leaves both empty.
-          placeholderBySecretName = sopsCfg.placeholder;
-
+          # System scope mounts its store, chowns what it writes, and
+          # propagates restarts. The user scope's manifest says `true` here
+          # and gets none of the three, because each needs privileges that
+          # scope does not have.
           userMode = false;
+
           logging = {
-            keyImport = builtins.elem "keyImport" sopsCfg.log;
-            secretChanges = builtins.elem "secretChanges" sopsCfg.log;
+            keyImport = builtins.elem "keyImport" cfg.installer.log;
+            secretChanges = builtins.elem "secretChanges" cfg.installer.log;
           };
+
+          inherit manifestInputHash;
         };
 
-        # The provisioner's own checkPhase (`manifest-for.nix:54-58`), run by
-        # the binary that will read the manifest, mirroring its conditional
+        # Checked at build time by the same program that will read it, in the
+        # mode `safix.installer.validate` selects, mirroring that conditional
         # rather than picking a branch of it. The branch is load-bearing and
-        # `manifest` is the tempting, weaker half: `validateSopsFiles` defaults
-        # true, so `sopsfile` is what runs over safix's entries today — it
-        # reads each ciphertext and verifies each declared `key` resolves —
-        # where `manifest` mode returns a stub without reading the file
-        # (`main.go:503-505`) and skips the key-presence check (`:558`),
-        # validating the JSON schema and nothing else.
+        # `manifest` is the tempting, weaker half: it validates the schema, the
+        # version, every mode's octal parse and every owner and group
+        # resolution, and never opens a document, where `document`
+        # additionally opens each named document and verifies every declared
+        # key is in it. Neither mode decrypts: a sops document carries its
+        # mapping keys in the clear, so key presence is readable without an
+        # identity, which is what lets the stronger mode be the default inside
+        # a build sandbox that holds none.
+        #
+        # `--ignore-passwd` because a build sandbox has no user database: a
+        # mode that guessed a uid would be validating a resolution it cannot
+        # perform, and the switch says so rather than guessing.
+        #
+        # `validationPackage` rather than `package`: this runs on the build
+        # platform where the activation invocation runs on the host's, and
+        # collapsing the two would make every cross build fail here.
         checkPhase = ''
-          ${sopsCfg.validationPackage}/bin/sops-install-secrets -check-mode=${
-            if sopsCfg.validateSopsFiles then "sopsfile" else "manifest"
-          } "$out"
+          ${cfg.installer.validationPackage}/bin/safix install --check-mode=${
+            if cfg.installer.validate then "document" else "manifest"
+          } --ignore-passwd "$out"
         '';
       };
 in
 {
   options.safix.installer = {
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.safix or (throw common.installerPackageMessage);
+      defaultText = lib.literalExpression "pkgs.safix";
+      description = ''
+        The safix build whose `safix install` an activation on this host runs.
+
+        Defaults to `pkgs.safix`, which is what a consumer who has safix in
+        their package set already has. A consumer who reaches safix only
+        through a flake input sets this to
+        `inputs.safix.packages.''${pkgs.stdenv.hostPlatform.system}.safix`:
+        this module imports nothing, by contract, so it has no input of its own
+        to read a package out of, and a module that guessed one would make
+        every consumer's evaluation seam part of safix's interface.
+      '';
+    };
+
+    validationPackage = lib.mkOption {
+      type = lib.types.package;
+      default =
+        if pkgs.stdenv.buildPlatform == pkgs.stdenv.hostPlatform then
+          cfg.installer.package
+        else
+          pkgs.pkgsBuildBuild.safix or (throw common.installerPackageMessage);
+      defaultText = lib.literalExpression "safix.installer.package, or the build-platform build under a cross build";
+      description = ''
+        The safix build that checks the manifest while the manifest derivation
+        is being built.
+
+        Two options rather than one because the two run on different platforms:
+        this one runs inside the build, on the build platform, where
+        `safix.installer.package` runs at activation, on the host's. They are
+        the same value whenever those platforms are, and collapsing them would
+        make every cross build fail on a binary it cannot execute.
+      '';
+    };
+
+    validate = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether the manifest is checked against its documents at build time.
+
+        On, this selects `safix install --check-mode=document`, which opens
+        each named document and verifies every declared key is in it, and it
+        refuses at evaluation a document that does not exist or lies outside
+        the nix store. Off, the check is `--check-mode=manifest`, which
+        validates the schema, the version, every mode's octal parse and every
+        owner and group resolution without opening a document at all.
+
+        Neither mode decrypts. A sops document carries its mapping keys in the
+        clear, so key presence is readable without an identity, which is why
+        the stronger mode is the default even though a build sandbox holds no
+        identity.
+
+        It also governs `manifestInputHash`: on, the manifest carries one hash
+        over every distinct document it names, so editing a document changes
+        this derivation and causes a rebuild. Off, the field is null and a
+        document edit changes nothing here.
+
+        Turn it off for a tree whose documents are not present at evaluation
+        time — a fixture naming paths no committed file backs, most often — and
+        accept that both refusals then arrive on a host instead.
+      '';
+    };
+
+    keepGenerations = lib.mkOption {
+      type = lib.types.int;
+      default = 1;
+      description = ''
+        How many generation directories under
+        `safix.installer.secretsMountPoint` the installer keeps after a
+        successful install, newest first. One is enough to answer what is
+        installed now; a larger number keeps the previous values readable,
+        which is a decision about the store's contents rather than about disk.
+        Zero keeps every generation, since there is then nothing to prune to.
+      '';
+    };
+
+    useTmpfs = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether the secret store is a tmpfs rather than a ramfs.
+
+        ramfs is the default because it cannot be swapped at all. tmpfs is
+        mounted with `noswap` where the kernel supports it, and safix falls
+        back to a tmpfs without that flag where it does not — which is a
+        filesystem a secret can reach swap through, and the reason this is not
+        the default.
+      '';
+    };
+
+    log = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.enum [
+          "keyImport"
+          "secretChanges"
+        ]
+      );
+      default = [ ];
+      example = [ "secretChanges" ];
+      description = ''
+        Which of the installer's two optional log classes reach the journal:
+        `keyImport` reports each identity the installer assembled, and
+        `secretChanges` reports each entry that was new or whose value changed
+        against the previous generation. Neither names a value.
+
+        Empty by default, because each says something about which secrets exist
+        and when they moved to anyone who reads the journal.
+      '';
+    };
+
+    environment = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = {
+        SOPS_GPG_EXEC = "/run/current-system/sw/bin/gpg2";
+      };
+      description = ''
+        Extra environment variables the installer runs with, on both the
+        activation-script and the unit path. `HOME` and `PATH` are set by safix
+        over whatever this names: an unset HOME makes sops search for ssh keys
+        and warn, and PATH is the age plugins alone.
+      '';
+    };
+
+    agePlugins = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ pkgs.age-plugin-yubikey ]";
+      description = ''
+        age plugin packages the installer puts on PATH.
+
+        They are on PATH rather than referenced by store path because sops
+        execs them itself, by the name the recipient string carries, so a store
+        path safix computed would never be consulted. Everything else the
+        installer runs — the backend and the ssh key converter — is a store
+        path and is never taken from PATH.
+      '';
+    };
+
     secretsMountPoint = lib.mkOption {
       type = lib.types.str;
       default = "/run/safix.d";
       description = ''
         Where safix's installer keeps its generation directories. A manifest
-        field rather than a provisioner option: `sops-install-secrets` reads it
-        from the manifest JSON, so this store is safix's own and disjoint from
-        any store another component of the host owns.
+        field as well as an option — `safix install` reads it out of the
+        manifest JSON and consults no option — so this store is safix's own and
+        disjoint from any store another component of the host owns.
       '';
     };
 
@@ -272,12 +462,15 @@ in
       description = ''
         Whether safix installs its secrets from a systemd unit rather than
         from an activation script. Defaults from the host's own
-        user-management options — the same condition the provisioner and its
-        secrets-for-users submodule both compute — and deliberately not from
-        `sops.useSystemdActivation`: that switch now governs an installer
-        safix no longer uses, and it is global to every consumer of the
-        provisioner in the tree, so reading it would couple safix's mechanism
-        to a foreign installer's setting.
+        user-management options, because which mechanism can install secrets
+        early enough is a fact about the host rather than a preference: where
+        systemd-sysusers or userborn create users, the users exist only once a
+        unit has run, so an activation script is too early.
+
+        No switch belonging to another installer is consulted to decide it.
+        Such a switch is global to every consumer of that installer in the
+        tree, so reading it would couple safix's mechanism to a setting made
+        about a different program.
       '';
     };
 
@@ -314,33 +507,62 @@ in
       ed25519 entries of `services.openssh.hostKeys` whose paths lie outside
       safix's own secret store.
 
-      The exclusion prefix is `safix.installer.symlinkPath` rather than the
-      `/run/secrets` the provisioner's filter hardcodes
-      (`modules/sops/default.nix:181-191`), because the exclusion exists to
-      avoid decrypting with a key this installer itself deploys, and that is a
-      statement about this package's store. A host key another store placed
-      under `/run/secrets` before safix runs is exactly the identity safix
-      should decrypt with. An identity named through
-      `safix.identity.sshKeyPaths` or `safix.identity.keyFile` always wins,
-      and turning this off makes the derivation contribute nothing.
+      The exclusion prefix is `safix.installer.symlinkPath` rather than any
+      other store's root, because the exclusion exists to avoid decrypting
+      with a key this installer itself deploys, and that is a statement about
+      this package's store. A host key another store placed under
+      `/run/secrets` before safix runs is exactly the identity safix should
+      decrypt with. An identity named through `safix.identity.sshKeyPaths` or
+      `safix.identity.keyFile` always wins, and turning this off makes the
+      derivation contribute nothing.
+    '';
+  };
+
+  # The derivation itself, as a read-only option rather than a `let` binding,
+  # because two files need the same list: this one builds the manifest and the
+  # unit's mount requirements from it, and `./nixos.nix` asks whether anything
+  # can decrypt at all while `safix.secrets` is being forced. One declaration
+  # is what keeps the two from disagreeing about what the identity is.
+  #
+  # A default rather than a definition, so it is computable while the option
+  # tree is being forced and carries no `mkIf` that could make it depend on
+  # `safix.enable` — whose own default reads `safix.secrets`, which is where
+  # this is read from.
+  options.safix.identity.derivedHostKeys = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    readOnly = true;
+    internal = true;
+    default =
+      if cfg.identity.deriveHostKeys && config.services.openssh.enable then
+        map (e: e.path) (
+          lib.filter (
+            e: e.type == "ed25519" && !(lib.hasPrefix cfg.installer.symlinkPath e.path)
+          ) config.services.openssh.hostKeys
+        )
+      else
+        [ ];
+    defaultText = lib.literalExpression "the ed25519 entries of config.services.openssh.hostKeys outside safix's own store";
+    description = ''
+      The ssh host keys `safix.identity.deriveHostKeys` yields on this host:
+      read-only, and what `safix.identity.sshKeyPaths` falls back to where a
+      consumer named none.
     '';
   };
 
   config = lib.mkIf cfg.enable {
-    # Mirrors the provisioner's `system.build.sops-nix-manifest`
-    # (`modules/sops/default.nix:534`), so checks read one concrete attribute
-    # rather than rebuilding the derivation each time. The installer script is
-    # exposed beside it so a check can hold the preflight's text without
-    # running it.
+    # One concrete attribute per artifact, so a check reads what a host would
+    # run rather than rebuilding the derivation each time. The installer
+    # script is exposed beside the manifest so a check can hold the
+    # preflight's text without running it.
     system.build.safix-manifest = manifest;
     system.build.safix-installer = installerScript;
 
-    # The name is load-bearing. Both the provisioner and clan register their
-    # installers as `setupSecrets`, and two definitions of one step name merge
-    # into a single node whose halves run in definition order — one node in
-    # the activation DAG has no edge to state. An entry named
-    # `safixInstallSecrets` is its own node, which is what makes the
-    # consumer-named ordering below expressible at all.
+    # The name is load-bearing. Other secret installers register themselves as
+    # `setupSecrets`, and two definitions of one step name merge into a single
+    # node whose halves run in definition order — one node in the activation
+    # DAG has no edge to state. An entry named `safixInstallSecrets` is its own
+    # node, which is what makes the consumer-named ordering below expressible
+    # at all.
     system.activationScripts.safixInstallSecrets = lib.mkIf (!cfg.installer.useSystemdActivation) (
       lib.stringAfter
         (
@@ -360,10 +582,9 @@ in
       }
     );
 
-    # The unit form, mirroring the provisioner's wiring
-    # (`modules/sops/default.nix:467-495`) including its
-    # `sysinit-reactivation.target` relationship, so the unit re-runs on a
-    # `nixos-rebuild switch` rather than only at boot.
+    # The unit form, including its `sysinit-reactivation.target` relationship,
+    # so the unit re-runs on a `nixos-rebuild switch` rather than only at
+    # boot.
     systemd.services.safix-install-secrets = lib.mkIf cfg.installer.useSystemdActivation {
       wantedBy = [ "sysinit.target" ];
       after = [
@@ -374,10 +595,10 @@ in
       ++ cfg.installer.afterUnits;
       requiredBy = [ "sysinit-reactivation.target" ];
       before = [ "sysinit-reactivation.target" ];
-      environment = sopsCfg.environment // {
+      environment = cfg.installer.environment // {
         SOPS_RESTART_UNITS_VIA_SYSTEMCTL = "1";
       };
-      path = sopsCfg.age.plugins;
+      path = cfg.installer.agePlugins;
 
       serviceConfig = {
         Type = "oneshot";
@@ -387,10 +608,8 @@ in
       unitConfig = {
         DefaultDependencies = "no";
         RequiresMountsFor = lib.concatLists [
-          (lib.lists.optional (sopsCfg.gnupg.home != null) sopsCfg.gnupg.home)
-          sopsCfg.gnupg.sshKeyPaths
-          (lib.lists.optional (sopsCfg.age.keyFile != null) sopsCfg.age.keyFile)
-          sopsCfg.age.sshKeyPaths
+          (lib.lists.optional (cfg.identity.keyFile != null) cfg.identity.keyFile)
+          identitySshKeyPaths
         ];
       };
     };

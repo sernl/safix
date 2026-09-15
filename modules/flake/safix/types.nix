@@ -100,8 +100,11 @@ let
           entry's audience picks, exactly as the entry a generator is declared
           on is written.
 
-          false writes it to `public/safix/…/<name>/value` in plaintext, gives
-          it no creation rule, and makes it readable at evaluation. That is what
+          false writes it in plaintext under
+          `flake.safix.storage.plaintextOutputs`, at a path naming the entry's
+          audience and then the output — a directory per output holding a file
+          called `value` — gives it no creation rule, and makes it readable at
+          evaluation. That is what
           a public key, a fingerprint or a derived identifier is for: a nix
           module reads it directly rather than through a deployment-time
           indirection, which is how the keypair samples this contract was taken
@@ -113,11 +116,13 @@ let
           not — the value is in the repository's history, and only minting a new
           one revokes it.
 
-          The public store sits under its own top-level prefix rather than
-          inside `secrets/`, because a path named for secrets has to mean that
+          The plaintext-output tree is its own root, disjoint from the
+          encrypted one, because a tree named for encryption has to mean that
           everything under it is encrypted without qualification. That is the
-          proposition every backup rule, every sync exclusion and every reviewer
-          applies to it.
+          proposition every backup rule, every sync exclusion and every
+          reviewer applies to it, and evaluation refuses any configuration
+          whose roots overlap rather than leaving it to two literals happening
+          not to.
         '';
       };
     };

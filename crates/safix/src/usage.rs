@@ -292,6 +292,54 @@ safix get [<user>] <name>
 Decrypt that one key to stdout. The output is plaintext by design and is meant
 for piping. It needs an identity that opens the file, which is the owner's or a
 recovery identity theirs names.
+
+`get` is the pipe. `safix view` is the verb that shows a value on a terminal and
+can offer a choice of what to show; a script wants this one.
+";
+
+/// `safix view -h`.
+pub const VIEW: &str = "\
+safix view [--no-preview] [<user>] [<name>]
+safix view [--no-preview] [<user>]
+
+Decrypt one key to the terminal. `safix get` writes the value to stdout and is
+what a pipeline calls; this writes it to the terminal, so a pipeline wants
+`get`. With no terminal to write to, the value goes to stdout instead \u{2014} what
+needs a terminal here is offering a choice, not writing a value.
+
+With no <name>, every entry <user> holds is offered for selection, showing the
+same six columns `safix list` prints: the name, where it came from, whether one
+value serves every carrier, whether a generator mints it, the key it is read
+under, and the file serving it. Type to narrow the list, move with the arrows or
+^P and ^N, enter to read the highlighted entry, escape to leave. Choosing is a
+way of naming: the run proceeds exactly as though the chosen name had been
+given.
+
+A lone argument is a user when flake.safix.users declares one by that name, and
+an entry's name otherwise. An entry whose name is also a person's is reachable
+by naming both.
+
+\u{2500}\u{2500} the preview \u{2500}\u{2500}
+The highlighted entry's value is decrypted and shown once the highlight has
+rested, so moving through twelve entries decrypts none of the eleven passed
+through. Exactly one decrypted value is held at any moment: the previous one is
+dropped and overwritten before the next is read. The rendering is bounded to the
+region, control bytes are shown as placeholders, and a value that is not valid
+text is described by its size. It is drawn in a region the terminal clears on
+exit, so no value enters scrollback, and nothing is staged: no plaintext of a
+previewed value reaches a file at any point. A value that does not decrypt is
+reported in the region and the list stays usable \u{2014} failing to show one value
+says nothing about choosing another.
+
+--no-preview offers the same list and decrypts nothing until a choice is made,
+for a shared screen, a recording, or a session whose scrollback you do not
+control.
+
+\u{2500}\u{2500} the three refusals \u{2500}\u{2500}
+  no terminal to choose on   name the entry, or `safix list` what the user holds
+  the user holds nothing     a state of the declarations, not of the session
+  left without choosing      nothing written, nothing decrypted kept, the
+                             terminal as it was found
 ";
 
 /// `safix list -h`.
@@ -324,12 +372,13 @@ convergences — a value is minted or typed, an unclaimed one is declared or
 deleted, and a value whose generator has changed is either regenerated or the
 edit is reverted — so nothing here does them for you.
 
-The last class is answered from state/safix/definitions/, where `generate` records
-a digest of the definition it minted under, in the same commit as the value. A
-value with no record predates the record and is not a finding: no record, no
-claim. A record whose format tag this version does not write gets the same answer,
-which is what keeps a change to what the digest covers from reporting the whole
-tree as drifted.
+The last class is answered from the generator-record tree — one plaintext file per
+generated value, under `flake.safix.storage.generatorRecords`, which defaults to
+state/safix/definitions/. `generate` writes a digest of the definition it minted
+under there, in the same commit as the value. A value with no record predates the
+record and is not a finding: no record, no claim. A record whose format tag this
+version does not write gets the same answer, which is what keeps a change to what
+the digest covers from reporting the whole tree as drifted.
 
 It needs no identity for any file it examines: every question above is answered
 from the document's structure and from that plaintext record, and nothing on this
@@ -645,7 +694,7 @@ attributed to cannot disagree.
 /// The shell runtime's own general usage, word for word: this binary implements
 /// every subcommand it lists.
 pub const EDIT: &str = "\
-safix edit [--allow-disk-staging] [<user>] <name>
+safix edit [--allow-disk-staging] [--no-preview] [<user>] [<name>]
 
 Open $VISUAL, or $EDITOR when that is unset, on <name>'s value. Neither set is a
 refusal naming both: this command opens no editor of its own choosing, because
@@ -682,6 +731,18 @@ discovered.
 
 A public output is not editable here: it is already plaintext in the repository,
 and the generator declaring it is what mints it.
+
+\u{2500}\u{2500} with no <name> \u{2500}\u{2500}
+Every entry <user> holds is offered for selection, the way `safix view` offers
+them and through the same code, less every public output \u{2014} a public value is
+not editable, so it is not among the choices either. The editor is settled
+before the list opens: a refusal after you have browsed and had values
+decrypted for a preview is a refusal that wasted your time. --no-preview
+suppresses the preview here too.
+
+The three refusals are `safix view`'s: no terminal to choose on, naming both
+remedies; the user holds nothing editable; and leaving without choosing, which
+writes nothing and leaves the terminal as it was found.
 ";
 
 /// `safix upload -h`.
@@ -731,12 +792,56 @@ Any deploy, switch or rebuild. Nothing here triggers one: the machine's own
 next rebuild is what activates what was written here.
 ";
 
+/// `safix install -h`.
+pub const INSTALL: &str = "\
+safix install <manifest> [--check-mode=off|manifest|document] [--ignore-passwd]
+                         [--dry-run]
+
+Install the entries one manifest names: mount the store, assemble the identity,
+decrypt each document once, write this activation's generation, restart what
+changed, and move the store's symlink onto it.
+
+This is the verb an activation runs, not one an operator types. A NixOS
+activation script and a home-manager activation entry each invoke it against a
+manifest safix's own nix half built; nothing about a person's own workflow
+reaches it, and the manifest is the whole input \u{2014} including whether this is a
+user-scope install, which is a field of the manifest rather than a flag here.
+
+\u{2500}\u{2500} --check-mode: how much of the manifest is verified \u{2500}\u{2500}
+  off        the default: install, checking each step as far as it needs
+  manifest   validate the schema, the version, every mode's octal parse and
+             every owner and group, then stop. Opens no document at all
+  document   everything manifest does, and additionally open each distinct
+             document and verify that every declared key is in it
+
+Neither check mode decrypts anything, and neither needs a key. The document
+mode reads the document's cleartext structure: sops enciphers leaf values and
+leaves the mapping keys in the clear, so whether a declared key is in its
+document is answerable from the bytes. That is what lets the build-time check
+of the manifest derivation run in the document mode inside a sandbox holding
+no identity, so a manifest naming a key no document holds fails the build
+rather than the activation. It is the mode that check uses unless the consumer
+turned validation off.
+
+\u{2500}\u{2500} --ignore-passwd \u{2500}\u{2500}
+Skip every user, group and keys-group lookup and set ownership to 0. What a
+check inside a nix build needs, where none of those users exist, and what a
+dry activation gets too.
+
+\u{2500}\u{2500} --dry-run \u{2500}\u{2500}
+Perform every step except the atomic swap of the store's symlink, so a dry
+activation is informative rather than a no-op. NIXOS_ACTION=dry-activate in the
+environment implies it, which is what makes the module's supportsDryActivation
+a claim about this program rather than about the script invoking it.
+";
+
 pub const SCAFFOLD: &str = "\
 safix \u{2014} the whole lifecycle of one secret, by name and never by file.
 
   safix set      [<user>] <name>                    write a value you type
-  safix edit     [<user>] <name>                    author a value in your editor
+  safix edit     [<user>] [<name>]                  author a value in your editor
   safix get      [<user>] <name>                    decrypt one key to stdout
+  safix view     [<user>] [<name>]                  browse and read, with a preview
   safix list     [<user>]                           every name a user holds
   safix generate [--regenerate] [--yes] [<user>] [<name>]
                                                     mint values from generators
@@ -751,6 +856,8 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix group    add|remove <group> <subject>       edit a group's membership
   safix upload   <machine> --directory DIR | --to ADDRESS
                                                     seed a machine's host identity
+  safix install  <manifest> [--check-mode=...] [--dry-run]
+                                                    what an activation runs
 
 \u{2500}\u{2500} global options \u{2500}\u{2500}
   --entry <file>          evaluate <file> instead of the repository's flake
@@ -758,8 +865,8 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                           flake reference instead of the declaring one
 
 SAFIX_ENTRY and SAFIX_NIXPKGS set the same two, and --entry and --nixpkgs win
-when both a flag and its variable are given. Thirteen of the fourteen
-subcommands behave identically under --entry as against a flake; generate is
+when both a flag and its variable are given. Every subcommand but generate
+behaves identically under --entry as against a flake; generate is
 the exception and refuses under --entry with neither --nixpkgs nor
 SAFIX_NIXPKGS set, naming both remedies. Neither option changes where a run
 stages or commits: that root is still the one git reports for the current
@@ -838,7 +945,7 @@ rather than more rows in `check`.
   upload   moves only a machine's own host identity, once, before that
            machine's first activation \u{2014} not clan's ongoing vars-delivery verb
            of the same name. No verb here delivers a secret's value on an
-           ongoing basis: activation already does, through sops-nix reading
-           the committed file, once a machine holds the identity this verb
-           seeds.
+           ongoing basis: activation already does, through `safix install`
+           reading the manifest safix's own nix half built, once a machine
+           holds the identity this verb seeds.
 ";

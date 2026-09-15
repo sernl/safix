@@ -9,6 +9,12 @@
           pkgs.jq
           pkgs.sops
 
+          # The installer's identity assembly converts each configured ssh key
+          # through this, as a subprocess behind `SAFIX_SSH_TO_AGE`, so a local
+          # run of the install suite needs it on PATH for the same reason the
+          # checks pin it.
+          pkgs.ssh-to-age
+
           # The integration suite drives these against a throwaway repository,
           # and pinning them here is what makes a local `cargo test` and the
           # check that runs the same test the same backends. `strace` is the

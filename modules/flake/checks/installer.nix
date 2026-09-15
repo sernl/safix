@@ -1,55 +1,43 @@
 # Holds the installer safix owns to the facts it is built on, before and beside
-# the code that builds it. Revisions are the ones `flake.lock` pins; every line
-# anchor below was read at one of them.
+# the code that builds it. Every anchor below is a symbol name rather than a
+# line, because line numbers drift and names survive.
 #
-# ── the mechanism ──
-# `sops-install-secrets` reads `secretsMountPoint` and `symlinkPath` from the
-# manifest JSON, never from a NixOS option, and the provisioner's builder
-# hardcodes both (`modules/sops/manifest-for.nix:36-38`) only to merge its
-# `extraJson` argument over them (`:52`). That merge is the whole mechanism this
-# change rests on, so it is held two ways: a manifest built by the provisioner's
-# own `manifest-for.nix` with an `extraJson` naming two other roots carries
-# those roots rather than the hardcoded ones, and the provisioner's own
-# `secrets-for-users` submodule is read back doing exactly this to itself
-# (`modules/sops/secrets-for-users/default.nix:24-27`), through the manifest it
-# exposes as `system.build.sops-nix-users-manifest` (`:87`). Both are jq'd out
-# of built manifests rather than out of the expressions that produced them.
-#
-# ── the option surface that is not there ──
-# The NixOS option tree offers neither root: every option path under
-# `options.sops` of an evaluated system configuration is enumerated, submodules
-# included, and none names a secrets mount point or a symlink path. The
-# home-manager scope's `sops.defaultSymlinkPath` and
-# `sops.defaultSecretsMountPoint` (`modules/home-manager/sops.nix:184`, `:193`)
-# are enumerated the same way and both exist, which is what makes the absence at
-# system scope a fact about that scope rather than about the enumeration.
-#
-# ── the merge that makes ordering inexpressible ──
-# A fixture system configuration defines `system.activationScripts.setupSecrets`
-# twice, once in the shape the provisioner uses (`modules/sops/default.nix:497-515`)
-# and once in clan's (`nixosModules/clanCore/vars/secret/age.nix:259-276`).
-# `deps` is `listOf str` and `text` is `types.lines`
-# (`nixos/modules/system/activation/activation-script.nix:101-107`), so the two
-# definitions become one activation step whose text carries both bodies and
-# whose dependency set is the union of the two lists — one node in the DAG, and
-# a single node has no edge to state. The wrapper the step runs under carries an
-# `ERR` trap and no `set -e` (`activation-script.nix:62-63`), which is why a
-# failed half records a status and the other half still runs; that record is
-# held here rather than asserted in prose.
+# ── the entry type safix declares ──
+# `safix-installer-type` reads `common.secretEntryType`'s own sub-options and
+# holds the field-name set and every literal default against an accepted
+# literal, so a field added, removed or re-defaulted is a failing check rather
+# than a manifest that quietly grew or lost a key. Three defaults — `name`,
+# `key` and `path` — are functions of the submodule's own configuration and so
+# cannot be asked for a value outside an `attrsOf`; what is held for those is
+# that each carries a default at all, and `path`'s value is held beside it over
+# a two-entry fixture, one entry declaring a path and one not.
 #
 # ── the manifest safix writes ──
-# `safix-installer-manifest` evaluates a fixture system configuration through
-# the exported module, builds `system.build.safix-manifest`, and holds it three
-# ways: it parses, its two roots are safix's own rather than the provisioner's,
-# and its `userMode` is false. The same fixture's entries are then run through
-# the provisioner's own builder from `inputs.sops-nix` — which the flake has
-# and the exported module deliberately does not — and the two manifests' JSON
-# key sets are asserted equal, so a field the provisioner adds reddens this
-# check on the commit that moves the pin rather than reaching a host. The
-# fixture sets `sops.validateSopsFiles = false` because the fixture fleet's
-# sops files are paths into this flake that no committed file backs; that
-# selects the checking branch that never reads ciphertext, and the branch
-# itself stays the module's conditional rather than a value this check pins.
+# `safix-installer-schema` builds `system.build.safix-manifest` over a fixture
+# system configuration and diffs its whole structure — every key, every value —
+# against a committed expected file, with the two values no snapshot can carry
+# normalized rather than dropped: each `sopsFile` is reduced to its path below
+# the store, and nothing else is touched. A field the nix half adds, removes or
+# renames without the `serde` struct moving reddens this on the commit that
+# makes the change; a field the `serde` struct gains without the nix half
+# emitting it reddens `safix-installer-roundtrip` beside it, which is the other
+# side of the same boundary.
+#
+# ── the manifest the program accepts, and the four it does not ──
+# `safix-installer-roundtrip` runs the real `safix install` over the real
+# manifest in two tiers. The schema tier accepts the built manifest and refuses
+# four single-field mutations of it — an unknown schema version, a mode that is
+# not octal, an unknown top-level field and an unknown entry field — each
+# refusal read for the field it names. The document tier is a second fixture
+# because it has to be: the fleet's sops files are paths into this flake that no
+# committed file backs, so a document-mode run over the built manifest would
+# refuse for want of a file rather than for want of a key. That tier encrypts a
+# document in the sandbox, accepts a manifest whose key resolves in it, and
+# refuses one whose key does not — which is the mutation the schema tier cannot
+# express, and the evidence the two check modes are not interchangeable.
+# `--ignore-passwd` is given throughout: a build sandbox has no users to
+# resolve, and a mode that guessed them would be validating a resolution it
+# cannot perform.
 #
 # ── the store and the entry default, one claim ──
 # `safix-installer-store` reads the built manifest of the same fixture twice,
@@ -58,36 +46,48 @@
 # declared a path keeps it, and every entry that did not parks at
 # `<symlinkPath>/<name>` under that fixture's own root. The map is one claim
 # deliberately — the installer symlinks any entry path that is not
-# `<symlinkPath>/<name>` (`main.go:254-268`), so a root moved without the
-# entry default does not collide with a foreign store, it writes into it. The
-# path-collision refusal is held beside it over the smallest fleet that can
-# collide: two entries of one person declaring one path still refuse, and a
-# minted default, being a function of the name, cannot.
+# `<symlinkPath>/<name>`, so a root moved without the entry default does not
+# collide with a foreign store, it writes into it. The path-collision refusal
+# is held beside it over the smallest fleet that can collide: two entries of
+# one person declaring one path still refuse, and a minted default, being a
+# function of the name, cannot.
+#
+# The expected side is read off `config.flake.safix.lib.materialize` rather
+# than off the option the manifest is built from, which matters more now than
+# it did: the mint lives in the entry type's own `path` default, so an
+# expectation read off the type would be the mint compared with itself.
 #
 # ── the named entry, both mechanisms, and the consumer's ordering ──
-# `safix-installer-ordering` evaluates three fixtures. One carries a foreign
+# `safix-installer-ordering` evaluates four fixtures. One carries a foreign
 # store's step under the shared `setupSecrets` name and names it through
 # `safix.installer.afterActivation`: safix's step is its own node beside it,
 # carries the name in its `deps`, and the foreign node's text never gains the
 # installer call. One enables userborn, so the selection follows the host's
-# own user-management options — not `sops.useSystemdActivation`, which now
-# governs an installer safix does not use — and the unit carries the unit
-# named by `safix.installer.afterUnits` in its `after`, plus the
-# `sysinit-reactivation.target` wiring that re-runs it on a switch. And the
+# own user-management options, and the unit carries the unit named by
+# `safix.installer.afterUnits` in its `after`, plus the
+# `sysinit-reactivation.target` wiring that re-runs it on a switch. The
 # unadorned fixture registers the installer with no foreign dependency, so a
-# host with no foreign store is a supported configuration.
+# host with no foreign store is a supported configuration. And one defines one
+# activation step name twice, which is why safix registers a name of its own:
+# `deps` is `listOf str` and `text` is `types.lines`, so two definitions become
+# one node whose text carries both bodies and whose dependency set is the union
+# — one node in the DAG, and a single node has no edge to state. The wrapper
+# the step runs under carries an `ERR` trap and no `set -e`, which is why a
+# failed half records a status and the other half still runs; that record is
+# held here rather than asserted in prose.
 #
 # ── one installer ──
 # `safix-installer-sole` holds, over the fixture whose resolution is the four
-# entries `safix-consumption-system` also reads, that the provisioner is
-# inert: its secrets option is empty, its activation step and unit are absent,
-# and a scan of every activation step's text and every unit's ExecStart finds
-# exactly one invocation of the installer binary, safix's. Beside it, the two
+# entries `safix-consumption-system` also reads, that safix's is the only
+# installer on the host and the only namespace it writes: a scan of every
+# activation step's text and every unit's ExecStart finds exactly one
+# invocation of an installer, safix's own, and the evaluated configuration
+# carries no `sops` option tree at all, which is the mechanical form of "safix
+# reads and defines no option outside its own namespace". Beside it, the two
 # refusals the typed set does not carry are measured on fixtures with one
-# injected entry each: a sops file outside the nix store and one that does
-# not exist both refuse through the block `modules/consume/installer.nix`
-# copies from the provisioner's builder, whose messages are named in
-# `common.nix` so this check can read them.
+# injected entry each: a sops file outside the nix store and one that does not
+# exist both refuse through the block in `modules/consume/installer.nix`, whose
+# messages are declared in `common.nix` so this check can read them.
 #
 # ── the identity the system scope derives ──
 # `safix-installer-identity` reads `ageSshKeyPaths` out of five built
@@ -96,63 +96,69 @@
 # rsa one; a host whose keys lie inside safix's own store derives nothing; a
 # named identity survives both placements unchanged; and the switch turned
 # off contributes nothing. The exclusion prefix is safix's own symlink path,
-# not the `/run/secrets` the provisioner hardcodes, because the catch-22 the
-# exclusion avoids is decrypting with a key this installer itself deploys.
+# because the catch-22 the exclusion avoids is decrypting with a key this
+# installer itself deploys.
 #
 # ── the two refusals ──
 # `safix-installer-refusals` holds both. The evaluation refusal is a throw
 # while `safix.secrets` is forced, read off a configuration that resolves
 # entries with nothing derivable and nothing named — nothing here forces the
-# assertion collection, so what fires is safix's own message or nothing, and
-# nothing else can fire: the provisioner's key-source assertion sits inside
-# its `mkIf (cfg.secrets != { })`, which safix leaves empty. The installer
-# script's half is held as text off `system.build.safix-installer` without
-# running it: it names every configured identity path, exits non-zero, names
-# both ordering options as the remedy and the foreign store that has not run
-# as the usual cause, and states the limit the user scope's preflight states —
-# presence and readability were checked, decryption was not.
+# assertion collection, so what fires is safix's own message or nothing. The
+# installer script's half is held as text off `system.build.safix-installer`
+# without running it: it names every configured identity path, exits non-zero,
+# names both ordering options as the remedy and the foreign store that has not
+# run as the usual cause, and states the limit the user scope's preflight
+# states — presence and readability were checked, decryption was not. The same
+# text carries design I8's store-path discipline: the `sops` binary is named by
+# store path and never taken from `PATH`, and the installer's own `PATH` is
+# composed of the age plugins alone.
+#
+# ── the overrides, driven rather than declared ──
+# `safix-installer-overrides` points `SAFIX_AGE_KEYGEN` and `SAFIX_SSH_TO_AGE`
+# at scripts of the check's own and asserts each is invoked, which is what makes
+# the override evidence rather than documentation.
 #
 # ── coexistence, against the binary ──
-# `safix-installer-coexistence` runs the real `sops-install-secrets` twice in
-# the sandbox, in user mode, over ciphertext and an age identity generated
-# there. Pointed at an ordinary directory holding a sentinel, the binary
-# removes it — the destructive branch is measured, not assumed. Pointed at
-# safix's own roots with the same foreign directory beside it, the sentinel
-# survives, the foreign directory is byte-identical, the rest of the tree is
-# unchanged by a before-and-after walk, and safix's own store holds the
-# decrypted fixture plaintext.
+# `safix-installer-coexistence` runs the real `safix install` twice in the
+# sandbox, in user mode, over ciphertext and an age identity generated there.
+# Pointed at an ordinary directory holding a sentinel, the binary removes it —
+# the destructive branch is measured, not assumed. Pointed at safix's own roots
+# with the same foreign directory beside it, the sentinel survives, the foreign
+# directory is byte-identical, the rest of the tree is unchanged by a
+# before-and-after walk, and safix's own store holds the decrypted fixture
+# plaintext.
 #
 # ── severity, each drill observed red ──
-# Removing the `extraJson` argument from the relocated manifest turns the
-# root assertion red on the hardcoded values. Replacing the two `setupSecrets`
-# definitions with two differently-named steps turns the merge assertion red:
-# the node list stops being the singleton and neither body reaches the shared
-# text. Dropping a field from safix's manifest turns the key-set parity
-# assertion red; corrupting the manifest text turns its own checkPhase into a
-# build failure; and pinning the check mode to `manifest` over an entry whose
-# declared key is absent from its ciphertext builds green where `sopsfile`
-# mode refuses, which is the measured evidence the two modes are not
-# interchangeable. Dropping the minted path default turns the store check's
-# path map red on every path-less entry, at `/run/secrets/<name>` — the
-# silent-write combination the map exists to forbid. Registering the installer
-# as `setupSecrets` again turns the ordering check red on the own-node facts —
-# the installer call lands inside the shared node's text — and dropping the
-# `afterActivation` wiring turns exactly the dependency assertion red.
-# Restoring the `sops.secrets` delivery turns the sole check red on the
-# provisioner-step facts, with both installers visible at once; removing the
-# copied refusal block turns its refusal fixtures into the incidental failure
-# the block pre-empts — a hard `sopsFileHash` evaluation error that is not
-# safix's message and that `tryEval` cannot catch — which is the evidence the
-# option type never carried the refusal. Restoring the `/run/secrets` prefix
-# turns the identity check red on the clan-shaped fixture, which derives
-# nothing; dropping the exclusion entirely turns it red on the safix-store
-# fixture, which derives the key safix itself deploys. Removing the
-# evaluation refusal turns the refusals check red on `noIdentity.refuses`
-# while every other check in this file and the consumption suite stays green,
-# which is the evidence no other refusal covers it; dropping one identity
-# path from the script turns exactly `script.namesTheIdentity` red. Pointing
-# the coexistence check's second run back at the foreign directory turns it
-# red on the tree walk, with the foreign store's paths gone.
+# Mutating one field of the built manifest turns `safix-installer-schema` red
+# on the diff; mutating the `serde` struct instead turns
+# `safix-installer-roundtrip` red on the acceptance of the real manifest, which
+# is the evidence the pair holds both sides of the boundary. Making
+# `--check-mode=document` accept a key absent from its document turns the
+# roundtrip check's document tier green where it must refuse. Dropping the
+# minted path default turns `safix-installer-type`'s two-entry fixture red on
+# the path-less entry and `safix-installer-store`'s path map red on every
+# path-less entry at once, which is the pair that holds the store root and the
+# entry default together. Registering the installer as `setupSecrets` again
+# turns the ordering check red on the own-node facts — the installer call lands
+# inside the shared node's text — and dropping the `afterActivation` wiring
+# turns exactly the dependency assertion red; replacing the two `setupSecrets`
+# definitions with two differently-named steps turns the merge assertion red,
+# the node list ceasing to be the singleton. Restoring a second installer's
+# delivery turns the sole check red on the invocation scan, with both
+# installers visible at once; removing the copied refusal block turns its
+# refusal fixtures into the incidental failure the block pre-empts. Restoring
+# the `/run/secrets` prefix turns the identity check red on the clan-shaped
+# fixture, which derives nothing; dropping the exclusion entirely turns it red
+# on the safix-store fixture, which derives the key safix itself deploys.
+# Removing the evaluation refusal turns the refusals check red on
+# `noIdentity.refuses` while every other check in this file stays green;
+# dropping one identity path from the script turns exactly
+# `script.namesTheIdentity` red, and replacing the script's store-path `sops`
+# reference with a bare `sops` turns exactly `script.namesSopsByStorePath` red.
+# Ignoring either environment override turns `safix-installer-overrides` red on
+# that override's own marker. Pointing the coexistence check's second run back
+# at the foreign directory turns it red on the tree walk, with the foreign
+# store's paths gone.
 {
   config,
   inputs,
@@ -161,281 +167,100 @@
 }:
 {
   perSystem =
-    { pkgs, system, ... }:
+    {
+      pkgs,
+      self',
+      system,
+      ...
+    }:
     let
-      # Every option path reachable under a prefix, submodule suboptions
-      # included, collecting names only: `getSubOptions` forces type structure
-      # and never a default, so options whose defaults read other config (the
-      # home-manager module's `defaultSymlinkPath` reads `config.xdg`) stay
-      # unforced.
-      optionPaths =
-        prefix: set:
-        lib.concatLists (
-          lib.mapAttrsToList (
-            name: v:
-            if lib.hasPrefix "_" name then
-              [ ]
-            else if lib.isOption v then
-              [ (lib.concatStringsSep "." (prefix ++ [ name ])) ]
-              ++ optionPaths (prefix ++ [ name ]) (v.type.getSubOptions (prefix ++ [ name ]))
-            else if builtins.isAttrs v then
-              optionPaths (prefix ++ [ name ]) v
-            else
-              [ ]
-          ) set
-        );
+      mkStructuralCheck = import ./mk-structural-check.nix pkgs;
 
-      namesAStoreRoot =
-        n: lib.hasInfix "symlink" (lib.toLower n) || lib.hasInfix "mountpoint" (lib.toLower n);
-
-      # The provisioner's builder, called the way its `secrets-for-users`
-      # submodule calls it, over a synthetic cfg carrying only the fields the
-      # builder reads. `validateSopsFiles` is off because this manifest holds no
-      # secrets and the claim is about the two roots, not about ciphertext.
-      manifestFor = pkgs.callPackage "${inputs.sops-nix}/modules/sops/manifest-for.nix" {
-        cfg = {
-          validateSopsFiles = false;
-          keepGenerations = 1;
-          gnupg = {
-            home = null;
-            sshKeyPaths = [ ];
-          };
-          age = {
-            keyFile = null;
-            sshKeyPaths = [ ];
-          };
-          useTmpfs = false;
-          placeholder = { };
-          log = [ ];
-          validationPackage = inputs.sops-nix.packages.${system}.sops-install-secrets;
-        };
+      systemCommon = import ../../consume/common.nix {
+        inherit lib;
+        scope = "system";
       };
 
-      relocatedManifest = manifestFor "-safix-mechanism" { } { } {
-        secretsMountPoint = "/run/safix-mechanism-probe.d";
-        symlinkPath = "/run/safix-mechanism-probe";
-      };
+      # The configuration the entry type's `path` default is a function of, and
+      # the only thing the type reads outside its own fields. A stub carrying
+      # it is what lets the type be read here at all, outside any module
+      # evaluation.
+      entryCfg.installer.symlinkPath = "/run/safix";
 
-      # A system configuration with the provisioner's module and one
-      # `neededForUsers` entry, so the `secrets-for-users` submodule builds the
-      # manifest it relocates. The sops file is synthetic and never read:
-      # `validateSopsFiles = false` selects the check mode that parses the
-      # manifest alone (`main.go:503-505`), and the claim here is the two roots.
-      providerFixture = inputs.nixpkgs.lib.nixosSystem {
-        modules = [
-          inputs.sops-nix.nixosModules.sops
-          {
-            nixpkgs.hostPlatform = system;
-            system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
-            sops.secrets.fixture-for-users = {
-              neededForUsers = true;
-              sopsFile = pkgs.writeText "safix-fixture-users.yaml" "fixture: encrypted\n";
-            };
-          }
-        ];
-      };
+      # `safix.installer.package` defaults to `pkgs.safix`, which this flake's
+      # nixpkgs does not carry: the binary is a flake output, not an overlay.
+      # Every fixture below that forces the manifest or the installer script
+      # names it, and the ones that force neither do not.
+      installerPackage = self'.packages.safix;
 
-      usersManifest = providerFixture.config.system.build.sops-nix-users-manifest;
+      # ── the two environment overrides ──
+      # Each stub records the call in a marker file the check names in the
+      # environment, then behaves as the real tool does, so a runtime that
+      # ignored the variable and found the real binary on `PATH` leaves the
+      # marker absent rather than failing outright.
+      #
+      # The stubs are built here rather than written by a heredoc inside the
+      # check, because a heredoc inside a nix indented string cannot put a
+      # shebang at byte zero.
+      sshToAgeStub = pkgs.writeShellScript "safix-fixture-ssh-to-age" ''
+        echo "ssh-to-age-was-called $*" >> "$SAFIX_OVERRIDE_MARKERS"
+        for argument in "$@"; do
+          case "$argument" in
+            *unconvertible*)
+              echo "ssh-to-age: not an ed25519 key" >&2
+              exit 1
+              ;;
+          esac
+        done
+        cat "$SAFIX_OVERRIDE_CONVERTED"
+      '';
 
-      # The home-manager module evaluated alone; the walker above touches
-      # declarations only, so the profile options it would need stay unforced.
-      homeManagerInstrument = lib.evalModules {
-        modules = [
-          "${inputs.sops-nix}/modules/home-manager/sops.nix"
-          {
-            _module.check = false;
-            _module.args.pkgs = pkgs;
-          }
-        ];
-      };
+      keygenStub = pkgs.writeShellScript "safix-fixture-age-keygen" ''
+        echo "keygen-was-called $*" >> "$SAFIX_OVERRIDE_MARKERS"
+        exec ${pkgs.age}/bin/age-keygen "$@"
+      '';
 
-      # Two definitions of one activation step name, each in the shape its
-      # package registers: `lib.stringAfter` on the same three dependencies,
-      # with the provisioner's `generate-age-key` addition off as it is on a
-      # host that does not generate a key, and clan's body distinguished the
-      # way clan's is, so each half is findable in the merged text.
-      mergedFixture = inputs.nixpkgs.lib.nixosSystem {
-        modules = [
-          {
-            nixpkgs.hostPlatform = system;
-            system.stateVersion = "24.05";
-          }
-          (
-            { config, ... }:
+      # The path the key-generation step mints into. It is baked into the
+      # script at evaluation, so it names the build root a sandboxed builder
+      # gives every derivation; the check verifies that assumption rather than
+      # relying on it.
+      generatedKeyFile = "/build/safix-fixture-minted-key.txt";
+
+      # A user-scope profile that asks for a key file at activation. Its
+      # install script is the only place in the tree `age-keygen` is reached
+      # from outside the operator-facing `keygen` verb, which needs a declaring
+      # repository a sandbox has none of.
+      keyGenerationProfile =
+        (inputs.home-manager.lib.homeManagerConfiguration {
+          inherit pkgs;
+          modules = [
+            config.flake.homeModules.safix
             {
-              system.activationScripts.setupSecrets =
-                lib.stringAfter
-                  [
-                    "specialfs"
-                    "users"
-                    "groups"
-                  ]
-                  ''
-                    [ -e /run/current-system ] || echo setting up secrets...
-                    echo safix-fixture-provisioner-half
-                  ''
-                // lib.optionalAttrs (config.system ? dryActivationScript) {
-                  supportsDryActivation = true;
-                };
-            }
-          )
-          (
-            { config, ... }:
-            {
-              system.activationScripts.setupSecrets =
-                lib.stringAfter
-                  [
-                    "specialfs"
-                    "users"
-                    "groups"
-                  ]
-                  ''
-                    [ -e /run/current-system ] || echo setting up age secrets...
-                    echo safix-fixture-clan-half
-                  ''
-                // lib.optionalAttrs (config.system ? dryActivationScript) {
-                  supportsDryActivation = true;
-                };
-            }
-          )
-        ];
-      };
-
-      scripts = mergedFixture.config.system.activationScripts;
-
-      # Read with a fallback rather than directly, so the rename drill turns
-      # the assertions below red as a diff instead of an evaluation error.
-      mergedStep =
-        scripts.setupSecrets or {
-          text = "";
-          deps = [ ];
-        };
-
-      structural = {
-        actual = {
-          storeRootOptions = {
-            nixos = builtins.filter namesAStoreRoot (optionPaths [ "sops" ] providerFixture.options.sops);
-            homeManager = builtins.filter namesAStoreRoot (
-              optionPaths [ "sops" ] homeManagerInstrument.options.sops
-            );
-          };
-
-          merge = {
-            nodes = builtins.filter (n: lib.hasInfix "etupSecrets" n) (builtins.attrNames scripts);
-            provisionerHalf = lib.hasInfix "safix-fixture-provisioner-half" mergedStep.text;
-            clanHalf = lib.hasInfix "safix-fixture-clan-half" mergedStep.text;
-            depsUnion = lib.sort (a: b: a < b) (lib.unique mergedStep.deps);
-          };
-
-          wrapper = {
-            trapsErr = lib.hasInfix "trap \"_status=1 _localstatus=\\$?\" ERR" scripts.script;
-            setELines = builtins.filter (l: builtins.match "[[:space:]]*set -e.*" l != null) (
-              lib.splitString "\n" scripts.script
-            );
-          };
-        };
-
-        expected = {
-          storeRootOptions = {
-            nixos = [ ];
-            homeManager = [
-              "sops.defaultSecretsMountPoint"
-              "sops.defaultSymlinkPath"
-            ];
-          };
-
-          merge = {
-            nodes = [ "setupSecrets" ];
-            provisionerHalf = true;
-            clanHalf = true;
-            depsUnion = [
-              "groups"
-              "specialfs"
-              "users"
-            ];
-          };
-
-          wrapper = {
-            trapsErr = true;
-            setELines = [ ];
-          };
-        };
-      };
-
-      # A system configuration through the exported module, resolving bob on
-      # the fixture fleet's server, the same subject `safix-consumption-system`
-      # reads. `validateSopsFiles` is off because the fleet's sops files are
-      # paths into this flake that no committed file backs, and both builders
-      # below mirror the same conditional, so the comparison stays over one
-      # fixture.
-      manifestFixture = inputs.nixpkgs.lib.nixosSystem {
-        modules = [
-          config.flake.nixosModules.default
-          {
-            nixpkgs.hostPlatform = system;
-            networking.hostName = "server";
-            system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
-            safix = {
-              lib = config.flake.safix.lib;
-              user = "bob";
-              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
-            };
-          }
-        ];
-      };
-
-      safixManifest = manifestFixture.config.system.build.safix-manifest;
-
-      # The provisioner's own builder from `inputs.sops-nix`, over the same
-      # fixture's cfg and the same typed entries, so the key-set comparison
-      # below is between two builders and one input.
-      parityManifest =
-        (pkgs.callPackage "${inputs.sops-nix}/modules/sops/manifest-for.nix" {
-          cfg = manifestFixture.config.sops;
-        })
-          "-safix-parity"
-          manifestFixture.config.safix.installed
-          { }
-          { };
-
-      # The same fixture with both roots moved through the options, so the
-      # settability claim and the root-and-default coupling are measured at the
-      # option rather than at the literal.
-      movedFixture = inputs.nixpkgs.lib.nixosSystem {
-        modules = [
-          config.flake.nixosModules.default
-          {
-            nixpkgs.hostPlatform = system;
-            networking.hostName = "server";
-            system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
-            safix = {
-              lib = config.flake.safix.lib;
-              user = "bob";
-              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
-              installer = {
-                secretsMountPoint = "/run/safix-moved.d";
-                symlinkPath = "/run/safix-moved";
+              home = {
+                username = "alice";
+                homeDirectory = "/home/alice";
+                stateVersion = "24.05";
               };
-            };
-          }
-        ];
-      };
+              safix = {
+                lib = config.flake.safix.lib;
+                user = "alice";
+                hostname = "workstation";
+                identity = {
+                  generateKey = true;
+                  keyFile = generatedKeyFile;
+                };
+                installer = {
+                  package = installerPackage;
+                  validate = false;
+                };
+              };
+            }
+          ];
+        }).config;
 
-      movedManifest = movedFixture.config.system.build.safix-manifest;
-
-      # name -> the path the manifest must carry, read off the pre-typed
-      # resolution: an entry that declared a path keeps it, and a path-less
-      # entry parks under the fixture's own symlink path. Holding both against
-      # the built manifest in one map is what makes the root and the entry
-      # default one claim rather than two.
-      entryPathContract =
-        fixture:
-        lib.mapAttrs (
-          name: entry: entry.path or "${fixture.config.safix.installer.symlinkPath}/${name}"
-        ) fixture.config.safix.secrets;
+      userInstallScript = lib.head (
+        lib.toList keyGenerationProfile.systemd.user.services.safix.Service.ExecStart
+      );
 
       resolve = import ../safix/resolve.nix { inherit lib; };
       fleetTypes = import ../safix/types.nix { inherit lib; };
@@ -450,6 +275,190 @@
         }).config.value;
 
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
+
+      names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
+
+      # ── the entry type ──
+
+      entrySubOptions = lib.filterAttrs (n: _: !lib.hasPrefix "_" n) (
+        (systemCommon.secretEntryType { cfg = entryCfg; }).getSubOptions [ ]
+      );
+
+      # A resolution of exactly two entries, one declaring a path and one not,
+      # injected through `common.resolvedFor`'s own seam because `safix.secrets`
+      # is read-only. The expectation below is written from the declarations
+      # rather than from the type, so the mint is the thing measured.
+      pathDefaultFixture = refusalFixtureWith {
+        declares = {
+          sopsFile = pkgs.writeText "safix-fixture-declares.yaml" "fixture: encrypted\n";
+          path = "/var/lib/safix-fixture/declared";
+        };
+        mints.sopsFile = pkgs.writeText "safix-fixture-mints.yaml" "fixture: encrypted\n";
+      };
+
+      typeFacts = {
+        actual = {
+          fields = lib.sort (a: b: a < b) (builtins.attrNames entrySubOptions);
+
+          # The literal defaults, read off the declaration rather than off an
+          # evaluated entry, so a re-default is a failing diff even where no
+          # fixture happens to exercise the field.
+          defaults = lib.mapAttrs (name: _: entrySubOptions.${name}.default) {
+            format = null;
+            gid = null;
+            group = null;
+            mode = null;
+            owner = null;
+            reloadUnits = null;
+            restartUnits = null;
+            uid = null;
+          };
+
+          # `name`, `key` and `path` default from the submodule's own
+          # configuration, so asking `getSubOptions` for a value would force
+          # `_module.args.name` outside the `attrsOf` that supplies it. What is
+          # held here is that each carries a default at all; `path`'s value is
+          # held by `mintedPaths` below and by `safix-installer-store`.
+          configuredDefaults = lib.mapAttrs (name: _: entrySubOptions.${name} ? default) {
+            key = null;
+            name = null;
+            path = null;
+          };
+
+          # The one field with no default. An entry that named no document
+          # would be an entry the installer could not open, so this is a
+          # refusal rather than a default.
+          documentIsRequired = !(entrySubOptions.sopsFile ? default);
+
+          mintedPaths = lib.mapAttrs (_name: entry: entry.path) pathDefaultFixture.config.safix.secrets;
+        };
+
+        expected = {
+          fields = [
+            "format"
+            "gid"
+            "group"
+            "key"
+            "mode"
+            "name"
+            "owner"
+            "path"
+            "reloadUnits"
+            "restartUnits"
+            "sopsFile"
+            "uid"
+          ];
+
+          defaults = {
+            format = "yaml";
+            gid = 0;
+            group = null;
+            mode = "0400";
+            owner = null;
+            reloadUnits = [ ];
+            restartUnits = [ ];
+            uid = 0;
+          };
+
+          configuredDefaults = {
+            key = true;
+            name = true;
+            path = true;
+          };
+
+          documentIsRequired = true;
+
+          mintedPaths = {
+            declares = "/var/lib/safix-fixture/declared";
+            mints = "/run/safix/mints";
+          };
+        };
+      };
+
+      # ── the manifest ──
+
+      # A system configuration through the exported module, resolving bob on
+      # the fixture fleet's server, the same subject `safix-consumption-system`
+      # reads. `safix.installer.validate` is off because the fleet's sops files
+      # are paths into this flake that no committed file backs; that selects the
+      # checking branch that never reads ciphertext and leaves
+      # `manifestInputHash` null, and the branch itself stays the module's
+      # conditional rather than a value this check pins.
+      manifestFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+              installer = {
+                package = installerPackage;
+                validate = false;
+              };
+            };
+          }
+        ];
+      };
+
+      safixManifest = manifestFixture.config.system.build.safix-manifest;
+
+      # The same fixture with both roots moved through the options, so the
+      # settability claim and the root-and-default coupling are measured at the
+      # option rather than at the literal.
+      movedFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          config.flake.nixosModules.default
+          {
+            nixpkgs.hostPlatform = system;
+            networking.hostName = "server";
+            system.stateVersion = "24.05";
+            safix = {
+              lib = config.flake.safix.lib;
+              user = "bob";
+              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+              installer = {
+                package = installerPackage;
+                validate = false;
+                secretsMountPoint = "/run/safix-moved.d";
+                symlinkPath = "/run/safix-moved";
+              };
+            };
+          }
+        ];
+      };
+
+      movedManifest = movedFixture.config.system.build.safix-manifest;
+
+      # name -> the path the manifest must carry, computed from the
+      # declarations' own resolution rather than from the option the manifest is
+      # built from: `config.flake.safix.lib.materialize` is the same call
+      # `common.resolvedFor` makes, read before any module minted anything, so
+      # the diff below is between two independent computations of one contract
+      # rather than one option against itself.
+      # An entry that declared a path keeps it, and a path-less entry parks
+      # under the fixture's own symlink path — read off the option so the moved
+      # fixture measures the root and the entry default as one claim.
+      #
+      # Severity: moving the mint out of the entry type's `path` default
+      # reddens this check, the diff putting the three path-less entries
+      # wherever the replacement mint puts them; pointed back at
+      # `fixture.config.safix.secrets` instead, the same move passes, which is
+      # why the expected side is read here rather than off the option.
+      entryPathContract =
+        fixture:
+        lib.mapAttrs (name: entry: entry.path or "${fixture.config.safix.installer.symlinkPath}/${name}") (
+          config.flake.safix.lib.materialize {
+            user = "bob";
+            machine = null;
+            hostname = "server";
+            tags = [ ];
+            scope = "system";
+          } fixture.config
+        );
 
       # Two entries of one person declaring one path, the smallest fleet the
       # collision refusal can fire on, so the minted default's inability to
@@ -485,7 +494,7 @@
         ) { }
       );
 
-      mkStructuralCheck = import ./mk-structural-check.nix pkgs;
+      # ── the ordering ──
 
       # A host that carries a foreign store's activation step under the name
       # both colliding packages use, and names it through safix's option.
@@ -496,7 +505,6 @@
             nixpkgs.hostPlatform = system;
             networking.hostName = "server";
             system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
             system.activationScripts.setupSecrets =
               lib.stringAfter
                 [
@@ -511,7 +519,11 @@
               lib = config.flake.safix.lib;
               user = "bob";
               identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
-              installer.afterActivation = [ "setupSecrets" ];
+              installer = {
+                package = installerPackage;
+                validate = false;
+                afterActivation = [ "setupSecrets" ];
+              };
             };
           }
         ];
@@ -527,20 +539,100 @@
             nixpkgs.hostPlatform = system;
             networking.hostName = "server";
             system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
             services.userborn.enable = true;
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
               identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
-              installer.afterUnits = [ "age-decrypt-secrets.service" ];
+              installer = {
+                package = installerPackage;
+                validate = false;
+                afterUnits = [ "age-decrypt-secrets.service" ];
+              };
             };
           }
         ];
       };
 
+      # Two definitions of one activation step name, each in the shape a
+      # package registers one: `lib.stringAfter` on the same three
+      # dependencies, with each body distinguishable so each half is findable
+      # in the merged text. Neither is safix's — this fixture exists to hold
+      # the mechanism that makes a name of one's own necessary, which is why
+      # safix registers `safixInstallSecrets` and never contributes to a name
+      # another package also defines.
+      mergedFixture = inputs.nixpkgs.lib.nixosSystem {
+        modules = [
+          {
+            nixpkgs.hostPlatform = system;
+            system.stateVersion = "24.05";
+          }
+          (
+            { config, ... }:
+            {
+              system.activationScripts.setupSecrets =
+                lib.stringAfter
+                  [
+                    "specialfs"
+                    "users"
+                    "groups"
+                  ]
+                  ''
+                    [ -e /run/current-system ] || echo setting up secrets...
+                    echo safix-fixture-first-half
+                  ''
+                // lib.optionalAttrs (config.system ? dryActivationScript) {
+                  supportsDryActivation = true;
+                };
+            }
+          )
+          (
+            { config, ... }:
+            {
+              system.activationScripts.setupSecrets =
+                lib.stringAfter
+                  [
+                    "specialfs"
+                    "users"
+                    "groups"
+                  ]
+                  ''
+                    [ -e /run/current-system ] || echo setting up age secrets...
+                    echo safix-fixture-second-half
+                  ''
+                // lib.optionalAttrs (config.system ? dryActivationScript) {
+                  supportsDryActivation = true;
+                };
+            }
+          )
+        ];
+      };
+
+      mergedScripts = mergedFixture.config.system.activationScripts;
+
+      # Read with a fallback rather than directly, so the rename drill turns
+      # the assertions below red as a diff instead of an evaluation error.
+      mergedStep =
+        mergedScripts.setupSecrets or {
+          text = "";
+          deps = [ ];
+        };
+
       orderingFacts =
         let
+          # The step and the unit both reach the installer through one script
+          # `system.build.safix-installer` exposes, so what is asserted here is
+          # that each names that script; that the script runs `safix install`
+          # is `safix-installer-refusals`' own row, read off the same text.
+          # The context is discarded because these strings are used as regex
+          # needles: a structural check's JSON must not name a store path as a
+          # dependency of itself.
+          activationInstaller = builtins.unsafeDiscardStringContext (
+            toString orderedActivationFixture.config.system.build.safix-installer
+          );
+          unitInstaller = builtins.unsafeDiscardStringContext (
+            toString orderedUnitFixture.config.system.build.safix-installer
+          );
           activationScripts = orderedActivationFixture.config.system.activationScripts;
           safixStep =
             activationScripts.safixInstallSecrets or {
@@ -565,9 +657,9 @@
           actual = {
             activation = {
               ownNode = (activationScripts ? safixInstallSecrets) && (activationScripts ? setupSecrets);
-              foreignStepNotMerged = !(lib.hasInfix "sops-install-secrets" activationScripts.setupSecrets.text);
+              foreignStepNotMerged = !(lib.hasInfix activationInstaller activationScripts.setupSecrets.text);
               deps = lib.sort (a: b: a < b) (lib.unique safixStep.deps);
-              runsTheInstaller = lib.hasInfix "safix-install-secrets" safixStep.text;
+              runsTheInstaller = lib.hasInfix activationInstaller safixStep.text;
               noUnit = orderedActivationFixture.config.systemd.services ? safix-install-secrets;
             };
 
@@ -578,9 +670,7 @@
               rerunsOnSwitch =
                 builtins.elem "sysinit-reactivation.target" unit.requiredBy
                 && builtins.elem "sysinit-reactivation.target" unit.before;
-              runsTheInstaller = lib.any (lib.hasInfix "safix-install-secrets") (
-                lib.toList unit.serviceConfig.ExecStart
-              );
+              runsTheInstaller = lib.any (lib.hasInfix unitInstaller) (lib.toList unit.serviceConfig.ExecStart);
               noActivationStep = orderedUnitFixture.config.system.activationScripts ? safixInstallSecrets;
             };
 
@@ -591,6 +681,26 @@
               registered = unorderedScripts ? safixInstallSecrets;
               deps = lib.sort (a: b: a < b) (lib.unique unorderedStep.deps);
               noUnit = manifestFixture.config.systemd.services ? safix-install-secrets;
+            };
+
+            # The reason a name of one's own is not a preference: two
+            # definitions of one name are one node, and a single node has no
+            # edge to state.
+            merge = {
+              nodes = builtins.filter (n: lib.hasInfix "etupSecrets" n) (builtins.attrNames mergedScripts);
+              firstHalf = lib.hasInfix "safix-fixture-first-half" mergedStep.text;
+              secondHalf = lib.hasInfix "safix-fixture-second-half" mergedStep.text;
+              depsUnion = lib.sort (a: b: a < b) (lib.unique mergedStep.deps);
+            };
+
+            # And the reason a merged node's failure is quiet: the wrapper
+            # traps `ERR` and sets no `-e`, so a failed half records a status
+            # and the other half still runs.
+            wrapper = {
+              trapsErr = lib.hasInfix "trap \"_status=1 _localstatus=\\$?\" ERR" mergedScripts.script;
+              setELines = builtins.filter (l: builtins.match "[[:space:]]*set -e.*" l != null) (
+                lib.splitString "\n" mergedScripts.script
+              );
             };
           };
 
@@ -626,19 +736,32 @@
               ];
               noUnit = false;
             };
+
+            merge = {
+              nodes = [ "setupSecrets" ];
+              firstHalf = true;
+              secondHalf = true;
+              depsUnion = [
+                "groups"
+                "specialfs"
+                "users"
+              ];
+            };
+
+            wrapper = {
+              trapsErr = true;
+              setELines = [ ];
+            };
           };
         };
 
-      systemCommon = import ../../consume/common.nix {
-        inherit lib;
-        scope = "system";
-      };
+      # ── the identity ──
 
       # The identity fixtures share the bob resolution and vary only what the
       # derivation reads: where the host's keys lie, whether an identity is
       # named, and whether the switch is on. `services.openssh.enable` is on
-      # because the derivation mirrors the provisioner's whole rule, which
-      # derives nothing from a host whose keys openssh does not manage.
+      # because the derivation derives nothing from a host whose keys openssh
+      # does not manage.
       identityFixture =
         extra:
         inputs.nixpkgs.lib.nixosSystem {
@@ -648,11 +771,14 @@
               nixpkgs.hostPlatform = system;
               networking.hostName = "server";
               system.stateVersion = "24.05";
-              sops.validateSopsFiles = false;
               services.openssh.enable = true;
               safix = {
                 lib = config.flake.safix.lib;
                 user = "bob";
+                installer = {
+                  package = installerPackage;
+                  validate = false;
+                };
               };
             }
             extra
@@ -710,18 +836,28 @@
           }).config.system.build.safix-manifest;
       };
 
-      names = tokens: messages: builtins.all (t: lib.any (m: lib.hasInfix t m) messages) tokens;
+      # ── the refusals ──
 
-      # An enabled configuration resolving nothing, with one entry injected
-      # into the typed set directly, so each refusal is measured on exactly the
-      # entry that earns it rather than beside the fleet's. In pure evaluation
-      # an out-of-store path is also unreadable, so the outside-store entry
-      # trips both halves of the copied block; the store-membership half is
+      # An enabled configuration whose resolution is exactly one injected
+      # entry, so each refusal is measured on the entry that earns it rather
+      # than beside the fleet's. In pure evaluation an out-of-store path is
+      # also unreadable, so the outside-store entry trips both halves of the
+      # block in `modules/consume/installer.nix`; the store-membership half is
       # still the one the removal drill isolates, because without the block the
-      # failure is the forced `builtins.hashFile` refusing the path — a hard
+      # failure is a forced `builtins.hashFile` refusing the path — a hard
       # evaluation error that is not safix's message and that `tryEval` cannot
-      # catch, which is what these fixtures would surface if the copy were
+      # catch, which is what these fixtures would surface if the block were
       # dropped.
+      #
+      # The entry enters through `common.resolvedFor`'s own seam, which on this
+      # path reads only `cfg.lib.violations` and `cfg.lib.materialize`, because
+      # `safix.secrets` is read-only — one option per scope, and it is a
+      # projection rather than a place to write. `cfg.lib.subjects` is not
+      # needed: `tags`' default reads it only when `safix.machine` is set, and
+      # this fixture is person-shaped. The identity is named so
+      # `common.noSystemIdentityMessage` cannot pre-empt the refusal under
+      # test, and `safix.installer.validate` is left at its default so the
+      # refusals are reached at all.
       refusalFixtureWith =
         entry:
         inputs.nixpkgs.lib.nixosSystem {
@@ -731,7 +867,14 @@
               nixpkgs.hostPlatform = system;
               system.stateVersion = "24.05";
               safix.enable = true;
-              safix.installed = entry;
+              safix.lib = {
+                violations = [ ];
+                materialize = _args: _cfg: entry;
+              };
+              safix.user = "bob";
+              safix.hostname = "server";
+              safix.identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+              safix.installer.package = installerPackage;
             }
           ];
         };
@@ -758,10 +901,13 @@
             nixpkgs.hostPlatform = system;
             networking.hostName = "server";
             system.stateVersion = "24.05";
-            sops.validateSopsFiles = false;
             safix = {
               lib = config.flake.safix.lib;
               user = "bob";
+              installer = {
+                package = installerPackage;
+                validate = false;
+              };
             };
           }
         ];
@@ -770,6 +916,33 @@
       refusalsFacts =
         let
           installerText = manifestFixture.config.system.build.safix-installer.text;
+          activationText = manifestFixture.config.system.activationScripts.safixInstallSecrets.text;
+
+          # The same fixture with one age plugin named, so the PATH claim is
+          # measured against a value rather than against emptiness: the
+          # activation's PATH is the plugins and nothing else, which is the one
+          # thing design I8 says must be on it.
+          pluginText =
+            (inputs.nixpkgs.lib.nixosSystem {
+              modules = [
+                config.flake.nixosModules.default
+                {
+                  nixpkgs.hostPlatform = system;
+                  networking.hostName = "server";
+                  system.stateVersion = "24.05";
+                  safix = {
+                    lib = config.flake.safix.lib;
+                    user = "bob";
+                    identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+                    installer = {
+                      package = installerPackage;
+                      validate = false;
+                      agePlugins = [ pkgs.hello ];
+                    };
+                  };
+                }
+              ];
+            }).config.system.activationScripts.safixInstallSecrets.text;
         in
         {
           actual = {
@@ -812,6 +985,36 @@
               namesTheUsualCause = lib.hasInfix "has not run yet" installerText;
               statesItsLimit =
                 lib.hasInfix "readability" installerText && lib.hasInfix "not a recipient" installerText;
+
+              # Design I8's store-path discipline, held on the text rather
+              # than on the option: `sops` is reached by store path, never as
+              # a bare name resolved out of whatever `PATH` the activation
+              # happens to carry, because a bare name is a different binary on
+              # a host that has one.
+              namesSopsByStorePath = lib.any (
+                line: builtins.match ".*${builtins.storeDir}/[^[:space:]]+/bin/sops.*" line != null
+              ) (lib.splitString "\n" installerText);
+              reachesSopsByNameAlone = lib.any (
+                line: builtins.match "[^#]*[^/[:alnum:]]sops[[:space:]]+(decrypt|encrypt).*" line != null
+              ) (lib.splitString "\n" installerText);
+
+              # The script reaches the installer itself by store path too,
+              # which is what makes the activation step's reference to this
+              # script a reference to safix's own binary rather than to
+              # whatever `safix` a `PATH` resolves.
+              runsTheInstaller = lib.any (
+                line: builtins.match ".*${builtins.storeDir}/[^[:space:]]+/bin/safix install .*" line != null
+              ) (lib.splitString "\n" installerText);
+            };
+
+            # The activation's own environment: `HOME` is the empty directory
+            # that stops sops searching for ssh keys, and `PATH` is the age
+            # plugins and nothing else — empty where none are named, and
+            # exactly their bin directories where they are.
+            environment = {
+              homeIsEmpty = lib.hasInfix "export HOME='/var/empty'" activationText;
+              pathIsEmptyWithNoPlugins = lib.hasInfix "export PATH=''" activationText;
+              pathIsPluginsAlone = lib.hasInfix (builtins.unsafeDiscardStringContext "export PATH='${lib.makeBinPath [ pkgs.hello ]}'") pluginText;
             };
           };
 
@@ -833,14 +1036,49 @@
               namesTheOrderingOptions = true;
               namesTheUsualCause = true;
               statesItsLimit = true;
+              namesSopsByStorePath = true;
+              reachesSopsByNameAlone = false;
+              runsTheInstaller = true;
+            };
+
+            environment = {
+              homeIsEmpty = true;
+              pathIsEmptyWithNoPlugins = true;
+              pathIsPluginsAlone = true;
             };
           };
         };
+
+      # ── one installer, one namespace ──
 
       soleFacts =
         let
           scripts = manifestFixture.config.system.activationScripts;
           services = manifestFixture.config.systemd.services;
+
+          # The same fleet and subject as `manifestFixture` with the gate off,
+          # so a non-empty resolution is read back against an installer that
+          # defined nothing.
+          disabledFixture = inputs.nixpkgs.lib.nixosSystem {
+            modules = [
+              config.flake.nixosModules.default
+              {
+                nixpkgs.hostPlatform = system;
+                networking.hostName = "server";
+                system.stateVersion = "24.05";
+                safix = {
+                  enable = false;
+                  lib = config.flake.safix.lib;
+                  user = "bob";
+                  identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+                  installer = {
+                    package = installerPackage;
+                    validate = false;
+                  };
+                };
+              }
+            ];
+          };
 
           # The full script the option's `apply` assembles aggregates every
           # step, so it is excluded by name; a step registered as a bare string
@@ -852,28 +1090,30 @@
             lib.sort (a: b: a < b) (
               builtins.attrNames (lib.filterAttrs (n: v: n != "script" && extract v) set)
             );
+
+          installerCall = text: lib.hasInfix "install-secrets" text || lib.hasInfix "/bin/safix install" text;
         in
         {
           actual = {
             # The fixture resolves the four entries `safix-consumption-system`
             # also reads, so the inertness below is evidence rather than an
             # empty resolution passing vacuously.
-            established = lib.sort (a: b: a < b) (builtins.attrNames manifestFixture.config.safix.installed);
+            established = lib.sort (a: b: a < b) (builtins.attrNames manifestFixture.config.safix.secrets);
 
-            provisionerInert = {
-              secretsOption = manifestFixture.config.sops.secrets;
-              activationStep = scripts ? setupSecrets;
-              unit = services ? sops-install-secrets;
-            };
+            # safix reads and defines no option outside its own namespace, held
+            # mechanically: the evaluated configuration carries no `sops`
+            # option tree at all, which it could only carry if something in
+            # this tree imported a module declaring one.
+            noForeignNamespace = !(manifestFixture.config ? sops);
 
-            # Exactly one invocation of the installer binary, and it is
-            # safix's: every activation step's text and every unit's ExecStart
-            # is scanned, so a second invocation appearing anywhere reddens
-            # this rather than only the two names the provisioner uses.
+            # Exactly one invocation of an installer, and it is safix's: every
+            # activation step's text and every unit's ExecStart is scanned, so
+            # a second invocation appearing anywhere reddens this rather than
+            # only the names one package happens to use.
             invocations = {
-              activation = invocationsIn scripts (v: lib.hasInfix "install-secrets" (textOf v));
+              activation = invocationsIn scripts (v: installerCall (textOf v));
               units = invocationsIn services (
-                v: lib.any (lib.hasInfix "install-secrets") (lib.toList (v.serviceConfig.ExecStart or [ ]))
+                v: lib.any installerCall (lib.toList (v.serviceConfig.ExecStart or [ ]))
               );
             };
 
@@ -884,7 +1124,7 @@
                   names
                     [
                       "is not in the Nix store"
-                      "sops.validateSopsFiles"
+                      "safix.installer.validate"
                       "/etc/hosts"
                       "outside"
                     ]
@@ -912,6 +1152,19 @@
                     ];
               };
             };
+
+            # The resolved set is reported outside the enable gate — the one
+            # place the collapsed option can be defined without an evaluation
+            # cycle — so what makes that safe is that nothing installs: the
+            # whole installer `config` is `lib.mkIf cfg.enable`, while the
+            # option still reports the resolution, minted paths and all.
+            disabledOverResolution = {
+              manifest = disabledFixture.config.system.build ? safix-manifest;
+              activationStep = disabledFixture.config.system.activationScripts ? safixInstallSecrets;
+              unit = disabledFixture.config.systemd.services ? safix-install-secrets;
+              resolutionNonEmpty = disabledFixture.config.safix.secrets != { };
+              paths = lib.mapAttrs (_: entry: entry.path) disabledFixture.config.safix.secrets;
+            };
           };
 
           expected = {
@@ -922,11 +1175,7 @@
               "team-vault"
             ];
 
-            provisionerInert = {
-              secretsOption = { };
-              activationStep = false;
-              unit = false;
-            };
+            noForeignNamespace = true;
 
             invocations = {
               activation = [ "safixInstallSecrets" ];
@@ -943,6 +1192,14 @@
                 namesTheFile = true;
               };
             };
+
+            disabledOverResolution = {
+              manifest = false;
+              activationStep = false;
+              unit = false;
+              resolutionNonEmpty = true;
+              paths = entryPathContract disabledFixture;
+            };
           };
         };
     in
@@ -950,100 +1207,163 @@
       # Every claim here evaluates a NixOS system configuration, so the check
       # exists only where one does, following `safix-consumption-system`.
       checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-        safix-installer-mechanism =
-          pkgs.runCommand "safix-installer-mechanism"
-            {
-              actualJson = builtins.toJSON structural.actual;
-              expectedJson = builtins.toJSON structural.expected;
-              passAsFile = [
-                "actualJson"
-                "expectedJson"
-              ];
-              relocatedManifest = relocatedManifest;
-              usersManifest = usersManifest;
-              nativeBuildInputs = [ pkgs.jq ];
-              meta.description = "the manifest-root mechanism, the absent option surface, and the setupSecrets merge";
-            }
-            ''
-              if ! diff -u "$expectedJsonPath" "$actualJsonPath"; then
-                echo ""
-                echo "safix-installer-mechanism: evaluated facts differ from expected"
-                exit 1
-              fi
+        safix-installer-type = mkStructuralCheck {
+          name = "safix-installer-type";
+          actual = typeFacts.actual;
+          expected = typeFacts.expected;
+        };
 
-              root() { jq -r ".$2" "$1"; }
-
-              for manifest in "$relocatedManifest" "$usersManifest"; do
-                for field in secretsMountPoint symlinkPath; do
-                  case "$(root "$manifest" "$field")" in
-                    /run/secrets.d | /run/secrets)
-                      echo "safix-installer-mechanism: $manifest carries the hardcoded $field"
-                      exit 1
-                      ;;
-                  esac
-                done
-              done
-
-              [ "$(root "$relocatedManifest" secretsMountPoint)" = /run/safix-mechanism-probe.d ] || {
-                echo "safix-installer-mechanism: extraJson did not relocate secretsMountPoint"
-                exit 1
-              }
-              [ "$(root "$relocatedManifest" symlinkPath)" = /run/safix-mechanism-probe ] || {
-                echo "safix-installer-mechanism: extraJson did not relocate symlinkPath"
-                exit 1
-              }
-
-              [ "$(root "$usersManifest" secretsMountPoint)" = /run/secrets-for-users.d ] || {
-                echo "safix-installer-mechanism: secrets-for-users did not relocate secretsMountPoint"
-                exit 1
-              }
-              [ "$(root "$usersManifest" symlinkPath)" = /run/secrets-for-users ] || {
-                echo "safix-installer-mechanism: secrets-for-users did not relocate symlinkPath"
-                exit 1
-              }
-
-              touch $out
-            '';
-
-        safix-installer-manifest =
-          pkgs.runCommand "safix-installer-manifest"
+        # The nix half of the manifest boundary, diffed whole against a
+        # committed file. Only `sopsFile` is normalized, and only by reducing
+        # it to its path below the store: nothing else in the manifest carries
+        # a hash, because the fixture turns `validate` off and
+        # `manifestInputHash` is therefore null. That absence is recorded
+        # rather than hidden — the field's emission is held by the ciphertext
+        # drill in task 2.8, over a fixture whose documents exist, and what
+        # this check holds is that the field is present and null when
+        # validation is off.
+        safix-installer-schema =
+          pkgs.runCommand "safix-installer-schema"
             {
               nativeBuildInputs = [ pkgs.jq ];
               safixManifest = safixManifest;
-              parityManifest = parityManifest;
-              meta.description = "the built manifest's roots and its field-set parity with the provisioner's builder";
+              expected = ./installer-manifest.json;
+              meta.description = "the built manifest's whole structure, against an accepted snapshot";
             }
             ''
               jq empty "$safixManifest"
 
               [ "$(jq '.secrets | length' "$safixManifest")" -gt 0 ] || {
-                echo "safix-installer-manifest: the fixture resolved nothing, so nothing below is evidence"
+                echo "safix-installer-schema: the fixture resolved nothing, so nothing below is evidence"
                 exit 1
               }
 
-              [ "$(jq -r .secretsMountPoint "$safixManifest")" = /run/safix.d ] || {
-                echo "safix-installer-manifest: secretsMountPoint is not safix's own"
-                exit 1
-              }
-              [ "$(jq -r .symlinkPath "$safixManifest")" = /run/safix ] || {
-                echo "safix-installer-manifest: symlinkPath is not safix's own"
-                exit 1
-              }
-              [ "$(jq -r .userMode "$safixManifest")" = false ] || {
-                echo "safix-installer-manifest: userMode is not false"
-                exit 1
+              normalize() {
+                jq -S '
+                  .secrets |= map(.sopsFile |= sub("^/nix/store/[^/]+/"; "")) | .secrets |= sort_by(.name)
+                ' "$1"
               }
 
-              if ! diff -u <(jq -S keys "$parityManifest") <(jq -S keys "$safixManifest"); then
+              if ! diff -u <(jq -S . "$expected") <(normalize "$safixManifest"); then
                 echo ""
-                echo "safix-installer-manifest: manifest key sets differ from the provisioner's builder"
+                echo "safix-installer-schema: the built manifest no longer matches the accepted snapshot"
+                echo "safix-installer-schema: if the change is deliberate, the serde struct in"
+                echo "safix-installer-schema: crates/safix-core/src/install.rs moves with it and so does"
+                echo "safix-installer-schema: modules/flake/checks/installer-manifest.json"
                 exit 1
               fi
-              if ! diff -u <(jq -S '.logging | keys' "$parityManifest") <(jq -S '.logging | keys' "$safixManifest"); then
-                echo ""
-                echo "safix-installer-manifest: logging key sets differ from the provisioner's builder"
-                exit 1
-              fi
+
+              touch $out
+            '';
+
+        # The program half of the same boundary, against the real binary.
+        safix-installer-roundtrip =
+          pkgs.runCommand "safix-installer-roundtrip"
+            {
+              nativeBuildInputs = [
+                pkgs.age
+                pkgs.jq
+                pkgs.sops
+                installerPackage
+              ];
+              safixManifest = safixManifest;
+              meta.description = "the real installer accepts the built manifest and refuses four mutations of it";
+            }
+            ''
+              export HOME="$TMPDIR"
+
+              # No runtime directory is named, deliberately. The document
+              # tier's fixture manifest is user-mode, and a check mode
+              # installs nothing, so it must validate a `%r` root rather than
+              # expand it: a build sandbox has no runtime directory and a
+              # manifest that only ever gets checked has no business needing
+              # one. This absence is what holds that.
+              work="$TMPDIR/work"
+              mkdir -p "$work"
+              cd "$work"
+
+              accept() {
+                if ! safix install --check-mode="$1" --ignore-passwd "$2" > accepted.log 2>&1; then
+                  cat accepted.log
+                  echo "safix-installer-roundtrip: $3"
+                  exit 1
+                fi
+              }
+
+              refuse() {
+                if safix install --check-mode="$1" --ignore-passwd "$2" > refused.log 2>&1; then
+                  echo "safix-installer-roundtrip: $3"
+                  exit 1
+                fi
+                if ! grep -q -- "$4" refused.log; then
+                  cat refused.log
+                  echo "safix-installer-roundtrip: the refusal did not name '$4'"
+                  exit 1
+                fi
+              }
+
+              # ── the schema tier, over the manifest the nix half built ──
+              cp "$safixManifest" built.json
+              accept manifest built.json \
+                "the manifest this tree builds is not one this binary reads"
+
+              jq '.version = 2' built.json > version.json
+              refuse manifest version.json \
+                "a schema version this binary does not know was accepted" "version"
+
+              jq '.secrets[0].mode = "0o400"' built.json > mode.json
+              refuse manifest mode.json \
+                "a mode that is not octal was accepted" "$(jq -r '.secrets[0].name' built.json)"
+
+              jq '. + { templates: [] }' built.json > top-field.json
+              refuse manifest top-field.json \
+                "an unknown top-level field was ignored rather than refused" "templates"
+
+              jq '.secrets[0] += { neededForUsers: false }' built.json > entry-field.json
+              refuse manifest entry-field.json \
+                "an unknown entry field was ignored rather than refused" "neededForUsers"
+
+              # ── the document tier, over ciphertext this check made ──
+              # The built manifest's documents are paths into this flake that no
+              # committed file backs, so a document-mode run over it would
+              # refuse for want of a file rather than for want of a key. This
+              # fixture is what makes the third mutation — a key absent from its
+              # document — expressible at all.
+              age-keygen -o identity.txt 2>/dev/null
+              recipient=$(age-keygen -y identity.txt)
+              printf 'present: a value\n' > plain.yaml
+              sops encrypt --age "$recipient" plain.yaml > cipher.yaml
+
+              documentManifest() {
+                jq -n --arg key "$1" --arg cipher "$work/cipher.yaml" --arg identity "$work/identity.txt" '{
+                  version: 1,
+                  secrets: [ {
+                    name: "probe", key: $key, path: "/run/safix-roundtrip/probe",
+                    owner: null, group: null, uid: 0, gid: 0,
+                    sopsFile: $cipher, format: "yaml", mode: "0400",
+                    restartUnits: [], reloadUnits: []
+                  } ],
+                  secretsMountPoint: "/run/safix-roundtrip.d",
+                  symlinkPath: "/run/safix-roundtrip",
+                  keepGenerations: 1,
+                  ageKeyFile: $identity,
+                  ageSshKeyPaths: [],
+                  useTmpfs: false,
+                  userMode: true,
+                  logging: { keyImport: false, secretChanges: false },
+                  manifestInputHash: null
+                }' > "$2"
+              }
+
+              documentManifest present document-present.json
+              documentManifest absent document-absent.json
+
+              accept document document-present.json \
+                "a key that resolves in its document was refused"
+              accept manifest document-absent.json \
+                "the schema mode read a document it has no business reading"
+              refuse document document-absent.json \
+                "a key absent from its document was accepted" "absent"
 
               touch $out
             '';
@@ -1118,8 +1438,8 @@
         };
 
         # Held against the built manifests' `ageSshKeyPaths` rather than
-        # against `sops.age.sshKeyPaths`, so the claim is about what the
-        # binary will read rather than about an intermediate option.
+        # against an intermediate option, so the claim is about what the
+        # binary will read.
         safix-installer-identity =
           pkgs.runCommand "safix-installer-identity"
             {
@@ -1154,15 +1474,136 @@
               touch $out
             '';
 
+        # The two environment overrides, driven rather than declared. Each
+        # points at a script of this check's own that records having been
+        # called and then behaves as the real tool does, so a runtime that
+        # ignored the variable and found the real binary on `PATH` — or found
+        # nothing and skipped — leaves the marker absent.
+        #
+        # `ssh-to-age`'s asymmetry is exercised in the same run: one key
+        # converts, one does not, and the run still assembles an identity from
+        # the one that did.
+        safix-installer-overrides =
+          pkgs.runCommand "safix-installer-overrides"
+            {
+              nativeBuildInputs = [
+                pkgs.age
+                pkgs.coreutils
+                pkgs.jq
+                pkgs.sops
+                installerPackage
+              ];
+              sshToAgeStub = sshToAgeStub;
+              keygenStub = keygenStub;
+              installScript = userInstallScript;
+              keyFile = generatedKeyFile;
+              meta.description = "SAFIX_AGE_KEYGEN and SAFIX_SSH_TO_AGE are read rather than declared";
+            }
+            ''
+              export HOME="$TMPDIR"
+              export XDG_RUNTIME_DIR="$TMPDIR/run"
+              mkdir -p "$XDG_RUNTIME_DIR"
+              work="$TMPDIR/work"
+              mkdir -p "$work"
+              cd "$work"
+
+              export SAFIX_OVERRIDE_MARKERS="$work/markers.txt"
+              : > "$SAFIX_OVERRIDE_MARKERS"
+
+              age-keygen -o real-identity.txt 2>/dev/null
+              recipient=$(age-keygen -y real-identity.txt)
+              export SAFIX_OVERRIDE_CONVERTED="$work/real-identity.txt"
+              printf 'token: safix-override-fixture\n' > plain.yaml
+              sops encrypt --age "$recipient" plain.yaml > cipher.yaml
+
+              printf 'not a key\n' > unconvertible-key
+              printf 'not a key either\n' > convertible-key
+
+              jq -n --arg cipher "$work/cipher.yaml" \
+                --arg convertible "$work/convertible-key" \
+                --arg unconvertible "$work/unconvertible-key" '{
+                version: 1,
+                secrets: [ {
+                  name: "token", key: "token", path: "%r/safix/token",
+                  owner: null, group: null, uid: 0, gid: 0,
+                  sopsFile: $cipher, format: "yaml", mode: "0400",
+                  restartUnits: [], reloadUnits: []
+                } ],
+                secretsMountPoint: "%r/safix.d",
+                symlinkPath: "%r/safix",
+                keepGenerations: 1,
+                ageKeyFile: null,
+                ageSshKeyPaths: [ $convertible, $unconvertible ],
+                useTmpfs: false,
+                userMode: true,
+                logging: { keyImport: false, secretChanges: false },
+                manifestInputHash: null
+              }' > manifest.json
+
+              SAFIX_SSH_TO_AGE="$sshToAgeStub" safix install manifest.json 2> install.log || {
+                cat install.log
+                echo "safix-installer-overrides: the install refused"
+                exit 1
+              }
+
+              grep -q "ssh-to-age-was-called" "$SAFIX_OVERRIDE_MARKERS" || {
+                echo "safix-installer-overrides: SAFIX_SSH_TO_AGE was declared and not read"
+                exit 1
+              }
+              grep -q "not an ed25519 key" install.log || {
+                echo "safix-installer-overrides: an unconvertible ssh key was not reported and skipped"
+                exit 1
+              }
+              [ "$(cat "$XDG_RUNTIME_DIR/safix/token")" = safix-override-fixture ] || {
+                echo "safix-installer-overrides: the entry did not decrypt with the converted identity"
+                exit 1
+              }
+
+              # ── the key generator's own override ──
+              # Exercised through the user scope's own install script, which is
+              # where `age-keygen` is reached at all: the installer mints no
+              # key, and the operator-facing `keygen` verb needs a declaring
+              # repository this sandbox has none of.
+              #
+              # The key file's path is baked into that script at evaluation, so
+              # it names the sandbox's own build root. That is an assumption
+              # about the sandbox rather than about safix, so it is checked
+              # rather than relied on.
+              [ -d "$(dirname "$keyFile")" ] && [ -w "$(dirname "$keyFile")" ] || {
+                echo "safix-installer-overrides: $keyFile's directory is not writable here,"
+                echo "safix-installer-overrides: so this check's assumption about the build root does not hold"
+                exit 1
+              }
+              rm -f "$keyFile"
+
+              # The install half of the script refuses: its manifest names the
+              # fixture fleet's documents, which are paths into this flake that
+              # no committed file backs. The key generation runs first and is
+              # what is measured, so the exit status is deliberately not.
+              SAFIX_AGE_KEYGEN="$keygenStub" "$installScript" > keygen.log 2>&1 || true
+
+              grep -q "keygen-was-called" "$SAFIX_OVERRIDE_MARKERS" || {
+                cat keygen.log
+                echo "safix-installer-overrides: SAFIX_AGE_KEYGEN was declared and not read"
+                exit 1
+              }
+              [ -s "$keyFile" ] || {
+                cat keygen.log
+                echo "safix-installer-overrides: no key file was minted where the profile asked for one"
+                exit 1
+              }
+
+              touch $out
+            '';
+
         # What this stands in for, and what it does not: the failure observed
-        # on the pilot host was EBUSY — `prepareSecretsDir` calling RemoveAll
-        # on a live ramfs mount — and a build sandbox cannot mount, so the
-        # branch demonstrated here is the removal itself (`main.go:404`,
-        # `:415-423`), which is what a mountpoint turns into an error. The
-        # binary is run for real, in user mode so no privilege is needed, over
-        # ciphertext and an age identity generated inside the sandbox. Linux
-        # only, and absent rather than trivially green elsewhere: this whole
-        # file's checks exist only where a NixOS configuration evaluates.
+        # on the pilot host was EBUSY — a RemoveAll on a live ramfs mount —
+        # and a build sandbox cannot mount, so the branch demonstrated here is
+        # the removal itself, which is what a mountpoint turns into an error.
+        # The binary is run for real, in user mode so no privilege is needed,
+        # over ciphertext and an age identity generated inside the sandbox.
+        # Linux only, and absent rather than trivially green elsewhere: this
+        # whole file's checks exist only where a NixOS configuration evaluates.
         safix-installer-coexistence =
           pkgs.runCommand "safix-installer-coexistence"
             {
@@ -1170,7 +1611,7 @@
                 pkgs.age
                 pkgs.sops
                 pkgs.jq
-                inputs.sops-nix.packages.${system}.sops-install-secrets
+                installerPackage
               ];
               meta.description = "the destructive branch is real, and safix's roots never reach a foreign store";
             }
@@ -1190,18 +1631,19 @@
               manifestFor() {
                 jq -n --arg symlink "$1" --arg mount "$2" \
                   --arg cipher "$work/cipher.yaml" --arg key "$TMPDIR/identity.txt" '{
+                  version: 1,
                   secrets: [ {
                     name: "token", key: "token", path: ($symlink + "/token"),
-                    format: "yaml", mode: "0400", owner: "", group: "", uid: 0, gid: 0,
-                    sopsFile: $cipher, sopsFileHash: "", restartUnits: [], reloadUnits: [],
-                    neededForUsers: false
+                    owner: null, group: null, uid: 0, gid: 0,
+                    sopsFile: $cipher, format: "yaml", mode: "0400",
+                    restartUnits: [], reloadUnits: []
                   } ],
-                  templates: [],
                   secretsMountPoint: $mount, symlinkPath: $symlink,
-                  keepGenerations: 1, gnupgHome: "", sshKeyPaths: [],
-                  ageKeyFile: $key, ageSshKeyPaths: [], useTmpfs: false,
-                  placeholderBySecretName: {}, userMode: true,
-                  logging: { keyImport: false, secretChanges: false }
+                  keepGenerations: 1,
+                  ageKeyFile: $key, ageSshKeyPaths: [],
+                  useTmpfs: false, userMode: true,
+                  logging: { keyImport: false, secretChanges: false },
+                  manifestInputHash: null
                 }' > "$3"
               }
 
@@ -1213,7 +1655,7 @@
               manifestFor "$work/foreign-destroyed" "$work/foreign-destroyed.d" manifest-destructive.json
               manifestFor "$work/safix" "$work/safix.d" manifest-safix.json
 
-              sops-install-secrets -ignore-passwd manifest-destructive.json
+              safix install --ignore-passwd manifest-destructive.json
               if [ -e foreign-destroyed/sentinel ]; then
                 echo "safix-installer-coexistence: the sentinel survived, so the destructive branch did not fire"
                 exit 1
@@ -1224,7 +1666,7 @@
               }
               snapshot > "$TMPDIR/before.txt"
 
-              sops-install-secrets -ignore-passwd manifest-safix.json
+              safix install --ignore-passwd manifest-safix.json
 
               snapshot > "$TMPDIR/after.txt"
               if ! diff -u "$TMPDIR/before.txt" "$TMPDIR/after.txt"; then

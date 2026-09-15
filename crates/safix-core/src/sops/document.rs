@@ -172,6 +172,40 @@ pub fn keys_of(text: &str) -> Result<BTreeMap<String, KeyState>> {
         .collect())
 }
 
+/// Whether the document holds a value at this `/`-nested key path.
+///
+/// Read off the cleartext structure, which is the whole point: sops enciphers
+/// leaf values and leaves the mapping keys in the clear, so whether a declared
+/// key exists is answerable without an identity. That is what lets the
+/// installer's document check mode run inside a nix build sandbox, where there
+/// is no key and decryption is not a thing that could be attempted.
+///
+/// A segment that resolves to something other than a mapping answers `false`
+/// rather than failing: the declared path does not reach a value either way,
+/// and the caller's refusal names the path it asked for.
+///
+/// # Errors
+///
+/// [`Error::SopsDocumentUnreadable`] when the bytes are not YAML.
+pub fn holds_key(text: &str, key: &str) -> Result<bool> {
+    let document: Value =
+        serde_norway::from_str(text).map_err(|cause| Error::SopsDocumentUnreadable {
+            cause: cause.to_string(),
+        })?;
+
+    let mut here = &document;
+    for segment in key.split('/') {
+        let Some(next) = here
+            .as_mapping()
+            .and_then(|mapping| mapping.get(Value::String(segment.to_owned())))
+        else {
+            return Ok(false);
+        };
+        here = next;
+    }
+    Ok(!here.is_mapping() && !here.is_sequence())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

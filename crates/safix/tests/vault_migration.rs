@@ -6,9 +6,15 @@
 //! a consumer declaring a vault for the first time on an existing repository
 //! is in — and drives `safix fix` (forward) or `safix fix --vault-rollback`
 //! (backward) against it with a vault declared. The opaque names below are
-//! not `opaqueOf`'s real output — the fixture's stubbed `nix` never computes
-//! one — but fixed hex-shaped literals standing in for it, exactly as
-//! `vault_opaque_names.rs` already does.
+//! `opaqueOf`'s real output, recomputed rather than hand-written: each is
+//! `sha256("<namingKey>|<tag>|<root-relative readable path>")` over
+//! `modules/flake/checks/vault.nix`'s fixture naming key
+//! `fc84b416cd03fedc2c02116b068d75c543d327361f19e3d18d9e8aa3de0f4ad2`, with
+//! the four tags `secrets`, `key`, `public` and `state`. The fixture's
+//! stubbed `nix` computes none of them — it hands them over as data,
+//! exactly as the resolver does — but they are the resolver's real bytes,
+//! so a change to the hash input this suite's constants did not follow
+//! shows up as a mismatch rather than passing silently.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -18,24 +24,52 @@ use harness::{Fixture, real_sops, shim};
 use serde_json::json;
 
 const LOGICAL_PRIVATE_FILE: &str = "secrets/safix/users/alice/secrets.yaml";
+/// `secrets|users/alice/secrets.yaml`.
 const OPAQUE_PRIVATE_FILE: &str =
-    "secrets/1111111111111111111111111111111111111111111111111111111111111111.yaml";
-const OPAQUE_PRIVATE_KEY: &str = "opaque-key-api-token";
+    "secrets/49de471561b63dceeb0edc0b29d324f49d1ec33bd7f21a2f312b47e8836248ea.yaml";
+/// `key|users/alice/secrets.yaml#api-token`.
+const OPAQUE_PRIVATE_KEY: &str = "6aec486973c1530ed15e672a3e69f95d5030dbd2f808a3f43bebd238331d5fd1";
+/// `state|alice/api-token` — the record's hash input was already relative
+/// to the generator-record root, so this one name survives the break.
 const OPAQUE_PRIVATE_RECORD: &str =
-    "state/1111111111111111111111111111111111111111111111111111111111111112";
+    "state/bf23927f1bb02936d41fc8f9730f5e98431724e6ff6bfe7b0f1da168d71450b6";
 const LOGICAL_PRIVATE_RECORD: &str = "state/safix/definitions/alice/api-token";
 
 const LOGICAL_SHARED_FILE: &str = "secrets/safix/shared/alice,bob/secrets.yaml";
+/// `secrets|shared/alice,bob/secrets.yaml`.
 const OPAQUE_SHARED_FILE: &str =
-    "secrets/2222222222222222222222222222222222222222222222222222222222222222.yaml";
-const OPAQUE_SHARED_KEY: &str = "opaque-key-fleet-token";
+    "secrets/873b6adfa41ee669e5896f0fe90bee8c5738b31b8491b39ade5c690a02741b26.yaml";
+/// `key|shared/alice,bob/secrets.yaml#fleet-token`.
+const OPAQUE_SHARED_KEY: &str = "921c7ad8e1fe08132fafe21cb993c15ed5b4b1654f251063976a9c989ba7b2c4";
+/// `state|shared/alice,bob/fleet-token`.
 const OPAQUE_SHARED_RECORD: &str =
-    "state/2222222222222222222222222222222222222222222222222222222222222223";
+    "state/63ab6079cff5facdfe01730d47c6dd0177ff95e86f831e6ee4db7c37ed9a5437";
 const LOGICAL_SHARED_RECORD: &str = "state/safix/definitions/shared/alice,bob/fleet-token";
 
 const LOGICAL_PUBLIC: &str = "public/safix/users/alice/host-key/value";
+/// `public|users/alice/host-key/value`.
 const OPAQUE_PUBLIC: &str =
-    "public/3333333333333333333333333333333333333333333333333333333333333333";
+    "public/662de5cdc16fc6e9d1f0809b5b6a22ce74aee202ef163267556904884892b81f";
+/// `state|alice/host-key`. The public output's own record: every placement
+/// carries one, whether its value is encrypted or not.
+const OPAQUE_PUBLIC_RECORD: &str =
+    "state/676dbf71c0c3280eeb04d631230df1cac6eed5d1ee4f00b83df5c0019d96e064";
+const LOGICAL_PUBLIC_RECORD: &str = "state/safix/definitions/alice/host-key";
+
+/// The pre-change names, hashed from the *root-prefixed* readable path the
+/// resolver used to feed `opaqueOf`, for the one-time-break drill below.
+/// The three records are absent from this list on purpose: their input was
+/// already root-relative, so they did not move.
+const PREVIOUS_PRIVATE_FILE: &str =
+    "secrets/374e7f916175346f12a5e181a3d58b6ebfd729cde1330a57ea0bf6b80a482254.yaml";
+const PREVIOUS_PRIVATE_KEY: &str =
+    "2c09b1be9e41eb6c358992919e270e95ca42ba83a420e7b40f336ac3e61f00d9";
+const PREVIOUS_SHARED_FILE: &str =
+    "secrets/d9384552d4cca82cbda1f5ba0397fb3d890fb0efaa8f78d9144a09ff945b10c2.yaml";
+const PREVIOUS_SHARED_KEY: &str =
+    "42e6df0ee468da93ec5a30562fda302e56f643a90568f4c1f7749fa842e8c0a1";
+const PREVIOUS_PUBLIC: &str =
+    "public/07e39eb89c181e396c52e61a48c5cde2b496f26cf40570f2d2e1ed868698e146";
 
 const PRIVATE_VALUE: &str = "CANARY-private-api-token";
 const SHARED_VALUE: &str = "CANARY-shared-fleet-token";
@@ -56,6 +90,7 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "owner": "alice", "shared": false, "generator": null, "public": null,
         "definitionRecord": OPAQUE_PRIVATE_RECORD,
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "api-token", "logicalPublic": null,
+        "logicalRecord": LOGICAL_PRIVATE_RECORD,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
 
@@ -63,9 +98,13 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "file": OPAQUE_PRIVATE_FILE, "key": "host-key-unused", "origin": "private",
         "owner": "alice", "shared": false, "generator": null,
         "public": OPAQUE_PUBLIC,
-        "definitionRecord": null,
+        // A public output carries a record of its own, opaque like every
+        // other vault-rooted name; what makes this placement public is
+        // `public`, not the absence of a record.
+        "definitionRecord": OPAQUE_PUBLIC_RECORD,
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "host-key-unused",
         "logicalPublic": LOGICAL_PUBLIC,
+        "logicalRecord": LOGICAL_PUBLIC_RECORD,
     });
     fixture.seed_vault_placement("alice", "host-key", public);
 
@@ -76,6 +115,7 @@ fn declare_vault_placements(fixture: &mut Fixture) {
             "definitionRecord": OPAQUE_SHARED_RECORD,
             "logicalFile": LOGICAL_SHARED_FILE, "logicalKey": "fleet-token",
             "logicalPublic": null,
+            "logicalRecord": LOGICAL_SHARED_RECORD,
         });
         fixture.seed_vault_placement(owner, "fleet-token", shared);
     }
@@ -281,8 +321,9 @@ fn an_interrupted_relocation_leaves_the_destination_absent_and_a_re_run_complete
     let private = json!({
         "file": OPAQUE_PRIVATE_FILE, "key": OPAQUE_PRIVATE_KEY, "origin": "private",
         "owner": "alice", "shared": false, "generator": null, "public": null,
-        "definitionRecord": null,
+        "definitionRecord": OPAQUE_PRIVATE_RECORD,
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "api-token", "logicalPublic": null,
+        "logicalRecord": LOGICAL_PRIVATE_RECORD,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
     let alice = fixture.alice.clone();
@@ -331,4 +372,174 @@ fn an_interrupted_relocation_leaves_the_destination_absent_and_a_re_run_complete
         !fixture.exists(LOGICAL_PRIVATE_FILE),
         "the readable-layout source survived the completed re-run"
     );
+}
+
+/// Seed the vault with a fleet already relocated under the names given, and
+/// leave the declaration root empty — the state a consumer who ran
+/// `safix fix` under some derivation of `opaqueOf` is in. The two records
+/// are seeded at their post-change names in both halves below, because the
+/// record's hash input was already relative to the generator-record root
+/// and so did not move.
+fn vault_seeded_at(
+    fixture: &mut Fixture,
+    secret_file: &str,
+    secret_key: &str,
+    shared_file: &str,
+    shared_key: &str,
+    public: &str,
+) {
+    let (alice, bob) = (fixture.alice.clone(), fixture.bob.clone());
+    fixture.encrypt_to_vault(
+        secret_file,
+        &[&alice],
+        &format!("{secret_key}: {PRIVATE_VALUE}\n"),
+    );
+    fixture.encrypt_to_vault(
+        shared_file,
+        &[&alice, &bob],
+        &format!("{shared_key}: {SHARED_VALUE}\n"),
+    );
+    vault_write(fixture, public, PUBLIC_VALUE);
+    vault_write(fixture, OPAQUE_PRIVATE_RECORD, PRIVATE_RECORD_TEXT);
+    vault_write(fixture, OPAQUE_SHARED_RECORD, SHARED_RECORD_TEXT);
+    vault_write(fixture, ".gitignore", "/.sops-vault-rules.yaml\n");
+}
+
+/// Write a plaintext leaf straight into the vault repository.
+fn vault_write(fixture: &Fixture, relative: &str, contents: &str) {
+    let path = fixture.vault_root().join(relative);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, contents).unwrap();
+}
+
+/// A vault fixture whose documents sit at the names given, with the
+/// post-change placements declared over them.
+fn stale_vault_fixture(
+    secret_file: &str,
+    secret_key: &str,
+    shared_file: &str,
+    shared_key: &str,
+    public: &str,
+) -> (Fixture, std::path::PathBuf) {
+    let mut fixture = Fixture::new();
+    fixture.seed_declarations();
+    let vault = fixture.declare_vault();
+    declare_vault_placements(&mut fixture);
+    vault_seeded_at(
+        &mut fixture,
+        secret_file,
+        secret_key,
+        shared_file,
+        shared_key,
+        public,
+    );
+    (fixture, vault)
+}
+
+/// Tasks 8.3 and 8.7: the one-time opaque-name break, drilled.
+///
+/// The break is observable, which is the half of task 8.7 that holds. A
+/// vault seeded under the pre-change, root-prefixed names reports every
+/// ciphertext document as holding no value, because each placement now
+/// names a post-change destination that is empty; the same vault seeded
+/// under the post-change names reports none of them. A `check` silent in
+/// both cases would mean the opaque names are not being compared at all.
+///
+/// Two things this drill establishes that design S5 does not say, recorded
+/// here rather than asserted away:
+///
+/// The break is *partial*, not total. `opaqueOf`'s `state` input was
+/// already relative to the generator-record root — `alice/api-token`, not
+/// `state/safix/definitions/alice/api-token` — so every definition record
+/// keeps its name across the change while every document, in-document key
+/// and public leaf loses its. That asymmetry is what the pre-change
+/// constants above record, and it is why the rollback below brings the two
+/// records back and nothing else.
+///
+/// And the break does not relocate itself. S5's migration plan says
+/// `safix check` reports every affected document as *pending relocation*
+/// and `safix fix` relocates; it does not, and this machinery cannot.
+/// `relocation`'s candidates are `(opaque, readable)` pairs and
+/// `named_move` only ever moves between the declaration root and the vault
+/// root, so an old-opaque-to-new-opaque move is not a move this code
+/// expresses: `check` finds nothing at the declaration root to queue, and
+/// `fix --vault-rollback` finds only the records, whose names did not
+/// move. The operational consequence is that the rollback has to be run
+/// *before* the input carrying this change is taken. The forward half is
+/// [`a_populated_readable_fixture_migrates_into_a_vault`], whose
+/// destinations are now the root-relative names.
+#[test]
+fn the_opaque_name_break_is_visible_but_does_not_relocate_itself() {
+    let (stale, stale_vault) = stale_vault_fixture(
+        PREVIOUS_PRIVATE_FILE,
+        PREVIOUS_PRIVATE_KEY,
+        PREVIOUS_SHARED_FILE,
+        PREVIOUS_SHARED_KEY,
+        PREVIOUS_PUBLIC,
+    );
+    let stale_env = [(
+        "SAFIX_VAULT_ROOT",
+        stale_vault.to_str().expect("a utf-8 path"),
+    )];
+
+    let before = stale.run_env(&["check"], None, &stale_env);
+    assert_eq!(before.code, Some(1), "the break went unreported");
+    // The two entries whose value lives in a ciphertext document: each is
+    // reported against the post-change name its placement now carries,
+    // which is empty. `host-key` is not part of the signal — its
+    // placement's `file` is the private document and `check`'s no-value
+    // pass reports it in both halves, unchanged by the break.
+    for entry in ["declares 'api-token'", "declares 'fleet-token'"] {
+        before.says(entry);
+    }
+    before.says(&format!("{OPAQUE_SHARED_FILE} holds no value for it"));
+    // Nothing is pending: the readable layout is not at the declaration
+    // root, so there is nothing for the relocation to queue.
+    before.silent_about("has not yet moved it into the vault");
+
+    // A rollback from here recovers exactly the names the break left
+    // alone. The two records come back, because their hash input was
+    // already root-relative; the documents and the public leaf do not,
+    // because the names the rollback looks for are the post-change ones
+    // and the vault holds the pre-change ones.
+    stale
+        .run_env(&["fix", "--yes", "--vault-rollback"], None, &stale_env)
+        .expect_success("a rollback over a vault holding only pre-change names");
+    for recovered in [LOGICAL_PRIVATE_RECORD, LOGICAL_SHARED_RECORD] {
+        assert!(
+            stale.exists(recovered),
+            "{recovered} did not come back, so its name moved after all"
+        );
+    }
+    for stranded in [LOGICAL_PRIVATE_FILE, LOGICAL_SHARED_FILE, LOGICAL_PUBLIC] {
+        assert!(
+            !stale.exists(stranded),
+            "{stranded} came back from a vault holding only pre-change names"
+        );
+    }
+
+    // The other half of the drill: the same fleet under the post-change
+    // names reports neither finding.
+    let (current, current_vault) = stale_vault_fixture(
+        OPAQUE_PRIVATE_FILE,
+        OPAQUE_PRIVATE_KEY,
+        OPAQUE_SHARED_FILE,
+        OPAQUE_SHARED_KEY,
+        OPAQUE_PUBLIC,
+    );
+    let after = current.run_env(
+        &["check"],
+        None,
+        &[(
+            "SAFIX_VAULT_ROOT",
+            current_vault.to_str().expect("a utf-8 path"),
+        )],
+    );
+    for entry in ["declares 'api-token'", "declares 'fleet-token'"] {
+        after.silent_about(entry);
+    }
+    after.silent_about(&format!("{OPAQUE_SHARED_FILE} holds no value for it"));
+    after.silent_about("has not yet moved it into the vault");
 }

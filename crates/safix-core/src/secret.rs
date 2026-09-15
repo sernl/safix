@@ -8,13 +8,28 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Result};
 use crate::probe::{
     DebugFallback as _, DisplayFallback as _, FromStrFallback as _, FromStringFallback as _,
-    Implements, SerializeFallback as _,
+    Implements, SerializeFallback as _, ToStringFallback as _,
 };
 
 /// Where the growing read buffer starts. Larger than any value an operator
 /// types and than any key an age or ssh identity is spelled as, so the ordinary
 /// read never grows and never copies.
 const INITIAL_BUFFER: usize = 4096;
+
+/// What a byte the terminal would otherwise interpret is shown as.
+///
+/// A value is arbitrary bytes, and a preview draws them on a terminal that
+/// reads some of those bytes as instructions: an `\x1b` in a value would move
+/// the cursor, repaint the region the picker cleared, or set a title. Replacing
+/// every control character with one visible glyph means a value can be looked
+/// at without being executed.
+const CONTROL_PLACEHOLDER: char = '\u{b7}';
+
+/// What marks a preview that stopped before the value ended.
+///
+/// One column wide, and it is spent from the region rather than added to it, so
+/// a marked line is still exactly as wide as the caller allowed.
+const TRUNCATED: char = '\u{2026}';
 
 /// A plaintext value, in memory, on its way to or from `sops`.
 ///
@@ -35,10 +50,11 @@ const INITIAL_BUFFER: usize = 4096;
 /// # How a value gets in, and how it gets out
 ///
 /// In through [`Secret::read_from`] or [`Secret::read_from_stdin`], and out
-/// through [`Secret::write_to`]. There is no conversion from a `String` or a
+/// through [`Secret::write_to`], [`Secret::write_json_to`] or
+/// [`Secret::preview_into`]. There is no conversion from a `String` or a
 /// `&str` — that absence is compiled too — and no accessor returning the bytes,
-/// so the only egress is into a writer, in practice the piped standard input of
-/// a `sops` child process.
+/// so every egress is into a writer: the piped standard input of a `sops` child
+/// process, and the terminal a preview is drawn on.
 ///
 /// # What is zeroed, and what cannot be
 ///
@@ -78,6 +94,14 @@ const _: () = assert!(
 const _: () = assert!(
     !Implements::<Secret>::FROM_STR,
     "Secret must not be constructible from a borrowed string"
+);
+// The probe that would have caught `preview_into` being written as a returning
+// method: a rendering that came back as a `String` is a rendering the caller
+// can `to_string` a value into, and `ToString` is what every such shape ends
+// up spelled as.
+const _: () = assert!(
+    !Implements::<Secret>::TO_STRING,
+    "Secret must not be convertible into an owned string"
 );
 
 impl Secret {
@@ -199,6 +223,80 @@ impl Secret {
         serde_json::to_writer(sink, text.as_str()).map_err(io::Error::other)
     }
 
+    /// Draw the value into a terminal writer, bounded to `lines` lines of
+    /// `columns` columns.
+    ///
+    /// The third egress, and the last one this type will grow: a sink rather
+    /// than a returned `String` because the plaintext's lifetime is then the
+    /// write's lifetime. The rejected shape was
+    /// `to_preview_string() -> String` — the same rectangle of characters, but
+    /// as a heap allocation with no zeroizing owner, reachable by every caller
+    /// in the workspace forever. Nothing is returned and nothing escapes as
+    /// bytes, so the type's compile-time probes stay exactly as they are.
+    ///
+    /// What reaches the sink is sanitized and bounded:
+    ///
+    /// - a control character is replaced by one visible glyph, so a value
+    ///   cannot repaint the region it is drawn in;
+    /// - a line wider than `columns` is cut, with the last column spent on a
+    ///   truncation marker rather than on a character;
+    /// - content past `lines` lines is not drawn, and the last line drawn
+    ///   carries the same marker;
+    /// - a value that is not valid UTF-8 is described by its size instead,
+    ///   because a preview of mojibake tells an operator nothing and a
+    ///   byte count tells them what they are holding.
+    ///
+    /// An empty value draws nothing, and so does a region with no room in it.
+    /// Each line drawn is terminated by a newline, including the last.
+    ///
+    /// # Errors
+    ///
+    /// Returns the sink's own failure.
+    pub fn preview_into(
+        &self,
+        sink: &mut impl Write,
+        lines: usize,
+        columns: usize,
+    ) -> io::Result<()> {
+        if lines == 0 || columns == 0 {
+            return Ok(());
+        }
+
+        let bytes = self.0.expose_secret();
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            let count = bytes.len();
+            return writeln!(sink, "{count} bytes, not valid UTF-8");
+        };
+
+        // One trailing newline is how a value arrives from a stream that ended
+        // on one, and drawing it as a second empty line would spend a line of
+        // the region — and, on a one-line region, mark the preview truncated —
+        // for a byte nobody stored.
+        let body = text.strip_suffix('\n').unwrap_or(text);
+
+        let mut remaining = body.split('\n').peekable();
+        let mut drawn: usize = 0;
+        while let Some(line) = remaining.next() {
+            // `peek` after taking the line rather than before: the body has to
+            // ask the iterator whether anything follows what it just took, and
+            // that is what decides whether the last slot drawn carries the
+            // truncation marker.
+            let more_lines = remaining.peek().is_some();
+            let last_slot = drawn.saturating_add(1) == lines;
+            write_preview_line(sink, line, columns, last_slot && more_lines)?;
+            if last_slot {
+                return Ok(());
+            }
+            drawn = drawn.saturating_add(1);
+        }
+
+        Ok(())
+    }
+
     /// The same value with one trailing newline removed, when there is one.
     ///
     /// For the one reader that needs it: `keepassxc-cli show` prints an entry's
@@ -295,6 +393,47 @@ impl Secret {
     pub fn empty() -> Self {
         Self::from_slice(&[])
     }
+}
+
+/// Draw one line of a preview, sanitized and clipped to `columns`.
+///
+/// `continues` says that content follows which the region has no room for, so
+/// the marker is written whether or not this line itself overflowed.
+///
+/// A character at a time, into a four-byte stack buffer, because the
+/// alternative is a `String` of the sanitized plaintext — which is the
+/// allocation `preview_into`'s whole shape exists to avoid.
+fn write_preview_line(
+    sink: &mut impl Write,
+    line: &str,
+    columns: usize,
+    continues: bool,
+) -> io::Result<()> {
+    // `nth` walks at most one character past the region, which is what tells a
+    // line that exactly fills it apart from one that does not.
+    let overflows = line.chars().nth(columns).is_some();
+    let marked = overflows || continues;
+    let room = if marked {
+        columns.saturating_sub(1)
+    } else {
+        columns
+    };
+
+    let mut encoded = [0_u8; 4];
+    for character in line.chars().take(room) {
+        let shown = if character.is_control() {
+            CONTROL_PLACEHOLDER
+        } else {
+            character
+        };
+        sink.write_all(shown.encode_utf8(&mut encoded).as_bytes())?;
+    }
+
+    if marked {
+        sink.write_all(TRUNCATED.encode_utf8(&mut encoded).as_bytes())?;
+    }
+
+    sink.write_all(b"\n")
 }
 
 /// Read to end of stream into a buffer that is zeroed on every path out,
@@ -668,5 +807,94 @@ mod tests {
         assert!(!of(b"same").equals(&of(b"samf")));
         assert!(!of(b"same").equals(&of(b"same ")));
         assert!(!of(b"").equals(&of(b"a")));
+    }
+
+    /// What a preview of `input` into a region of `lines` by `columns` draws.
+    ///
+    /// The sink is a `Vec<u8>` and the assertion is over its bytes, so a raw
+    /// escape reaching the terminal is a visible difference rather than an
+    /// invisible one.
+    fn preview(input: &[u8], lines: usize, columns: usize) -> Vec<u8> {
+        let secret =
+            Secret::read_from(&mut Cursor::new(input.to_vec())).expect("a cursor can be read");
+        let mut sink = Vec::new();
+        secret
+            .preview_into(&mut sink, lines, columns)
+            .expect("writing a vec cannot fail");
+        sink
+    }
+
+    #[test]
+    fn a_value_inside_the_region_is_drawn_whole_and_unmarked() {
+        assert_eq!(preview(b"grafana-token", 4, 20), b"grafana-token\n");
+        assert_eq!(preview(b"one\ntwo", 4, 20), b"one\ntwo\n");
+    }
+
+    #[test]
+    fn the_column_bound_is_exact_and_the_marker_is_spent_from_it() {
+        // Five characters in five columns is not truncation, so nothing is
+        // spent on a marker; six is, and the marker takes the last column
+        // rather than a sixth.
+        assert_eq!(preview(b"abcde", 4, 5), "abcde\n".as_bytes());
+        assert_eq!(preview(b"abcdef", 4, 5), "abcd\u{2026}\n".as_bytes());
+        assert_eq!(preview(b"abcdefghij", 4, 5), "abcd\u{2026}\n".as_bytes());
+    }
+
+    #[test]
+    fn the_line_bound_is_exact_and_the_last_line_drawn_carries_the_marker() {
+        assert_eq!(preview(b"one\ntwo", 2, 10), "one\ntwo\n".as_bytes());
+        assert_eq!(
+            preview(b"one\ntwo\nthree", 2, 10),
+            "one\ntwo\u{2026}\n".as_bytes()
+        );
+    }
+
+    #[test]
+    fn a_value_larger_than_the_region_in_both_directions_stays_inside_it() {
+        let mut long = Vec::new();
+        for _ in 0..40 {
+            long.extend_from_slice(b"0123456789012345678901234567890123456789\n");
+        }
+        let drawn = preview(&long, 3, 8);
+        let text = String::from_utf8(drawn).expect("the preview writes valid UTF-8");
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows.len(), 3);
+        for row in rows {
+            assert_eq!(row.chars().count(), 8, "a row wider than the region: {row}");
+        }
+    }
+
+    #[test]
+    fn a_control_byte_reaches_the_sink_as_a_placeholder_rather_than_itself() {
+        let drawn = preview(b"a\x1b[31mred\r\nnext\ttab", 4, 40);
+        assert_eq!(drawn, "a\u{b7}[31mred\u{b7}\nnext\u{b7}tab\n".as_bytes());
+        assert!(
+            !drawn.contains(&0x1b),
+            "an escape byte reached the terminal"
+        );
+        assert!(!drawn.contains(&b'\r'), "a carriage return reached it too");
+    }
+
+    #[test]
+    fn a_value_that_is_not_text_is_described_by_its_size() {
+        let drawn = preview(b"\xff\xfe\x00\x01", 4, 40);
+        assert_eq!(drawn, b"4 bytes, not valid UTF-8\n");
+        assert!(!drawn.contains(&0xff), "a byte of the value was drawn");
+    }
+
+    #[test]
+    fn nothing_is_drawn_for_an_empty_value_or_a_region_with_no_room() {
+        assert!(preview(b"", 4, 20).is_empty());
+        assert!(preview(b"grafana-token", 0, 20).is_empty());
+        assert!(preview(b"grafana-token", 4, 0).is_empty());
+    }
+
+    #[test]
+    fn one_trailing_newline_does_not_spend_a_line() {
+        // The byte a stream that ended on a newline leaves behind is not a
+        // second line of the value, and on a one-line region drawing it as one
+        // would report the value truncated when it was not.
+        assert_eq!(preview(b"only\n", 1, 10), b"only\n");
+        assert_eq!(preview(b"only\n\n", 2, 10), b"only\n\n");
     }
 }
