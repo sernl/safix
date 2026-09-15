@@ -6,7 +6,7 @@ title: Zero-knowledge direction for the separate secrets vault
 
 Research note, 2026-09-03.
 It feeds the decision on the open change `openspec/changes/separate-secrets-vault/` and builds on the 2026-09-02 finding that ciphertext in the nix store is never plaintext and that the vault change is neutral on store exposure.
-Sources were read at the revisions safix pins (sops 3.13.3, clan-core 56e35624, nix 2.34.8, age 1.3.1, age-plugin-yubikey 0.5.1, age Rust crate 0.12.1) or at the dates given, and at sops-nix a8627b21 where a finding rests on the installer safix replaced.
+Sources were read at the revisions safix pins (sops 3.13.3, nix 2.34.8, age 1.3.1, age-plugin-yubikey 0.5.1, age Rust crate 0.12.1) or at the dates given, and at two revisions safix pins nothing at: clan-core 56e35624, which was a flake input here when this note was written, and sops-nix a8627b21, where a finding rests on the installer safix replaced.
 
 ## Question
 

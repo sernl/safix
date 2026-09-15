@@ -11,7 +11,7 @@
 #   - linux, because the backend here is bubblewrap. darwin's is `sandbox-exec`
 #     with a profile this repository constructs, and observing it needs a darwin
 #     machine rather than a build sandbox. This is the same shape and the same
-#     reasoning as `safix-syscall-proof`'s and `safix-bridge-real-clan`'s.
+#     reasoning as `safix-syscall-proof`'s.
 #   - a kernel that grants unprivileged user namespaces, which bubblewrap is made
 #     of and which a hardened kernel refuses. `crates/safix/tests/sandbox.rs`
 #     asks that question against an argument vector written there rather than
@@ -19,19 +19,18 @@
 #     says what it did not do.
 #
 # Nesting bubblewrap inside the nix build sandbox was the risk this change's
-# design recorded, and it turned out not to be one on this fleet:
-# `safix-bridge-real-clan` already runs `clan vars generate` — which is
-# bubblewrap — inside a `runCommand`, and this check runs the envelope the same
-# way. A machine where the nesting genuinely fails reports the absence through the
-# guard below rather than by going quietly green.
+# design recorded, and it turned out not to be one on this fleet: this check runs
+# the envelope — bubblewrap — inside a `runCommand`, and the confinement takes.
+# This check is where that is observed rather than assumed: a machine where the
+# nesting genuinely fails reports the absence through the guard below rather than
+# by going quietly green.
 #
 # # The guard, and why it is not `integration.runOne`
 #
 # Each test in the target reports the absence and returns where the gate closes,
 # so libtest would say five passed over a run that established nothing. `runOne`
 # reads the result line, which catches a filter naming nothing and would not catch
-# this. So the absence sentence is read out of the output too, exactly as
-# `safix-bridge-real-clan` reads its own.
+# this. So the absence sentence is read out of the output too.
 { ... }:
 {
   perSystem =

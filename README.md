@@ -392,7 +392,7 @@ A generator script writes files rather than printing a value, and the three dire
 | `$prompts/<name>` | one answered prompt each, present only when prompts are declared |
 | `$in/<generator>/<name>` | a dependency's plaintext, keyed by the generator producing it |
 
-This is the interface clan-core's own generators are written against, so a script written for either system runs under the other.
+This is the interface clan's own generators are written against, so a script written for either system runs under the other.
 One difference is deliberate: only the dependencies a generator *declares* appear under `$in`, where clan places every file of the dependency generator — which would hand a script depending on a keypair's public half the private half as well.
 
 Bytes are stored exactly as written.
@@ -1171,6 +1171,11 @@ The companion's name is the mapped entry's plus `-safix-bridge-sync-state`, and 
 `placement = "shared"` (default `"per-machine"`) says the clan side is one var no machine owns exclusively, so `machine` is refused rather than required; the runtime discovers which machine to reach it through by trying each name `clan machines list` returns until one resolves, and refuses only once every one of them has failed.
 A two-way push still carries the identical stale-generator refusal a `safix-to-clan` write already has, with no override.
 
+**What the bridge's evidence is made of.**
+Every check that drives the bridge drives a stub of clan's command line, `crates/safix/tests/support/clan-stub.rs`, and no real-clan drill ships.
+That is the right instrument for what the claims are about — that a read runs clan's command and takes what came back on the pipe, that a write puts the value on standard input and nowhere else, that clan's refusals reach the operator as clan's words, and that nothing here reads a file clan placed — because a stub can be asked what it saw and a real clan cannot.
+What it does not establish is that those argument vectors mean to clan what safix thinks they mean; that rests on review of clan-cli itself, and the stub's own header cites the source file behind each line of the contract it stands in for, so the review is repeatable rather than remembered.
+
 ## The mirror in your password database
 
 Some secrets are read by tools and some are also read by a person — typed into a web login, a phone, another machine's prompt.
@@ -1365,7 +1370,6 @@ The nix half was never in scope and did not move; what was replaced is a shell r
 The port ran behind a differential harness comparing every subcommand against the shell runtime; the five places the two differ are recorded as decisions in the changelog's "Known differences".
 With the port complete the harness was deleted with the runtime it compared against — 6205 lines — and its claims rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
 `safix-syscall-proof` (linux-only) observes every plaintext `write` a `set` and a `generate` make and holds each to a pipe; `safix-channel-drills` damages the runtime once per channel and fails unless each damage is caught by the channel that exists to catch it.
-`safix-bridge-real-clan` (linux-only) drives the real clan command over a clan it builds inside the check — two machines, four `age`-backed generators between them, an identity minted per run — because every other bridge check drives a stub, and a stub goes on answering safix's arguments after clan has changed what they mean.
 `safix-generate-envelope` (linux-only) drives fragments that try to leave the sandbox and holds each attempt to failing, each one drilled against an unconfined run of the same fragment so that an absent file is the envelope's doing rather than the fragment's.
 The proposal, the decisions and the staging are in `openspec/changes/rewrite-runtime-in-rust/` for the port and `openspec/changes/rust-only-runtime/` for the retirement.
 

@@ -11,8 +11,8 @@
 //! the backend running: bubblewrap needs user namespaces, which a kernel can
 //! refuse, and a suite that asserted confinement it never established would be
 //! worse than one that says it established nothing. Where the gate closes, each
-//! test says what it did not do — the shape `syscall_proof.rs` and `real_clan.rs`
-//! already use — and `safix-generate-envelope` reads that sentence out of the
+//! test says what it did not do — the shape `syscall_proof.rs` already uses —
+//! and `safix-generate-envelope` reads that sentence out of the
 //! output and fails, so a check cannot be green over a claim nobody made.
 //!
 //! # What "outside the staging root" means, exactly

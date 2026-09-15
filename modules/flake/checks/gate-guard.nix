@@ -35,13 +35,12 @@
       # Every check that is legitimately Linux-only today: the nine
       # `safix-installer-*` checks (each of which evaluates a real
       # `nixosSystem`), the VM test (which boots one),
-      # `safix-bridge-real-clan`, `safix-generate-envelope`,
-      # `safix-memory-backing`, `safix-consumption-system` and
-      # `safix-portability-system`. Every other check is expected on every
-      # system — including `safix-portability-user-manifest`, which builds a
-      # home-scope manifest and needs no NixOS evaluation at all.
+      # `safix-generate-envelope`, `safix-memory-backing`,
+      # `safix-consumption-system` and `safix-portability-system`. Every other
+      # check is expected on every system — including
+      # `safix-portability-user-manifest`, which builds a home-scope manifest
+      # and needs no NixOS evaluation at all.
       linuxOnlyChecks = [
-        "safix-bridge-real-clan"
         "safix-consumption-system"
         "safix-generate-envelope"
         "safix-installer-coexistence"

@@ -139,13 +139,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No step frees disk for the store, because the surface does not need one.
-      # The whole of it — this flake's nixpkgs closure, the second one clan-core
-      # pins for the nested clan that `safix-bridge-real-clan` builds inside
-      # itself, a rust toolchain and a Qt application — comes to 8.5 GiB, against
-      # 87 GiB free on a linux runner and 97 GiB on a darwin one. The last step of
-      # this job reports the store's size and what is left on the filesystem, so
-      # the day a runner image or the surface changes that arithmetic the run says
-      # so rather than dying of a full disk. Reclaiming the image's own tooling
+      # The whole of it — this flake's nixpkgs closure, a rust toolchain and a Qt
+      # application — fits well inside the 87 GiB free on a linux runner and the
+      # 97 GiB free on a darwin one. The last step of this job reports the
+      # store's size and what is left on the filesystem, so the day a runner
+      # image or the surface changes that arithmetic the run says so rather than
+      # dying of a full disk. Reclaiming the image's own tooling
       # was tried and taken back out: it left `/` at one gigabyte free, which is a
       # new way to fail in exchange for headroom nothing was using.
       # `access-tokens` is what makes a run repeatable rather than a coin toss.

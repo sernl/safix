@@ -17,8 +17,9 @@
 //! because it can be asked what it saw.
 //!
 //! What a stub cannot establish is that the arguments mean to clan what safix
-//! thinks they mean. That is what the real-clan check is for, and it is a
-//! separate check for exactly that reason.
+//! thinks they mean. No check in this repository drives a real clan, so nothing
+//! holds that; what holds it is review of clan's own CLI against the contract
+//! below, and the citations are there so a reader can repeat that review.
 //!
 //! # The contract this stands in for
 //!

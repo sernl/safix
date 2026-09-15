@@ -22,7 +22,7 @@ A change to it is a breaking change whether or not any rust changed.
 ### **BREAKING** (nix surface): safix owns its installer and declares no sops-nix input
 
 safix declares no sops-nix input.
-`nix flake metadata` shows exactly one `sops-nix` node in the lock and it is `clan-core`'s, reached through a check-only input; the root flake's own input set is `advisory-db`, `clan-core`, `crane`, `flake-parts`, `home-manager`, `nixpkgs` and `treefmt-nix`.
+`nix flake metadata` shows no `sops-nix` node in the lock at all; the root flake's own input set is `advisory-db`, `crane`, `flake-parts`, `home-manager`, `nixpkgs` and `treefmt-nix`.
 `sops` the binary is unchanged and still performs every encryption and decryption as a subprocess: the document format, its MAC, its IV-reuse rule and its key wrapping remain upstream's.
 
 The secret-entry type is safix's own.
@@ -54,6 +54,13 @@ safix never supported any of the three; what changes is that the workaround clos
 A consumer's gnupg configuration also stops suppressing safix's own no-identity refusal, which it previously did on the strength of a configuration safix neither wrote nor could use.
 
 `sopsFileOutsideStoreMessage`'s remedy now names `safix.installer.validate` where it named `sops.validateSopsFiles`; the rest of the sentence is unchanged.
+
+### The clan-core input and the real-clan drill are removed
+
+`clan-core` is no longer a flake input and `safix-bridge-real-clan` is no longer a check.
+The input was read by that check and by nothing else, and it was the only path by which a second `nixpkgs` and a `sops-nix` node reached this flake's lock; with it gone, `nix flake metadata` names neither.
+Every check that drives the bridge now drives the stub in `crates/safix/tests/support/clan-stub.rs`, and the one thing the retired check established that a stub cannot — that safix's argument vectors mean to clan what safix thinks they mean — is now held by review of clan-cli against the contract the stub's own header cites, which is stated there rather than implied.
+`crates/safix/tests/real_clan.rs` is deleted with the check: every test in it was gated on a real clan the tree can no longer put in the environment, so its stated-absence arm would have been permanently vacuous.
 
 ### A read verb with a picker, and a nameless `edit`
 
