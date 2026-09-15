@@ -797,6 +797,16 @@ let
               "${r.storage.generatorRecords}/shared/${lib.concatStringsSep audienceSeparator audience}/${name}"
             else
               "${r.storage.generatorRecords}/${src.owner}/${name}";
+
+          # The stamp record sits beside the definition record, under the same
+          # root and keyed the same way, because it is the same kind of thing:
+          # per-value plaintext bookkeeping carrying no value.
+          #
+          # `.stamps` can be appended without a second injectivity argument:
+          # `.` is outside the alphabet `wellFormedName` admits, so no declared
+          # name can end in `.stamps` and no entry's definition record can
+          # therefore collide with another entry's stamp record.
+          logicalStamp = "${logicalRecord}.stamps";
         in
         {
           inherit (src) origin owner;
@@ -824,10 +834,10 @@ let
           # already evaluates, which is why the temptation to add one is a
           # second channel for a value that already has one.
           #
-          # `logicalFile`/`logicalKey`/`logicalPublic`/`logicalRecord` are the
-          # readable inputs the opaque names above were hashed from, and stay
-          # vault-only: outside vault mode the readable name *is* the emitted
-          # one, so a second copy of it would be a field that can disagree with
+          # `logicalFile`/`logicalKey`/`logicalPublic`/`logicalRecord`/
+          # `logicalStamp` are the readable inputs the opaque names above were
+          # hashed from, and stay vault-only: outside vault mode the readable
+          # name *is* the emitted one, so a second copy of it would be a field
           # itself. They are carried here rather than recomputed by the runtime,
           # because nothing in `crates/safix-core` may compute a hash.
           definitionRecord =
@@ -839,6 +849,21 @@ let
           logicalKey = if r.namingKey != null then logicalKey else null;
           logicalPublic = if r.namingKey != null then logicalPublic else null;
           logicalRecord = if r.namingKey != null then logicalRecord else null;
+
+          # `stampRecord` is the path `stamps::read`/`stamps::touch` are handed,
+          # emitted on every placement for the reason `definitionRecord` is: the
+          # resolver is the one implementation of the layout. Its own vault tag
+          # is `"stamps"` rather than `"state"`, so a stamp and the definition
+          # record beside it hash to two distinct names under one bucket even
+          # though their readable identities differ by a suffix alone. The hash
+          # input is root-relative like every other (design S5), so renaming
+          # `generatorRecords` moves no vault name.
+          stampRecord =
+            if r.namingKey != null then
+              "state/${opaqueOf r.namingKey "stamps" (relativeTo r.storage.generatorRecords logicalStamp)}"
+            else
+              logicalStamp;
+          logicalStamp = if r.namingKey != null then logicalStamp else null;
 
           generator =
             if entry.generator == null then

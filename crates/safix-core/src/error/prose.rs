@@ -568,14 +568,17 @@ pub(super) fn nothing_to_pick(user: &str) -> String {
 }
 
 /// The operator left the choice without making one.
-pub(super) const SELECTION_CANCELLED: &str = "\
-nothing was chosen, so nothing was read.
-
-The terminal is back in the state it was found in, no value was written
-anywhere, and whatever was decrypted for the preview was dropped rather than
-kept. Leaving is not a failure of the run, but it is not a success either, so
-the exit status is non-zero: a script that wrapped this would otherwise read a
-cancelled choice as a value it never got.";
+///
+/// The one refusal in this file that is not a sentence, and deliberately: every
+/// other one describes something that went wrong and names the way out, where
+/// leaving a picker is the operator doing exactly what they meant to do. The
+/// paragraph this used to carry — the terminal is back, nothing was written,
+/// nothing decrypted was kept — described the picker's own guarantees to
+/// somebody who had just pressed escape and was reading their prompt again. So
+/// what is left is the machine-readable name of the outcome and nothing else;
+/// the guarantees are stated where they belong, in `README.md` and in
+/// `safix view -h`.
+pub(super) const SELECTION_CANCELLED: &str = "safix::selection_cancelled";
 
 /// A PIN this run generated, or was given, that the card refused.
 pub(super) fn card_pin_rejected(serial: &str) -> String {
@@ -991,5 +994,21 @@ pub(super) fn vault_commit_half_landed(vault_commit: &str, pending: &[String]) -
         command completes the operation and will not repeat the vault commit,\n\
         because the content it would stage there already matches HEAD.",
         bulleted(pending)
+    )
+}
+
+/// A stamp record that exists and does not parse.
+///
+/// The remedy names both moves and says what each costs, because a record
+/// this refusal is about is one somebody edited by hand: restoring it from
+/// history keeps the dates, and removing it keeps none of them.
+pub(super) fn stamp_record_unparsable(path: &str) -> String {
+    format!(
+        "{path} is not a stamp record this version of safix can read.\n\
+        \n\
+        A stamp record is one line: v1 created=<unix seconds> updated=<unix\n\
+        seconds>. Restore it from git history to keep the dates it held, or\n\
+        remove it — an entry with no record reads as having no dates, which is\n\
+        what every value written before the record existed reads as."
     )
 }

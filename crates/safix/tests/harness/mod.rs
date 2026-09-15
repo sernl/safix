@@ -494,6 +494,8 @@ impl Fixture {
             "definitionRecord": format!("state/safix/definitions/alice/{name}"),
             "logicalFile": null, "logicalKey": null,
             "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/alice/{name}.stamps"),
+            "logicalStamp": null,
         });
         self.write_fixtures();
     }
@@ -531,6 +533,8 @@ impl Fixture {
                 "definitionRecord": format!("state/safix/definitions/shared/alice,bob/{name}"),
                 "logicalFile": null, "logicalKey": null,
                 "logicalPublic": null, "logicalRecord": null,
+                "stampRecord": format!("state/safix/definitions/shared/alice,bob/{name}.stamps"),
+                "logicalStamp": null,
             });
         }
         self.write_fixtures();
@@ -645,6 +649,8 @@ impl Fixture {
             "definitionRecord": format!("state/safix/definitions/alice/{name}"),
             "logicalFile": null, "logicalKey": null,
             "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/alice/{name}.stamps"),
+            "logicalStamp": null,
         });
 
         // Keyed by the declared name, which is how `resolve.nix` emits the plan
@@ -907,6 +913,8 @@ impl Fixture {
             "definitionRecord": format!("state/safix/definitions/{owner}/{companion}"),
             "logicalFile": null, "logicalKey": null,
             "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/{owner}/{companion}.stamps"),
+            "logicalStamp": null,
         });
         self.write_fixtures();
     }
@@ -934,6 +942,8 @@ impl Fixture {
             "definitionRecord": format!("state/safix/definitions/{owner}/{companion}"),
             "logicalFile": null, "logicalKey": null,
             "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/{owner}/{companion}.stamps"),
+            "logicalStamp": null,
         });
         self.write_fixtures();
     }
@@ -1733,6 +1743,21 @@ impl Fixture {
         // test rather than on the run.
         let slave = open_without_claiming(&path);
         let before = rustix::termios::tcgetattr(&slave).expect("the pair has no attributes");
+        // A size, so the frame a test reads is the frame this file describes
+        // rather than the fallback the runtime uses for a terminal that will
+        // not say: `openpt` leaves the pair at zero by zero. Wide enough that
+        // the eight-column table is not cut, and tall enough for the value
+        // pane and every entry a fixture seeds.
+        rustix::termios::tcsetwinsize(
+            &slave,
+            rustix::termios::Winsize {
+                ws_row: PICKER_ROWS,
+                ws_col: PICKER_COLUMNS,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .expect("the pair will not take a size");
 
         let mut command = self.picker_command(pick, &slave);
         let mut child = command.spawn().expect("could not spawn the command");
@@ -1793,6 +1818,14 @@ impl Fixture {
         }
     }
 
+    /// The state directory a picker run remembers itself in.
+    ///
+    /// Inside the fixture, so what one run left showing is what the next run of
+    /// the same fixture opens with and nothing outside it is read or written.
+    pub fn picker_state(&self) -> PathBuf {
+        self.work.join("state")
+    }
+
     /// The command one picker run is spawned as.
     ///
     /// `--ctty` is the whole point: a picker opens `/dev/tty`, and only a
@@ -1836,6 +1869,13 @@ impl Fixture {
                 Reporter::Plain
             },
         );
+        // The picker remembers what the last run left showing, in the state
+        // directory. Pinned inside the fixture so a run reads what an earlier
+        // run of the same fixture wrote and never what the developer's own
+        // picker wrote: the state directory is otherwise `$HOME/.local/state`,
+        // and `HOME` is the fixture, but a developer with `XDG_STATE_HOME` set
+        // would have their own file read here.
+        command.env("XDG_STATE_HOME", self.picker_state());
         for (variable, value) in pick.extra {
             command.env(variable, value);
         }
@@ -2176,6 +2216,25 @@ impl Fixture {
     /// The bytes of a repository file.
     pub fn read(&self, relative: &str) -> String {
         std::fs::read_to_string(self.repo.join(relative)).unwrap()
+    }
+
+    /// The `(created, updated)` a stamp record holds, or `None` when the
+    /// record is absent.
+    ///
+    /// Parsed here rather than read through `safix_core::stamps` on purpose: a
+    /// test asserting the recorded dates against the runtime's own reader
+    /// would pass for a record the runtime writes and reads consistently
+    /// wrongly. The two numbers are read out of the committed line instead,
+    /// which is the file an operator and a `git show` see.
+    pub fn stamps_of(&self, relative: &str) -> Option<(u64, u64)> {
+        let text = std::fs::read_to_string(self.repo.join(relative)).ok()?;
+        let line = text.strip_suffix('\n').unwrap_or(&text).to_owned();
+        let mut fields = line.split(' ');
+        assert_eq!(fields.next(), Some("v1"), "the record's format tag: {line}");
+        let created = fields.next().unwrap().strip_prefix("created=").unwrap();
+        let updated = fields.next().unwrap().strip_prefix("updated=").unwrap();
+        assert_eq!(fields.next(), None, "the record holds one line: {line}");
+        Some((created.parse().unwrap(), updated.parse().unwrap()))
     }
 
     /// Write a file into the repository.
@@ -2614,7 +2673,9 @@ fn roots_under(directory: &Path) -> Vec<PathBuf> {
 /// because the runtime reads the record off the placement and derives nothing.
 /// A stub leaving it out would make every record-reading test fail to
 /// deserialize rather than silently pass, which is the point of it being
-/// non-nullable.
+/// non-nullable. `stampRecord` rides along the same way and for the same
+/// reason, carrying the record path plus the `.stamps` suffix the resolver
+/// appends.
 fn placement(file: &str, name: &str, key: &str, origin: &str, owner: &str) -> Value {
     json!({
         "file": file, "key": key, "origin": origin,
@@ -2622,6 +2683,8 @@ fn placement(file: &str, name: &str, key: &str, origin: &str, owner: &str) -> Va
         "definitionRecord": format!("state/safix/definitions/{owner}/{name}"),
         "logicalFile": null, "logicalKey": null,
         "logicalPublic": null, "logicalRecord": null,
+        "stampRecord": format!("state/safix/definitions/{owner}/{name}.stamps"),
+        "logicalStamp": null,
     })
 }
 
@@ -2904,6 +2967,19 @@ fn open_without_claiming(path: &Path) -> std::fs::File {
         .unwrap_or_else(|cause| panic!("{} could not be opened: {cause}", path.display()));
     std::fs::File::from(opened)
 }
+
+/// How tall the pseudoterminal a picker is driven on is.
+///
+/// Fixed rather than inherited, so the geometry a test reads off a frame is a
+/// statement about the runtime and not about the window the suite was run in.
+pub const PICKER_ROWS: u16 = 40;
+
+/// How wide it is.
+///
+/// Wider than the eight-column table over the fixture's own names and paths,
+/// because the runtime cuts a line to the terminal's width rather than letting
+/// it wrap.
+pub const PICKER_COLUMNS: u16 = 200;
 
 /// How long a picker run is given before it is ended for hanging.
 const PICKER_DEADLINE: &str = "20";

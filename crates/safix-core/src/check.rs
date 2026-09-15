@@ -220,9 +220,9 @@ fn vault_gitignore(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result
 /// so [`crate::relocation`]'s enumerations find nothing to group.
 ///
 /// One finding per distinct readable path — a ciphertext document, a public
-/// output, or a definition record — still present at the declaration root,
-/// deduplicated because a shared secret's readable file is one path named by
-/// every carrier's placement.
+/// output, a definition record, or a stamp record — still present at the
+/// declaration root, deduplicated because a shared secret's readable file is
+/// one path named by every carrier's placement.
 fn vault_relocation(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result<()> {
     if workspace.vault_root() == workspace.root() {
         return Ok(());
@@ -237,6 +237,7 @@ fn vault_relocation(workspace: &Workspace, findings: &mut Vec<Finding>) -> Resul
     for leaf in crate::relocation::public_leaves(placements)
         .into_iter()
         .chain(crate::relocation::record_leaves(placements))
+        .chain(crate::relocation::stamp_leaves(placements))
     {
         if workspace.absolute(&leaf.logical).exists() {
             pending.insert(leaf.logical);

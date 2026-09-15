@@ -193,9 +193,9 @@ enum RelocateOutcome {
 /// Move readable-layout content into a declared vault, or the reverse.
 ///
 /// A no-op when no vault is declared: `vault_root` equals `root` then, and
-/// [`relocation::secret_documents`]/`public_leaves`/`record_leaves` find
-/// nothing to group, since design V14's `logical_*` fields are `null`
-/// outside vault mode.
+/// [`relocation::secret_documents`]/`public_leaves`/`record_leaves`/
+/// `stamp_leaves` find nothing to group, since design V14's `logical_*` fields
+/// are `null` outside vault mode.
 ///
 /// Forward (`rollback: false`, the default): for every document, output, or
 /// record still present at the declaration root and absent from the vault,
@@ -272,6 +272,9 @@ fn relocate(
         moved |= relocate_leaf(workspace, rollback, &leaf)?;
     }
     for leaf in relocation::record_leaves(placements) {
+        moved |= relocate_leaf(workspace, rollback, &leaf)?;
+    }
+    for leaf in relocation::stamp_leaves(placements) {
         moved |= relocate_leaf(workspace, rollback, &leaf)?;
     }
 

@@ -1,5 +1,6 @@
 //! What a vault migration moves: the opaque and readable name of every
-//! document, public output, and definition record a vault-mode fleet holds.
+//! document, public output, definition record and stamp record a vault-mode
+//! fleet holds.
 //!
 //! Shared by [`crate::check`]'s pending-relocation finding and
 //! [`crate::fix`]'s relocate phase, so the two enumerate the same set rather
@@ -103,9 +104,28 @@ pub(crate) fn record_leaves(placements: &Placements) -> Vec<PlainLeaf> {
     })
 }
 
-/// The shape [`public_leaves`] and [`record_leaves`] share: derive one
-/// `(opaque, logical)` pair per placement when `select` finds one, keyed and
-/// deduplicated by the opaque half.
+/// Every stamp record a vault-mode fleet holds, in opaque-path order.
+///
+/// Gated on `logical_stamp` for the reason [`record_leaves`] is gated on
+/// `logical_record`: [`Placement::stamp_record`] is set in both modes and so
+/// cannot be the gate. A stamp moves with the value it dates, so a migration
+/// that relocated the document and left the stamp behind would strand the
+/// dates of every value it moved.
+///
+/// Deduplicated by opaque path, and load-bearing here for the same reason:
+/// a shared entry's stamp is one file both carriers resolve.
+pub(crate) fn stamp_leaves(placements: &Placements) -> Vec<PlainLeaf> {
+    leaves_by(placements, |placement| {
+        Some((
+            placement.stamp_record.clone(),
+            placement.logical_stamp.clone()?,
+        ))
+    })
+}
+
+/// The shape [`public_leaves`], [`record_leaves`] and [`stamp_leaves`] share:
+/// derive one `(opaque, logical)` pair per placement when `select` finds one,
+/// keyed and deduplicated by the opaque half.
 fn leaves_by(
     placements: &Placements,
     select: impl Fn(&Placement) -> Option<(String, String)>,
@@ -128,7 +148,7 @@ fn leaves_by(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{public_leaves, record_leaves, secret_documents};
+    use super::{public_leaves, record_leaves, secret_documents, stamp_leaves};
     use crate::model::Placements;
 
     fn placements(entries: Value) -> Placements {
@@ -143,6 +163,8 @@ mod tests {
             "logicalFile": "secrets/safix/users/alice/secrets.yaml",
             "logicalKey": logical_key, "logicalPublic": null,
             "logicalRecord": "state/safix/definitions/alice/api-token",
+            "stampRecord": "state/opaque-stamp",
+            "logicalStamp": "state/safix/definitions/alice/api-token.stamps",
         })
     }
 
@@ -153,6 +175,8 @@ mod tests {
             "definitionRecord": "state/safix/definitions/alice/api-token",
             "logicalFile": null, "logicalKey": null,
             "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": "state/safix/definitions/alice/api-token.stamps",
+            "logicalStamp": null,
         })
     }
 
@@ -208,6 +232,7 @@ mod tests {
         assert!(secret_documents(&held).is_empty());
         assert!(public_leaves(&held).is_empty());
         assert!(record_leaves(&held).is_empty());
+        assert!(stamp_leaves(&held).is_empty());
     }
 
     /// A public output's opaque and readable paths pass through unmodified.
@@ -221,6 +246,8 @@ mod tests {
             "logicalFile": "secrets/safix/users/alice/secrets.yaml",
             "logicalKey": "k", "logicalPublic": "public/safix/users/alice/host-key/value",
             "logicalRecord": "state/safix/definitions/alice/host-key",
+            "stampRecord": "state/opaque-stamp",
+            "logicalStamp": "state/safix/definitions/alice/host-key.stamps",
         });
         let held = placements(json!({ "alice": { "host-key": entry } }));
         let leaves = public_leaves(&held);
@@ -241,6 +268,8 @@ mod tests {
             "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
             "logicalKey": "fleet-token", "logicalPublic": null,
             "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
+            "stampRecord": "state/opaque-stamp",
+            "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
         });
         let bob = json!({
             "file": "secrets/shared-opaque.yaml", "key": "opaque-key", "origin": "carries",
@@ -249,6 +278,8 @@ mod tests {
             "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
             "logicalKey": "fleet-token", "logicalPublic": null,
             "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
+            "stampRecord": "state/opaque-stamp",
+            "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
         });
         let held = placements(json!({
             "alice": { "fleet-token": alice },
@@ -262,6 +293,38 @@ mod tests {
         assert_eq!(
             leaf.logical,
             "state/safix/definitions/shared/alice,bob/fleet-token"
+        );
+    }
+
+    /// A shared entry's stamp is one leaf too, and it carries the `.stamps`
+    /// pair the resolver emitted rather than a path derived from the
+    /// definition record beside it.
+    #[test]
+    fn a_shared_stamp_record_is_one_leaf() {
+        let carrier = |owner: &str| {
+            json!({
+                "file": "secrets/shared-opaque.yaml", "key": "opaque-key", "origin": "carries",
+                "owner": owner, "shared": true, "generator": null, "public": null,
+                "definitionRecord": "state/opaque-record",
+                "logicalFile": "secrets/safix/shared/alice,bob/secrets.yaml",
+                "logicalKey": "fleet-token", "logicalPublic": null,
+                "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
+                "stampRecord": "state/opaque-stamp",
+                "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
+            })
+        };
+        let held = placements(json!({
+            "alice": { "fleet-token": carrier("alice") },
+            "bob": { "fleet-token": carrier("bob") },
+        }));
+        let leaves = stamp_leaves(&held);
+        let [leaf] = leaves.as_slice() else {
+            unreachable!("both carriers resolve the one stamp they share, got {leaves:?}");
+        };
+        assert_eq!(leaf.opaque, "state/opaque-stamp");
+        assert_eq!(
+            leaf.logical,
+            "state/safix/definitions/shared/alice,bob/fleet-token.stamps"
         );
     }
 }

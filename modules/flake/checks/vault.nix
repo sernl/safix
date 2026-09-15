@@ -67,6 +67,12 @@
 # copy. Note that `leakedFragments` stays `[ ]` under that perturbation — a
 # collision is not a leak, which is why the tag claim needs its own row rather
 # than riding the opacity scan.
+# The stamp record's own tag is held the same way, and it is a fifth tag
+# rather than a reuse of `"state"`: replacing `"stamps"` with `"state"` in
+# `placementsIn` turns `opaque.<n>.stampRecord` `false` for every name while
+# leaving every other row — `stampIsNotTheRecord` included, since the `.stamps`
+# suffix still parts the two hash inputs — `true`. Observed against a scratch
+# copy.
 { lib, ... }:
 {
   perSystem =
@@ -222,6 +228,11 @@
       # reconstructed here from `shared`/`owner`.
       logicalRecordOf = name: noVault.placements.alice.${name}.definitionRecord;
 
+      # The readable stamp path, read off the same projection for the same
+      # reason: `stampRecord` is emitted unconditionally too, so readable mode
+      # is where its readable form comes from.
+      logicalStampOf = name: noVault.placements.alice.${name}.stampRecord;
+
       # Every opaque name hashes its readable identity *relative to the root it
       # sits under* (design S5), so `relativeTo` appears here exactly as it does
       # in the resolver. The `secrets/`, `public/` and `state/` joins stay
@@ -247,6 +258,11 @@
         "state/${
           resolve.opaqueOf namingKey "state" (relative storage.generatorRecords (logicalRecordOf name))
         }";
+      expectedStampRecord =
+        name:
+        "state/${
+          resolve.opaqueOf namingKey "stamps" (relative storage.generatorRecords (logicalStampOf name))
+        }";
 
       names = [
         "solo-token"
@@ -267,6 +283,7 @@
             p.file
             p.key
             p.definitionRecord
+            p.stampRecord
           ]
           ++ lib.optional (p.public != null) p.public
         ) names
@@ -359,19 +376,23 @@
             wgPublicValue =
               noVault.placements.alice.wg-public.public == resolve.publicFileOf storage [ "alice" ] "wg-public";
 
-            # `definitionRecord` parts company with the other three here: it is
-            # emitted on every placement (design S8), so readable mode carries
-            # the readable record path rather than `null`, while the three
-            # `logical*` fields stay vault-only because outside vault mode the
-            # emitted name *is* the readable one.
+            # `definitionRecord` and `stampRecord` part company with the other
+            # three here: both are emitted on every placement (design S8), so
+            # readable mode carries the readable paths rather than `null`, while
+            # the `logical*` fields stay vault-only because outside vault mode
+            # the emitted name *is* the readable one.
             readableRecord =
               noVault.placements.alice.solo-token.definitionRecord
               == "${storage.generatorRecords}/alice/solo-token";
+            readableStamp =
+              noVault.placements.alice.solo-token.stampRecord
+              == "${storage.generatorRecords}/alice/solo-token.stamps";
             noneOpaque = {
               logicalFile = noVault.placements.alice.solo-token.logicalFile;
               logicalKey = noVault.placements.alice.solo-token.logicalKey;
               logicalPublic = noVault.placements.alice.wg-public.logicalPublic;
               logicalRecord = noVault.placements.alice.solo-token.logicalRecord;
+              logicalStamp = noVault.placements.alice.solo-token.logicalStamp;
             };
           };
 
@@ -415,6 +436,18 @@
               definitionRecord = p.definitionRecord == expectedDefinitionRecord name;
               logicalFile = p.logicalFile == logicalFileOf name;
               logicalKey = p.logicalKey == logicalKeyOf name;
+              stampRecord = p.stampRecord == expectedStampRecord name;
+              logicalStamp = p.logicalStamp == logicalStampOf name;
+
+              # The stamp and the definition record sit under one bucket, so
+              # the two things keeping them apart are the `.stamps` suffix in
+              # the hash input and the tag. `stampRecord` above is what reddens
+              # when either one is dropped alone — observed: replacing the
+              # `stamps` tag with `state` turned it `false` for all four names
+              # and left every other row `true`. This row is the collision
+              # itself, and it is what would redden if both were dropped at
+              # once: one value's stamp writing over its own digest.
+              stampIsNotTheRecord = p.stampRecord != p.definitionRecord;
             }
           );
           publicOpaque = withVault.placements.alice.wg-public.public == expectedOpaquePublic "wg-public";
@@ -480,10 +513,10 @@
           # 7.10 — renaming all three storage roots changes no vault-rooted
           # name. This is the whole point of making the hash input
           # root-relative, and the one assertion a missed `relativeTo` fails:
-          # every opaque file, in-document key, public leaf and definition
-          # record is compared against the same fixture under the defaults,
-          # tree by tree, so a site left root-prefixed reddens exactly its own
-          # row.
+          # every opaque file, in-document key, public leaf, definition record
+          # and stamp record is compared against the same fixture under the
+          # defaults, tree by tree, so a site left root-prefixed reddens
+          # exactly its own row.
           renamedRootsResolveIdentically = lib.genAttrs names (
             name:
             let
@@ -495,6 +528,7 @@
               key = d.key == n.key;
               public = d.public == n.public;
               definitionRecord = d.definitionRecord == n.definitionRecord;
+              stampRecord = d.stampRecord == n.stampRecord;
             }
           );
 
@@ -505,14 +539,15 @@
             file = withVaultRenamed.placements.alice.solo-token.logicalFile;
             public = withVaultRenamed.placements.alice.wg-public.logicalPublic;
             record = withVaultRenamed.placements.alice.solo-token.logicalRecord;
+            stamp = withVaultRenamed.placements.alice.solo-token.logicalStamp;
           };
 
-          # 7.11 — the four tags are the only separator now. While the full
-          # path was hashed, the roots kept the four uses apart on their own;
-          # with the input root-relative, two roots' relative names can
-          # coincide exactly, and only the tag distinguishes them. Asserted by
-          # feeding one root-relative identity through all four tags and
-          # requiring four distinct names.
+          # 7.11 — the five tags are the only separator now. While the full
+          # path was hashed, the roots kept the uses apart on their own; with
+          # the input root-relative, two roots' relative names can coincide
+          # exactly, and only the tag distinguishes them. Asserted by feeding
+          # one root-relative identity through all five tags and requiring five
+          # distinct names.
           tagsAreTheOnlySeparator =
             let
               shared = relative storage.encrypted (logicalFileOf "solo-token");
@@ -520,10 +555,11 @@
                 "secrets"
                 "public"
                 "state"
+                "stamps"
                 "key"
               ];
             in
-            builtins.length (lib.unique hashes) == 4;
+            builtins.length (lib.unique hashes) == 5;
 
           # 12.4 — a vault does not move the committed policy: the text
           # `.sops.yaml` is rendered from is identical whether or not a
@@ -550,11 +586,13 @@
             teamFile = true;
             wgPublicValue = true;
             readableRecord = true;
+            readableStamp = true;
             noneOpaque = {
               logicalFile = null;
               logicalKey = null;
               logicalPublic = null;
               logicalRecord = null;
+              logicalStamp = null;
             };
           };
           rootFlip = {
@@ -577,6 +615,9 @@
             definitionRecord = true;
             logicalFile = true;
             logicalKey = true;
+            stampRecord = true;
+            logicalStamp = true;
+            stampIsNotTheRecord = true;
           });
           publicOpaque = true;
           publicLogical = true;
@@ -597,11 +638,13 @@
             key = true;
             public = true;
             definitionRecord = true;
+            stampRecord = true;
           });
           renamedRootsMoveTheReadableSide = {
             file = "cipher/users/alice/secrets.yaml";
             public = "clear/users/alice/wg-public/value";
             record = "bookkeeping/alice/solo-token";
+            stamp = "bookkeeping/alice/solo-token.stamps";
           };
           tagsAreTheOnlySeparator = true;
           committedPolicyUnmoved = true;

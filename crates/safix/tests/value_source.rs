@@ -72,7 +72,14 @@ fn a_piped_value_is_stored_as_its_own_bytes_and_nothing_is_asked() {
         fixture.subject("HEAD"),
         "chore(safix): set api-token for alice"
     );
-    assert_eq!(fixture.paths_in("HEAD"), vec![ALICE_FILE.to_owned()]);
+    assert_eq!(
+        fixture.paths_in("HEAD"),
+        vec![
+            ALICE_FILE.to_owned(),
+            "state/safix/definitions/alice/api-token.stamps".to_owned()
+        ],
+        "the commit is not exactly the value and its stamp"
+    );
     assert!(!fixture.message("HEAD").contains("CANARY-piped"));
     assert_eq!(fixture.status(), "", "the piped write left the tree dirty");
 

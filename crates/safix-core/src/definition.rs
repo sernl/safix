@@ -436,6 +436,8 @@ mod tests {
             "definitionRecord": record,
             "logicalFile": null, "logicalKey": null, "logicalPublic": null,
             "logicalRecord": null,
+            "stampRecord": format!("{record}.stamps"),
+            "logicalStamp": null,
         }))
         .expect("the fixture is the shape the resolver emits")
     }
@@ -458,6 +460,8 @@ mod tests {
             "logicalFile": "secrets/safix/users/alice/secrets.yaml",
             "logicalKey": "api-token", "logicalPublic": null,
             "logicalRecord": logical_record,
+            "stampRecord": format!("{opaque_record}-stamps"),
+            "logicalStamp": format!("{logical_record}.stamps"),
         }))
         .expect("the fixture is the shape the resolver emits")
     }

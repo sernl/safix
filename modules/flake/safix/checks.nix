@@ -231,7 +231,12 @@ let
   # now guard a tree nix itself places rather than describing the shape Rust
   # writes.
   #
-  # The six tree-shaped probes are derived from the configured roots and must
+  # The stamp records sit in the same tree and get their own two probes rather
+  # than riding the definition record's: `.stamps` is a distinct path, and a
+  # rule anchored to one of the two forms would be missed by a probe naming
+  # only the other.
+  #
+  # The eight tree-shaped probes are derived from the configured roots and must
   # stay so. Left literal while the roots are the consumer's, this check would
   # probe trees nothing uses and stop probing the trees the consumer has: green,
   # and meaningless. A silently lost check is worse than a broken one (design
@@ -248,6 +253,8 @@ let
     "${storage.plaintextOutputs}/shared/UNCLAIMED/x/value"
     "${storage.generatorRecords}/UNCLAIMED/x"
     "${storage.generatorRecords}/shared/UNCLAIMED/x"
+    "${storage.generatorRecords}/UNCLAIMED/x.stamps"
+    "${storage.generatorRecords}/shared/UNCLAIMED/x.stamps"
   ];
 
   catchAllMessagesOf =

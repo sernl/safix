@@ -205,6 +205,27 @@ pub struct Placement {
     /// computing either hash.
     #[serde(rename = "logicalRecord")]
     pub logical_record: Option<String>,
+    /// Where this entry's created/updated stamp lives: repository-relative
+    /// under `flake.safix.storage.generatorRecords` with no vault declared,
+    /// vault-rooted-relative and opaque when one is.
+    ///
+    /// Always set, for the reason [`Placement::definition_record`] is: the
+    /// resolver owns the layout, and the readable form carries a
+    /// `generatorRecords` root this crate never sees. The two records sit in
+    /// one tree because they are one kind of thing — plaintext bookkeeping
+    /// about a value, carrying no value — and this one differs from the
+    /// definition record's path by a `.stamps` suffix no declared name can
+    /// carry.
+    #[serde(rename = "stampRecord")]
+    pub stamp_record: String,
+    /// The readable, unhashed relative stamp path [`Placement::stamp_record`]
+    /// would carry with no vault declared; `null` when no vault is declared.
+    ///
+    /// Carried for the same reason [`Placement::logical_record`] is, and it is
+    /// what gates a stamp's relocation: a migration enumerates both forms of
+    /// one stamp without this crate computing either hash.
+    #[serde(rename = "logicalStamp")]
+    pub logical_stamp: Option<String>,
 }
 
 /// `user -> name -> placement`, the whole of what the command resolves against.
@@ -1036,7 +1057,9 @@ mod tests {
           "public": null, "shared": false,
           "definitionRecord": "state/safix/definitions/alice/api-token",
           "logicalFile": null,
-          "logicalKey": null, "logicalPublic": null, "logicalRecord": null
+          "logicalKey": null, "logicalPublic": null, "logicalRecord": null,
+          "stampRecord": "state/safix/definitions/alice/api-token.stamps",
+          "logicalStamp": null
         }
       },
       "carol": {}

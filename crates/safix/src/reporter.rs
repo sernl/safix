@@ -189,8 +189,14 @@ pub fn report_graphical(refusal: &Refusal) {
 }
 
 /// Write a refusal in whichever shape the environment selected.
+///
+/// A cancelled selection is the one refusal that is not a diagnosis: the
+/// operator pressed Escape and knows it, so the whole report is the code, on
+/// one line, in either shape.
 pub fn report(refusal: &Refusal) {
-    if plain_selected() {
+    if let Refusal::Runtime(Error::SelectionCancelled) = refusal {
+        eprintln!("{}", Error::SelectionCancelled.code());
+    } else if plain_selected() {
         report_plain(refusal);
     } else {
         report_graphical(refusal);
@@ -343,6 +349,9 @@ mod tests {
             Code::FileUnreadable => Error::FileUnreadable {
                 path: "secrets/safix/users/alice/secrets.yaml.safix-tmp.4213.yaml".into(),
                 cause: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            Code::StampRecordUnparsable => Error::StampRecordUnparsable {
+                path: "state/safix/definitions/alice/api-token.stamps".into(),
             },
             Code::GitUnavailable => Error::GitUnavailable {
                 program: "git".into(),

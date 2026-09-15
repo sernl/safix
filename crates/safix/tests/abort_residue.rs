@@ -186,9 +186,12 @@ fn assert_pristine(fixture: &Fixture, before: &str, value: &str) {
     // A record asserts that a value was minted under a declaration. An
     // interrupted run minted nothing it committed, so a record left behind would
     // be an assertion about a mint this repository never made — and `check` would
-    // then report drift against a value that is not there.
+    // then report drift against a value that is not there. The tree itself may
+    // exist: a value a fixture committed before the run carries a stamp record
+    // there, and the head-and-status assertions above hold that the run added
+    // nothing beside it.
     assert!(
-        !fixture.exists("state/safix/definitions"),
+        !fixture.exists("state/safix/definitions/alice/api-token"),
         "the interrupted run left a definition record for a value it did not commit"
     );
 

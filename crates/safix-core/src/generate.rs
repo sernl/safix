@@ -51,13 +51,13 @@ use std::process::Stdio;
 
 use crate::error::{Error, Result};
 use crate::inputs::Tree;
-use crate::model::{Generator, PromptKind, UserPlan};
+use crate::model::{Generator, Placement, PromptKind, UserPlan};
 use crate::progress::{Progress, log, note};
 use crate::sandbox::Envelope;
 use crate::secret::Secret;
 use crate::sops::document;
 use crate::workspace::Workspace;
-use crate::{definition, git, public, scratch, set};
+use crate::{definition, git, public, scratch, set, stamps};
 
 /// Where a generator's prompts are answered and its cascade confirmed.
 ///
@@ -322,18 +322,25 @@ impl Target {
     }
 }
 
-/// The definition records one generator's run is to leave behind.
+/// The definition records one generator's run is to leave behind, and the
+/// placements whose stamps it is to move.
 ///
 /// One line for the whole run, because one generator has one declaration however
 /// many outputs it writes, and one path per output, because drift is reported
 /// against the entry an operator holds rather than against the generator. They
 /// travel together so that the write path takes one argument rather than a pair
 /// it could be handed out of step.
-struct Records {
+///
+/// The placements travel with them for the same reason: a stamp is written from
+/// the placement it is recorded for, and a stamp path handed over separately
+/// from the entry it dates is a pair that can be assembled wrong.
+struct Records<'a> {
     /// The repository-relative path of each output's record.
     paths: Vec<String>,
     /// The line every one of them holds.
     line: String,
+    /// The placement of each output, in the same order.
+    stamps: Vec<&'a Placement>,
 }
 
 /// One generator: its inputs, its run, its outputs, and one commit.
@@ -366,6 +373,7 @@ fn run_one(
     let mut records = Records {
         paths: Vec::with_capacity(outputs.len()),
         line: definition::line(record),
+        stamps: Vec::with_capacity(outputs.len()),
     };
     let mut missing = 0_usize;
     for output in &outputs {
@@ -381,6 +389,7 @@ fn run_one(
             missing = missing.saturating_add(1);
         }
         records.paths.push(definition::record_path(placement));
+        records.stamps.push(placement);
         targets.push(target);
     }
 
@@ -765,7 +774,7 @@ fn write(
     distinct: &[String],
     targets: &[Target],
     values: &[Secret],
-    records: &Records,
+    records: &Records<'_>,
 ) -> Result<Outcome> {
     let config = if distinct
         .iter()
@@ -878,6 +887,15 @@ fn write(
     let mut committed: Vec<String> = distinct.to_vec();
     committed.extend(records.paths.iter().cloned());
 
+    // A mint is always a change — this is only reached for an output that held
+    // nothing or for a `--regenerate` that rotated it — so every stamp moves,
+    // and each rides the commit its value rides.
+    let minted = stamps::now();
+    for stamp in &records.stamps {
+        stamps::touch(workspace, stamp, minted)?;
+        committed.push(stamp.stamp_record.clone());
+    }
+
     let identity = workspace.git().author_identity(workspace.root())?;
     git::commit_written_files(
         workspace.git(),
@@ -905,7 +923,7 @@ fn write(
 /// That suffix is there because sops reads a document's format off the extension,
 /// and nothing here goes through sops: a record is one line of plaintext this
 /// module writes and [`crate::check`] reads.
-fn stage_records(workspace: &Workspace, records: &Records) -> Result<Vec<PathBuf>> {
+fn stage_records(workspace: &Workspace, records: &Records<'_>) -> Result<Vec<PathBuf>> {
     let mut staged = Vec::with_capacity(records.paths.len());
     for relative in &records.paths {
         let absolute = workspace.vault_absolute(relative);

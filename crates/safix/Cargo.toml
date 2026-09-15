@@ -82,18 +82,23 @@ miette = { workspace = true, features = ["fancy"] }
 # through an escape hatch opened for them.
 rustix.workspace = true
 signal-hook.workspace = true
+# The picker's `*` and wildcard terms. `regex-lite` rather than `regex`: the
+# patterns are typed by a person into a query line over tens of candidates, so
+# the automaton-size and match-speed engineering the full crate carries buys
+# nothing here, and its unicode tables are a megabyte of binary for a table of
+# names drawn from `[a-z0-9._/-]`.
+regex-lite.workspace = true
+# The picker's own settings file, which is the one JSON the shipped binary reads
+# and writes. It is not a schema anything else declares — three fields the picker
+# itself wrote — and it is parsed as a tree rather than into a type because a
+# corrupt one is ignored per field rather than refused.
+serde_json.workspace = true
 
 [dev-dependencies]
 # The graphical rendering of every refusal is held by a snapshot, pinned against
 # itself.
 insta.workspace = true
 proptest.workspace = true
-# The integration suite writes the fixture documents the stubbed evaluator
-# answers with — placements, audiences, the generator plan — which are the nix
-# half's own schemas and are built rather than pasted, so a mode that adds a
-# generator changes the plan the way an evaluation would. A dev dependency: the
-# shipped binary reads no JSON of its own.
-serde_json.workspace = true
 
 [lints]
 workspace = true

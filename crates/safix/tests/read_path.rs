@@ -62,19 +62,51 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
     let table = listing.output();
     assert_eq!(
         row(&table, "NAME"),
-        vec!["NAME", "ORIGIN", "SHARED", "GENERATOR", "KEY", "FILE"],
-        "list does not head the SHARED and GENERATOR columns"
+        vec![
+            "NAME",
+            "ORIGIN",
+            "SHARED",
+            "GENERATOR",
+            "KEY",
+            "CREATED",
+            "UPDATED",
+            "FILE"
+        ],
+        "list does not head the SHARED, GENERATOR and stamp columns"
     );
     // ORIGIN says how the name reached this user and SHARED says whether the
     // entry is one value. A secret granted through sharedWith is shared in the
     // first sense and not in the second, so the two columns disagree here.
+    //
+    // CREATED and UPDATED are `-` on every row here: these entries are seeded
+    // declarations over documents the fixture wrote, and nothing wrote a stamp
+    // record beside them. A value written through `safix set` carries a date
+    // instead, which `crates/safix/tests/picker.rs` is where it is asserted.
     assert_eq!(
         row(&table, "api-token"),
-        vec!["api-token", "carries", "-", "-", "api-token", ALICE_FILE],
+        vec![
+            "api-token",
+            "carries",
+            "-",
+            "-",
+            "api-token",
+            "-",
+            "-",
+            ALICE_FILE
+        ],
     );
     assert_eq!(
         row(&table, "wifi-psk"),
-        vec!["wifi-psk", "shared", "-", "-", "wifi-psk", SHARED_FILE],
+        vec![
+            "wifi-psk",
+            "shared",
+            "-",
+            "-",
+            "wifi-psk",
+            "-",
+            "-",
+            SHARED_FILE
+        ],
     );
     // An entry may be read under a key that is not its name, and the KEY column
     // is what tells an operator which.
@@ -86,6 +118,8 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "-",
             "-",
             "custom-key",
+            "-",
+            "-",
             ALICE_FILE
         ],
     );

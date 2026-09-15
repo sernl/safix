@@ -348,7 +348,23 @@ fn list(arguments: &[String]) -> Result<ExitCode, Refusal> {
     if held.is_empty() {
         println!("flake.safix.users.{user} holds no secret.");
     } else {
-        print!("{}", table::aligned(&render::listing(held)));
+        // A stamp record that cannot be read is a refusal rather than a blank
+        // cell, so the reader's own failure is raised here rather than folded
+        // into the `-` a value with no record renders as.
+        let mut recorded = std::collections::BTreeMap::new();
+        for (name, placement) in held {
+            let _ = recorded.insert(
+                name.clone(),
+                safix_core::stamps::read(&workspace, placement)?,
+            );
+        }
+        print!(
+            "{}",
+            table::aligned(&render::listing(held, |name| recorded
+                .get(name)
+                .copied()
+                .flatten()))
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -1283,10 +1299,12 @@ mod tests {
             generator: None,
             public: None,
             definition_record: "records/alice/one".to_owned(),
+            stamp_record: "records/alice/one.stamps".to_owned(),
             logical_file: None,
             logical_key: None,
             logical_public: None,
             logical_record: None,
+            logical_stamp: None,
         };
         let mut held = std::collections::BTreeMap::new();
         held.insert("alice".to_owned(), placement("secrets/alice.yaml"));

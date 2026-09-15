@@ -555,6 +555,10 @@ The option's name says what this one holds, which is why the tree no longer has 
 A value with no record predates the record and is not a finding: no record, no claim.
 A record in a format the running safix does not write is not a finding either, which is what keeps a change to the digest's canonical form from reporting every value in the tree as drifted.
 
+A second record sits in the same tree, one line per value, named for the value plus `.stamps`: the unix seconds it was first written and the seconds it last changed, written by `set` and by `generate` in the same commit as the value itself, which is what `safix view` prints as `Created` and `Updated`.
+It records no value either, and it is what lets that question be answered without decryption and without asking git, which dates commits rather than writes to one key inside a file.
+A value written before the record existed has none, and shows as `-` rather than as a date nothing recorded.
+
 ## Browsing what is there: `safix view`
 
 ```console
@@ -565,24 +569,52 @@ $ safix view                       # choose from what alice holds, then read it
 `safix get` writes the value to standard output and is what a pipeline calls.
 `safix view` writes it to the terminal, and needs one only when it has to offer a choice — given a name it writes to standard output where no terminal opens, so a `view` in a pipeline is a working invocation rather than a refusal.
 
-With no name, every entry the user holds is offered with the same six columns `safix list` prints: the name, where it came from, whether one value serves every carrier, whether a generator mints it, the key it is read under, and the file serving it.
-Type to narrow the list, move with the arrows or `^P` and `^N`, enter to read the highlighted entry, escape to leave.
+With no name, every entry the user holds is offered with seven of the eight columns `safix list` prints: the name, where it came from, whether one value serves every carrier, whether a generator mints it, the key it is read under, and when the value was created and last updated. `Tab` adds the eighth, the file serving it.
 Choosing is a way of naming: the run proceeds exactly as though the chosen name had been given as an argument, through the same resolver every other verb uses.
 A lone argument is a user when `flake.safix.users` declares one by that name and an entry's name otherwise, so an entry whose name is also a person's is reachable by naming both.
 
-The highlighted entry's value is shown in a preview with four properties, each of them a property a preview of a secret has to have.
+The list is drawn from the bottom of the screen upwards: the key help is the last line, the query above it, the value pane above that, and the table above that with its header on top.
+The rows run in reverse alphabetical order, so the alphabetically first entry is the bottom row — against the query being typed, under the cursor when the picker opens.
+Typing narrows the list without reordering it, which is what keeps the entry under the cursor from changing identity between two keystrokes.
+
+| key | what it does |
+| --- | --- |
+| `Enter` | read the entry under the cursor |
+| `Esc`, `^C` | leave without choosing |
+| `↑` `↓` | move the cursor; up is later in the alphabet |
+| `←` `→` | scroll the columns; neither leaves and neither wraps |
+| `Tab` | show or hide the `FILE` column |
+| `^P` | show or hide the value pane |
+| `Backspace` | edit the query |
+
+Every other key is consumed and does nothing, including every function key and every editing key a terminal spells as an escape sequence: a sequence is parsed to its end, so a key safix does not bind can neither put bytes in the query nor leave the list.
+
+The query is KeePassXC's syntax, because an operator who keeps a password database beside this one already knows it.
+Terms are separated by whitespace, `"two words"` is one term, and all of them have to match — typing more narrows.
+A term may name a column and may be modified: `name:token` (or `n:token`, and likewise `origin`, `shared`, `generator`, `key`, `created`, `updated`, `file`), `!token` to exclude, `+Token` for the whole cell including its case, `*^api-.*$` for a regular expression, `api-*` and `api-toke?` for whole-cell wildcards, and `api-token|mail-password` for either.
+A regular expression that does not compile matches nothing rather than refusing the frame, because every prefix of one being typed is a query the picker has already been asked to answer.
+
+Four colours, each of them a fact rather than a decoration: the decrypted value is green, the entry you chose last is yellow, the entry created most recently is cyan, and a cell with nothing in it is dim.
+
+The `CREATED` and `UPDATED` columns read a record written beside each value — two unix seconds, committed in the same commit as the value — and render it in local time.
+A value written before that record existed shows `-` in both: no record is no claim about when a value arrived, and a date invented for one would be worse than none.
+
+The entry under the cursor is decrypted and shown in the pane, which has four properties, each of them a property a preview of a secret has to have.
 It decrypts on a quiet period rather than on a keystroke, so moving through a dozen entries forks one `sops` subprocess instead of twelve and the entries passed through are not decrypted at all.
 It holds exactly one decrypted value at a time: the previous one is dropped — and zeroed — before the next is read, so nothing accumulates over a long browse.
 It is drawn in a region the terminal clears on exit, so no value enters scrollback, where it would outlive the process and the zeroing.
 And it stages nothing: a preview is drawn by safix itself, so there is no path to hand anybody and no plaintext reaches a file at any point.
-A value that does not decrypt is reported in the region and the list stays usable, because failing to show one value says nothing about your ability to choose another.
+A value that does not decrypt is reported in the pane and the list stays usable, because failing to show one value says nothing about your ability to choose another.
 
-`--no-preview` offers the same list and decrypts nothing until a choice is made, for a shared screen, a recording, or a session whose scrollback you do not control.
+`^P` and `--no-preview` both suppress it, and a suppressed preview decrypts nothing at all until a choice is made — for a shared screen, a recording, or a session whose scrollback you do not control.
+
+Whether the pane and the extra column were showing, and what you chose last, are remembered in `${XDG_STATE_HOME:-$HOME/.local/state}/safix/picker.json`, created `0600`.
+It is written on every toggle and on every choice, and a file that does not parse is ignored and overwritten rather than refused: nothing in it is declared anywhere, and the worst outcome of ignoring it is one keystroke.
 
 Three refusals, each its own:
 no terminal to choose on, which names both remedies — name the entry, or `safix list` what the user holds;
 the user holds nothing, which is a state of the declarations rather than of the session;
-and leaving without choosing, which writes nothing, keeps nothing it decrypted, and leaves the terminal in the state it was found in.
+and leaving without choosing, which says nothing but the name of the outcome — `safix::selection_cancelled` — exits 1, writes nothing, keeps nothing it decrypted, and leaves the terminal in the state it was found in.
 
 ## Editing a value: `safix edit`
 
@@ -605,7 +637,7 @@ An editor configured to write undo history to a location of its own has put plai
 
 With no name, `edit` offers the same selection `safix view` offers, through the same code, less every public output: a public value is already plaintext in the repository and is not editable, so it is not among the choices either — a refusal reachable by selection is one the choice should never have offered.
 The editor is settled before the list opens, on every form, because a refusal after you have browsed a list and had values decrypted for a preview is a refusal that wasted your time and decrypted values for nothing.
-`--no-preview` suppresses the preview here too, and the three refusals are `safix view`'s.
+The keys, the query syntax, the colours and the remembered state are `safix view`'s; `^P` and `--no-preview` both suppress the preview here too, and the three refusals are `safix view`'s.
 
 ## Values without declarations: the runtime extract
 
@@ -1343,7 +1375,7 @@ And the three trees safix places files in, each named by an option:
 |---|---|---|---|
 | encrypted values | `flake.safix.storage.encrypted` | `secrets/safix` — `users/<u>/secrets.yaml` and `shared/<audience>/secrets.yaml` below it | `secrets/<opaque-hash>.yaml` at the vault root |
 | public outputs | `flake.safix.storage.plaintextOutputs` | `public/safix` — `users/<u>/<name>/value` and `shared/<audience>/<name>/value` below it, no creation rule, readable at evaluation | `public/<opaque-hash>` at the vault root |
-| the definition each generated value was minted under | `flake.safix.storage.generatorRecords` | `state/safix/definitions` — `<u>/<name>` and `shared/<audience>/<name>` below it, one plaintext digest per value | `state/<opaque-hash>` at the vault root |
+| the per-value records: which definition minted it, and when it was created and last changed | `flake.safix.storage.generatorRecords` | `state/safix/definitions` — `<u>/<name>` and `shared/<audience>/<name>` below it, plus `<name>.stamps` beside each, one plaintext line per file | `state/<opaque-hash>` at the vault root |
 
 The vault's own three buckets are not configurable: a vault-rooted name is a hash of an entry's identity, so renaming a storage root moves nothing inside a vault.
 

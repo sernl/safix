@@ -110,8 +110,9 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
 
     // One commit per generator, and the multi-output generator's two files in
     // one of them: a keypair split across two commits is a tree holding halves
-    // that do not match. Each output's definition record rides that same commit,
-    // which is the property `check`'s drift finding rests on.
+    // that do not match. Each output's definition record rides that same
+    // commit, which is the property `check`'s drift finding rests on, and so
+    // does each output's stamp, which is what dates the minted value.
     assert_ne!(fixture.head(), before, "generate committed nothing");
     let paired = fixture.commit_matching("generate paired, paired-pub");
     assert!(!paired.is_empty(), "no commit names both outputs");
@@ -120,6 +121,8 @@ fn generate_mints_in_dependency_order_and_commits_each_generator() {
         SHARED_FILE.to_owned(),
         "state/safix/definitions/alice/paired".to_owned(),
         "state/safix/definitions/alice/paired-pub".to_owned(),
+        "state/safix/definitions/alice/paired.stamps".to_owned(),
+        "state/safix/definitions/alice/paired-pub.stamps".to_owned(),
     ];
     expected.sort();
     assert_eq!(fixture.paths_in(&paired), expected);
@@ -753,6 +756,25 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
         "the record is more than one line: {recorded:?}"
     );
 
+    // The stamp rode the mint's own commit, and its two dates agree, because a
+    // first mint is the value's first write. `created` is read here so the
+    // regeneration below can be asked to leave it alone.
+    let stamped = fixture.commit_matching("generate recorded");
+    assert!(
+        fixture
+            .paths_in(&stamped)
+            .contains(&format!("{RECORD}.stamps")),
+        "the mint's commit does not name the stamp: {:?}",
+        fixture.paths_in(&stamped)
+    );
+    let (minted_at, updated_at) = fixture
+        .stamps_of(&format!("{RECORD}.stamps"))
+        .expect("the mint wrote a stamp");
+    assert_eq!(
+        minted_at, updated_at,
+        "a first mint dates both stamps alike"
+    );
+
     // Two mints of different values under one declaration produce one record. A
     // value cannot reach the digest — it is computed from the generator record and
     // nothing else — and this is what says so from outside: `rolling` mints
@@ -825,8 +847,20 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
     let commit = fixture.commit_matching("generate recorded");
     assert_eq!(
         fixture.paths_in(&commit),
-        vec![ALICE_FILE.to_owned(), RECORD.to_owned()],
+        vec![
+            ALICE_FILE.to_owned(),
+            RECORD.to_owned(),
+            format!("{RECORD}.stamps"),
+        ],
         "the refreshed record did not ride the regeneration's commit"
+    );
+    assert_eq!(
+        fixture
+            .stamps_of(&format!("{RECORD}.stamps"))
+            .expect("the regeneration kept the stamp")
+            .0,
+        minted_at,
+        "the regeneration reminted `created` rather than dating the entry's first mint"
     );
     fixture
         .run(&["check", "alice"])
@@ -1012,6 +1046,8 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
         PUBLIC.to_owned(),
         "state/safix/definitions/alice/wg-private".to_owned(),
         "state/safix/definitions/alice/wg-public".to_owned(),
+        "state/safix/definitions/alice/wg-private.stamps".to_owned(),
+        "state/safix/definitions/alice/wg-public.stamps".to_owned(),
     ];
     expected_paths.sort();
     assert_eq!(fixture.paths_in(&commit), expected_paths);

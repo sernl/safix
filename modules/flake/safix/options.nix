@@ -307,11 +307,13 @@ in
             default = "state/safix/definitions";
             example = ".safix/generator-records";
             description = ''
-              The repository-relative directory holding one plaintext line per
-              generated value: a digest of the generator definition that minted
-              it, carrying no value and no derivative of a value — which is
-              what licenses committing it in the clear — so that `safix check`
-              can answer definition drift without decrypting anything.
+              The repository-relative directory holding every per-value
+              plaintext record: a digest of the generator definition that
+              minted the value, and the unix seconds it was created and last
+              updated. Neither carries a value or a derivative of one — which
+              is what licenses committing them in the clear — so that `safix
+              check` can answer definition drift, and `safix view` can show a
+              value's dates, without decrypting anything.
 
               It is a separate tree from the plaintext-output one because that
               tree means "declared public outputs a nix module reads", and

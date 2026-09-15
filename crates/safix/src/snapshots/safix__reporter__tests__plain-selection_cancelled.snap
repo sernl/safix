@@ -2,10 +2,4 @@
 source: crates/safix/src/reporter.rs
 expression: render_plain(&refusal)
 ---
-safix: nothing was chosen, so nothing was read.
-
-The terminal is back in the state it was found in, no value was written
-anywhere, and whatever was decrypted for the preview was dropped rather than
-kept. Leaving is not a failure of the run, but it is not a success either, so
-the exit status is non-zero: a script that wrapped this would otherwise read a
-cancelled choice as a value it never got.
+safix: safix::selection_cancelled

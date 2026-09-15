@@ -307,38 +307,84 @@ what a pipeline calls; this writes it to the terminal, so a pipeline wants
 `get`. With no terminal to write to, the value goes to stdout instead \u{2014} what
 needs a terminal here is offering a choice, not writing a value.
 
-With no <name>, every entry <user> holds is offered for selection, showing the
-same six columns `safix list` prints: the name, where it came from, whether one
-value serves every carrier, whether a generator mints it, the key it is read
-under, and the file serving it. Type to narrow the list, move with the arrows or
-^P and ^N, enter to read the highlighted entry, escape to leave. Choosing is a
-way of naming: the run proceeds exactly as though the chosen name had been
-given.
+With no <name>, every entry <user> holds is offered for selection, showing seven
+of the eight columns `safix list` prints: the name, where it came from, whether
+one value serves every carrier, whether a generator mints it, the key it is read
+under, and when the value was created and last updated. Tab adds the eighth, the
+file serving it. Choosing is a way of naming: the run proceeds exactly as though
+the chosen name had been given.
+
+The list is drawn from the bottom of the screen upwards, alphabetically, with
+the first entry as the bottom row under the cursor: the rows nearest the query
+being typed are the ones a query is narrowing towards. Typing narrows without
+reordering, so an entry does not move under the cursor between two keystrokes.
 
 A lone argument is a user when flake.safix.users declares one by that name, and
 an entry's name otherwise. An entry whose name is also a person's is reachable
 by naming both.
 
+\u{2500}\u{2500} the keys \u{2500}\u{2500}
+  enter          read the entry under the cursor
+  escape, ^C     leave without choosing
+  up, down       move the cursor; up is later in the alphabet
+  left, right    scroll the columns; neither leaves and neither wraps
+  tab            show or hide the FILE column
+  ^P             show or hide the value pane
+  backspace      edit the query
+Every other key is consumed and does nothing, including every function key and
+every editing key a terminal spells as an escape sequence: a key this does not
+bind cannot put bytes in the query and cannot leave the list.
+
+\u{2500}\u{2500} the query \u{2500}\u{2500}
+KeePassXC's syntax. Terms are separated by whitespace and all of them have to
+match; \"two words\" is one term. A term may name a column and may be modified:
+
+  token                    a substring of any column, case-insensitive
+  name:token, n:token      the same, in that column alone \u{2014} name, origin,
+                           shared, generator, key, created, updated, file, each
+                           also by its initial
+  !token                   entries this term does not match
+  +Token                   the whole cell, case included
+  *^api-.*$                a regular expression
+  api-*, api-toke?         * is any run and ? is one character, whole-cell
+  api-token|mail-password  either, whole-cell
+
+A regular expression that does not compile matches nothing rather than refusing
+the frame, because every prefix of one being typed is a query this has to answer.
+
 \u{2500}\u{2500} the preview \u{2500}\u{2500}
-The highlighted entry's value is decrypted and shown once the highlight has
+The value under the cursor is decrypted and shown in the pane once the cursor has
 rested, so moving through twelve entries decrypts none of the eleven passed
 through. Exactly one decrypted value is held at any moment: the previous one is
 dropped and overwritten before the next is read. The rendering is bounded to the
-region, control bytes are shown as placeholders, and a value that is not valid
-text is described by its size. It is drawn in a region the terminal clears on
-exit, so no value enters scrollback, and nothing is staged: no plaintext of a
-previewed value reaches a file at any point. A value that does not decrypt is
-reported in the region and the list stays usable \u{2014} failing to show one value
-says nothing about choosing another.
+pane, control bytes are shown as placeholders, and a value that is not valid text
+is described by its size. It is drawn in a region the terminal clears on exit, so
+no value enters scrollback, and nothing is staged: no plaintext of a previewed
+value reaches a file at any point. A value that does not decrypt is reported in
+the pane and the list stays usable \u{2014} failing to show one value says nothing
+about choosing another.
 
---no-preview offers the same list and decrypts nothing until a choice is made,
-for a shared screen, a recording, or a session whose scrollback you do not
-control.
+^P and --no-preview both suppress it, and a suppressed preview decrypts nothing
+at all until a choice is made \u{2014} for a shared screen, a recording, or a session
+whose scrollback you do not control.
+
+\u{2500}\u{2500} what the colours mean \u{2500}\u{2500}
+  green    the decrypted value
+  yellow   the entry you chose last, as this user
+  cyan     the entry created most recently
+  dim      a cell with nothing in it
+
+\u{2500}\u{2500} what is remembered \u{2500}\u{2500}
+Whether the pane and the extra column were showing, and what you chose last, in
+${XDG_STATE_HOME:-$HOME/.local/state}/safix/picker.json, created 0600. It is
+written on every toggle and on every choice, and a file that does not parse is
+ignored and overwritten rather than refused.
 
 \u{2500}\u{2500} the three refusals \u{2500}\u{2500}
   no terminal to choose on   name the entry, or `safix list` what the user holds
   the user holds nothing     a state of the declarations, not of the session
-  left without choosing      nothing written, nothing decrypted kept, the
+  left without choosing      one line, safix::selection_cancelled, and exit 1:
+                             nothing written, nothing decrypted kept, the
                              terminal as it was found
 ";
 
@@ -347,11 +393,17 @@ pub const LIST: &str = "\
 safix list [<user>]
 
 Every name <user> holds, where it came from, whether it has a generator, the key
-it is read under, and the file serving it.
+it is read under, when the value was created and last updated, and the file
+serving it.
 
 The GENERATOR column shows a generator's own description when it has one, `yes`
 when it has a generator and no description, and `-` when the value can only be
 typed or transcribed.
+
+CREATED and UPDATED are read from the record written beside each value, in local
+time. They show `-` for a value written before that record existed: no record is
+no claim about when a value arrived, and a date invented for one would be worse
+than none.
 ";
 
 /// `safix check -h`.
@@ -737,12 +789,14 @@ Every entry <user> holds is offered for selection, the way `safix view` offers
 them and through the same code, less every public output \u{2014} a public value is
 not editable, so it is not among the choices either. The editor is settled
 before the list opens: a refusal after you have browsed and had values
-decrypted for a preview is a refusal that wasted your time. --no-preview
-suppresses the preview here too.
+decrypted for a preview is a refusal that wasted your time. The keys, the query
+syntax, the colours and the remembered state are `safix view`'s, and
+--no-preview suppresses the preview here too.
 
 The three refusals are `safix view`'s: no terminal to choose on, naming both
 remedies; the user holds nothing editable; and leaving without choosing, which
-writes nothing and leaves the terminal as it was found.
+writes one line, safix::selection_cancelled, and leaves the terminal as it was
+found.
 ";
 
 /// `safix upload -h`.

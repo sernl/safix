@@ -19,6 +19,48 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### The picker is drawn bottom-up, searched the way a password database is, and remembers itself
+
+`safix view` and the nameless `safix edit` draw their list from the bottom of the terminal upwards.
+The key help is the last line — `Enter choose · Esc/^C cancel · ↑↓ move · ←→ scroll · Tab columns · ^P preview` — the query is above it, the value pane above that under the title `── Decrypted Value ──`, and the table above that with its header on top.
+The rows run in reverse alphabetical order, so the alphabetically first entry is the bottom row, against the query being typed, and the cursor starts on it.
+
+The key map is closed: `Enter` chooses, `Esc` and `^C` leave, the vertical arrows move, the horizontal arrows scroll the columns without ever leaving or wrapping, `Tab` shows and hides the `FILE` column, `^P` shows and hides the value pane, and `Backspace` edits the query.
+Every other byte sequence is consumed and does nothing, escape sequences included: a sequence is now parsed to its end, so a function key, `Home`, `End`, `Delete` or a page key can no longer leave its tail in the query, and neither `^D` nor `^N` ends a run or moves a cursor any more.
+`^P` was "up" and is now the preview toggle; a suppressed pane still issues no decrypt at all.
+
+The subsequence ranking is retired, and with it the reordering a query used to do under the cursor.
+Narrowing is KeePassXC's syntax over the whole row: whitespace-separated terms, `"two words"` as one term, all of them ANDed, each optionally naming a column (`name:`/`n:`, `origin:`, `shared:`, `generator:`, `key:`, `created:`, `updated:`, `file:`) and optionally modified — `!` excludes, `+` matches the whole cell including its case, `*` reads the term as a regular expression, and `*`, `?` and `|` compile to an anchored whole-cell pattern.
+A regular expression that does not compile matches nothing rather than refusing the frame, because every prefix of one being typed is a query the picker has already been asked to answer.
+
+`safix list` and the picker both gained the two stamp columns: `CREATED` and `UPDATED`, read from the record beside each value and rendered `dd/mm/yyyy hh:mm(am|pm)` in local time, `-` for a value written before that record existed.
+The offset is read once per run from `date +%z`, and UTC where there is no `date` to ask or its answer does not parse; there is no timezone database and no dependency that carries one.
+The picker's default column set is `NAME ORIGIN SHARED GENERATOR KEY CREATED UPDATED` with `FILE` behind `Tab`, and `safix list` prints all eight — one row builder, as before.
+
+Colours, each of them a fact: the decrypted value is green, the row of the entry this user chose last is yellow, the row with the greatest `created` stamp is cyan, an empty cell is dim, the header is bold, and the cursor is reverse video over whatever colour its row has.
+Attributes are reset at every line end and on the way out.
+
+Three things are remembered between runs in `${XDG_STATE_HOME:-$HOME/.local/state}/safix/picker.json`, created `0600`: whether the pane was showing, whether the extra column was, and the last name chosen per user.
+It is written on every toggle and on every choice, and a file that does not parse is ignored and overwritten rather than refused — nothing in it is declared anywhere, and the worst outcome of ignoring it is one keystroke.
+
+`safix::selection_cancelled` no longer carries a paragraph.
+Leaving a picker exits 1 and names the outcome and nothing else; what the paragraph explained — the terminal is back, nothing was written, nothing decrypted was kept — is in `README.md` and in `safix view -h`, which is where somebody reading about the verb is rather than where somebody who has just pressed escape is.
+
+### Every value records when it was created and when it last changed
+
+The resolver emits `stampRecord` on every placement, beside `definitionRecord` and computed the same way: `<generatorRecords>/<owner>/<name>.stamps` for an owned entry, `<generatorRecords>/shared/<audience>/<name>.stamps` for a shared one, and one opaque `state/<hash>` name in vault mode, hashed under its own `stamps` tag so a stamp and the definition record beside it cannot collide.
+`logicalStamp` rides along beside `logicalRecord`, non-null only in vault mode, and is what makes a stamp relocate and roll back with the value it dates.
+A declared name is `[a-z0-9][a-z0-9_-]*`, so no name can end in `.stamps` and the suffix needs no injectivity argument of its own.
+
+`safix_core::stamps` is a new module: `Stamps { created, updated }` as unix seconds, `read` answering `None` for an entry that has no record, and `touch` writing one line — `v1 created=<epoch> updated=<epoch>` — through the same candidate-beside-target and rename the definition record is written through.
+`set` and `generate` stamp what they wrote, and the stamp is named in the same commit as the value, so a value and its dates land together or not at all.
+`set` stamps only when the value actually changed: re-setting the identical value is still the "unchanged" case that commits nothing, so `updated` dates the last change to a value rather than the last run of the command.
+
+Every value written before this record existed has none, and that reads as no dates rather than as an epoch or a refusal.
+A record that exists and does not parse is the opposite case and is refused, `safix::stamp_record_unparsable`, naming the path: silence there would mint a fresh `created` over a value that plainly has one.
+
+`flake.safix.storage.generatorRecords`' description now says what its tree holds — every per-value plaintext record, the definition digest and the created/updated stamp, neither carrying a value — and the no-catch-all check gains two probes, `<root>/UNCLAIMED/x.stamps` and `<root>/shared/UNCLAIMED/x.stamps`, so a recipient rule reaching the stamps is reported rather than only one reaching the digests.
+
 ### **BREAKING** (nix surface): safix owns its installer and declares no sops-nix input
 
 safix declares no sops-nix input.

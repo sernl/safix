@@ -46,6 +46,10 @@ fn both_carriers_resolve_one_file_and_read_one_value() {
                 "yes",
                 "-",
                 "fleet-token",
+                // No stamp record beside a seeded declaration, which both
+                // stamp columns render as an empty cell.
+                "-",
+                "-",
                 SHARED_FILE
             ],
             "{user}'s row does not mark fleet-token shared against the audience file"

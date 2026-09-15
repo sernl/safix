@@ -104,6 +104,7 @@ refusal_codes! {
     GeneratorDefinitionDrifted => "safix::generator_definition_drifted",
     NoClanFlake => "safix::no_clan_flake",
     FileUnreadable => "safix::file_unreadable",
+    StampRecordUnparsable => "safix::stamp_record_unparsable",
     GitUnavailable => "safix::git_unavailable",
     GitCommandFailed => "safix::git_command_failed",
     GitOutputNotText => "safix::git_output_not_text",

@@ -66,6 +66,10 @@
 # for `UNCLAIMED` in the derived probes and observes the legitimate fixture's
 # own rules start matching them, which is why the excluded-alphabet component
 # is not decoration.
+# The stamp record is emitted beside the definition record under both roots
+# (`stampsAreEmitted`), and `besideTheDefinitionRecord` is what holds the two
+# to one derivation: a stamp path spelled from anything but the record path
+# plus `.stamps` reddens that row alone.
 { lib, ... }:
 {
   perSystem =
@@ -165,6 +169,8 @@
       regexesOf = projection: lib.sort (a: b: a < b) (map (r: r.pathRegex) projection.policyPlan.rules);
 
       recordsOf = projection: lib.mapAttrs (_name: p: p.definitionRecord) projection.placements.alice;
+
+      stampsOf = projection: lib.mapAttrs (_name: p: p.stampRecord) projection.placements.alice;
 
       # ── the two refusals ──
       malformed = {
@@ -344,6 +350,19 @@
             underRenamedRoot = recordsOf renamed;
           };
 
+          # ── the stamp record is emitted beside the definition record ──
+          # Under both roots, and named by appending `.stamps` to the record
+          # path rather than by a second derivation of the layout: the third
+          # row is what would redden if the two ever parted company.
+          stampsAreEmitted = {
+            noneNull = lib.all (p: p.stampRecord != null) (lib.attrValues defaults.placements.alice);
+            underDefaultRoot = stampsOf defaults;
+            underRenamedRoot = stampsOf renamed;
+            besideTheDefinitionRecord = lib.all (
+              name: (stampsOf renamed).${name} == "${(recordsOf renamed).${name}}.stamps"
+            ) (builtins.attrNames renamed.placements.alice);
+          };
+
           # ── 5.6: the committed header names the configured root ──
           renamedPolicyHeader = {
             sharedExample = lib.hasInfix "${renamedStorage.encrypted}/shared/<a>,<b>/" renamed.policyText;
@@ -509,6 +528,23 @@
               wg-private = "bookkeeping/alice/wg-private";
               wg-public = "bookkeeping/alice/wg-public";
             };
+          };
+
+          stampsAreEmitted = {
+            noneNull = true;
+            underDefaultRoot = {
+              solo-token = "state/safix/definitions/alice/solo-token.stamps";
+              team-secret = "state/safix/definitions/alice/team-secret.stamps";
+              wg-private = "state/safix/definitions/alice/wg-private.stamps";
+              wg-public = "state/safix/definitions/alice/wg-public.stamps";
+            };
+            underRenamedRoot = {
+              solo-token = "bookkeeping/alice/solo-token.stamps";
+              team-secret = "bookkeeping/alice/team-secret.stamps";
+              wg-private = "bookkeeping/alice/wg-private.stamps";
+              wg-public = "bookkeeping/alice/wg-public.stamps";
+            };
+            besideTheDefinitionRecord = true;
           };
 
           renamedPolicyHeader = {

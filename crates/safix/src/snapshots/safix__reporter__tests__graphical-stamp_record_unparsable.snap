@@ -1,0 +1,13 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::stamp_record_unparsable
+
+  × state/safix/definitions/alice/api-token.stamps is not a stamp record this
+  │ version of safix can read.
+  │ 
+  │ A stamp record is one line: v1 created=<unix seconds> updated=<unix
+  │ seconds>. Restore it from git history to keep the dates it held, or
+  │ remove it — an entry with no record reads as having no dates, which is
+  │ what every value written before the record existed reads as.

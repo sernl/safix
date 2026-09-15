@@ -38,7 +38,9 @@
 //! runs inside, and [`scratch`] is what an aborted write must not leave behind.
 //! [`definition`] is the record a mint leaves of the declaration it minted
 //! under, which is what lets [`check`] report a value whose generator has
-//! changed since. [`delegation`] is who may perform a scaffold for whom, read
+//! changed since, and [`stamps`] is the record beside it of when a value was
+//! first written and when it last changed. [`delegation`] is who may perform
+//! a scaffold for whom, read
 //! off the declarations and matched against the identity the resulting commit
 //! would carry; it guards the cooperative path and is explicitly not
 //! authorization, which its own documentation states at length.
@@ -90,6 +92,7 @@ mod secret;
 pub mod set;
 pub mod sops;
 pub mod staging;
+pub mod stamps;
 pub mod store;
 pub mod sync;
 pub mod upload;

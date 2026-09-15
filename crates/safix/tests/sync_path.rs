@@ -265,7 +265,16 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
     fixture
         .run_with(&["set", "alice", "by-hand"], "typed-by-a-person")
         .expect_success("the hand-set write");
-    let by_hand = fixture.paths_in("HEAD");
+    // The shape, not the paths: each write also stamps its own entry, so the
+    // record path carries the entry's name and only the value document is
+    // shared between the two.
+    let shape = |paths: Vec<String>, name: &str| -> Vec<String> {
+        paths
+            .into_iter()
+            .map(|path| path.replace(&format!("/{name}."), "/<entry>."))
+            .collect()
+    };
+    let by_hand = shape(fixture.paths_in("HEAD"), "by-hand");
 
     fixture.store_seed("safix/alice/pulled", "kdbx-pulled");
     fixture
@@ -273,7 +282,7 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
         .expect_success("pulling one mapping");
 
     assert_eq!(
-        fixture.paths_in("HEAD"),
+        shape(fixture.paths_in("HEAD"), "pull-me"),
         by_hand,
         "a pull committed a different set of paths from a hand-set write"
     );

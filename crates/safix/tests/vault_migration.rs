@@ -10,7 +10,7 @@
 //! `sha256("<namingKey>|<tag>|<root-relative readable path>")` over
 //! `modules/flake/checks/vault.nix`'s fixture naming key
 //! `fc84b416cd03fedc2c02116b068d75c543d327361f19e3d18d9e8aa3de0f4ad2`, with
-//! the four tags `secrets`, `key`, `public` and `state`. The fixture's
+//! the five tags `secrets`, `key`, `public`, `state` and `stamps`. The
 //! stubbed `nix` computes none of them — it hands them over as data,
 //! exactly as the resolver does — but they are the resolver's real bytes,
 //! so a change to the hash input this suite's constants did not follow
@@ -34,6 +34,10 @@ const OPAQUE_PRIVATE_KEY: &str = "6aec486973c1530ed15e672a3e69f95d5030dbd2f808a3
 const OPAQUE_PRIVATE_RECORD: &str =
     "state/bf23927f1bb02936d41fc8f9730f5e98431724e6ff6bfe7b0f1da168d71450b6";
 const LOGICAL_PRIVATE_RECORD: &str = "state/safix/definitions/alice/api-token";
+/// `stamps|alice/api-token.stamps`.
+const OPAQUE_PRIVATE_STAMP: &str =
+    "state/2e54ed1efaa901181510f06d0db9af37058d852ae0ccd08b5b01ca6e42c5ec2d";
+const LOGICAL_PRIVATE_STAMP: &str = "state/safix/definitions/alice/api-token.stamps";
 
 const LOGICAL_SHARED_FILE: &str = "secrets/safix/shared/alice,bob/secrets.yaml";
 /// `secrets|shared/alice,bob/secrets.yaml`.
@@ -45,6 +49,10 @@ const OPAQUE_SHARED_KEY: &str = "921c7ad8e1fe08132fafe21cb993c15ed5b4b1654f25106
 const OPAQUE_SHARED_RECORD: &str =
     "state/63ab6079cff5facdfe01730d47c6dd0177ff95e86f831e6ee4db7c37ed9a5437";
 const LOGICAL_SHARED_RECORD: &str = "state/safix/definitions/shared/alice,bob/fleet-token";
+/// `stamps|shared/alice,bob/fleet-token.stamps`.
+const OPAQUE_SHARED_STAMP: &str =
+    "state/fb678949eebf737dd873665255ff8054d5197b366b7172ab7289e597eb10c19b";
+const LOGICAL_SHARED_STAMP: &str = "state/safix/definitions/shared/alice,bob/fleet-token.stamps";
 
 const LOGICAL_PUBLIC: &str = "public/safix/users/alice/host-key/value";
 /// `public|users/alice/host-key/value`.
@@ -55,6 +63,10 @@ const OPAQUE_PUBLIC: &str =
 const OPAQUE_PUBLIC_RECORD: &str =
     "state/676dbf71c0c3280eeb04d631230df1cac6eed5d1ee4f00b83df5c0019d96e064";
 const LOGICAL_PUBLIC_RECORD: &str = "state/safix/definitions/alice/host-key";
+/// `stamps|alice/host-key.stamps`.
+const OPAQUE_PUBLIC_STAMP: &str =
+    "state/ad498ea92592d2936ab0d85d2a36896c70cf48d48dad4120e6f9356e41b5527b";
+const LOGICAL_PUBLIC_STAMP: &str = "state/safix/definitions/alice/host-key.stamps";
 
 /// The pre-change names, hashed from the *root-prefixed* readable path the
 /// resolver used to feed `opaqueOf`, for the one-time-break drill below.
@@ -78,12 +90,17 @@ const PRIVATE_RECORD_TEXT: &str =
     "safix-definition-v2 1111111111111111111111111111111111111111111111111111111111111111\n";
 const SHARED_RECORD_TEXT: &str =
     "safix-definition-v2 2222222222222222222222222222222222222222222222222222222222222222\n";
+/// Two distinct stamp lines, so a relocation that moved one record's bytes
+/// into the other's destination is a mismatch rather than a coincidence.
+const PRIVATE_STAMP_TEXT: &str = "v1 created=1700000001 updated=1700000002\n";
+const SHARED_STAMP_TEXT: &str = "v1 created=1700000003 updated=1700000004\n";
 
 /// One private entry, one shared entry (both carriers), and one public
 /// output, declared with both their opaque and readable forms — the shape
 /// `flake.safix.lib.placements` carries once a vault is declared, over a
-/// fleet whose ciphertext, plaintext outputs and definition records still
-/// sit at the declaration root because nothing has relocated them yet.
+/// fleet whose ciphertext, plaintext outputs, definition records and stamp
+/// records still sit at the declaration root because nothing has relocated
+/// them yet.
 fn declare_vault_placements(fixture: &mut Fixture) {
     let private = json!({
         "file": OPAQUE_PRIVATE_FILE, "key": OPAQUE_PRIVATE_KEY, "origin": "private",
@@ -91,6 +108,8 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "definitionRecord": OPAQUE_PRIVATE_RECORD,
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "api-token", "logicalPublic": null,
         "logicalRecord": LOGICAL_PRIVATE_RECORD,
+        "stampRecord": OPAQUE_PRIVATE_STAMP,
+        "logicalStamp": LOGICAL_PRIVATE_STAMP,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
 
@@ -105,6 +124,8 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "host-key-unused",
         "logicalPublic": LOGICAL_PUBLIC,
         "logicalRecord": LOGICAL_PUBLIC_RECORD,
+        "stampRecord": OPAQUE_PUBLIC_STAMP,
+        "logicalStamp": LOGICAL_PUBLIC_STAMP,
     });
     fixture.seed_vault_placement("alice", "host-key", public);
 
@@ -116,6 +137,8 @@ fn declare_vault_placements(fixture: &mut Fixture) {
             "logicalFile": LOGICAL_SHARED_FILE, "logicalKey": "fleet-token",
             "logicalPublic": null,
             "logicalRecord": LOGICAL_SHARED_RECORD,
+            "stampRecord": OPAQUE_SHARED_STAMP,
+            "logicalStamp": LOGICAL_SHARED_STAMP,
         });
         fixture.seed_vault_placement(owner, "fleet-token", shared);
     }
@@ -144,6 +167,8 @@ fn populated_readable_fixture() -> (Fixture, std::path::PathBuf) {
     fixture.write(LOGICAL_PUBLIC, PUBLIC_VALUE);
     fixture.write(LOGICAL_PRIVATE_RECORD, PRIVATE_RECORD_TEXT);
     fixture.write(LOGICAL_SHARED_RECORD, SHARED_RECORD_TEXT);
+    fixture.write(LOGICAL_PRIVATE_STAMP, PRIVATE_STAMP_TEXT);
+    fixture.write(LOGICAL_SHARED_STAMP, SHARED_STAMP_TEXT);
 
     fixture.set_vault_rules_many(&[
         (OPAQUE_PRIVATE_FILE, &[alice.as_str()]),
@@ -155,11 +180,11 @@ fn populated_readable_fixture() -> (Fixture, std::path::PathBuf) {
 
 /// Task 11.3: `fix` moves every readable-layout leaf into its opaque vault
 /// destination — every secret decrypts to the same plaintext, every public
-/// output and definition record copies byte for byte, every physical name
-/// is the opaque one the placements declared, and the readable-layout
-/// source is gone. Folds task 11.6's drill: `check` reports the pending
-/// relocations and the missing `.gitignore` entry beforehand, and reports
-/// neither afterward.
+/// output, definition record and stamp record copies byte for byte, every
+/// physical name is the opaque one the placements declared, and the
+/// readable-layout source is gone. Folds task 11.6's drill: `check` reports
+/// the pending relocations and the missing `.gitignore` entry beforehand,
+/// and reports neither afterward.
 #[test]
 fn a_populated_readable_fixture_migrates_into_a_vault() {
     let (fixture, vault) = populated_readable_fixture();
@@ -171,6 +196,8 @@ fn a_populated_readable_fixture_migrates_into_a_vault() {
     before.says(LOGICAL_PUBLIC);
     before.says(LOGICAL_PRIVATE_RECORD);
     before.says(LOGICAL_SHARED_RECORD);
+    before.says(LOGICAL_PRIVATE_STAMP);
+    before.says(LOGICAL_SHARED_STAMP);
     before.says("has not yet moved it into the vault");
     before.says(".sops-vault-rules.yaml");
     before.says("does not cover");
@@ -205,6 +232,16 @@ fn a_populated_readable_fixture_migrates_into_a_vault() {
         SHARED_RECORD_TEXT,
         "the shared record's bytes did not survive the move"
     );
+    assert_eq!(
+        fixture.vault_read(OPAQUE_PRIVATE_STAMP),
+        PRIVATE_STAMP_TEXT,
+        "the private stamp's dates did not survive the move"
+    );
+    assert_eq!(
+        fixture.vault_read(OPAQUE_SHARED_STAMP),
+        SHARED_STAMP_TEXT,
+        "the shared stamp's dates did not survive the move"
+    );
 
     // Every physical name matches the opaque form the placements declared,
     // and the readable-layout source is gone.
@@ -214,6 +251,8 @@ fn a_populated_readable_fixture_migrates_into_a_vault() {
         OPAQUE_PUBLIC,
         OPAQUE_PRIVATE_RECORD,
         OPAQUE_SHARED_RECORD,
+        OPAQUE_PRIVATE_STAMP,
+        OPAQUE_SHARED_STAMP,
     ] {
         assert!(
             fixture.vault_exists(opaque),
@@ -226,6 +265,8 @@ fn a_populated_readable_fixture_migrates_into_a_vault() {
         LOGICAL_PUBLIC,
         LOGICAL_PRIVATE_RECORD,
         LOGICAL_SHARED_RECORD,
+        LOGICAL_PRIVATE_STAMP,
+        LOGICAL_SHARED_STAMP,
     ] {
         assert!(
             !fixture.exists(logical),
@@ -251,9 +292,9 @@ fn a_populated_readable_fixture_migrates_into_a_vault() {
 /// the readable layout. Secrets are compared by decrypted value rather than
 /// by ciphertext bytes — a fresh encryption of the same plaintext carries a
 /// fresh nonce and `lastmodified`, so byte-identical ciphertext is not the
-/// achievable claim; the plaintext leaves (the public output and both
-/// definition records) are compared byte for byte, since a rollback copies
-/// them rather than re-encrypting anything.
+/// achievable claim; the plaintext leaves (the public output, both
+/// definition records and both stamps) are compared byte for byte, since a
+/// rollback copies them rather than re-encrypting anything.
 #[test]
 fn a_vault_rollback_restores_the_readable_layout() {
     let (fixture, vault) = populated_readable_fixture();
@@ -292,6 +333,16 @@ fn a_vault_rollback_restores_the_readable_layout() {
         SHARED_RECORD_TEXT,
         "the shared record is not byte-identical after the round trip"
     );
+    assert_eq!(
+        fixture.stamps_of(LOGICAL_PRIVATE_STAMP),
+        Some((1_700_000_001, 1_700_000_002)),
+        "the private stamp's dates did not survive the round trip"
+    );
+    assert_eq!(
+        fixture.stamps_of(LOGICAL_SHARED_STAMP),
+        Some((1_700_000_003, 1_700_000_004)),
+        "the shared stamp's dates did not survive the round trip"
+    );
 
     for opaque in [
         OPAQUE_PRIVATE_FILE,
@@ -299,6 +350,8 @@ fn a_vault_rollback_restores_the_readable_layout() {
         OPAQUE_PUBLIC,
         OPAQUE_PRIVATE_RECORD,
         OPAQUE_SHARED_RECORD,
+        OPAQUE_PRIVATE_STAMP,
+        OPAQUE_SHARED_STAMP,
     ] {
         assert!(
             !fixture.vault_exists(opaque),
@@ -324,6 +377,8 @@ fn an_interrupted_relocation_leaves_the_destination_absent_and_a_re_run_complete
         "definitionRecord": OPAQUE_PRIVATE_RECORD,
         "logicalFile": LOGICAL_PRIVATE_FILE, "logicalKey": "api-token", "logicalPublic": null,
         "logicalRecord": LOGICAL_PRIVATE_RECORD,
+        "stampRecord": OPAQUE_PRIVATE_STAMP,
+        "logicalStamp": LOGICAL_PRIVATE_STAMP,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
     let alice = fixture.alice.clone();

@@ -64,8 +64,11 @@ fn set_new_creates_the_file_through_the_creation_rules() {
     );
     assert_eq!(
         fixture.paths_in("HEAD"),
-        vec![SHARED_FILE.to_owned()],
-        "the commit is the one file"
+        vec![
+            SHARED_FILE.to_owned(),
+            "state/safix/definitions/bob/wifi-psk.stamps".to_owned(),
+        ],
+        "the commit is the one file and the stamp dating it"
     );
     assert!(
         !fixture.message("HEAD").contains("CANARY-shared-value"),
@@ -487,8 +490,11 @@ fn a_staged_bystander_survives_the_run_and_does_not_make_it_commit() {
 
     assert_eq!(
         fixture.paths_in("HEAD"),
-        vec![ALICE_FILE.to_owned()],
-        "the commit reached beyond the target"
+        vec![
+            ALICE_FILE.to_owned(),
+            "state/safix/definitions/alice/api-token.stamps".to_owned(),
+        ],
+        "the commit reached beyond the target and its stamp"
     );
     assert_eq!(
         fixture.staged(),
@@ -574,4 +580,111 @@ fn an_aborted_run_leaves_no_file_no_scratch_and_no_value() {
         "a scratch file was left beside the target"
     );
     assert_eq!(fixture.status(), "", "the failed run left the tree dirty");
+}
+
+/// A value's stamp record lands in the same commit as the value, and a later
+/// write of a different value moves `updated` alone.
+///
+/// The record is read out of the committed line rather than through the
+/// runtime's own reader, and the two dates are compared to the clock the test
+/// itself reads, so a record written from a fixed number or from the wrong
+/// field would fail here. `created` staying put across the rotation is the
+/// claim the picker's `Created` column rests on: a rotation is a new value for
+/// an entry that has existed since its first write, not a new entry.
+#[test]
+fn a_set_stamps_the_value_in_the_same_commit_and_a_rotation_moves_updated_alone() {
+    /// Where the fixture's own `api-token` records its dates: alice's entry,
+    /// keyed by its owner under the default generator-record root.
+    const STAMP: &str = "state/safix/definitions/alice/api-token.stamps";
+
+    let fixture = Fixture::new();
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "bystander-one"]);
+
+    assert_eq!(
+        fixture.stamps_of(STAMP),
+        None,
+        "the entry carries a stamp before anything was written to it"
+    );
+
+    let before = seconds_now();
+    fixture
+        .set("alice", "api-token", "CANARY-stamped-v1")
+        .expect_success("the first set");
+    let after = seconds_now();
+
+    assert_eq!(
+        fixture.paths_in("HEAD"),
+        vec![ALICE_FILE.to_owned(), STAMP.to_owned()],
+        "the stamp rode the commit the value rode"
+    );
+    let (created, updated) = fixture
+        .stamps_of(STAMP)
+        .expect("the first set wrote a stamp");
+    assert_eq!(created, updated, "a first write dates both stamps alike");
+    assert!(
+        (before..=after).contains(&created),
+        "the stamp {created} is outside the window [{before}, {after}] the run happened in"
+    );
+    assert_eq!(
+        fixture.status(),
+        "",
+        "the stamped write left the tree dirty"
+    );
+
+    // A second later, so a moved `updated` is distinguishable from an unmoved
+    // one: the record's resolution is one second, and a rotation inside the
+    // same second would leave both readings equal whether or not the write
+    // stamped anything.
+    std::thread::sleep(Duration::from_millis(1_100));
+    let rotated = seconds_now();
+    fixture
+        .set("alice", "api-token", "CANARY-stamped-v2")
+        .expect_success("the rotation");
+
+    let (created_again, updated_again) = fixture
+        .stamps_of(STAMP)
+        .expect("the rotation kept the stamp");
+    assert_eq!(
+        created_again, created,
+        "the rotation reminted `created` rather than leaving the entry's first write where it was"
+    );
+    assert!(
+        updated_again >= rotated && updated_again > updated,
+        "`updated` did not move with the rotation: {updated} -> {updated_again}"
+    );
+    assert_eq!(
+        fixture.paths_in("HEAD"),
+        vec![ALICE_FILE.to_owned(), STAMP.to_owned()],
+        "the rotation's commit is the value and its stamp"
+    );
+
+    // Re-setting the identical value changes nothing, so it stamps nothing:
+    // `updated` dates the last change to a value rather than the last run of
+    // the command, and a stamp moved here would put a commit holding nothing
+    // but bookkeeping into the history.
+    let head = fixture.head();
+    std::thread::sleep(Duration::from_millis(1_100));
+    fixture
+        .set("alice", "api-token", "CANARY-stamped-v2")
+        .expect_success("the idempotent re-run")
+        .says("unchanged");
+    assert_eq!(fixture.head(), head, "the unchanged re-run committed");
+    assert_eq!(
+        fixture.stamps_of(STAMP),
+        Some((created, updated_again)),
+        "the unchanged re-run moved a stamp"
+    );
+    assert_eq!(
+        fixture.status(),
+        "",
+        "the unchanged re-run left the tree dirty"
+    );
+}
+
+/// The wall clock in unix seconds, as the record writes it.
+fn seconds_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock is after the epoch")
+        .as_secs()
 }

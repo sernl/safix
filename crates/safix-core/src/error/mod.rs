@@ -407,6 +407,17 @@ pub enum Error {
         cause: io::Error,
     },
 
+    /// A stamp record exists and is not the line [`crate::stamps`] writes.
+    ///
+    /// A refusal rather than an absent answer: a record that will not parse
+    /// still says a value was written before, so treating it as no record
+    /// would mint a fresh `created` over a value that plainly has one.
+    #[error("{}", prose::stamp_record_unparsable(path))]
+    StampRecordUnparsable {
+        /// The repository-relative path of the record.
+        path: String,
+    },
+
     /// The git binary could not be run.
     #[error("could not run {program}")]
     GitUnavailable {

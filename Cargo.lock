@@ -456,6 +456,7 @@ dependencies = [
  "insta",
  "miette",
  "proptest",
+ "regex-lite",
  "rustix",
  "safix-core",
  "serde_json",

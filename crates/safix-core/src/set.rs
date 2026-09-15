@@ -13,7 +13,8 @@
 //! 5. write it into the candidate through `sops`;
 //! 6. refuse the candidate whose recipients are not the declared audience;
 //! 7. rename the candidate over the target;
-//! 8. stage and commit that path alone.
+//! 8. stamp the value as changed, when it changed;
+//! 9. stage and commit those paths alone.
 //!
 //! Six comes after five and before seven for the reason
 //! [`Error::RecipientDrift`] gives: `sops set` takes an existing file's
@@ -33,7 +34,7 @@ use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 use crate::sops::document;
 use crate::workspace::Workspace;
-use crate::{git, scratch};
+use crate::{git, scratch, stamps};
 
 /// Where the value comes from.
 ///
@@ -195,13 +196,33 @@ pub fn run_committing(
     })?;
     scratch::keep_dirs();
 
+    // Whether this write changed anything, asked of git and asked before the
+    // stamp is touched. `updated` dates the last change to a value rather than
+    // the last run of this command: re-setting the identical value is the
+    // "unchanged" case `commit_written_files` already declines to commit, and
+    // a stamp moved there would put a bookkeeping-only commit in the history
+    // for a write that did not happen. Staging the one path is what makes the
+    // question answerable, and it is the same staging the commit below repeats.
+    let value_path = std::slice::from_ref(&relative);
+    workspace.git().stage(workspace.vault_root(), value_path)?;
+    let mut written = vec![relative.clone()];
+    if workspace
+        .git()
+        .has_staged_changes(workspace.vault_root(), value_path)?
+    {
+        // After the value is in place and before the commit that names both, so
+        // the stamp and the value it dates land in one commit or in none.
+        stamps::touch(workspace, placement, stamps::now())?;
+        written.push(placement.stamp_record.clone());
+    }
+
     let identity = workspace.git().author_identity(workspace.root())?;
     git::commit_written_files(
         workspace.git(),
         workspace.vault_root(),
         progress,
         subject,
-        std::slice::from_ref(&relative),
+        &written,
         Some(&identity),
     )?;
     if workspace.vault_root() != workspace.root() {

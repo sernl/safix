@@ -465,14 +465,28 @@ fn push_definition(out: &mut String, finding: &Finding) {
     }
 }
 
-/// The six facts `list` reports about one entry, in column order.
+/// The eight facts `list` reports about one entry, in column order.
 ///
 /// Named once because two tables show them: `list`'s own output and the
-/// picker's candidate rows. Two tables claiming to show the same six facts,
+/// picker's candidate rows. Two tables claiming to show the same eight facts,
 /// built by two pieces of code, drift on the first column that gains a rule —
 /// the `GENERATOR` column's description/`yes`/`-` fallback below is already
-/// such a rule.
-const LISTING_COLUMNS: [&str; 6] = ["NAME", "ORIGIN", "SHARED", "GENERATOR", "KEY", "FILE"];
+/// such a rule, and the two stamp columns are two more.
+///
+/// `FILE` is last because it is the column the picker keeps behind tab: where a
+/// value is served from answers a question about one entry rather than about a
+/// list, so hiding it is hiding the end of the row rather than a hole in the
+/// middle of one.
+const LISTING_COLUMNS: [&str; 8] = [
+    "NAME",
+    "ORIGIN",
+    "SHARED",
+    "GENERATOR",
+    "KEY",
+    "CREATED",
+    "UPDATED",
+    "FILE",
+];
 
 /// The header row `list` and the picker both align their columns against.
 #[must_use]
@@ -481,8 +495,17 @@ pub fn listing_header() -> Vec<String> {
 }
 
 /// One held name, as the row `list` aligns and the picker offers.
+///
+/// The stamps arrive rather than being read here, because the two callers reach
+/// them differently — `list` walks a whole user's entries and the picker holds
+/// one record per candidate — and because a row builder that read files would
+/// be a row builder a test could not call.
 #[must_use]
-pub fn listing_row(name: &str, placement: &safix_core::model::Placement) -> Vec<String> {
+pub fn listing_row(
+    name: &str,
+    placement: &safix_core::model::Placement,
+    stamps: Option<safix_core::stamps::Stamps>,
+) -> Vec<String> {
     vec![
         name.to_owned(),
         placement.origin.as_str().to_owned(),
@@ -497,6 +520,8 @@ pub fn listing_row(name: &str, placement: &safix_core::model::Placement) -> Vec<
             },
         ),
         placement.key.clone(),
+        crate::picker::stamp(stamps.map(|stamps| stamps.created)),
+        crate::picker::stamp(stamps.map(|stamps| stamps.updated)),
         placement.file.clone(),
     ]
 }
@@ -505,14 +530,19 @@ pub fn listing_row(name: &str, placement: &safix_core::model::Placement) -> Vec<
 ///
 /// The header is a row like any other, which is what makes the column widths
 /// account for it.
+///
+/// `stamps` is asked for each entry by name rather than read here: `list` hands
+/// it what it read out of the records and a test hands it a literal, which is
+/// what keeps the two stamp columns assertable without a repository.
 #[must_use]
 pub fn listing(
     held: &std::collections::BTreeMap<String, safix_core::model::Placement>,
+    stamps: impl Fn(&str) -> Option<safix_core::stamps::Stamps>,
 ) -> Vec<Vec<String>> {
     let mut rows = vec![listing_header()];
     rows.extend(
         held.iter()
-            .map(|(name, placement)| listing_row(name, placement)),
+            .map(|(name, placement)| listing_row(name, placement, stamps(name))),
     );
     rows
 }
