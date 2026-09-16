@@ -1,7 +1,7 @@
 # bitwarden-sync Specification
 
 ## Purpose
-TBD - created by archiving change add-bitwarden-bridge. Update Purpose after archive.
+A declared subset of safix's secrets exists, converged, in the operator's Bitwarden or Vaultwarden vault, under the folders, item names and metadata fields the declaration chooses — so a credential a browser and a fleet both read has one place to drift from and one verb that ends the drift, with the vault password crossing on one pipe and the session key on one environment variable, never an argument vector.
 
 ## Requirements
 
