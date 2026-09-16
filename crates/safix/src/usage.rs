@@ -79,7 +79,7 @@ declaration and unset SAFIX_VAULT_ROOT yourself once it finishes.
 
 /// `safix audit -h`.
 pub const AUDIT: &str = "\
-safix audit [clan|keepassxc] [<mapping>...] [--direction <value>]
+safix audit [clan|keepassxc|pass|bitwarden|1password] [<mapping>...] [--direction <value>]
 
 Compare declared mappings and change nothing. With no target it compares both
 clan and keepassxc; naming one narrows to that target's own mappings, and
@@ -111,6 +111,50 @@ keepassxc <mapping>. Entries under the declared group that no mapping
 declares are reported alongside as information \u{2014} lingering, in the same
 shape sync's own report gives it \u{2014} and never move the exit status.
 
+\u{2500}\u{2500} the pass target \u{2500}\u{2500}
+Both sides of each mapping are read and compared per its declared mode, and
+nothing is written \u{2014} no entry is created, no entry is replaced, and no
+recipient declaration is touched. Each mapping's outcome is reported as
+agreeing, diverged, diverged in named fields, or unjudgeable; a value
+divergence takes precedence over a field divergence for the same mapping, so
+a cosmetic drift is never mistaken for a secret drift. The remedy for a
+diverged mapping is safix sync pass <mapping>. A diverged field is named and
+never printed, because a notes body and a field sourced from another entry
+are themselves secrets. Entries in the store that no mapping declares are
+reported alongside as information \u{2014} lingering, in the same shape sync's own
+report gives it \u{2014} and never move the exit status.
+
+\u{2500}\u{2500} the bitwarden target \u{2500}\u{2500}
+Both sides of each mapping are read and compared, and nothing is written \u{2014}
+no item is created, no item is edited, and no folder is touched. The client
+is asked for its own state first and its local copy is refreshed once, so a
+comparison is never made against a copy that may predate another device's
+change: a locked or unauthenticated client, a declared server that is not
+the one reached, and a failed refresh each refuse exactly as they refuse
+under sync. Each mapping's outcome is reported as agreeing, diverged,
+diverged in named fields, or unjudgeable; a value divergence takes
+precedence over a field divergence for the same mapping. A diverged mapping
+under a pushing mode is given safix sync bitwarden <mapping> as its remedy;
+one declared bitwarden-to-safix is told instead that the declaration is the
+author of a field. A diverged field is named and never printed. Items under
+a declared folder that no mapping declares are reported alongside as
+information \u{2014} lingering \u{2014} and never move the exit status.
+
+\u{2500}\u{2500} the 1password target \u{2500}\u{2500}
+Both sides of each mapping are read and compared, and nothing is written \u{2014}
+no item is created, no item is edited, and no vault is touched. Each
+mapping's outcome is reported as agreeing, diverged, diverged in named
+fields, or unjudgeable; a value divergence takes precedence over a field
+divergence for the same mapping, so a cosmetic drift is never mistaken for a
+secret drift. A diverged mapping under a pushing mode is given safix sync
+1password <mapping> as its remedy; one declared 1password-to-safix is told
+instead that the declaration is the author, because for that mode converging
+toward the declaration is what the mode already means. A diverged field is
+named and never printed, because a notes body and a field sourced from
+another entry are themselves secrets. Items in a declared vault that no
+mapping declares are reported alongside as information \u{2014} lingering \u{2014} and
+never move the exit status.
+
 \u{2500}\u{2500} why this is a verb of its own and not four more rows in `check` \u{2500}\u{2500}
 `check` decrypts nothing, which is what lets one machine judge files
 belonging to people whose keys it does not have, and it needs no clan and no
@@ -130,7 +174,7 @@ reaches the report.
 
 /// `safix sync -h`.
 pub const SYNC: &str = "\
-safix sync [clan|keepassxc] [<mapping>...] [--direction <value>]
+safix sync [clan|keepassxc|pass|bitwarden|1password] [<mapping>...] [--direction <value>]
 
 Converge declared relationships. With no target it converges every mapping
 on both clan and keepassxc, each in its own declared direction or mode;
@@ -283,6 +327,230 @@ refused, or not judged, and every declared mapping appears whatever happened to
 it. A mapping whose safix side did not decrypt is reported rather than skipped,
 because a report that dropped those would be a report about who ran it. The run
 exits non-zero when any mapping conflicts, is refused, or could not be judged.
+
+\u{2500}\u{2500} the pass target: the four modes \u{2500}\u{2500}
+The mode is declared per mapping, not passed here, for the reason the keepassxc
+target's own modes are.
+
+  safix-to-pass        the store converges to safix's value. A store-side edit to
+                       a mapped entry is overwritten, and reported.
+  pass-to-safix        safix converges to the store's value, through the same
+                       path `safix set` writes through: the same empty-value
+                       refusal, the same recipient-drift refusal, the same staged
+                       write and rename, and a commit naming the mapping.
+  two-way              whichever side changed since the last agreement wins.
+                       Both changed is a conflict.
+  backup               safix's value is written where the store holds no entry,
+                       and a store value that differs is never overwritten \u{2014}
+                       the divergence is reported instead, and no field is
+                       written either.
+
+No mode deletes an entry, and `pass rm` is never run.
+
+\u{2500}\u{2500} the pass target: the record layout is safix's own \u{2500}\u{2500}
+The store fixes no metadata schema \u{2014} its own convention is that the value is
+the record's first line and further information follows it \u{2014} so safix defines
+the layout: the value's bytes, then one blank line, then one `login:`, `url:`,
+`notes:` or `tags:` line per declared field, under the spellings the store's
+ecosystem already reads. A read takes the field block to be the trailing run of
+such lines, consumes one blank line before it as the separator, and takes every
+byte above it as the value, verbatim; a body with no such run is a value and
+nothing else, so an entry safix wrote with no field is indistinguishable from
+one written by hand and `pass -c` still copies the value.
+
+One ambiguity follows and is stated rather than refused: a value whose own
+trailing lines are spelled like fields reads back as fields. safix's own writes
+never produce it, because they emit the blank separator.
+
+\u{2500}\u{2500} what sync's pass target is \u{2500}\u{2500}
+It converges a declared safix entry with one entry inside the declared store,
+per mapping and per mode \u{2014} see flake.safix.pass.mappings. The whole record
+body, the value and every field together, travels standard input; the argument
+vector carries the entry path and the child's environment carries
+PASSWORD_STORE_DIR, which is a location rather than a value. Nothing here reads
+or decrypts the store's files itself, creates a store, writes a recipient
+declaration, or removes an entry.
+
+There is no unlock step and no passphrase prompt: the store shells to gpg, and
+the unlock belongs to your own agent, which may answer from its cache, from a
+pinentry on your own terminal, or not at all. A decrypt the agent declined is
+its own refusal carrying gpg's own words, told apart from an absent entry \u{2014}
+absence is answered from the store's own listing of names, so a backup mapping
+never writes over an entry it merely could not read. Before any mapping is
+read, a declared store that is not one \u{2014} absent, or carrying no recipient
+declaration \u{2014} refuses the run, naming the location.
+
+A value carrying newlines is written and read back byte-identically, a trailing
+newline included. There is no value-shape refusal for this target, and that is a
+property of the transport rather than an omission: keepassxc's exists because
+its own command reads a password as one line.
+
+A two-way mapping's last agreement is a companion entry beside the mapped one,
+named the mapped path plus `.safix-sync-state`, written as its own second write
+strictly after the value's. Evaluation refuses a declared path carrying that
+suffix, and each mapping accounts for its own companion, so a mapping's memory
+is never reported as an entry nothing declares.
+
+Each pass-target mapping is reported as unchanged, updated, pulled, fields
+updated, fields diverged, conflict, refused, or not judged, and every declared
+mapping appears whatever happened to it. A diverged field is named and never
+printed. SAFIX_PASS points safix at the command to run.
+
+\u{2500}\u{2500} the bitwarden target: the four modes \u{2500}\u{2500}
+The mode is declared per mapping, not passed here, for the reason the keepassxc
+target's own modes are.
+
+  safix-to-bitwarden   the vault converges to safix's value. A vault-side edit to
+                       a mapped item is overwritten, and reported.
+  bitwarden-to-safix   safix converges to the vault's value, through the same
+                       path `safix set` writes through: the same empty-value
+                       refusal, the same recipient-drift refusal, the same staged
+                       write and rename, and a commit naming the mapping.
+  two-way              whichever side changed since the last agreement wins.
+                       Both changed is a conflict.
+  backup               safix's value is written where the vault holds no such
+                       item, and a vault value that differs is never overwritten
+                       \u{2014} the divergence is reported instead.
+
+No mode deletes an item, a folder or a field, under any circumstances.
+
+\u{2500}\u{2500} the bitwarden target: the client is unlocked, never logged in \u{2500}\u{2500}
+Before any mapping's side is read, the client is asked for its own state. A
+client that is not logged in refuses, naming logging in as your own act: safix
+unlocks a vault and never authenticates one. A locked client with a terminal is
+unlocked by one master-password prompt, and a locked client with none refuses
+rather than prompting into the void. The master password travels the client's
+standard input alone \u{2014} never an argument, never the client's own
+password-from-environment option, which is not used. A run that unlocked the
+client locks it again when it finishes; a run that found it unlocked leaves the
+session as it found it.
+
+The session key the unlock returns travels in the environment of the children
+that need it, and in no argument vector, no file safix writes and no output. That
+is a deliberate narrowing of the rule every other target keeps unconditionally,
+and the reason is that this client offers no third channel: an argument vector is
+readable by every process on the machine, an environment by the same user alone,
+so the key goes in the lesser exposure rather than in none. No mapped value and
+no master password is in either, on any invocation.
+
+flake.safix.bitwarden.server is optional: the client already holds that
+configuration, so an undeclared server is a working configuration rather than a
+missing declaration. A declared server that is not the one the unlocked client
+reports reaching refuses before any side is read, naming both \u{2014} a write against
+the wrong vault is not correctable by a later run.
+
+\u{2500}\u{2500} the bitwarden target: one refresh, and one item write \u{2500}\u{2500}
+The client's reads answer from a local copy, so exactly one refresh runs after
+the unlock and before the first read. A failed refresh refuses every mapping on
+this target: a stale copy would report agreement that is not there, and a backup
+mapping would write into an item that already holds a value.
+
+An item is addressed by an optional folder and its name, never by the vault's own
+item identifier, and an address that matches more than one item is refused naming
+the count \u{2014} nothing picks between them. An address that matches none is created
+by a pushing mode and refused by bitwarden-to-safix.
+
+The value, the declared username, url and notes, and a two-way mapping's recorded
+state all cross as one base64 JSON payload on standard input; no payload is ever
+a positional argument. A write onto an existing item begins from that item's own
+current content, because this client replaces a whole item \u{2014} so a totp, a second
+website or your own custom field survives a value repair. Tags are refused at
+evaluation rather than approximated: this vault has no tag concept, only folders
+and collections, and both are placements rather than labels.
+
+A value carrying newlines is written and read back byte-identically. There is no
+value-shape refusal for this target, and that is a property of the transport
+rather than an omission.
+
+A two-way mapping's last agreement is a hidden custom field of the mapped item
+itself, named safix-sync-state, written in the same item write as the value. So
+this target reserves no item name: the companion object keepassxc needs exists
+only because its own command cannot write a custom field. An unreadable or
+unrecognised recorded state is treated as absent, which takes the mapping to
+bootstrap semantics rather than to a refusal.
+
+\u{2500}\u{2500} what sync's bitwarden target is \u{2500}\u{2500}
+It converges a declared safix entry with one item in the operator's vault, per
+mapping and per mode \u{2014} see flake.safix.bitwarden.mappings. Each mapping is
+reported as unchanged, updated, pulled, fields updated, fields diverged,
+conflict, refused, or not judged, and every declared mapping appears whatever
+happened to it. A diverged field is named and never printed. Items under a
+declared folder that no mapping declares are reported as information and never
+removed.
+
+No check of this repository runs the real client, and that absence is written
+down where this target's checks live: the client cannot authenticate without a
+network and a nix build has none. SAFIX_BW points safix at the command to run.
+
+\u{2500}\u{2500} the 1password target: the four modes \u{2500}\u{2500}
+The mode is declared per mapping, not passed here, for the reason the keepassxc
+target's own modes are.
+
+  safix-to-1password   the item converges to safix's value. An item-side edit to
+                       a mapped value is overwritten, and reported.
+  1password-to-safix   safix converges to the item's value, through the same
+                       path `safix set` writes through: the same empty-value
+                       refusal, the same recipient-drift refusal, the same staged
+                       write and rename, and a commit naming the mapping.
+  two-way              whichever side changed since the last agreement wins.
+                       Both changed is a conflict.
+  backup               safix's value is written where the item does not exist or
+                       holds none, and an item value that differs is never
+                       overwritten \u{2014} the divergence is reported instead.
+
+No mode deletes an item, a field or a vault, under any circumstances.
+
+\u{2500}\u{2500} the 1password target: one channel, and all four fields \u{2500}\u{2500}
+The value and all four declared fields \u{2014} the username, the url, the notes and
+the tags \u{2014} travel standard input, as one JSON item payload per command. No
+field=value assignment statement is ever spelled: 1Password's own documentation
+states such a statement is recorded in shell history and can be visible to other
+processes. So no declared field of this target is refused for want of a channel,
+and a field whose source is another entry of the mapping's own person is
+admissible on every one of the four. A declared url becomes the item's own
+autofill website rather than a similarly named custom field, because the custom
+field is not what a browser fills from.
+
+A value carrying newlines is written and read back byte-identically. There is no
+value-shape refusal for this target, and that is a property of the transport
+rather than an omission: the refusal keepassxc has exists because its own
+command reads a password as one line.
+
+\u{2500}\u{2500} the 1password target: the session is yours \u{2500}\u{2500}
+Before any mapping's side is read, one invocation establishes that the service
+answers and the session is authenticated; a signed-out run refuses there, naming
+the declared account when one is declared and carrying the command's own words,
+with safix's own side of no mapping decrypted. safix signs nothing in, mints,
+holds, prints and stores no session token, and never puts one in an argument
+vector \u{2014} what the child process inherits is whatever your own environment
+carries, a service-account token or a session your own `op signin` established.
+flake.safix.onepassword.account is optional: `op` resolves its own default
+account and an automation token names one implicitly, so an undeclared account is
+a working configuration rather than a missing declaration.
+
+A two-way mapping's last agreement is a concealed custom field of the mapped
+item itself, named safix-sync-state. So this target reserves no item name and has
+no refusal keeping one out of your reach: the companion object keepassxc needs
+exists only because its command cannot write a custom field. An unreadable or
+unrecognised recorded state is treated as absent, which converts the mapping to
+bootstrap semantics rather than to a refusal.
+
+A write onto an existing item begins from that item's own current content and
+replaces only the value, the declared fields and the recorded state; safix never
+constructs an item from a template. 1Password's documentation carries an explicit
+danger that a template-assembled edit loses the passkeys on an item, and safix
+cannot reach that outcome \u{2014} so no refusal about passkey-bearing items exists,
+and an ordinary login item carrying one stays mappable.
+
+A failure against the service refuses its own mapping and does not end the run:
+every declared mapping still appears in the report, and the run exits non-zero.
+Items in a declared vault that no mapping declares are reported as information
+and never removed.
+
+No check of this repository runs the real command, and that absence is permanent:
+the package is unfree, there is no self-hostable server to point a sandboxed node
+at, and every authentication path needs the network. SAFIX_OP points safix at the
+command to run.
 ";
 
 /// `safix get -h`.
@@ -901,8 +1169,9 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
                                                     mint values from generators
   safix check    [<user>]                           report drift, change nothing
   safix fix      [--yes]                            converge policy and ciphertext
-  safix audit    [clan|keepassxc] [<mapping>...]    report bridge or mirror drift
-  safix sync     [clan|keepassxc] [<mapping>...]    converge declared relationships
+  safix audit    [<target>] [<mapping>...]          report bridge or mirror drift
+  safix sync     [<target>] [<mapping>...]          converge declared relationships
+                 <target> is clan, keepassxc, pass, bitwarden or 1password
   safix keygen   [--for-someone-else] [<user>] | --show
                                                     an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
@@ -986,6 +1255,47 @@ values between two tools that both hold them for programs; this target ends
 the drift between a value a program reads and the same value a person reads.
 Its report is the same `audit`/`sync` verbs' own, over the second target,
 rather than more rows in `check`.
+
+\u{2500}\u{2500} what sync's bitwarden target is \u{2500}\u{2500}
+`sync bitwarden` converges declared safix entries with items in the vault your
+people read on a phone. Each mapping declares its own folder, item name, mode
+and fields, so one run can push some items and pull others; no mode deletes an
+item, a folder or a field.
+
+The client is unlocked and never logged in: a client that is not logged in
+refuses, naming logging in as your own act. The master password travels standard
+input alone, and the session key the unlock returns travels the environment of
+the children that need it and nothing else \u{2014} a deliberate narrowing, because
+this client offers no third channel and an argument vector is the worse of the
+two exposures. Exactly one refresh precedes the first read, and a failed one
+refuses every mapping rather than comparing against a copy that may predate
+another device's change.
+
+An item is addressed by folder and name, never by the vault's own identifier, and
+an address matching two items is refused rather than resolved. The two-way memory
+is a hidden custom field of the mapped item itself, written in the same item
+write as the value, so nothing is reserved and any item name is yours to declare.
+Tags are refused at evaluation: this vault has no tag concept.
+
+No check of this repository drives a real `bw`. The client cannot authenticate
+without a network and a nix build has none, and that absence is recorded where
+this target's checks live rather than left silent.
+
+\u{2500}\u{2500} what sync's 1password target is \u{2500}\u{2500}
+`sync 1password` converges declared safix entries with items in your 1Password
+vaults \u{2014} the other place a person-read credential lives. Each mapping declares
+its own vault, item, mode and fields, so one run can push some items and pull
+others; no mode deletes an item, a field or a vault.
+
+The value and all four fields travel standard input as one item payload, never
+an argument vector. The two-way memory is a concealed field of the mapped item
+itself, so nothing is reserved and any item name is yours to declare. The
+session is the operator's: safix signs nothing in. A failure against the service
+refuses its own mapping and does not end the run.
+
+No check of this repository drives a real `op`. The package is unfree, there is
+no self-hostable server, and every authentication path needs the network; each
+of the three alone is sufficient, and none of them expires.
 
 \u{2500}\u{2500} verbs retired, reserved, or narrower here than in clan \u{2500}\u{2500}
   export   retired permanently. clan's own vars export writes a machine's whole

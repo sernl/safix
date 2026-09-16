@@ -769,6 +769,362 @@ pub(super) fn value_spans_lines(entry: &str) -> String {
     )
 }
 
+/// A declared field the target cannot carry at all.
+pub(super) fn field_unsupported(target: &str, field: &str) -> String {
+    format!(
+        "the mapping declares the field '{field}', and {target} cannot carry it. The\n\
+        store's own command has no way to write that field, so nothing was written:\n\
+        accepting the declaration would mean converging a mapping while doing less\n\
+        than it says.\n\
+        \n\
+        Remove the field from the mapping, or move the mapping to a target whose\n\
+        own command can write it."
+    )
+}
+
+/// A declared field read out of another entry, on a field the target carries in
+/// an argument vector.
+pub(super) fn field_source_in_argv(target: &str, field: &str, entry: &str) -> String {
+    format!(
+        "the mapping sources the field '{field}' from the entry '{entry}', and {target}\n\
+        carries that field in an argument vector. The entry's value is a secret, and a\n\
+        secret value travels standard input or a pipe — never an argument vector, where\n\
+        every process on the host can read it. Nothing was written.\n\
+        \n\
+        Either write the field as a literal in the declaration, which is evaluated into\n\
+        the world-readable store and is therefore not a secret, or declare it on a\n\
+        target whose channel for that field is a pipe."
+    )
+}
+
+/// The store's own command could not be run at all.
+pub(super) fn pass_unavailable(program: &str) -> String {
+    format!(
+        "could not run {program}, so no pass mapping was judged and nothing was\n\
+        written on either side.\n\
+        \n\
+        safix reaches the store only through the store's own command; it never\n\
+        reads or decrypts the files itself, because how a store encrypts an entry\n\
+        is the whole of what the store is. Install it, or point safix at the one\n\
+        you have:\n\
+        \n\
+        \x20   SAFIX_PASS=/path/to/pass safix sync pass"
+    )
+}
+
+/// The operator's own agent declined to decrypt one entry.
+pub(super) fn pass_locked(entry: &str, output: &str) -> String {
+    format!(
+        "the entry '{entry}' did not decrypt, so this mapping was not judged and\n\
+        nothing was written for it.\n\
+        \n\
+        There is no safix option for this and there should not be: `pass` shells to\n\
+        gpg, and the unlock belongs to your own agent — it may answer from its\n\
+        cache, from a pinentry on a terminal this run does not have, or not at all.\n\
+        safix does not interpose on that, because interposing would defeat a\n\
+        hardware-backed key and would mean holding a passphrase safix has no use\n\
+        for.\n\
+        \n\
+        This is not the absent-entry refusal: absence is answered from the store's\n\
+        own listing of names, so a backup mapping never writes over an entry it\n\
+        merely could not read.\n\
+        \n\
+        gpg said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// The store's own command refused over one entry.
+pub(super) fn pass_command_failed(entry: &str, arguments: &str, output: &str) -> String {
+    format!(
+        "the store's own command refused over the entry '{entry}'.\n\
+        \n\
+        It was run as:\n\
+        \n\
+        \x20   pass {arguments}\n\
+        \n\
+        No value and no field is in that line: the whole record body travels\n\
+        standard input, and what the argument vector carries is the entry path.\n\
+        The store's location is in the child's environment, which is a location\n\
+        rather than a value. The command said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// The declared store root is not a store.
+pub(super) fn no_pass_store(store: &str, mappings: usize) -> String {
+    format!(
+        "{store} is not a pass store, so none of the {mappings} mapping(s) declared\n\
+        against it was read and nothing was written.\n\
+        \n\
+        The refusal is here rather than after the first mapping deliberately: a run\n\
+        that treated an absent store as an empty one would report every mapping as\n\
+        one-sided and, in backup mode, write.\n\
+        \n\
+        A store is a directory carrying a .gpg-id, which is the store's own\n\
+        declaration of who can read it. Either the location is wrong:\n\
+        \n\
+        \x20   flake.safix.pass.store = \"/home/<you>/.password-store\";\n\
+        \n\
+        or there is no store there yet, and creating one is yours rather than\n\
+        safix's — writing a .gpg-id would be safix deciding who can read your\n\
+        secrets:\n\
+        \n\
+        \x20   pass init <your-gpg-id>"
+    )
+}
+
+/// A mapping whose store side holds no entry to read.
+pub(super) fn pass_entry_absent(mapping: &str, entry: &str, mode: &str) -> String {
+    format!(
+        "the mapping '{mapping}' is {mode}, so the store is where its value comes\n\
+        from, and the store holds no entry at '{entry}'. Nothing was written.\n\
+        \n\
+        safix does not author that entry, and this is the one place the asymmetry\n\
+        shows: a value the operator puts in their own store is theirs to create,\n\
+        where a value safix mints is safix's. Create it, and the next run converges\n\
+        safix onto it.\n\
+        \n\
+        If safix is the producer after all, the mapping is declared the wrong way\n\
+        round: mode = \"safix-to-pass\" makes the store follow safix."
+    )
+}
+
+/// The vault's own client could not be run at all.
+pub(super) fn bitwarden_unavailable(program: &str) -> String {
+    format!(
+        "could not run {program}, so no bitwarden mapping was judged and nothing was\n\
+        written on either side.\n\
+        \n\
+        safix drives the vault through the client an operator already logged in\n\
+        with; it speaks no vault protocol of its own. Install the client, or point\n\
+        safix at the one you have:\n\
+        \n\
+        \x20   SAFIX_BW=/path/to/bw safix sync bitwarden"
+    )
+}
+
+/// The client is locked, or not logged in at all.
+pub(super) fn bitwarden_locked(state: &str) -> String {
+    if state == "unauthenticated" {
+        return String::from(
+            "the vault's client is not logged in, so no side of any mapping was read and\n\
+            nothing was written.\n\
+            \n\
+            safix unlocks a vault; it never logs one in. Logging in registers a device\n\
+            against an account and is the operator's own act, exactly as creating the\n\
+            vault is — a tool that did it for you would be authenticating as you\n\
+            without being asked.\n\
+            \n\
+            Log in yourself, then re-run:\n\
+            \n\
+            \x20   bw login\n\
+            \x20   safix sync bitwarden",
+        );
+    }
+    String::from(
+        "the vault's client is locked and there is no terminal to ask its master\n\
+        password on. Nothing was read.\n\
+        \n\
+        The refusal is here rather than after the first mapping deliberately: a run\n\
+        that prompted into the void would have decrypted safix's side of every\n\
+        mapping first, and a run that treated a locked vault as an empty one would\n\
+        report every mapping as one-sided and, in backup mode, write.\n\
+        \n\
+        Run this where you can type, or unlock the client first and let safix use\n\
+        the session it finds:\n\
+        \n\
+        \x20   bw unlock",
+    )
+}
+
+/// The client refused one invocation.
+pub(super) fn bitwarden_command_failed(address: &str, arguments: &str, output: &str) -> String {
+    format!(
+        "the vault's own client refused over the item '{address}'.\n\
+        \n\
+        It was run as:\n\
+        \n\
+        \x20   bw {arguments}\n\
+        \n\
+        No value is in that line: the master password and every item payload travel\n\
+        standard input. The client said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// The declared server is not the one the unlocked client reached.
+pub(super) fn bitwarden_server_mismatch(declared: &str, reached: &str) -> String {
+    format!(
+        "flake.safix.bitwarden.server declares {declared} and the unlocked client\n\
+        reports reaching {reached}. Nothing was read and nothing was written.\n\
+        \n\
+        The refusal arrives before any side is read because a write against the\n\
+        wrong vault is not correctable by a later run: the secret is in somebody\n\
+        else's store the moment it lands, and removing it there does not unsend it.\n\
+        \n\
+        safix never repoints the client — which server it reaches is the operator's\n\
+        own configuration. Either point the client at the declared server, or\n\
+        declare the one it reaches:\n\
+        \n\
+        \x20   bw config server {declared}"
+    )
+}
+
+/// The client's refresh of its own local copy failed.
+pub(super) fn bitwarden_stale(output: &str) -> String {
+    format!(
+        "the vault's client could not refresh its local copy, so every bitwarden\n\
+        mapping was refused: none was read, judged or written.\n\
+        \n\
+        The client's read commands answer from that local copy, and it may predate\n\
+        another device's change. Comparing against it would report agreement that is\n\
+        not there, and a backup mapping would write a value into an item that\n\
+        already holds one — which is the exact outcome backup's non-overwriting rule\n\
+        exists to prevent.\n\
+        \n\
+        The client said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// One declared address matching more than one item.
+pub(super) fn bitwarden_item_ambiguous(mapping: &str, address: &str, matched: usize) -> String {
+    format!(
+        "the mapping '{mapping}' addresses '{address}', and {matched} items in the vault\n\
+        answer to it. Nothing was read and nothing was written for it.\n\
+        \n\
+        Nothing picks between them — not recency, not an identifier's order. A vault\n\
+        legitimately holds two items with one name, and a mirror that chose would\n\
+        converge a person's secret with whichever one happened to sort first.\n\
+        \n\
+        Rename one of the items, or move it to another folder, so that the declared\n\
+        address names exactly one."
+    )
+}
+
+/// A mapping whose vault side holds no item to read.
+pub(super) fn bitwarden_item_absent(mapping: &str, address: &str, mode: &str) -> String {
+    format!(
+        "the mapping '{mapping}' is {mode}, so the vault is where its value comes from,\n\
+        and the vault holds no item at '{address}'. Nothing was written.\n\
+        \n\
+        safix does not author that item, and this is the one place the asymmetry\n\
+        shows: a value the operator types into their own vault is theirs to create,\n\
+        where a value safix mints is safix's. Create it, and the next run converges\n\
+        safix onto it.\n\
+        \n\
+        If safix is the producer after all, the mapping is declared the wrong way\n\
+        round: mode = \"safix-to-bitwarden\" makes the vault follow safix."
+    )
+}
+
+/// The 1Password command could not be run at all.
+pub(super) fn onepassword_unavailable(program: &str) -> String {
+    format!(
+        "could not run {program}, so no 1password mapping was judged and nothing was\n\
+        written on either side.\n\
+        \n\
+        safix reaches the service only through its own command, under whatever\n\
+        session the operator already established; it speaks no 1Password protocol\n\
+        and signs nothing in. No check of this repository runs the real command\n\
+        either — the package is unfree, there is no self-hostable server, and every\n\
+        authentication path needs the network. Install it, or point safix at the one\n\
+        you have:\n\
+        \n\
+        \x20   SAFIX_OP=/path/to/op safix sync 1password"
+    )
+}
+
+/// The session preflight did not answer.
+pub(super) fn onepassword_signed_out(account: Option<&str>, output: &str) -> String {
+    let named = match account {
+        Some(account) => format!("the declared account '{account}'"),
+        None => String::from("the account the command resolves for itself"),
+    };
+    format!(
+        "the 1Password command would not answer for {named}, so no side of any mapping\n\
+        was read and nothing was written.\n\
+        \n\
+        The session is yours rather than safix's: safix never signs in, mints, holds\n\
+        or prints a session token, and it never puts one in an argument vector. What\n\
+        the child process inherits is whatever your own environment carries — a\n\
+        service-account token in OP_SERVICE_ACCOUNT_TOKEN, or a session your own\n\
+        `op signin` established in this shell.\n\
+        \n\
+        This refusal precedes the first read, which is why safix's own side of no\n\
+        mapping has been decrypted.\n\
+        \n\
+        The command said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// The 1Password command refused over one item.
+pub(super) fn onepassword_command_failed(item: &str, arguments: &str, output: &str) -> String {
+    format!(
+        "the 1Password command refused over the item '{item}'. That mapping is refused\n\
+        and the rest of the run went on, so the report is complete over the\n\
+        declarations.\n\
+        \n\
+        It was run as:\n\
+        \n\
+        \x20   op {arguments}\n\
+        \n\
+        No value and no field is in that line, by construction: the whole item\n\
+        travels standard input as one JSON object, and safix never spells a\n\
+        field=value assignment — the service's own documentation says such a\n\
+        statement is recorded in shell history and can be visible to other\n\
+        processes. The command said:\n\
+        \n\
+        {output}"
+    )
+}
+
+/// A mapping whose 1Password side holds no item to read.
+pub(super) fn onepassword_item_absent(
+    mapping: &str,
+    vault: &str,
+    item: &str,
+    mode: &str,
+) -> String {
+    format!(
+        "the mapping '{mapping}' is {mode}, so the item is where its value comes from,\n\
+        and the vault '{vault}' holds no item '{item}'. Nothing was written.\n\
+        \n\
+        safix does not author that item, and this is the one place the asymmetry\n\
+        shows: a value the operator keeps in their own vault is theirs to create,\n\
+        where a value safix mints is safix's. Create it, and the next run converges\n\
+        safix onto it.\n\
+        \n\
+        If safix is the producer after all, the mapping is declared the wrong way\n\
+        round: mode = \"safix-to-1password\" makes the item follow safix."
+    )
+}
+
+/// The declared vault is not one this session can see.
+pub(super) fn onepassword_vault_absent(mapping: &str, vault: &str, output: &str) -> String {
+    format!(
+        "the mapping '{mapping}' names the vault '{vault}', and this session cannot see\n\
+        a vault by that name. Nothing was read and nothing was written for it.\n\
+        \n\
+        This is not the absent-item refusal and its remedy is not the same one: an\n\
+        item that is not there is written by a pushing mode, where a vault that is\n\
+        not reachable is a permission. A service account reaches exactly the vaults\n\
+        it was granted and cannot reach a built-in Private, Personal or Employee\n\
+        vault at all, so grant it that vault or name one it already has.\n\
+        \n\
+        The command said:\n\
+        \n\
+        {output}"
+    )
+}
+
 /// A person whose audience covers no file the proof could use.
 pub(super) fn no_file_to_prove_with(user: &str) -> String {
     format!(

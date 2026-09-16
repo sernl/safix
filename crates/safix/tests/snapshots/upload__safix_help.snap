@@ -13,8 +13,9 @@ safix — the whole lifecycle of one secret, by name and never by file.
                                                     mint values from generators
   safix check    [<user>]                           report drift, change nothing
   safix fix      [--yes]                            converge policy and ciphertext
-  safix audit    [clan|keepassxc] [<mapping>...]    report bridge or mirror drift
-  safix sync     [clan|keepassxc] [<mapping>...]    converge declared relationships
+  safix audit    [<target>] [<mapping>...]          report bridge or mirror drift
+  safix sync     [<target>] [<mapping>...]          converge declared relationships
+                 <target> is clan, keepassxc, pass, bitwarden or 1password
   safix keygen   [--for-someone-else] [<user>] | --show
                                                     an age identity for a person
   safix adduser  <name> <age-recipient> [...]       declare a person who holds none
@@ -98,6 +99,47 @@ values between two tools that both hold them for programs; this target ends
 the drift between a value a program reads and the same value a person reads.
 Its report is the same `audit`/`sync` verbs' own, over the second target,
 rather than more rows in `check`.
+
+── what sync's bitwarden target is ──
+`sync bitwarden` converges declared safix entries with items in the vault your
+people read on a phone. Each mapping declares its own folder, item name, mode
+and fields, so one run can push some items and pull others; no mode deletes an
+item, a folder or a field.
+
+The client is unlocked and never logged in: a client that is not logged in
+refuses, naming logging in as your own act. The master password travels standard
+input alone, and the session key the unlock returns travels the environment of
+the children that need it and nothing else — a deliberate narrowing, because
+this client offers no third channel and an argument vector is the worse of the
+two exposures. Exactly one refresh precedes the first read, and a failed one
+refuses every mapping rather than comparing against a copy that may predate
+another device's change.
+
+An item is addressed by folder and name, never by the vault's own identifier, and
+an address matching two items is refused rather than resolved. The two-way memory
+is a hidden custom field of the mapped item itself, written in the same item
+write as the value, so nothing is reserved and any item name is yours to declare.
+Tags are refused at evaluation: this vault has no tag concept.
+
+No check of this repository drives a real `bw`. The client cannot authenticate
+without a network and a nix build has none, and that absence is recorded where
+this target's checks live rather than left silent.
+
+── what sync's 1password target is ──
+`sync 1password` converges declared safix entries with items in your 1Password
+vaults — the other place a person-read credential lives. Each mapping declares
+its own vault, item, mode and fields, so one run can push some items and pull
+others; no mode deletes an item, a field or a vault.
+
+The value and all four fields travel standard input as one item payload, never
+an argument vector. The two-way memory is a concealed field of the mapped item
+itself, so nothing is reserved and any item name is yours to declare. The
+session is the operator's: safix signs nothing in. A failure against the service
+refuses its own mapping and does not end the run.
+
+No check of this repository drives a real `op`. The package is unfree, there is
+no self-hostable server, and every authentication path needs the network; each
+of the three alone is sufficient, and none of them expires.
 
 ── verbs retired, reserved, or narrower here than in clan ──
   export   retired permanently. clan's own vars export writes a machine's whole

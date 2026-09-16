@@ -19,8 +19,8 @@ use std::sync::OnceLock;
 use crate::error::{Error, Result};
 use crate::git::Git;
 use crate::model::{
-    Audiences, Bridge, Delegation, GeneratorPlan, GovernedFiles, Keepassxc, Placement, Placements,
-    Recipients, Subjects,
+    Audiences, Bitwarden, Bridge, Delegation, GeneratorPlan, GovernedFiles, Keepassxc, OnePassword,
+    Pass, Placement, Placements, Recipients, Subjects,
 };
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
@@ -41,6 +41,9 @@ pub struct Workspace {
     generator_plan: OnceLock<GeneratorPlan>,
     bridge: OnceLock<Bridge>,
     keepassxc: OnceLock<Keepassxc>,
+    pass: OnceLock<Pass>,
+    bitwarden: OnceLock<Bitwarden>,
+    onepassword: OnceLock<OnePassword>,
     subjects: OnceLock<Subjects>,
     vault_creation_rules_text: OnceLock<Option<String>>,
 }
@@ -102,6 +105,9 @@ impl Workspace {
             generator_plan: OnceLock::new(),
             bridge: OnceLock::new(),
             keepassxc: OnceLock::new(),
+            pass: OnceLock::new(),
+            bitwarden: OnceLock::new(),
+            onepassword: OnceLock::new(),
             subjects: OnceLock::new(),
             vault_creation_rules_text: OnceLock::new(),
         }
@@ -236,6 +242,42 @@ impl Workspace {
     pub fn keepassxc(&self) -> Result<&Keepassxc> {
         cached(&self.keepassxc, || {
             self.nix.eval_json(&self.root, Attribute::Keepassxc)
+        })
+    }
+
+    /// The `pass` store this consumer mirrors into, and every mapping declared
+    /// for it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn pass(&self) -> Result<&Pass> {
+        cached(&self.pass, || {
+            self.nix.eval_json(&self.root, Attribute::Pass)
+        })
+    }
+
+    /// The vault this consumer mirrors into, and every mapping declared for
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn bitwarden(&self) -> Result<&Bitwarden> {
+        cached(&self.bitwarden, || {
+            self.nix.eval_json(&self.root, Attribute::Bitwarden)
+        })
+    }
+
+    /// The 1Password mirror this consumer declares, and every mapping declared
+    /// for it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn onepassword(&self) -> Result<&OnePassword> {
+        cached(&self.onepassword, || {
+            self.nix.eval_json(&self.root, Attribute::OnePassword)
         })
     }
 

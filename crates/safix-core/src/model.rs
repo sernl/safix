@@ -897,16 +897,91 @@ impl std::fmt::Display for Mode {
     }
 }
 
-/// The database half of a mapping: where the entry sits, and what to call its
-/// user.
+/// One field's declared value, and where it came from.
+///
+/// A [`FieldValue::Literal`] was written in a declaration, which is evaluated
+/// into a world-readable nix store, so it is not a secret and may travel any
+/// channel a target offers. A [`FieldValue::Entry`] names another entry of the
+/// mapping's own person, is read at run time rather than at evaluation, and is
+/// therefore a secret value — which is what decides the channels it may
+/// travel.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum FieldValue {
+    /// A value written in the declaration itself.
+    Literal(String),
+    /// A value read out of another entry the same person holds.
+    Entry {
+        /// The entry's name, as that person holds it.
+        entry: String,
+    },
+}
+
+/// What a mapping's far side carries beside its value.
+///
+/// The other half of `modules/flake/safix/fields.nix`'s `fields` submodule,
+/// coupled to it the way this module's own header describes: a field added
+/// there is a schema change, and this struct denying unknown fields is what
+/// makes a half-migrated declaration an evaluation failure rather than a run
+/// that silently wrote less than it said.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fields {
+    /// The username to set, or none to leave the field alone.
+    pub username: Option<FieldValue>,
+    /// The address the credential is used at, or none.
+    pub url: Option<FieldValue>,
+    /// The entry's note, or none.
+    pub notes: Option<FieldValue>,
+    /// The tags to set, empty to leave them alone.
+    #[serde(default)]
+    pub tags: Vec<FieldValue>,
+}
+
+impl Fields {
+    /// Whether the mapping says anything at all about a field.
+    #[must_use]
+    pub fn declares(&self) -> bool {
+        self.username.is_some()
+            || self.url.is_some()
+            || self.notes.is_some()
+            || !self.tags.is_empty()
+    }
+
+    /// The declared fields, paired with the name every report and every diff
+    /// names them by, in `fields.nix`'s own `fieldNames` order.
+    ///
+    /// `tags` yields one pair per element, because a tag list is written as a
+    /// list and a refusal about it names the field rather than the element.
+    #[must_use]
+    pub fn named(&self) -> Vec<(&'static str, &FieldValue)> {
+        let mut named = Vec::new();
+        if let Some(value) = self.username.as_ref() {
+            named.push(("username", value));
+        }
+        if let Some(value) = self.url.as_ref() {
+            named.push(("url", value));
+        }
+        if let Some(value) = self.notes.as_ref() {
+            named.push(("notes", value));
+        }
+        for value in &self.tags {
+            named.push(("tags", value));
+        }
+        named
+    }
+}
+
+/// The database half of a mapping: where the entry sits, and what it carries
+/// beside the value.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KdbxSide {
     /// The entry's path under the declared group, as the store's own command
     /// line spells one.
     pub path: String,
-    /// The username to set on the entry, or none to leave the field alone.
-    pub username: Option<String>,
+    /// What the entry carries beside its value.
+    pub fields: Fields,
 }
 
 /// One declared relationship between a safix entry and a database entry.
@@ -982,6 +1057,420 @@ impl Keepassxc {
     #[must_use]
     pub fn entry_of(&self, mapping: &SyncMapping) -> String {
         format!("{}/{}", self.group, mapping.kdbx.path)
+    }
+}
+
+/// How one mapping between a safix entry and a `pass` entry converges.
+///
+/// The same four modes [`Mode`] carries, spelled with this target's own word:
+/// a declaration is read by someone with no tool in hand to be relative to, so
+/// the endpoints are named rather than a direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum PassMode {
+    /// The store converges to safix's value. `sync` overwrites a store-side
+    /// edit and reports that it did.
+    #[serde(rename = "safix-to-pass")]
+    SafixToPass,
+    /// safix converges to the store's value, through the write path a hand-set
+    /// value takes.
+    #[serde(rename = "pass-to-safix")]
+    PassToSafix,
+    /// Whichever side changed since the last agreement wins; both changed is a
+    /// conflict that writes nothing.
+    #[serde(rename = "two-way")]
+    TwoWay,
+    /// safix's value is written where the store holds no entry, and a differing
+    /// store value is reported rather than overwritten.
+    #[serde(rename = "backup")]
+    Backup,
+}
+
+impl PassMode {
+    /// The mode as it is declared and as every report of it names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SafixToPass => "safix-to-pass",
+            Self::PassToSafix => "pass-to-safix",
+            Self::TwoWay => "two-way",
+            Self::Backup => "backup",
+        }
+    }
+
+    /// Whether this mode can write safix's side, which is what makes a
+    /// generator on that side a second producer.
+    ///
+    /// The same predicate `modules/flake/safix/pass.nix` refuses on, here as
+    /// well for the reason [`Mode::pulls`] is: evaluation refuses the
+    /// declaration, and the runtime decides which half of a converging run may
+    /// write.
+    #[must_use]
+    pub const fn pulls(self) -> bool {
+        matches!(self, Self::PassToSafix | Self::TwoWay)
+    }
+
+    /// Whether this mode can write the store's side.
+    #[must_use]
+    pub const fn pushes(self) -> bool {
+        matches!(self, Self::SafixToPass | Self::TwoWay | Self::Backup)
+    }
+}
+
+impl std::fmt::Display for PassMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The store half of a mapping: which entry, and what the record carries
+/// beside the value.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PassSide {
+    /// The entry path inside the declared store, as `pass` itself spells one:
+    /// no leading slash and no `.gpg` suffix.
+    pub path: String,
+    /// What the record carries beside its value. All four are carried, because
+    /// the whole body crosses on standard input.
+    pub fields: Fields,
+}
+
+/// One declared relationship between a safix entry and a `pass` entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PassMapping {
+    /// The attribute name the mapping was declared under, for the reason
+    /// [`Mapping::id`] carries one.
+    pub id: String,
+    /// How it converges.
+    pub mode: PassMode,
+    /// The safix endpoint, which evaluation did verify.
+    pub safix: SafixSide,
+    /// The store endpoint. Nothing at evaluation verified any of it.
+    pub pass: PassSide,
+}
+
+/// The declared `pass` store and every mapping into it.
+///
+/// No group, where [`Keepassxc`] has one: a `pass` path is already absolute
+/// within the store.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pass {
+    /// The store root, as the declaration names it — a leading `~` is expanded
+    /// by the runtime, because evaluation has no home to expand against.
+    pub store: String,
+    /// Every mapping, in the order the attribute names sort.
+    pub mappings: Vec<PassMapping>,
+}
+
+impl Pass {
+    /// One mapping by its declared name.
+    #[must_use]
+    pub fn named(&self, id: &str) -> Option<&PassMapping> {
+        self.mappings.iter().find(|mapping| mapping.id == id)
+    }
+
+    /// Every declared mapping's name, for a refusal that has to list them.
+    #[must_use]
+    pub fn declared(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect()
+    }
+
+    /// The entry path this mapping names, unchanged.
+    ///
+    /// No group prefix, where [`Keepassxc::entry_of`] has one: a `pass` path is
+    /// absolute within the store and there is no group option for it to be
+    /// relative to. The function exists anyway, so that the report, the
+    /// refusals and the reads all name the entry through one place — a
+    /// difference between them would be a difference with nothing behind it.
+    #[must_use]
+    pub fn entry_of(&self, mapping: &PassMapping) -> String {
+        mapping.pass.path.clone()
+    }
+}
+
+/// How one mapping between a safix entry and a Bitwarden item converges.
+///
+/// The same four modes [`Mode`] carries, spelled with this target's own word,
+/// for [`PassMode`]'s reason: a declaration is read by someone with no tool in
+/// hand to be relative to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum BitwardenMode {
+    /// The vault converges to safix's value. `sync` overwrites a vault-side
+    /// edit and reports that it did.
+    #[serde(rename = "safix-to-bitwarden")]
+    SafixToBitwarden,
+    /// safix converges to the vault's value, through the write path a hand-set
+    /// value takes.
+    #[serde(rename = "bitwarden-to-safix")]
+    BitwardenToSafix,
+    /// Whichever side changed since the last agreement wins; both changed is a
+    /// conflict that writes nothing.
+    #[serde(rename = "two-way")]
+    TwoWay,
+    /// safix's value is written where the vault holds no such item, and a
+    /// differing vault value is reported rather than overwritten.
+    #[serde(rename = "backup")]
+    Backup,
+}
+
+impl BitwardenMode {
+    /// The mode as it is declared and as every report of it names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SafixToBitwarden => "safix-to-bitwarden",
+            Self::BitwardenToSafix => "bitwarden-to-safix",
+            Self::TwoWay => "two-way",
+            Self::Backup => "backup",
+        }
+    }
+
+    /// Whether this mode can write safix's side, which is what makes a
+    /// generator on that side a second producer.
+    ///
+    /// The same predicate `modules/flake/safix/bitwarden.nix` refuses on, here
+    /// as well for the reason [`Mode::pulls`] is: evaluation refuses the
+    /// declaration, and the runtime decides which half of a converging run may
+    /// write.
+    #[must_use]
+    pub const fn pulls(self) -> bool {
+        matches!(self, Self::BitwardenToSafix | Self::TwoWay)
+    }
+
+    /// Whether this mode can write the vault's side.
+    #[must_use]
+    pub const fn pushes(self) -> bool {
+        matches!(self, Self::SafixToBitwarden | Self::TwoWay | Self::Backup)
+    }
+}
+
+impl std::fmt::Display for BitwardenMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The vault half of a mapping: where the item sits, and what it carries
+/// beside the value.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BitwardenSide {
+    /// The folder the item sits in, or none for the vault's root.
+    pub folder: Option<String>,
+    /// The item's name, as the person holding it sees it.
+    ///
+    /// Never the vault's own item identifier: an identifier is opaque to
+    /// review and is reissued by a restore of the vault, which
+    /// `modules/flake/safix/bitwarden.nix` records as the reason this target
+    /// addresses by folder and name.
+    pub item: String,
+    /// What the item carries beside its value. Three of the four are carried,
+    /// because this vault has no tag concept at all.
+    pub fields: Fields,
+}
+
+/// One declared relationship between a safix entry and a Bitwarden item.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BitwardenMapping {
+    /// The attribute name the mapping was declared under, for the reason
+    /// [`Mapping::id`] carries one.
+    pub id: String,
+    /// How it converges.
+    pub mode: BitwardenMode,
+    /// The safix endpoint, which evaluation did verify.
+    pub safix: SafixSide,
+    /// The vault endpoint. Nothing at evaluation verified any of it.
+    pub bitwarden: BitwardenSide,
+}
+
+/// The declared vault and every mapping into it.
+///
+/// No group and no store root, where [`Keepassxc`] and [`Pass`] have one: the
+/// far side is a network service, and the one thing declared about it is which
+/// server — optionally, because a client an operator logged into already holds
+/// that configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bitwarden {
+    /// The server every mapping is converged against, or none for whichever
+    /// one the operator's own client is configured against.
+    pub server: Option<String>,
+    /// Every mapping, in the order the attribute names sort.
+    pub mappings: Vec<BitwardenMapping>,
+}
+
+impl Bitwarden {
+    /// One mapping by its declared name.
+    #[must_use]
+    pub fn named(&self, id: &str) -> Option<&BitwardenMapping> {
+        self.mappings.iter().find(|mapping| mapping.id == id)
+    }
+
+    /// Every declared mapping's name, for a refusal that has to list them.
+    #[must_use]
+    pub fn declared(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect()
+    }
+
+    /// The address this mapping names: `folder/item`, or the item alone when it
+    /// lives in the vault's root.
+    ///
+    /// The same two branches `modules/flake/safix/bitwarden.nix`'s
+    /// `itemPathOf` has, and the address every report and every refusal names.
+    /// It is not an argument any command takes: the transport resolves it to
+    /// the vault's own item identifier at run time.
+    #[must_use]
+    pub fn address_of(&self, mapping: &BitwardenMapping) -> String {
+        match mapping.bitwarden.folder.as_deref() {
+            Some(folder) => format!("{folder}/{}", mapping.bitwarden.item),
+            None => mapping.bitwarden.item.clone(),
+        }
+    }
+}
+
+/// How one mapping between a safix entry and a 1Password item converges.
+///
+/// The same four modes [`Mode`] carries, spelled with this target's own word.
+/// `1password` and never `op`: one spelling per target, and `op` is the name of
+/// the program the runtime invokes rather than of the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum OnePasswordMode {
+    /// The item converges to safix's value. `sync` overwrites an item-side edit
+    /// and reports that it did.
+    #[serde(rename = "safix-to-1password")]
+    SafixToOnePassword,
+    /// safix converges to the item's value, through the write path a hand-set
+    /// value takes.
+    #[serde(rename = "1password-to-safix")]
+    OnePasswordToSafix,
+    /// Whichever side changed since the last agreement wins; both changed is a
+    /// conflict that writes nothing.
+    #[serde(rename = "two-way")]
+    TwoWay,
+    /// safix's value is written where the item does not exist or holds none,
+    /// and a differing item value is reported rather than overwritten.
+    #[serde(rename = "backup")]
+    Backup,
+}
+
+impl OnePasswordMode {
+    /// The mode as it is declared and as every report of it names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SafixToOnePassword => "safix-to-1password",
+            Self::OnePasswordToSafix => "1password-to-safix",
+            Self::TwoWay => "two-way",
+            Self::Backup => "backup",
+        }
+    }
+
+    /// Whether this mode can write safix's side, which is what makes a
+    /// generator on that side a second producer.
+    ///
+    /// The same predicate `modules/flake/safix/onepassword.nix` refuses on,
+    /// here as well for the reason [`Mode::pulls`] is: evaluation refuses the
+    /// declaration, and the runtime decides which half of a converging run may
+    /// write.
+    #[must_use]
+    pub const fn pulls(self) -> bool {
+        matches!(self, Self::OnePasswordToSafix | Self::TwoWay)
+    }
+
+    /// Whether this mode can write the item's side.
+    #[must_use]
+    pub const fn pushes(self) -> bool {
+        matches!(self, Self::SafixToOnePassword | Self::TwoWay | Self::Backup)
+    }
+}
+
+impl std::fmt::Display for OnePasswordMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The 1Password half of a mapping: which vault, which item, and what the item
+/// carries beside the value.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpSide {
+    /// The vault the item lives in, by name. Required rather than defaulted: a
+    /// service account cannot reach a built-in vault at all.
+    pub vault: String,
+    /// The item's title inside that vault.
+    pub item: String,
+    /// What the item carries beside its value. All four are carried, because
+    /// the whole item crosses as one JSON object on standard input.
+    pub fields: Fields,
+}
+
+/// One declared relationship between a safix entry and a 1Password item.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OnePasswordMapping {
+    /// The attribute name the mapping was declared under, for the reason
+    /// [`Mapping::id`] carries one.
+    pub id: String,
+    /// How it converges.
+    pub mode: OnePasswordMode,
+    /// The safix endpoint, which evaluation did verify.
+    pub safix: SafixSide,
+    /// The 1Password endpoint. Nothing at evaluation verified any of it: both
+    /// halves are content of a remote service.
+    pub onepassword: OpSide,
+}
+
+/// The declared 1Password mirror and every mapping into it.
+///
+/// No database and no store root, where [`Keepassxc`] and [`Pass`] have one:
+/// the far side is a service, and what addresses it is the account the
+/// operator's own session resolves.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OnePassword {
+    /// The account shorthand every invocation names, or none to let `op`
+    /// resolve its own — which a service-account token does implicitly, so an
+    /// undeclared account is a working configuration rather than a missing one.
+    pub account: Option<String>,
+    /// Every mapping, in the order the attribute names sort.
+    pub mappings: Vec<OnePasswordMapping>,
+}
+
+impl OnePassword {
+    /// One mapping by its declared name.
+    #[must_use]
+    pub fn named(&self, id: &str) -> Option<&OnePasswordMapping> {
+        self.mappings.iter().find(|mapping| mapping.id == id)
+    }
+
+    /// Every declared mapping's name, for a refusal that has to list them.
+    #[must_use]
+    pub fn declared(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect()
+    }
+
+    /// The vault-qualified item this mapping names, the counterpart of
+    /// [`Keepassxc::entry_of`].
+    ///
+    /// The vault is part of the address rather than decoration: two mappings
+    /// naming one item name in two vaults name two items, and an identity that
+    /// dropped the vault would call them a collision.
+    #[must_use]
+    pub fn item_of(&self, mapping: &OnePasswordMapping) -> String {
+        format!("{}/{}", mapping.onepassword.vault, mapping.onepassword.item)
     }
 }
 
@@ -1283,13 +1772,16 @@ mod tests {
           "id": "grafana",
           "mode": "safix-to-keepassxc",
           "safix": { "user": "alice", "name": "grafana-password" },
-          "kdbx": { "path": "alice/grafana", "username": "alice@example.com" }
+          "kdbx": {
+            "path": "alice/grafana",
+            "fields": { "username": "alice@example.com", "url": null, "notes": null, "tags": [] }
+          }
         },
         {
           "id": "router",
           "mode": "two-way",
           "safix": { "user": "bob", "name": "router" },
-          "kdbx": { "path": "bob/router", "username": null }
+          "kdbx": { "path": "bob/router", "fields": {} }
         }
       ]
     }"#;
@@ -1305,12 +1797,69 @@ mod tests {
         let grafana = mirror.named("grafana").unwrap();
         assert_eq!(grafana.mode, Mode::SafixToKeepassxc);
         assert_eq!(mirror.entry_of(grafana), "safix/alice/grafana");
-        assert_eq!(grafana.kdbx.username.as_deref(), Some("alice@example.com"));
+        assert!(matches!(
+            &grafana.kdbx.fields.username,
+            Some(FieldValue::Literal(username)) if username == "alice@example.com"
+        ));
+        assert!(grafana.kdbx.fields.declares());
 
         let router = mirror.named("router").unwrap();
         assert_eq!(router.mode, Mode::TwoWay);
-        assert!(router.kdbx.username.is_none());
+        assert!(!router.kdbx.fields.declares());
         assert!(mirror.named("absent").is_none());
+    }
+
+    #[test]
+    fn a_field_is_a_literal_or_a_named_entry_and_nothing_else() {
+        let fields: Fields = serde_json::from_str(
+            r#"{
+              "username": "alice@example",
+              "url": {"entry": "grafana-url"},
+              "notes": null,
+              "tags": []
+            }"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            &fields.username,
+            Some(FieldValue::Literal(text)) if text == "alice@example"
+        ));
+        assert!(matches!(
+            &fields.url,
+            Some(FieldValue::Entry { entry }) if entry == "grafana-url"
+        ));
+        assert!(fields.notes.is_none());
+
+        // The declared fields come back in the order every report and every
+        // diff names them in, whatever order they were written in.
+        assert_eq!(
+            fields
+                .named()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>(),
+            ["username", "url"]
+        );
+
+        // A third shape is not a field. `{ "name": … }` is the mistake this
+        // refuses: it is the spelling an operator reaches for, and accepting it
+        // as a literal would write the object's rendering into the entry.
+        assert!(serde_json::from_str::<Fields>(r#"{"username": {"name": "x"}}"#).is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_name_is_refused_by_the_model() {
+        assert!(
+            serde_json::from_str::<KdbxSide>(r#"{"path": "a/b", "fields": {"pin": "1234"}}"#)
+                .is_err()
+        );
+        // And the spelling this change deleted is refused the same way, which
+        // is what makes the cutover clean rather than silently half-applied.
+        assert!(
+            serde_json::from_str::<KdbxSide>(r#"{"path": "a/b", "username": "alice"}"#).is_err()
+        );
+        assert!(serde_json::from_str::<KdbxSide>(r#"{"path": "a/b", "fields": {}}"#).is_ok());
     }
 
     /// A declared composite key deserializes field-for-field, and a mirror
@@ -1382,6 +1931,257 @@ mod tests {
         }
     }
 
+    const PASS_STORE: &str = r#"{
+      "store": "~/.password-store",
+      "mappings": [
+        {
+          "id": "grafana",
+          "mode": "safix-to-pass",
+          "safix": { "user": "alice", "name": "grafana-password" },
+          "pass": {
+            "path": "alice/grafana",
+            "fields": {
+              "username": "alice@example.com",
+              "url": "https://grafana.example.invalid",
+              "notes": "minted by safix",
+              "tags": ["work", "fleet"]
+            }
+          }
+        },
+        {
+          "id": "sourced",
+          "mode": "two-way",
+          "safix": { "user": "alice", "name": "deck-password" },
+          "pass": {
+            "path": "alice/deck",
+            "fields": { "username": { "entry": "other" } }
+          }
+        },
+        {
+          "id": "bare",
+          "mode": "backup",
+          "safix": { "user": "bob", "name": "router" },
+          "pass": { "path": "bob/router", "fields": {} }
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn the_pass_store_deserializes_from_the_shape_nix_emits() {
+        let store: Pass = serde_json::from_str(PASS_STORE).unwrap();
+        assert_eq!(store.store, "~/.password-store");
+        assert_eq!(store.declared(), ["grafana", "sourced", "bare"]);
+
+        let grafana = store.named("grafana").unwrap();
+        assert_eq!(grafana.mode, PassMode::SafixToPass);
+        assert_eq!(store.entry_of(grafana), "alice/grafana");
+        assert!(matches!(
+            &grafana.pass.fields.username,
+            Some(FieldValue::Literal(username)) if username == "alice@example.com"
+        ));
+        assert!(matches!(
+            &grafana.pass.fields.url,
+            Some(FieldValue::Literal(url)) if url == "https://grafana.example.invalid"
+        ));
+        assert!(matches!(
+            &grafana.pass.fields.notes,
+            Some(FieldValue::Literal(notes)) if notes == "minted by safix"
+        ));
+        assert_eq!(grafana.pass.fields.tags.len(), 2);
+        assert!(matches!(
+            grafana.pass.fields.tags.first(),
+            Some(FieldValue::Literal(tag)) if tag == "work"
+        ));
+
+        // The one target where an `{ entry = … }` source is admissible, so the
+        // variant it lands in is what the transport reads to decide whether a
+        // field's value is a secret.
+        let sourced = store.named("sourced").unwrap();
+        assert_eq!(sourced.mode, PassMode::TwoWay);
+        assert!(matches!(
+            &sourced.pass.fields.username,
+            Some(FieldValue::Entry { entry }) if entry == "other"
+        ));
+
+        let bare = store.named("bare").unwrap();
+        assert_eq!(bare.mode, PassMode::Backup);
+        assert!(!bare.pass.fields.declares());
+        assert!(store.named("absent").is_none());
+    }
+
+    /// What makes the nix half and this one a single change: a key the
+    /// declaration does not have is an evaluation-time failure here rather than
+    /// a run that silently wrote less than the declaration said.
+    #[test]
+    fn an_unknown_key_on_a_pass_mapping_is_refused_rather_than_dropped() {
+        let with_extra = PASS_STORE.replace(
+            r#""path": "bob/router""#,
+            r#""path": "bob/router", "group": "safix""#,
+        );
+        assert!(serde_json::from_str::<Pass>(&with_extra).is_err());
+    }
+
+    #[test]
+    fn an_unknown_pass_mode_is_refused_rather_than_read_as_another() {
+        let with_mode = PASS_STORE.replace(r#""mode": "two-way""#, r#""mode": "push""#);
+        assert!(serde_json::from_str::<Pass>(&with_mode).is_err());
+    }
+
+    #[test]
+    fn each_pass_mode_writes_the_sides_its_name_says() {
+        let modes = [
+            (PassMode::SafixToPass, false, true),
+            (PassMode::PassToSafix, true, false),
+            (PassMode::TwoWay, true, true),
+            (PassMode::Backup, false, true),
+        ];
+        for (mode, pulls, pushes) in modes {
+            assert_eq!(mode.pulls(), pulls, "{mode} pulls");
+            assert_eq!(mode.pushes(), pushes, "{mode} pushes");
+        }
+    }
+
+    /// Exactly what `modules/flake/safix/default.nix`'s `bitwarden` record
+    /// emits: an optional server, one mapping under a folder, one folderless,
+    /// and the fields record — `tags` included, because the refusal for it is
+    /// evaluation's rather than serde's.
+    const VAULT: &str = r#"{
+      "server": "http://127.0.0.1:8222",
+      "mappings": [
+        {
+          "id": "grafana",
+          "mode": "safix-to-bitwarden",
+          "safix": { "user": "alice", "name": "grafana-password" },
+          "bitwarden": {
+            "folder": "fleet",
+            "item": "grafana",
+            "fields": {
+              "username": "alice@example.com",
+              "url": "https://grafana.example.invalid",
+              "notes": "minted by safix",
+              "tags": []
+            }
+          }
+        },
+        {
+          "id": "sourced",
+          "mode": "two-way",
+          "safix": { "user": "alice", "name": "router" },
+          "bitwarden": {
+            "folder": null,
+            "item": "router",
+            "fields": { "username": { "entry": "other" }, "url": null, "notes": null, "tags": [] }
+          }
+        },
+        {
+          "id": "bare",
+          "mode": "backup",
+          "safix": { "user": "bob", "name": "router" },
+          "bitwarden": { "folder": null, "item": "bob-router", "fields": {} }
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn the_vault_deserializes_from_the_shape_nix_emits() {
+        let vault: Bitwarden = serde_json::from_str(VAULT).unwrap();
+        assert_eq!(vault.server.as_deref(), Some("http://127.0.0.1:8222"));
+        assert_eq!(vault.declared(), ["grafana", "sourced", "bare"]);
+
+        let grafana = vault.named("grafana").unwrap();
+        assert_eq!(grafana.mode, BitwardenMode::SafixToBitwarden);
+        assert!(matches!(
+            &grafana.bitwarden.fields.username,
+            Some(FieldValue::Literal(username)) if username == "alice@example.com"
+        ));
+        assert!(matches!(
+            &grafana.bitwarden.fields.url,
+            Some(FieldValue::Literal(url)) if url == "https://grafana.example.invalid"
+        ));
+        assert!(matches!(
+            &grafana.bitwarden.fields.notes,
+            Some(FieldValue::Literal(notes)) if notes == "minted by safix"
+        ));
+
+        let sourced = vault.named("sourced").unwrap();
+        assert_eq!(sourced.mode, BitwardenMode::TwoWay);
+        assert!(matches!(
+            &sourced.bitwarden.fields.username,
+            Some(FieldValue::Entry { entry }) if entry == "other"
+        ));
+
+        let bare = vault.named("bare").unwrap();
+        assert_eq!(bare.mode, BitwardenMode::Backup);
+        assert!(!bare.bitwarden.fields.declares());
+        assert!(vault.named("absent").is_none());
+    }
+
+    /// The two branches of the address, asserted against the literals
+    /// `modules/flake/safix/bitwarden.nix`'s `itemPathOf` builds.
+    #[test]
+    fn an_address_is_the_folder_and_the_item_or_the_item_alone() {
+        let vault: Bitwarden = serde_json::from_str(VAULT).unwrap();
+        assert_eq!(
+            vault.address_of(vault.named("grafana").unwrap()),
+            "fleet/grafana"
+        );
+        assert_eq!(vault.address_of(vault.named("bare").unwrap()), "bob-router");
+    }
+
+    /// What makes the nix half and this one a single change: a key the
+    /// declaration does not have is a deserialization failure rather than a run
+    /// that silently wrote less than it said. Drill 2.8 is removing
+    /// `deny_unknown_fields` from `BitwardenSide` and watching this turn green.
+    #[test]
+    fn an_unknown_key_on_a_vault_mapping_is_refused_rather_than_dropped() {
+        let with_extra = VAULT.replace(
+            r#""item": "bob-router""#,
+            r#""item": "bob-router", "collection": "fleet""#,
+        );
+        assert!(serde_json::from_str::<Bitwarden>(&with_extra).is_err());
+    }
+
+    #[test]
+    fn an_unknown_bitwarden_mode_is_refused_rather_than_read_as_another() {
+        let with_mode = VAULT.replace(r#""mode": "two-way""#, r#""mode": "push""#);
+        assert!(serde_json::from_str::<Bitwarden>(&with_mode).is_err());
+    }
+
+    #[test]
+    fn each_bitwarden_mode_writes_the_sides_its_name_says() {
+        let modes = [
+            (BitwardenMode::SafixToBitwarden, false, true),
+            (BitwardenMode::BitwardenToSafix, true, false),
+            (BitwardenMode::TwoWay, true, true),
+            (BitwardenMode::Backup, false, true),
+        ];
+        for (mode, pulls, pushes) in modes {
+            assert_eq!(mode.pulls(), pulls, "{mode} pulls");
+            assert_eq!(mode.pushes(), pushes, "{mode} pushes");
+        }
+    }
+
+    /// A declared `tags` deserializes — the shared `Fields` type carries it —
+    /// and the transport's own capability table is what reports it uncarried.
+    /// The refusal is evaluation's, and confusing the two would make serde the
+    /// place a consumer hears about a field this vault has no concept of.
+    #[test]
+    fn a_declared_tag_deserializes_and_is_reported_uncarried_by_the_capabilities() {
+        let with_tags = VAULT.replace(
+            r#""fields": { "username": { "entry": "other" }, "url": null, "notes": null, "tags": [] }"#,
+            r#""fields": { "username": null, "url": null, "notes": null, "tags": ["work"] }"#,
+        );
+        let vault: Bitwarden = serde_json::from_str(&with_tags).unwrap();
+        assert_eq!(
+            vault.named("sourced").unwrap().bitwarden.fields.tags.len(),
+            1
+        );
+        assert_eq!(
+            crate::bitwarden::CAPABILITIES.channel(crate::endpoint::FieldName::Tags),
+            crate::endpoint::Channel::Unsupported
+        );
+    }
+
     #[test]
     fn holders_of_separates_named_users_from_orphaned_keys() {
         let recipients: Recipients = serde_json::from_str(
@@ -1435,6 +2235,150 @@ mod tests {
         let per_machine = bridge.named("per-machine-rel").unwrap();
         assert_eq!(per_machine.clan.placement, ClanPlacement::PerMachine);
         assert_eq!(per_machine.clan.machine.as_deref(), Some("meridian"));
+    }
+
+    const ONEPASSWORD: &str = r#"{
+      "account": "fixture.example.com",
+      "mappings": [
+        {
+          "id": "grafana",
+          "mode": "safix-to-1password",
+          "safix": { "user": "alice", "name": "grafana-password" },
+          "onepassword": {
+            "vault": "fixture-vault",
+            "item": "grafana",
+            "fields": {
+              "username": "alice@example.com",
+              "url": "https://grafana.example.invalid",
+              "notes": "minted by safix",
+              "tags": ["work", "fleet"]
+            }
+          }
+        },
+        {
+          "id": "sourced",
+          "mode": "1password-to-safix",
+          "safix": { "user": "alice", "name": "deck-password" },
+          "onepassword": {
+            "vault": "fixture-vault",
+            "item": "deck",
+            "fields": { "notes": { "entry": "other" } }
+          }
+        },
+        {
+          "id": "bare",
+          "mode": "backup",
+          "safix": { "user": "bob", "name": "router" },
+          "onepassword": { "vault": "other-vault", "item": "grafana", "fields": {} }
+        },
+        {
+          "id": "paired",
+          "mode": "two-way",
+          "safix": { "user": "carol", "name": "wiki" },
+          "onepassword": { "vault": "fixture-vault", "item": "wiki", "fields": {} }
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn the_onepassword_mirror_deserializes_from_the_shape_nix_emits() {
+        let mirror: OnePassword = serde_json::from_str(ONEPASSWORD).unwrap();
+        assert_eq!(mirror.account.as_deref(), Some("fixture.example.com"));
+        assert_eq!(mirror.declared(), ["grafana", "sourced", "bare", "paired"]);
+
+        let grafana = mirror.named("grafana").unwrap();
+        assert_eq!(grafana.mode, OnePasswordMode::SafixToOnePassword);
+        assert_eq!(mirror.item_of(grafana), "fixture-vault/grafana");
+        assert!(matches!(
+            &grafana.onepassword.fields.username,
+            Some(FieldValue::Literal(username)) if username == "alice@example.com"
+        ));
+        assert_eq!(grafana.onepassword.fields.tags.len(), 2);
+
+        // The far side's address is the vault and the item together: the same
+        // item name in a second vault is a second item.
+        let bare = mirror.named("bare").unwrap();
+        assert_eq!(mirror.item_of(bare), "other-vault/grafana");
+        assert!(!bare.onepassword.fields.declares());
+
+        // Every field of this target crosses standard input, so an
+        // `{ entry = … }` source is admissible on all four.
+        let sourced = mirror.named("sourced").unwrap();
+        assert_eq!(sourced.mode, OnePasswordMode::OnePasswordToSafix);
+        assert!(matches!(
+            &sourced.onepassword.fields.notes,
+            Some(FieldValue::Entry { entry }) if entry == "other"
+        ));
+
+        assert_eq!(
+            mirror.named("paired").unwrap().mode,
+            OnePasswordMode::TwoWay
+        );
+        assert!(mirror.named("absent").is_none());
+    }
+
+    /// An account nobody declared is a working configuration rather than a
+    /// missing declaration, so the projection's null has to survive the read.
+    #[test]
+    fn an_undeclared_onepassword_account_deserializes_as_none() {
+        let mirror: OnePassword =
+            serde_json::from_str(r#"{"account": null, "mappings": []}"#).unwrap();
+        assert!(mirror.account.is_none());
+        assert!(mirror.declared().is_empty());
+    }
+
+    /// What makes the nix half and this one a single change: a key the
+    /// declaration does not have is refused here rather than read as a run
+    /// that silently wrote less than the declaration said.
+    #[test]
+    fn an_unknown_member_of_the_onepassword_side_is_refused_rather_than_dropped() {
+        let with_extra = ONEPASSWORD.replace(
+            r#""item": "wiki""#,
+            r#""item": "wiki", "category": "login""#,
+        );
+        assert!(serde_json::from_str::<OnePassword>(&with_extra).is_err());
+    }
+
+    #[test]
+    fn an_unknown_top_level_member_of_the_onepassword_mirror_is_refused() {
+        assert!(
+            serde_json::from_str::<OnePassword>(
+                r#"{"account": null, "mappings": [], "vault": "fixture-vault"}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unknown_onepassword_mode_is_refused_rather_than_read_as_another() {
+        let with_mode = ONEPASSWORD.replace(r#""mode": "two-way""#, r#""mode": "op-to-safix""#);
+        assert!(serde_json::from_str::<OnePassword>(&with_mode).is_err());
+    }
+
+    #[test]
+    fn each_onepassword_mode_writes_the_sides_its_name_says() {
+        let modes = [
+            (OnePasswordMode::SafixToOnePassword, false, true),
+            (OnePasswordMode::OnePasswordToSafix, true, false),
+            (OnePasswordMode::TwoWay, true, true),
+            (OnePasswordMode::Backup, false, true),
+        ];
+        for (mode, pulls, pushes) in modes {
+            assert_eq!(mode.pulls(), pulls, "{mode} pulls");
+            assert_eq!(mode.pushes(), pushes, "{mode} pushes");
+        }
+        // Each of the four spellings round-trips under its own word.
+        for spelling in [
+            "safix-to-1password",
+            "1password-to-safix",
+            "two-way",
+            "backup",
+        ] {
+            let one =
+                ONEPASSWORD.replace(r#""mode": "two-way""#, &format!(r#""mode": "{spelling}""#));
+            let mirror: OnePassword = serde_json::from_str(&one).unwrap();
+            assert_eq!(mirror.named("paired").unwrap().mode.as_str(), spelling);
+        }
     }
 }
 

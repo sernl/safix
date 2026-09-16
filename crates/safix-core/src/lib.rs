@@ -62,6 +62,7 @@
 
 pub mod adduser;
 pub mod audit;
+pub mod bitwarden;
 pub mod bridge;
 pub mod check;
 pub mod clan;
@@ -70,6 +71,7 @@ pub mod definition;
 pub mod delegation;
 mod digest;
 pub mod edit;
+pub mod endpoint;
 pub mod enroll;
 mod error;
 pub mod fix;
@@ -82,6 +84,8 @@ pub mod keygen;
 mod lock_bump;
 pub mod model;
 pub mod nix;
+pub mod onepassword;
+pub mod pass;
 mod probe;
 pub mod progress;
 pub mod public;

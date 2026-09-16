@@ -356,7 +356,12 @@ pub fn keepassxc_cli() -> PathBuf {
     named(KEEPASSXC_OVERRIDE, "keepassxc-cli")
 }
 
-fn named(variable: &str, default: &str) -> PathBuf {
+/// The program a named override points at, or the default spelling.
+///
+/// `pub(crate)` rather than private: [`crate::pass`] resolves its own
+/// transport's program through exactly this rule, and a second copy of it
+/// would be a second answer to "what does an override spell" free to drift.
+pub(crate) fn named(variable: &str, default: &str) -> PathBuf {
     std::env::var_os(variable)
         .filter(|value| !value.is_empty())
         .map_or_else(|| PathBuf::from(default), PathBuf::from)

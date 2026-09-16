@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the vault's client could not refresh its local copy, so every bitwarden
+mapping was refused: none was read, judged or written.
+
+The client's read commands answer from that local copy, and it may predate
+another device's change. Comparing against it would report agreement that is
+not there, and a backup mapping would write a value into an item that
+already holds one — which is the exact outcome backup's non-overwriting rule
+exists to prevent.
+
+The client said:
+
+Failed to sync: connect ECONNREFUSED 127.0.0.1:8222

@@ -55,6 +55,7 @@
 mod harness;
 
 use harness::{ALICE_FILE, Fixture, Run};
+use serde_json::json;
 
 /// The var the fixture mappings name on clan's side.
 const VAR: &str = "ntfy/token";
@@ -514,7 +515,7 @@ fn audit_keepassxc_compares_a_diverged_mapping_without_writing() {
         "safix-to-keepassxc",
         ("alice", "password"),
         "alice/grafana",
-        None,
+        json!({}),
     );
     fixture
         .run_with(&["set", "alice", "password"], "CANARY-safix-side")
@@ -557,7 +558,7 @@ fn audit_keepassxc_reports_agreement_when_both_sides_match() {
         "safix-to-keepassxc",
         ("alice", "password"),
         "alice/grafana",
-        None,
+        json!({}),
     );
     fixture
         .run_with(&["set", "alice", "password"], "CANARY-in-step")
@@ -583,7 +584,7 @@ fn audit_keepassxc_reports_lingering_entries_without_removing_them() {
         "safix-to-keepassxc",
         ("alice", "password"),
         "alice/grafana",
-        None,
+        json!({}),
     );
     fixture
         .run_with(&["set", "alice", "password"], "CANARY-in-step")
@@ -605,6 +606,53 @@ fn audit_keepassxc_reports_lingering_entries_without_removing_them() {
     );
 }
 
+/// A field divergence names the field and never what either side holds of it.
+///
+/// The distinctive literals are what makes this a claim about the bytes rather
+/// than about the word: a report that interpolated a field's value would carry
+/// one of them, and both are searched for in both streams.
+#[test]
+fn no_field_reaches_the_report_only_its_name_does() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("password", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "grafana",
+        "safix-to-keepassxc",
+        ("alice", "password"),
+        "alice/grafana",
+        json!({"url": "https://CANARY-declared.example"}),
+    );
+    fixture
+        .run_with(&["set", "alice", "password"], "CANARY-in-step")
+        .expect_success("seeding the safix side");
+    fixture.store_seed("safix/alice/grafana", "CANARY-in-step");
+    fixture.store_seed_fields(
+        "safix/alice/grafana",
+        &[("url", "https://CANARY-the-person-typed.example")],
+    );
+
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+    let report = fixture.run_sync(&["audit", "keepassxc"], UNLOCK, &extra);
+    assert_eq!(
+        report.code,
+        Some(1),
+        "a field divergence did not fail the run\n{}",
+        report.combined()
+    );
+    report.says("fields diverged");
+    report.says("url");
+    report.silent_about("https://CANARY-declared.example");
+    report.silent_about("https://CANARY-the-person-typed.example");
+
+    // Nothing was written on either side, which is what audit is.
+    assert_eq!(
+        fixture.store_field("safix/alice/grafana", "url"),
+        "https://CANARY-the-person-typed.example"
+    );
+    assert_eq!(fixture.value(ALICE_FILE, "password"), "CANARY-in-step");
+}
+
 // ── bare audit: both targets ───────────────────────────────────────────────
 
 /// Bare `audit`, with no target named, compares both the clan target and the
@@ -618,7 +666,7 @@ fn bare_audit_covers_both_targets() {
         "safix-to-keepassxc",
         ("alice", "password"),
         "alice/grafana",
-        None,
+        json!({}),
     );
     fixture
         .run_with(&["set", "alice", "password"], "CANARY-in-step")
@@ -661,7 +709,12 @@ fn the_audit_appears_in_the_help_and_says_why_it_is_not_check() {
     let help = fixture
         .run(&["audit", "-h"])
         .expect_success("the audit's own help");
-    help.says("safix audit [clan|keepassxc]");
+    // The verb's own name and not the target enumeration after it: that list
+    // grows with every target this programme adds — five of them now — and an
+    // assertion carrying a copy of it fails on the change that adds the sixth
+    // while saying nothing about whether the help is printed. `usage::AUDIT`'s
+    // form is held to `main.rs`'s own `FORM` where both are written.
+    help.says("safix audit [");
     help.says("decrypts nothing");
     help.says("rather than skipped");
 }

@@ -49,12 +49,21 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use crate::bitwarden::{self, Bitwarden as BitwardenClient};
 use crate::bridge::{self, Addressing, Target};
 use crate::clan::{Clan, Reading};
+use crate::endpoint::{self, Endpoint as _, ResolvedFields};
 use crate::enroll;
 use crate::enroll::custody::DatabasePassword;
 use crate::error::{Error, Result};
-use crate::model::{ClanPlacement, Direction, Mapping, Mode, SyncMapping};
+use crate::model::{
+    BitwardenMapping, BitwardenMode, ClanPlacement, Direction, Mapping, Mode, OnePasswordMapping,
+    OnePasswordMode, PassMapping, PassMode, SyncMapping,
+};
+use crate::onepassword::{self, OnePassword as OnePasswordService};
+use crate::pass::{self, Store as PassStore};
+use crate::progress::Silent;
+use crate::secret::Secret;
 use crate::store::Database;
 use crate::sync;
 use crate::workspace::Workspace;
@@ -150,6 +159,12 @@ pub enum KeepassxcOutcome {
     /// The two sides hold different content: different values, or exactly one
     /// side holding a value the other does not.
     Diverged,
+    /// The two sides hold the same value and the named declared fields differ.
+    ///
+    /// The names, and never the contents: the names are `&'static str`, so no
+    /// run-time string — and therefore no field content, on either side — can
+    /// reach this report at all.
+    FieldsDiverged(Vec<&'static str>),
     /// The two sides could not be compared, and this is why.
     Unjudgeable(Error),
 }
@@ -161,6 +176,7 @@ impl KeepassxcOutcome {
         match self {
             Self::Agreeing => "agreeing",
             Self::Diverged => "diverged",
+            Self::FieldsDiverged(_) => "fields diverged",
             Self::Unjudgeable(_) => "unjudgeable",
         }
     }
@@ -209,6 +225,223 @@ impl KeepassxcReport {
     }
 }
 
+/// Why one pass mapping's compared outcome is what it is.
+///
+/// No `Debug`, for the reason [`Disagreement`] has none.
+pub enum PassOutcome {
+    /// Both sides hold the same value, or neither holds one.
+    Agreeing,
+    /// The two sides hold different content: different values, or exactly one
+    /// side holding a value the other does not.
+    Diverged,
+    /// The two sides hold the same value and the named declared fields differ.
+    ///
+    /// The names, and never the contents: the names are `&'static str`, so no
+    /// run-time string — and therefore no field content, on either side — can
+    /// reach this report at all.
+    FieldsDiverged(Vec<&'static str>),
+    /// The two sides could not be compared, and this is why.
+    Unjudgeable(Error),
+}
+
+impl PassOutcome {
+    /// The word a report prints for this outcome.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Agreeing => "agreeing",
+            Self::Diverged => "diverged",
+            Self::FieldsDiverged(_) => "fields diverged",
+            Self::Unjudgeable(_) => "unjudgeable",
+        }
+    }
+}
+
+/// One pass mapping's compared outcome.
+pub struct PassFinding {
+    /// The mapping's declared name.
+    pub mapping: String,
+    /// How it converges, when it is converged.
+    pub mode: PassMode,
+    /// The safix endpoint, as `<user>.<name>`.
+    pub safix: String,
+    /// The store endpoint, as the entry path inside the declared store.
+    pub entry: String,
+    /// What was found.
+    pub outcome: PassOutcome,
+}
+
+/// What one run compared on the pass target, and what it found.
+pub struct PassReport {
+    /// The store root the run compared against, expanded.
+    pub store: String,
+    /// One entry per compared mapping, in declaration order, whatever its
+    /// outcome.
+    pub compared: Vec<PassFinding>,
+    /// Entries in the store that no declared mapping accounts for, in the same
+    /// shape [`crate::pass::Report::lingering`] gives it.
+    ///
+    /// Information rather than a finding: excluded from
+    /// [`PassReport::is_clean`] the way every other target's is, so an entry
+    /// nobody declared never moves the exit status.
+    pub lingering: Vec<String>,
+}
+
+impl PassReport {
+    /// Whether every compared mapping agreed.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.compared
+            .iter()
+            .all(|entry| matches!(entry.outcome, PassOutcome::Agreeing))
+    }
+}
+
+/// Why one bitwarden mapping's compared outcome is what it is.
+///
+/// No `Debug`, for the reason [`Disagreement`] has none.
+pub enum BitwardenOutcome {
+    /// Both sides hold the same value, or neither holds one.
+    Agreeing,
+    /// The two sides hold different content: different values, or exactly one
+    /// side holding a value the other does not.
+    Diverged,
+    /// The two sides hold the same value and the named declared fields differ.
+    ///
+    /// The names, and never the contents: the names are `&'static str`, so no
+    /// run-time string — and therefore no field content, on either side — can
+    /// reach this report at all.
+    FieldsDiverged(Vec<&'static str>),
+    /// The two sides could not be compared, and this is why.
+    Unjudgeable(Error),
+}
+
+impl BitwardenOutcome {
+    /// The word a report prints for this outcome.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Agreeing => "agreeing",
+            Self::Diverged => "diverged",
+            Self::FieldsDiverged(_) => "fields diverged",
+            Self::Unjudgeable(_) => "unjudgeable",
+        }
+    }
+}
+
+/// One bitwarden mapping's compared outcome.
+pub struct BitwardenFinding {
+    /// The mapping's declared name.
+    pub mapping: String,
+    /// How it converges, when it is converged.
+    pub mode: BitwardenMode,
+    /// The safix endpoint, as `<user>.<name>`.
+    pub safix: String,
+    /// The vault endpoint, as the folder and item name the declaration gives.
+    pub address: String,
+    /// What was found.
+    pub outcome: BitwardenOutcome,
+}
+
+/// What one run compared on the bitwarden target, and what it found.
+pub struct BitwardenReport {
+    /// The server the run compared against, or the empty string where the
+    /// declaration names none.
+    pub server: String,
+    /// One entry per compared mapping, in declaration order, whatever its
+    /// outcome.
+    pub compared: Vec<BitwardenFinding>,
+    /// Items under a declared folder that no declared mapping accounts for, in
+    /// the same shape [`crate::bitwarden::Report::lingering`] gives it.
+    ///
+    /// Information rather than a finding: excluded from
+    /// [`BitwardenReport::is_clean`] the way every other target's is, so an
+    /// item nobody declared never moves the exit status.
+    pub lingering: Vec<String>,
+}
+
+impl BitwardenReport {
+    /// Whether every compared mapping agreed.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.compared
+            .iter()
+            .all(|entry| matches!(entry.outcome, BitwardenOutcome::Agreeing))
+    }
+}
+
+/// Why one 1password mapping's compared outcome is what it is.
+///
+/// No `Debug`, for the reason [`Disagreement`] has none.
+pub enum OnePasswordOutcome {
+    /// Both sides hold the same value, or neither holds one.
+    Agreeing,
+    /// The two sides hold different content: different values, or exactly one
+    /// side holding a value the other does not.
+    Diverged,
+    /// The two sides hold the same value and the named declared fields differ.
+    ///
+    /// The names, and never the contents: the names are `&'static str`, so no
+    /// run-time string — and therefore no field content, on either side — can
+    /// reach this report at all.
+    FieldsDiverged(Vec<&'static str>),
+    /// The two sides could not be compared, and this is why.
+    Unjudgeable(Error),
+}
+
+impl OnePasswordOutcome {
+    /// The word a report prints for this outcome.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Agreeing => "agreeing",
+            Self::Diverged => "diverged",
+            Self::FieldsDiverged(_) => "fields diverged",
+            Self::Unjudgeable(_) => "unjudgeable",
+        }
+    }
+}
+
+/// One 1password mapping's compared outcome.
+pub struct OnePasswordFinding {
+    /// The mapping's declared name.
+    pub mapping: String,
+    /// How it converges, when it is converged.
+    pub mode: OnePasswordMode,
+    /// The safix endpoint, as `<user>.<name>`.
+    pub safix: String,
+    /// The 1Password endpoint, as `<vault>/<item>`.
+    pub item: String,
+    /// What was found.
+    pub outcome: OnePasswordOutcome,
+}
+
+/// What one run compared on the 1password target, and what it found.
+pub struct OnePasswordReport {
+    /// The account the run named, or none where the declaration names none.
+    pub account: Option<String>,
+    /// One entry per compared mapping, in declaration order, whatever its
+    /// outcome.
+    pub compared: Vec<OnePasswordFinding>,
+    /// Items in a declared vault that no declared mapping accounts for, in the
+    /// same shape [`onepassword::Report::lingering`] gives it.
+    ///
+    /// Information rather than a finding: excluded from
+    /// [`OnePasswordReport::is_clean`] the way every other target's is, so an
+    /// item nobody declared never moves the exit status.
+    pub lingering: Vec<String>,
+}
+
+impl OnePasswordReport {
+    /// Whether every compared mapping agreed.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.compared
+            .iter()
+            .all(|entry| matches!(entry.outcome, OnePasswordOutcome::Agreeing))
+    }
+}
+
 /// What one run compared, on whichever target it was scoped to.
 pub struct Report {
     /// Present when the run compared the clan target: bare, or `clan` named.
@@ -216,6 +449,14 @@ pub struct Report {
     /// Present when the run compared the keepassxc target: bare, or
     /// `keepassxc` named.
     pub keepassxc: Option<KeepassxcReport>,
+    /// Present when the run compared the pass target: bare, or `pass` named.
+    pub pass: Option<PassReport>,
+    /// Present when the run compared the bitwarden target: bare, or
+    /// `bitwarden` named.
+    pub bitwarden: Option<BitwardenReport>,
+    /// Present when the run compared the 1password target: bare, or
+    /// `1password` named.
+    pub onepassword: Option<OnePasswordReport>,
 }
 
 impl Report {
@@ -231,6 +472,15 @@ impl Report {
                 .keepassxc
                 .as_ref()
                 .is_none_or(KeepassxcReport::is_clean)
+            && self.pass.as_ref().is_none_or(PassReport::is_clean)
+            && self
+                .bitwarden
+                .as_ref()
+                .is_none_or(BitwardenReport::is_clean)
+            && self
+                .onepassword
+                .as_ref()
+                .is_none_or(OnePasswordReport::is_clean)
     }
 }
 
@@ -272,7 +522,332 @@ pub fn run(
     } else {
         None
     };
-    Ok(Report { clan, keepassxc })
+    let pass = if matches!(target, None | Some(Target::Pass)) {
+        Some(run_pass(workspace, only)?)
+    } else {
+        None
+    };
+    let bitwarden = if matches!(target, None | Some(Target::Bitwarden)) {
+        Some(run_bitwarden(workspace, password, only)?)
+    } else {
+        None
+    };
+    let onepassword = if matches!(target, None | Some(Target::OnePassword)) {
+        Some(run_onepassword(workspace, only)?)
+    } else {
+        None
+    };
+    Ok(Report {
+        clan,
+        keepassxc,
+        pass,
+        bitwarden,
+        onepassword,
+    })
+}
+
+/// The pass target's own comparison.
+///
+/// The store check runs here too, and before the first mapping is compared,
+/// for the reason `sync`'s does: a comparison that treated an absent store as
+/// an empty one would report every mapping as one-sided, and one that
+/// discovered it partway through would already have decrypted safix's side of
+/// every mapping it had reached. A consumer declaring no mapping of this
+/// target reaches the store not at all.
+///
+/// Nothing is written on either side, which is what makes
+/// [`crate::pass::Store::read_record`] and [`crate::pass::lingering`] the only
+/// two things this function asks of the store.
+fn run_pass(workspace: &Workspace, only: &[String]) -> Result<PassReport> {
+    let declared = workspace.pass()?;
+    let mappings = pass::selected(declared, only)?;
+    if mappings.is_empty() {
+        return Ok(PassReport {
+            store: declared.store.clone(),
+            compared: Vec::new(),
+            lingering: Vec::new(),
+        });
+    }
+
+    let mut store = PassStore::new(&declared.store, declared.mappings.len())?;
+    store.unlock()?;
+
+    let mut compared = Vec::with_capacity(mappings.len());
+    for mapping in &mappings {
+        let entry = declared.entry_of(mapping);
+        let outcome = compare_pass(workspace, &store, mapping, &entry);
+        compared.push(PassFinding {
+            mapping: mapping.id.clone(),
+            mode: mapping.mode,
+            safix: format!("{}.{}", mapping.safix.user, mapping.safix.name),
+            entry,
+            outcome,
+        });
+    }
+
+    Ok(PassReport {
+        store: store.root().display().to_string(),
+        lingering: pass::lingering(&store, declared),
+        compared,
+    })
+}
+
+/// One pass mapping's two sides, read and compared.
+///
+/// Judged on agreement alone rather than per mode, the way
+/// [`compare_keepassxc`] is and for its reason: `sync`'s own mode decides which
+/// side a divergence would resolve toward, and this reports that a divergence
+/// exists without pre-empting that decision.
+///
+/// One read rather than two, where the keepassxc comparison takes a second
+/// invocation for the fields: this store returns the whole record body on one
+/// pipe, so there is no second question to decide about.
+fn compare_pass(
+    workspace: &Workspace,
+    store: &PassStore,
+    mapping: &PassMapping,
+    entry: &str,
+) -> PassOutcome {
+    let declared = match endpoint::resolve_fields(
+        workspace,
+        "pass",
+        &mapping.safix.user,
+        &mapping.pass.fields,
+        &store.capabilities(),
+    ) {
+        Ok(declared) => declared,
+        Err(reason) => return PassOutcome::Unjudgeable(reason),
+    };
+    let reading = match store.read_record(entry) {
+        Ok(reading) => reading,
+        Err(reason) => return PassOutcome::Unjudgeable(reason),
+    };
+    let ours = match bridge::held_by_safix(
+        workspace,
+        &mapping.id,
+        &mapping.safix.user,
+        &mapping.safix.name,
+    ) {
+        Ok(held) => held,
+        Err(reason) => return PassOutcome::Unjudgeable(reason),
+    };
+
+    let (theirs, held) = match reading {
+        Some(record) => (record.value, record.fields),
+        None => (None, ResolvedFields::default()),
+    };
+    match judged(ours.as_ref(), theirs.as_ref(), &declared, &held) {
+        KeepassxcOutcome::Agreeing => PassOutcome::Agreeing,
+        KeepassxcOutcome::Diverged => PassOutcome::Diverged,
+        KeepassxcOutcome::FieldsDiverged(drifted) => PassOutcome::FieldsDiverged(drifted),
+        KeepassxcOutcome::Unjudgeable(reason) => PassOutcome::Unjudgeable(reason),
+    }
+}
+
+/// The bitwarden target's own comparison.
+///
+/// The unlock and the pre-read refresh happen here too, and before the first
+/// mapping is compared: a comparison against a client that could not refresh
+/// its local copy would report agreement that is not there, and one that
+/// discovered a locked client partway through would already have decrypted
+/// safix's side of every mapping it had reached. That is what keeps `audit`
+/// from reporting agreement about mappings it could not look at, and it is the
+/// same [`crate::bitwarden::Bitwarden::preflight`] a converging run performs
+/// rather than a second sequence resembling it.
+///
+/// Nothing is written on either side, which is what makes
+/// [`crate::bitwarden::Bitwarden::read`] and [`crate::bitwarden::lingering`]
+/// the only two things this function asks of the client after the preflight.
+fn run_bitwarden(
+    workspace: &Workspace,
+    password: &mut dyn DatabasePassword,
+    only: &[String],
+) -> Result<BitwardenReport> {
+    let declared = workspace.bitwarden()?;
+    let mappings = bitwarden::selected(declared, only)?;
+    if mappings.is_empty() {
+        return Ok(BitwardenReport {
+            server: declared.server.clone().unwrap_or_default(),
+            compared: Vec::new(),
+            lingering: Vec::new(),
+        });
+    }
+
+    let mut vault = BitwardenClient::new(declared);
+    if let Err(reason) = vault.preflight(password) {
+        vault.lock();
+        return Err(reason);
+    }
+
+    let mut compared = Vec::with_capacity(mappings.len());
+    for mapping in &mappings {
+        let address = declared.address_of(mapping);
+        let outcome = compare_bitwarden(workspace, &vault, mapping, &address);
+        compared.push(BitwardenFinding {
+            mapping: mapping.id.clone(),
+            mode: mapping.mode,
+            safix: format!("{}.{}", mapping.safix.user, mapping.safix.name),
+            address,
+            outcome,
+        });
+    }
+    let lingering = bitwarden::lingering(&vault, declared);
+    let server = vault.server();
+    vault.lock();
+
+    Ok(BitwardenReport {
+        server,
+        compared,
+        lingering,
+    })
+}
+
+/// One bitwarden mapping's two sides, read and compared.
+///
+/// Judged on agreement alone rather than per mode, the way
+/// [`compare_keepassxc`] is and for its reason: `sync`'s own mode decides which
+/// side a divergence would resolve toward, and this reports that a divergence
+/// exists without pre-empting that decision.
+fn compare_bitwarden(
+    workspace: &Workspace,
+    vault: &BitwardenClient,
+    mapping: &BitwardenMapping,
+    address: &str,
+) -> BitwardenOutcome {
+    let declared = match endpoint::resolve_fields(
+        workspace,
+        "bitwarden",
+        &mapping.safix.user,
+        &mapping.bitwarden.fields,
+        &bitwarden::CAPABILITIES,
+    ) {
+        Ok(declared) => declared,
+        Err(reason) => return BitwardenOutcome::Unjudgeable(reason),
+    };
+    let reading = match vault.read(address, &declared) {
+        Ok(reading) => reading,
+        Err(reason) => return BitwardenOutcome::Unjudgeable(reason),
+    };
+    let ours = match bridge::held_by_safix(
+        workspace,
+        &mapping.id,
+        &mapping.safix.user,
+        &mapping.safix.name,
+    ) {
+        Ok(held) => held,
+        Err(reason) => return BitwardenOutcome::Unjudgeable(reason),
+    };
+
+    let (theirs, held) = match reading {
+        Some(record) => (record.value, record.fields),
+        None => (None, ResolvedFields::default()),
+    };
+    // The same four-way judgement every other target's comparison is built
+    // from, mapped onto this target's own words — the shape
+    // `compare_onepassword` already uses, rather than a second precedence rule
+    // between a value and a field.
+    match judged(ours.as_ref(), theirs.as_ref(), &declared, &held) {
+        KeepassxcOutcome::Agreeing => BitwardenOutcome::Agreeing,
+        KeepassxcOutcome::Diverged => BitwardenOutcome::Diverged,
+        KeepassxcOutcome::FieldsDiverged(drifted) => BitwardenOutcome::FieldsDiverged(drifted),
+        KeepassxcOutcome::Unjudgeable(reason) => BitwardenOutcome::Unjudgeable(reason),
+    }
+}
+
+/// The 1password target's own comparison.
+///
+/// The session preflight runs here too, and before the first mapping is
+/// compared, for the reason `sync`'s does: a comparison that discovered a
+/// signed-out session partway through would already have decrypted safix's side
+/// of every mapping it had reached. A consumer declaring no mapping of this
+/// target reaches the service not at all.
+///
+/// Nothing is written on either side, which is what makes
+/// [`crate::onepassword::OnePassword::read_address`] the only method this
+/// function calls.
+fn run_onepassword(workspace: &Workspace, only: &[String]) -> Result<OnePasswordReport> {
+    let mirror = workspace.onepassword()?;
+    let mappings = onepassword::selected(mirror, only)?;
+    if mappings.is_empty() {
+        return Ok(OnePasswordReport {
+            account: mirror.account.clone(),
+            compared: Vec::new(),
+            lingering: Vec::new(),
+        });
+    }
+
+    // Silent rather than the run's own channel: `audit` writes a report and no
+    // commentary, so the preflight's own log line has nowhere to go.
+    let quiet = Silent;
+    let mut service = OnePasswordService::new(mirror, &quiet);
+    service.unlock()?;
+
+    let mut compared = Vec::with_capacity(mappings.len());
+    for mapping in &mappings {
+        let item = mirror.item_of(mapping);
+        let outcome = compare_onepassword(workspace, &service, mapping, &item);
+        compared.push(OnePasswordFinding {
+            mapping: mapping.id.clone(),
+            mode: mapping.mode,
+            safix: format!("{}.{}", mapping.safix.user, mapping.safix.name),
+            item,
+            outcome,
+        });
+    }
+
+    Ok(OnePasswordReport {
+        account: mirror.account.clone(),
+        lingering: onepassword::lingering(&service, mirror),
+        compared,
+    })
+}
+
+/// One 1password mapping's two sides, read and compared.
+///
+/// Judged on agreement alone rather than per mode, the way
+/// [`compare_keepassxc`] is and for its reason: `sync`'s own mode decides which
+/// side a divergence would resolve toward, and this reports that a divergence
+/// exists without pre-empting that decision.
+fn compare_onepassword(
+    workspace: &Workspace,
+    service: &OnePasswordService<'_>,
+    mapping: &OnePasswordMapping,
+    item: &str,
+) -> OnePasswordOutcome {
+    let declared = match endpoint::resolve_fields(
+        workspace,
+        "1password",
+        &mapping.safix.user,
+        &mapping.onepassword.fields,
+        &onepassword::CAPABILITIES,
+    ) {
+        Ok(declared) => declared,
+        Err(reason) => return OnePasswordOutcome::Unjudgeable(reason),
+    };
+    let reading = match service.read_address(item) {
+        Ok(reading) => reading,
+        Err(reason) => return OnePasswordOutcome::Unjudgeable(reason),
+    };
+    let ours = match bridge::held_by_safix(
+        workspace,
+        &mapping.id,
+        &mapping.safix.user,
+        &mapping.safix.name,
+    ) {
+        Ok(held) => held,
+        Err(reason) => return OnePasswordOutcome::Unjudgeable(reason),
+    };
+
+    let (theirs, held) = match reading {
+        Some(reading) => (reading.record.value, reading.record.fields),
+        None => (None, ResolvedFields::default()),
+    };
+    match judged(ours.as_ref(), theirs.as_ref(), &declared, &held) {
+        KeepassxcOutcome::Agreeing => OnePasswordOutcome::Agreeing,
+        KeepassxcOutcome::Diverged => OnePasswordOutcome::Diverged,
+        KeepassxcOutcome::FieldsDiverged(drifted) => OnePasswordOutcome::FieldsDiverged(drifted),
+        KeepassxcOutcome::Unjudgeable(reason) => OnePasswordOutcome::Unjudgeable(reason),
+    }
 }
 
 /// The clan target's own comparison.
@@ -433,16 +1008,42 @@ fn run_keepassxc(
 ///
 /// Judged on agreement alone rather than per mode: `sync`'s own mode decides
 /// which side a divergence would resolve toward, and this reports that a
-/// divergence exists without pre-empting that decision.
+/// divergence exists without pre-empting that decision. A field divergence is
+/// reported the same way and for the same reason — without saying which side
+/// `sync` would resolve it toward, which for a field is always the
+/// declaration, and without writing anything either way.
+///
+/// A declaration this target cannot honour is `Unjudgeable`: the fields cannot
+/// be resolved, so whether they agree is not something this run knows.
 fn compare_keepassxc(
     workspace: &Workspace,
     database: &Database,
     mapping: &SyncMapping,
     entry: &str,
 ) -> KeepassxcOutcome {
+    let declared = match endpoint::resolve_fields(
+        workspace,
+        "keepassxc",
+        &mapping.safix.user,
+        &mapping.kdbx.fields,
+        &database.capabilities(),
+    ) {
+        Ok(declared) => declared,
+        Err(reason) => return KeepassxcOutcome::Unjudgeable(reason),
+    };
     let theirs = match database.read(entry) {
         Ok(held) => held,
         Err(reason) => return KeepassxcOutcome::Unjudgeable(reason),
+    };
+    // An entry the listing does not carry holds no field either, and asking
+    // the store about one would be asking about an entry it says is absent.
+    let held_fields = if theirs.is_some() {
+        match database.read_fields(entry, &declared) {
+            Ok(held) => held,
+            Err(reason) => return KeepassxcOutcome::Unjudgeable(reason),
+        }
+    } else {
+        ResolvedFields::default()
     };
     let ours = match bridge::held_by_safix(
         workspace,
@@ -454,9 +1055,31 @@ fn compare_keepassxc(
         Err(reason) => return KeepassxcOutcome::Unjudgeable(reason),
     };
 
+    judged(ours.as_ref(), theirs.as_ref(), &declared, &held_fields)
+}
+
+/// One mapping's outcome, over its two values and the two sides of its fields.
+///
+/// A value divergence takes precedence and is decided first: a mapping whose
+/// value and whose declared fields both differ is `diverged`, because the
+/// lesser finding displacing the greater one would bury it in both the report
+/// and the exit status.
+fn judged(
+    ours: Option<&Secret>,
+    theirs: Option<&Secret>,
+    declared: &ResolvedFields,
+    held: &ResolvedFields,
+) -> KeepassxcOutcome {
     match (ours, theirs) {
         (None, None) => KeepassxcOutcome::Agreeing,
-        (Some(ours), Some(theirs)) if ours.equals(&theirs) => KeepassxcOutcome::Agreeing,
+        (Some(ours), Some(theirs)) if ours.equals(theirs) => {
+            let drifted = declared.diff(held);
+            if drifted.is_empty() {
+                KeepassxcOutcome::Agreeing
+            } else {
+                KeepassxcOutcome::FieldsDiverged(drifted)
+            }
+        }
         _ => KeepassxcOutcome::Diverged,
     }
 }
@@ -575,6 +1198,9 @@ mod tests {
             Report {
                 clan: Some(clean_clan),
                 keepassxc: Some(clean_keepassxc),
+                pass: None,
+                bitwarden: None,
+                onepassword: None,
             }
             .is_clean(),
             "lingering on either section should not flip the exit status"
@@ -583,6 +1209,9 @@ mod tests {
             !Report {
                 clan: Some(dirty_clan),
                 keepassxc: None,
+                pass: None,
+                bitwarden: None,
+                onepassword: None,
             }
             .is_clean()
         );
@@ -590,8 +1219,46 @@ mod tests {
             !Report {
                 clan: None,
                 keepassxc: Some(dirty_keepassxc),
+                pass: None,
+                bitwarden: None,
+                onepassword: None,
             }
             .is_clean()
+        );
+    }
+
+    /// A value divergence is reported as one, whatever the fields say.
+    ///
+    /// Held over the comparison itself rather than over a run, because the
+    /// precedence is the comparison's: returning a field divergence before the
+    /// values are compared would turn this red while every other keepassxc
+    /// claim stayed green.
+    #[test]
+    fn a_value_divergence_is_reported_as_one_even_when_the_fields_also_differ() {
+        let value = |bytes: &[u8]| Secret::read_from(&mut &*bytes).expect("a fixture value");
+        let declared = ResolvedFields {
+            username: Some(endpoint::Field::Literal("alice@example".to_owned())),
+            ..ResolvedFields::default()
+        };
+        let held = ResolvedFields {
+            username: Some(endpoint::Field::Literal("someone-else@example".to_owned())),
+            ..ResolvedFields::default()
+        };
+
+        let ours = value(b"safix-side");
+        let theirs = value(b"database-side");
+        assert_eq!(
+            judged(Some(&ours), Some(&theirs), &declared, &held).as_str(),
+            "diverged"
+        );
+
+        // The same fields over two agreeing values are the finding, which is
+        // what makes the assertion above about the precedence rather than about
+        // the fields never being compared at all.
+        let agreeing = value(b"safix-side");
+        assert_eq!(
+            judged(Some(&ours), Some(&agreeing), &declared, &held).as_str(),
+            "fields diverged"
         );
     }
 }

@@ -50,6 +50,12 @@ pub enum Attribute {
     Bridge,
     /// The declared mirror: the database, the group, and every mapping under it.
     Keepassxc,
+    /// The declared pass store: the store root, and every mapping under it.
+    Pass,
+    /// The declared vault: the server, and every mapping under it.
+    Bitwarden,
+    /// The declared 1Password mirror: the account, and every mapping under it.
+    OnePassword,
     /// The consumer's onboarding invocation, or null when none is configured.
     OnboardingHook,
     /// The consumer's enrollment invocation, or null when none is configured.
@@ -78,6 +84,9 @@ impl Attribute {
             Self::NameRegex => "safix.lib.nameRegex",
             Self::Bridge => "safix.lib.bridge",
             Self::Keepassxc => "safix.lib.keepassxc",
+            Self::Pass => "safix.lib.pass",
+            Self::Bitwarden => "safix.lib.bitwarden",
+            Self::OnePassword => "safix.lib.onepassword",
             Self::OnboardingHook => "safix.onboardingHook",
             Self::EnrollHook => "safix.enrollHook",
             Self::Subjects => "safix.lib.subjects",
@@ -100,6 +109,9 @@ impl Attribute {
             Self::NameRegex => "flake.safix.lib.nameRegex",
             Self::Bridge => "flake.safix.lib.bridge",
             Self::Keepassxc => "flake.safix.lib.keepassxc",
+            Self::Pass => "flake.safix.lib.pass",
+            Self::Bitwarden => "flake.safix.lib.bitwarden",
+            Self::OnePassword => "flake.safix.lib.onepassword",
             Self::OnboardingHook => "flake.safix.onboardingHook",
             Self::EnrollHook => "flake.safix.enrollHook",
             Self::Subjects => "flake.safix.lib.subjects",

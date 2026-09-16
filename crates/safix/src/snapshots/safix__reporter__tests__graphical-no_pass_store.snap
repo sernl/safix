@@ -1,0 +1,25 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::no_pass_store
+
+  × /home/alice/.password-store is not a pass store, so none of the 3
+  │ mapping(s) declared
+  │ against it was read and nothing was written.
+  │ 
+  │ The refusal is here rather than after the first mapping deliberately: a
+  │ run
+  │ that treated an absent store as an empty one would report every mapping as
+  │ one-sided and, in backup mode, write.
+  │ 
+  │ A store is a directory carrying a .gpg-id, which is the store's own
+  │ declaration of who can read it. Either the location is wrong:
+  │ 
+  │     flake.safix.pass.store = "/home/<you>/.password-store";
+  │ 
+  │ or there is no store there yet, and creating one is yours rather than
+  │ safix's — writing a .gpg-id would be safix deciding who can read your
+  │ secrets:
+  │ 
+  │     pass init <your-gpg-id>

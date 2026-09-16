@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the vault's client is locked and there is no terminal to ask its master
+password on. Nothing was read.
+
+The refusal is here rather than after the first mapping deliberately: a run
+that prompted into the void would have decrypted safix's side of every
+mapping first, and a run that treated a locked vault as an empty one would
+report every mapping as one-sided and, in backup mode, write.
+
+Run this where you can type, or unlock the client first and let safix use
+the session it finds:
+
+    bw unlock

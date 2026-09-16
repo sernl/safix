@@ -17,6 +17,9 @@ let
   types = import ./types.nix { inherit lib; };
   bridge = import ./bridge.nix { inherit lib; };
   keepassxc = import ./keepassxc.nix { inherit lib; };
+  pass = import ./pass.nix { inherit lib; };
+  bitwarden = import ./bitwarden.nix { inherit lib; };
+  onepassword = import ./onepassword.nix { inherit lib; };
 
   # The declared factors that unlock a database whose own composite key needs
   # more than a password. Local to this file rather than exported from
@@ -597,7 +600,10 @@ in
               };
               kdbx = {
                 path = "alice/grafana";
-                username = "alice@example.com";
+                fields = {
+                  username = "alice@example.com";
+                  url = "https://grafana.example.com";
+                };
               };
             };
           }
@@ -617,6 +623,222 @@ in
           reserves for a two-way mapping's recorded agreement. It refuses
           nothing about the database: the group and the entry are content of an
           encrypted file, and answering whether they are there needs a key.
+        '';
+      };
+    };
+
+    pass = {
+      store = lib.mkOption {
+        default = "~/.password-store";
+        type = lib.types.str;
+        example = "/home/alice/.local/share/password-store";
+        description = ''
+          The `pass` store `safix sync` converges against, as a location on the
+          machine the verb runs on.
+
+          A string rather than a nix path, and that is not a style choice: a nix
+          path is copied into the store when it is interpolated, so declaring
+          the store as one would put a copy of the whole encrypted tree in a
+          world-readable store, on every evaluation — the reason
+          `flake.safix.keepassxc.database` is a string too. A path-typed option
+          additionally stringifies to a root-dependent absolute path, which
+          reddens `safix-examples`: that check compares the flattened
+          `flake.safix.lib.*` records field-for-field between two examples
+          evaluated under different roots.
+
+          A leading `~` is expanded by the runtime rather than by nix, because
+          evaluation has no home to expand against.
+
+          This carries a default where `database` cannot, because the tool
+          itself has one — `$PASSWORD_STORE_DIR`, else `$HOME/.password-store` —
+          and a declaration that had to restate the tool's own default would be
+          a declaration of nothing.
+        '';
+      };
+
+      mappings = lib.mkOption {
+        default = { };
+        type = lib.types.attrsOf pass.mapping;
+        example = lib.literalExpression ''
+          {
+            grafana = {
+              mode = "safix-to-pass";
+              safix = {
+                user = "alice";
+                name = "grafana-password";
+              };
+              pass = {
+                path = "alice/grafana";
+                fields.username = "alice@example.com";
+              };
+            };
+
+            deck = {
+              mode = "two-way";
+              safix = {
+                user = "alice";
+                name = "deck-password";
+              };
+              pass.path = "alice/deck";
+            };
+          }
+        '';
+        description = ''
+          Every standing relationship between a safix entry and an entry in the
+          `pass` store.
+
+          The attribute name is the mapping's own identifier, for the reason
+          `flake.safix.bridge.mappings` gives: it appears in reports and in
+          refusals, and a name taken from one side reads wrongly in a sentence
+          about the other.
+
+          Evaluation refuses five things: a mapping whose safix side does not
+          resolve — an undeclared user, or a secret that user does not hold — a
+          pull-capable mapping onto an entry a generator also produces, two
+          mappings naming one entry path, an entry path carrying the suffix
+          safix reserves for a two-way mapping's recorded agreement, and a
+          mapping whose id is one of the words `sync` and `audit` read as a
+          target keyword. It refuses nothing about the store:
+          whether the store exists, whether it declares recipients and whether
+          an entry is there are answered at run time, with a key.
+        '';
+      };
+    };
+
+    bitwarden = {
+      server = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr lib.types.str;
+        example = "https://vault.example.org";
+        description = ''
+          The vault server every mapping here is converged against, as a URL, or
+          null for whichever server the operator's own client is configured
+          against.
+
+          Null is not a gap. A client an operator has logged into already holds
+          that configuration, so requiring this declaration to restate it would
+          add a second place for one fact to be wrong and would refuse a
+          correctly working setup for saying nothing. A declared URL is checked
+          against the one the unlocked client reports reaching, and a difference
+          is refused before any side is read — a write against the wrong vault
+          is not correctable by a later run.
+
+          safix never configures the client. Pinning a client's server is the
+          operator's own act, like creating the vault, and doing it here would
+          silently repoint a client they use for other vaults.
+
+          There is no default, because there is no server safix could name that
+          would be the right one.
+        '';
+      };
+
+      mappings = lib.mkOption {
+        default = { };
+        type = lib.types.attrsOf bitwarden.mapping;
+        example = lib.literalExpression ''
+          {
+            grafana = {
+              mode = "safix-to-bitwarden";
+              safix = {
+                user = "alice";
+                name = "grafana-password";
+              };
+              bitwarden = {
+                folder = "fleet";
+                item = "grafana";
+                fields = {
+                  username = "alice@example.com";
+                  url = "https://grafana.example.com";
+                };
+              };
+            };
+          }
+        '';
+        description = ''
+          Every standing relationship between a safix entry and an item in the
+          vault.
+
+          The attribute name is the mapping's own identifier, for the reason
+          `flake.safix.bridge.mappings` gives: it appears in reports and in
+          refusals, and a name taken from one side reads wrongly in a sentence
+          about the other.
+
+          Evaluation refuses a mapping whose safix side does not resolve, a
+          pull-capable mapping onto an entry a generator also produces, two
+          mappings naming one folder-and-item pair, a mapping whose id is one of
+          the words `sync` and `audit` read as a target keyword, and a declared
+          `tags` field this target cannot carry. It refuses nothing about the
+          vault: whether the folder and the item are there needs an unlocked
+          client, and that is a run-time question.
+        '';
+      };
+    };
+
+    onepassword = {
+      account = lib.mkOption {
+        default = null;
+        type = lib.types.nullOr lib.types.str;
+        example = "fixture.example.com";
+        description = ''
+          The 1Password account shorthand, sign-in address or user id every
+          invocation names, or null to let the program resolve its own.
+
+          There is deliberately no refusal for an undeclared account. `op`
+          resolves a default account of its own, and a service-account token
+          names one implicitly, so an undeclared account is a working
+          configuration rather than a missing declaration. Where the account is
+          the defect, the refusal carries `op`'s own sentence rather than a
+          safix-invented one.
+
+          safix signs nothing in and holds no session: whatever authentication
+          material the operator's environment already carries — a service
+          account token, or a session established by their own `op signin` — is
+          what the child process inherits.
+        '';
+      };
+
+      mappings = lib.mkOption {
+        default = { };
+        type = lib.types.attrsOf onepassword.mapping;
+        example = lib.literalExpression ''
+          {
+            grafana = {
+              mode = "safix-to-1password";
+              safix = {
+                user = "alice";
+                name = "grafana-password";
+              };
+              onepassword = {
+                vault = "fixture-vault";
+                item = "grafana";
+                fields = {
+                  username = "alice@example.com";
+                  url = "https://grafana.example.com";
+                  notes = {
+                    entry = "grafana-provenance";
+                  };
+                  tags = [ "safix" ];
+                };
+              };
+            };
+          }
+        '';
+        description = ''
+          Every standing relationship between a safix entry and an item in a
+          1Password vault.
+
+          The attribute name is the mapping's own identifier, for the reason
+          `flake.safix.bridge.mappings` gives: it appears in reports and in
+          refusals, and a name taken from one side reads wrongly in a sentence
+          about the other.
+
+          Evaluation refuses four things: a mapping whose safix side does not
+          resolve, a pull-capable mapping onto an entry a generator also
+          produces, two mappings naming one item in one vault, and a mapping
+          whose id is a word `sync` and `audit` read as a target keyword. It
+          refuses nothing about the far side — whether the vault exists, whether
+          the item does, and whether either side holds a value are content of a
+          remote service, and answering needs a session.
         '';
       };
     };

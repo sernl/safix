@@ -104,6 +104,14 @@ pub fn shim() -> &'static str {
         .as_str()
 }
 
+/// The service-account token every 1password run in this suite carries.
+///
+/// Plainly not a credential: no real token has this shape, and
+/// [`refuse_a_real_onepassword`] asserts that this exact string is what the
+/// child was given, so a run that inherited the operator's own token from their
+/// shell is refused before a process is spawned.
+pub const OP_FIXTURE_TOKEN: &str = "ops-fixture-not-a-real-token";
+
 /// The git the commit-ordering drills point safix at, to refuse one root's
 /// `commit` invocation on purpose. See `tests/support/git-shim.rs`.
 pub fn git_shim() -> &'static str {
@@ -139,6 +147,77 @@ pub fn clan_stub() -> &'static str {
         )
     })
     .as_str()
+}
+
+/// The `pass` the pass tests delegate across.
+///
+/// Unlike every other stub here it is not the only instrument for its
+/// boundary: `checks.safix-pass-cli` drives the real `pass` over a store it
+/// mints in its own `GNUPGHOME`, because this is the one target whose tool is
+/// free-licensed and needs neither a network nor an account. See the head of
+/// `tests/support/pass-stub.rs`.
+pub fn pass_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        located(
+            "SAFIX_TEST_PASS_STUB",
+            env!("CARGO_BIN_EXE_safix-pass-stub"),
+        )
+    })
+    .as_str()
+}
+
+/// The 1Password command the onepassword tests delegate across.
+///
+/// The only `op` this suite will ever have: no check of this repository may run
+/// the real program, permanently, for the three grounds
+/// `tests/support/op-stub.rs`'s header states.
+pub fn op_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| located("SAFIX_TEST_OP_STUB", env!("CARGO_BIN_EXE_safix-op-stub")))
+        .as_str()
+}
+
+/// The Bitwarden client the bitwarden tests delegate across.
+///
+/// The only `bw` this suite has: no check of this repository runs the real
+/// client, because it cannot authenticate without a network and a `nix build`
+/// has none — `modules/flake/checks/bitwarden.nix` records that absence where
+/// the checks live. See the head of `tests/support/bw-stub.rs`.
+pub fn bw_stub() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| located("SAFIX_TEST_BW_STUB", env!("CARGO_BIN_EXE_safix-bw-stub")))
+        .as_str()
+}
+
+/// The master password every bitwarden run in this suite unlocks with.
+///
+/// Plainly not a credential, the way [`OP_FIXTURE_TOKEN`] is plainly not one,
+/// and named in one place so [`Fixture::bitwarden_env`] can hand it to the stub
+/// as a word that may not appear in an argument vector or an environment on any
+/// invocation.
+pub const BW_FIXTURE_PASSWORD: &str = "fixture-vault-master-password";
+
+/// The identifier the stubbed client gives one item, derived from its name the
+/// way `tests/support/bw-stub.rs`'s own `slug` derives it.
+///
+/// Restated here rather than shared, because the stub deliberately takes no
+/// dependency of its own: a helper crate between the two would be a third thing
+/// to keep in step. A drift between them fails every seeded fixture at once
+/// rather than quietly, because the item the run reads would not be the item the
+/// test wrote.
+fn bitwarden_identifier(item: &str) -> String {
+    let slug: String = item
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{slug}-id")
 }
 
 /// The ssh-adjacent tools `safix upload` shells out to: `ssh-keygen`,
@@ -292,6 +371,13 @@ pub struct Fixture {
     genplan: Value,
     bridge: Value,
     keepassxc: Value,
+    /// The declared pass store, as `flake.safix.lib.pass` projects it.
+    pass: Value,
+    /// The declared vault, as `flake.safix.lib.bitwarden` projects it.
+    bitwarden: Value,
+    /// The declared 1Password mirror, as `flake.safix.lib.onepassword` projects
+    /// it.
+    onepassword: Value,
     clan_flake: Option<PathBuf>,
     /// A second git repository this fixture also owns, once
     /// [`Fixture::declare_vault`] has stood one up. `None` is what makes
@@ -389,6 +475,22 @@ impl Fixture {
             // this, and every test that declares no mapping drives it, so `sync`
             // has to be silent about an empty mirror rather than refuse.
             keepassxc: json!({ "database": null, "group": "safix", "mappings": [] }),
+            // The same statement for the pass target, with the one difference
+            // the option surface has: `store` carries the tool's own default,
+            // because the tool has one. A fixture that declares no pass mapping
+            // drives exactly this record, and a run over it reaches no store.
+            pass: json!({ "store": "~/.password-store", "mappings": [] }),
+            // The same statement for the vault: an undeclared server is a
+            // working configuration rather than a missing declaration, because
+            // the operator's own client already holds that configuration. A
+            // fixture that declares no bitwarden mapping drives exactly this
+            // record, and a run over it reaches no client at all.
+            bitwarden: json!({ "server": null, "mappings": [] }),
+            // The same statement again, for the target whose far side is a
+            // remote service: an undeclared account is a working configuration
+            // rather than a missing declaration, so `null` here is what every
+            // fixture that declares no 1password mapping drives.
+            onepassword: json!({ "account": null, "mappings": [] }),
             subjects: json!({ "alice": [alice.clone()], "bob": [bob.clone()] }),
             subject_records: json!({ "machines": {}, "services": {}, "groups": {} }),
             // What a fleet that has never heard of delegation evaluates to, and
@@ -965,19 +1067,32 @@ impl Fixture {
     ///
     /// The shape is the one `modules/flake/safix/default.nix` projects: the
     /// database and the group once for the consumer, and one record per mapping
-    /// carrying the attribute name it was declared under. Built rather than
-    /// pasted, so a field added on the nix side has to be added here too and the
+    /// carrying the attribute name it was declared under, its two sides, and
+    /// the fields record the database half declares. Built rather than pasted,
+    /// so a field added on the nix side has to be added here too and the
     /// fixture cannot drift into answering an older schema.
+    ///
+    /// `fields` is the record itself — `json!({})` for a mapping declaring
+    /// none, `json!({"username": "alice@example.com"})` for one declaring a
+    /// literal, `json!({"notes": {"entry": "grafana-note"}})` for one naming
+    /// another entry. It is always emitted, because `KdbxSide` carries no
+    /// serde default for it.
     pub fn seed_sync_mapping(
         &mut self,
         id: &str,
         mode: &str,
         safix: (&str, &str),
         path: &str,
-        username: Option<&str>,
+        fields: serde_json::Value,
     ) {
         let (user, name) = safix;
         self.keepassxc["database"] = json!(self.kdbx().to_string_lossy());
+        // Built as a map so the record owns the fields it was handed: the
+        // database half is a path and a fields record, and `KdbxSide` carries
+        // no serde default for the second, so it is always emitted.
+        let mut kdbx = serde_json::Map::new();
+        kdbx.insert("path".to_owned(), json!(path));
+        kdbx.insert("fields".to_owned(), fields);
         self.keepassxc["mappings"]
             .as_array_mut()
             .unwrap()
@@ -985,10 +1100,7 @@ impl Fixture {
                 "id": id,
                 "mode": mode,
                 "safix": { "user": user, "name": name },
-                "kdbx": {
-                    "path": path,
-                    "username": username.map_or(Value::Null, |name| json!(name)),
-                },
+                "kdbx": Value::Object(kdbx),
             }));
         self.write_fixtures();
     }
@@ -1051,9 +1163,12 @@ impl Fixture {
         write_lines(&spool.join("kdbx-groups"), &groups);
 
         let mut entries: Vec<String> = read_lines(&spool.join("kdbx-entries"));
-        let line = format!("{entry} ");
+        // The record the stub keeps: the path, then its three fields, tab
+        // separated. A seeded entry carries none of them, which is a person
+        // typing a password and nothing else.
+        let line = format!("{entry}\t");
         if !entries.iter().any(|held| held.starts_with(&line)) {
-            entries.push(line);
+            entries.push(format!("{entry}\t\t\t"));
         }
         write_lines(&spool.join("kdbx-entries"), &entries);
 
@@ -1064,23 +1179,72 @@ impl Fixture {
         .unwrap();
     }
 
+    /// Put fields on an already-seeded entry without going through safix.
+    ///
+    /// The other half of [`Fixture::store_seed`]: the person typed a username
+    /// or a URL into the entry themselves, which is what a field divergence
+    /// fixture is. Named fields only — one the call does not name keeps
+    /// whatever the record held.
+    pub fn store_seed_fields(&self, entry: &str, fields: &[(&str, &str)]) {
+        let spool = self.card_spool();
+        let path = spool.join("kdbx-entries");
+        let prefix = format!("{entry}\t");
+        let mut entries: Vec<String> = read_lines(&path);
+        let at = entries
+            .iter()
+            .position(|line| line.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("{entry} is not in the modelled database"));
+        let held = entries[at].clone();
+        let mut held: Vec<String> = ["username", "url", "notes"]
+            .into_iter()
+            .zip(held.split('\t').skip(1).chain(std::iter::repeat("")))
+            .map(|(name, value)| {
+                fields
+                    .iter()
+                    .find(|(wanted, _)| *wanted == name)
+                    .map_or_else(|| value.to_owned(), |(_, given)| (*given).to_owned())
+            })
+            .collect();
+        held.insert(0, entry.to_owned());
+        entries[at] = held.join("\t");
+        write_lines(&path, &entries);
+    }
+
     /// Every entry the modelled database holds, in path order.
     pub fn store_entries(&self) -> Vec<String> {
         read_lines(&self.card_spool().join("kdbx-entries"))
             .into_iter()
-            .filter_map(|line| line.split_once(' ').map(|(name, _)| name.to_owned()))
+            .filter_map(|line| line.split_once('\t').map(|(name, _)| name.to_owned()))
             .collect()
     }
 
-    /// The username the modelled database holds for one entry.
-    pub fn store_username(&self, entry: &str) -> String {
+    /// Every field the modelled database holds for one entry, by name.
+    ///
+    /// Only the ones the entry carries: a field the record leaves empty is one
+    /// the entry does not have, which is what the stub's own empty-line answer
+    /// means on the other side of the same record.
+    pub fn store_fields(&self, entry: &str) -> BTreeMap<String, String> {
+        let prefix = format!("{entry}\t");
         read_lines(&self.card_spool().join("kdbx-entries"))
             .into_iter()
-            .find_map(|line| {
-                line.strip_prefix(&format!("{entry} "))
-                    .map(str::trim)
-                    .map(str::to_owned)
+            .find_map(|line| line.strip_prefix(&prefix).map(str::to_owned))
+            .map(|held| {
+                ["username", "url", "notes"]
+                    .into_iter()
+                    .zip(held.split('\t'))
+                    .filter(|(_, value)| !value.is_empty())
+                    .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                    .collect()
             })
+            .unwrap_or_default()
+    }
+
+    /// One field the modelled database holds for one entry, empty when the
+    /// entry does not carry it.
+    pub fn store_field(&self, entry: &str, field: &str) -> String {
+        self.store_fields(entry)
+            .get(field)
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -1109,6 +1273,477 @@ impl Fixture {
                 self.card_spool().to_string_lossy().into_owned(),
             ),
         ]
+    }
+
+    /// Declare one pass mapping, as `flake.safix.lib.pass` resolves it.
+    ///
+    /// The shape is the one `modules/flake/safix/default.nix` projects: the
+    /// store root once for the consumer, and one record per mapping carrying
+    /// the attribute name it was declared under, its two sides, and the fields
+    /// record the store half declares. Built rather than pasted, so a field
+    /// added on the nix side has to be added here too and the fixture cannot
+    /// drift into answering an older schema.
+    ///
+    /// `fields` is the record itself — `json!({})` for a mapping declaring
+    /// none. It is always emitted, because `PassSide` carries no serde default
+    /// for it.
+    ///
+    /// The store root is set to the fixture's own scratch directory here rather
+    /// than left at the tool's default, which is what
+    /// [`refuse_a_real_store`]'s second half checks: a fixture that reached the
+    /// operator's `~/.password-store` is refused before a process is spawned.
+    pub fn seed_pass_mapping(
+        &mut self,
+        id: &str,
+        mode: &str,
+        safix: (&str, &str),
+        path: &str,
+        fields: serde_json::Value,
+    ) {
+        let (user, name) = safix;
+        self.pass["store"] = json!(self.pass_store().to_string_lossy());
+        let mut side = serde_json::Map::new();
+        side.insert("path".to_owned(), json!(path));
+        side.insert("fields".to_owned(), fields);
+        self.pass["mappings"].as_array_mut().unwrap().push(json!({
+            "id": id,
+            "mode": mode,
+            "safix": { "user": user, "name": name },
+            "pass": Value::Object(side),
+        }));
+        self.write_fixtures();
+    }
+
+    /// Declare a store root of the fixture's own choosing.
+    ///
+    /// For the one test that declares a store which is not a store: the
+    /// absent-store refusal is about a declared location, so a fixture has to
+    /// be able to declare one. Still inside the scratch directory, which is
+    /// what [`refuse_a_real_store`] requires of every declaration.
+    pub fn pass_store_is(&mut self, store: &Path) {
+        self.pass["store"] = json!(store.to_string_lossy());
+        self.write_fixtures();
+    }
+
+    /// The store root the fixture declares.
+    ///
+    /// Inside the fixture's own scratch directory, which is on tmpfs and
+    /// removed on every exit path. Nothing in this suite ever names a store of
+    /// the operator's, and [`refuse_a_real_store`] is the structural guard that
+    /// makes that a property rather than a habit.
+    pub fn pass_store(&self) -> PathBuf {
+        self.work.join("password-store")
+    }
+
+    /// Where the stubbed `pass` keeps its own store, its spool and its
+    /// switches.
+    pub fn pass_spool(&self) -> PathBuf {
+        self.work.join("pass-spool")
+    }
+
+    /// Make the declared root a store: a directory carrying a `.gpg-id`.
+    ///
+    /// The `.gpg-id` is the one file the fixture writes into the root the
+    /// runtime is pointed at, and it holds a synthetic recipient. safix reads
+    /// whether one exists and never writes one, so the preflight has to have
+    /// something to find.
+    pub fn pass_store_exists(&self) {
+        let root = self.pass_store();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".gpg-id"),
+            "safix fixture <fixture@example.invalid>\n",
+        )
+        .unwrap();
+    }
+
+    /// Put a record into the stubbed store without going through safix.
+    ///
+    /// The person's own entry, which is what every divergence and every
+    /// round-trip fixture is. Two writes, and the split is the whole point of
+    /// the stub having a layout of its own: the body goes into the spool, hex
+    /// encoded, and the root the runtime is pointed at gets only a `<path>.gpg`
+    /// name marker whose content is a sentence rather than the record. A
+    /// runtime that read the tool's own file instead of asking the tool finds
+    /// the sentence.
+    pub fn pass_seed(&self, path: &str, body: &str) {
+        self.pass_store_exists();
+        let directory = self.pass_spool().join("store");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(path.replace('/', "%")), to_hex(body)).unwrap();
+
+        let marker = self.pass_store().join(format!("{path}.gpg"));
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(
+            marker,
+            "this is the stub's name marker and never a record body\n",
+        )
+        .unwrap();
+    }
+
+    /// What the stubbed store holds for one entry, if it holds anything.
+    ///
+    /// The whole body, byte for byte: the value's own bytes and, where the
+    /// mapping declares one, the trailing field block. Read out of the stub's
+    /// own layout rather than the store's, which is the point of the stub
+    /// having one.
+    pub fn pass_holds(&self, path: &str) -> Option<String> {
+        from_hex(
+            &std::fs::read_to_string(self.pass_spool().join("store").join(path.replace('/', "%")))
+                .ok()?,
+        )
+    }
+
+    /// Every entry the stubbed store holds, in path order.
+    pub fn pass_entries(&self) -> Vec<String> {
+        let mut held: Vec<String> = std::fs::read_dir(self.pass_spool().join("store"))
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .map(|name| name.replace('%', "/"))
+            .collect();
+        held.sort();
+        held
+    }
+
+    /// One of the stubbed store's record files, as lines.
+    ///
+    /// `argv`, `env` and `writes`. The environment is recorded whole, so a test
+    /// asserting that the only variable safix added is the store's location
+    /// reads everything rather than a filtered view.
+    pub fn pass_recorded(&self, name: &str) -> Vec<String> {
+        std::fs::read_to_string(self.pass_spool().join(name))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The environment a pass run needs: the store's own command pointed at the
+    /// stub, the store root inside the fixture's scratch directory, and the
+    /// spool the stub records into.
+    ///
+    /// `PASSWORD_STORE_DIR` is set here as well as reaching each child through
+    /// the transport, and the redundancy is deliberate: it is the variable
+    /// [`refuse_a_real_store`]'s second half reads, so a test that built its
+    /// environment any other way is refused before a process is spawned.
+    pub fn pass_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("SAFIX_PASS".to_owned(), pass_stub().to_owned()),
+            (
+                "SAFIX_PASS_STUB_SPOOL".to_owned(),
+                self.pass_spool().to_string_lossy().into_owned(),
+            ),
+            (
+                "PASSWORD_STORE_DIR".to_owned(),
+                self.pass_store().to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
+    /// Declare one bitwarden mapping, as `flake.safix.lib.bitwarden` resolves
+    /// it.
+    ///
+    /// The shape is the one `modules/flake/safix/default.nix` projects: the
+    /// server once for the consumer, and one record per mapping carrying the
+    /// attribute name it was declared under, its two sides, and the fields
+    /// record the vault half declares. Built rather than pasted, so a field
+    /// added on the nix side has to be added here too and the fixture cannot
+    /// drift into answering an older schema.
+    ///
+    /// `folder` is `None` for the vault's root, which is where an item with no
+    /// folder lives — the same two branches `bitwardenLib.itemPathOf` has.
+    pub fn seed_bitwarden_mapping(
+        &mut self,
+        id: &str,
+        mode: &str,
+        safix: (&str, &str),
+        folder: Option<&str>,
+        item: &str,
+        fields: serde_json::Value,
+    ) {
+        let (user, name) = safix;
+        let mut side = serde_json::Map::new();
+        side.insert(
+            "folder".to_owned(),
+            folder.map_or(Value::Null, |folder| json!(folder)),
+        );
+        side.insert("item".to_owned(), json!(item));
+        side.insert("fields".to_owned(), fields);
+        self.bitwarden["mappings"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "id": id,
+                "mode": mode,
+                "safix": { "user": user, "name": name },
+                "bitwarden": Value::Object(side),
+            }));
+        self.write_fixtures();
+    }
+
+    /// Declare the server every mapping of a bitwarden run is converged
+    /// against.
+    ///
+    /// Declaring none is the ordinary case — the operator's own client already
+    /// holds that configuration — so this is only what a fixture about the
+    /// mismatch refusal calls.
+    pub fn bitwarden_server_is(&mut self, server: &str) {
+        self.bitwarden["server"] = json!(server);
+        self.write_fixtures();
+    }
+
+    /// Where the stubbed client keeps its item store, its invocation spool and
+    /// its counter.
+    pub fn bitwarden_spool(&self) -> PathBuf {
+        self.work.join("bw-spool")
+    }
+
+    /// The environment a bitwarden run needs: the client pointed at the stub,
+    /// the spool it records into, a client data directory inside the fixture's
+    /// own scratch, and the fixture's master password as a word the stub
+    /// refuses to see in an argument vector or an environment.
+    ///
+    /// All four are read by [`refuse_a_real_vault`] or by the stub itself, so a
+    /// test that built its environment any other way is refused before a
+    /// process is spawned.
+    pub fn bitwarden_env(&self) -> Vec<(String, String)> {
+        self.bitwarden_env_forbidding(&[BW_FIXTURE_PASSWORD])
+    }
+
+    /// The same, with every fixture value the run must not put in an argument
+    /// vector or an environment named as well.
+    ///
+    /// The stub fails the invocation that carries one, rather than recording it
+    /// for a test to grep afterwards: a channel claim asserted by the
+    /// instrument cannot be forgotten by a test that did not think to look.
+    pub fn bitwarden_env_forbidding(&self, forbidden: &[&str]) -> Vec<(String, String)> {
+        vec![
+            ("SAFIX_BW".to_owned(), bw_stub().to_owned()),
+            (
+                "SAFIX_BW_STUB_SPOOL".to_owned(),
+                self.bitwarden_spool().to_string_lossy().into_owned(),
+            ),
+            (
+                "BITWARDENCLI_APPDATA_DIR".to_owned(),
+                self.work.join("bw-appdata").to_string_lossy().into_owned(),
+            ),
+            ("SAFIX_BW_STUB_FORBIDDEN".to_owned(), forbidden.join(" ")),
+        ]
+    }
+
+    /// Put an item into the stubbed client's store without going through
+    /// safix.
+    ///
+    /// The person's own item, which is what every divergence and every
+    /// round-trip fixture is. `document` carries the members a person put
+    /// there — a `login`, a `totp`, custom fields, notes — and this splices the
+    /// three the client itself answers with: the item's identifier, its name,
+    /// and the folder it sits in. Spliced onto the front as text rather than
+    /// merged through `serde_json`, because the stub reads its store textually
+    /// and a member order that put a custom field's own `name` before the
+    /// item's would make the stub answer with the wrong one.
+    ///
+    /// `document` must therefore carry no `id`, `name`, `folder` or `folderId`
+    /// of its own; those are this function's to write.
+    pub fn bitwarden_seed(&self, folder: Option<&str>, item: &str, document: &serde_json::Value) {
+        let items = self.bitwarden_spool().join("items");
+        std::fs::create_dir_all(&items).unwrap();
+        let identifier = bitwarden_identifier(item);
+        let mut head = format!(r#""id":"{identifier}","name":"{item}""#);
+        match folder {
+            Some(folder) => {
+                use std::fmt::Write as _;
+                let _ = write!(head, r#","folder":"{folder}","folderId":"{folder}-id""#);
+            }
+            None => head.push_str(r#","folderId":null"#),
+        }
+        let body = document.to_string();
+        let members = body
+            .trim()
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .trim();
+        let record = if members.is_empty() {
+            format!("{{{head}}}")
+        } else {
+            format!("{{{head},{members}}}")
+        };
+        std::fs::write(items.join(&identifier), record).unwrap();
+    }
+
+    /// What the stubbed client holds for one item, as the JSON it holds it as.
+    ///
+    /// Read out of the stub's own layout rather than a client's, which is the
+    /// point of the stub having one: a real client keeps one `data.json` of
+    /// encrypted ciphers, so a runtime that reached past the command would find
+    /// nothing shaped like this.
+    pub fn bitwarden_holds(&self, item: &str) -> Option<String> {
+        std::fs::read_to_string(
+            self.bitwarden_spool()
+                .join("items")
+                .join(bitwarden_identifier(item)),
+        )
+        .ok()
+    }
+
+    /// Every invocation the stubbed client recorded, whole, in invocation
+    /// order.
+    ///
+    /// Each record is the three channels a credential could travel — `argv:`,
+    /// `env:` and `stdin:` — one line each, so a test can assert the order of a
+    /// run as well as its content.
+    pub fn bitwarden_records(&self) -> Vec<String> {
+        let spool = self.bitwarden_spool();
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(&spool)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("invocation-"))
+            })
+            .collect();
+        paths.sort();
+        paths
+            .iter()
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .collect()
+    }
+
+    /// Every invocation's argument vector, in invocation order.
+    ///
+    /// The subcommand a record names is the first word of this without the
+    /// leading `--nointeraction`, which is what the spool-order assertions read.
+    pub fn bitwarden_invocations(&self) -> Vec<String> {
+        self.bitwarden_records()
+            .iter()
+            .filter_map(|record| {
+                record
+                    .lines()
+                    .find_map(|line| line.strip_prefix("argv: "))
+                    .map(str::to_owned)
+            })
+            .collect()
+    }
+
+    /// Declare one 1password mapping, as `flake.safix.lib.onepassword` resolves
+    /// it.
+    ///
+    /// The shape is the one `modules/flake/safix/default.nix` projects: the
+    /// account once for the consumer, and one record per mapping carrying the
+    /// attribute name it was declared under, its two sides, and the fields
+    /// record the 1Password half declares. Built rather than pasted, so a field
+    /// added on the nix side has to be added here too and the fixture cannot
+    /// drift into answering an older schema.
+    ///
+    /// `fields` is the record itself, and it is always emitted, because
+    /// `OpSide` carries no serde default for it.
+    pub fn seed_onepassword_mapping(
+        &mut self,
+        id: &str,
+        mode: &str,
+        safix: (&str, &str),
+        vault: &str,
+        item: &str,
+        fields: serde_json::Value,
+    ) {
+        let (user, name) = safix;
+        let mut side = serde_json::Map::new();
+        side.insert("vault".to_owned(), json!(vault));
+        side.insert("item".to_owned(), json!(item));
+        side.insert("fields".to_owned(), fields);
+        self.onepassword["mappings"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "id": id,
+                "mode": mode,
+                "safix": { "user": user, "name": name },
+                "onepassword": Value::Object(side),
+            }));
+        self.write_fixtures();
+    }
+
+    /// Declare the account every invocation of a 1password run names.
+    pub fn onepassword_account_is(&mut self, account: &str) {
+        self.onepassword["account"] = json!(account);
+        self.write_fixtures();
+    }
+
+    /// Where the stubbed `op` keeps its store, its spool and its switches.
+    pub fn onepassword_spool(&self) -> PathBuf {
+        self.work.join("op-spool")
+    }
+
+    /// The environment a 1password run needs: the command pointed at the stub,
+    /// the spool it records into, and a service-account token that is a fixture.
+    ///
+    /// `OP_ACCOUNT` is deliberately not set. An undeclared account is a working
+    /// configuration for this target, and a variable naming one of the
+    /// operator's own would be the suite reaching a real account by inheritance
+    /// — which is exactly what [`refuse_a_real_onepassword`] refuses.
+    pub fn onepassword_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("SAFIX_OP".to_owned(), op_stub().to_owned()),
+            (
+                "SAFIX_OP_STUB_SPOOL".to_owned(),
+                self.onepassword_spool().to_string_lossy().into_owned(),
+            ),
+            (
+                "OP_SERVICE_ACCOUNT_TOKEN".to_owned(),
+                OP_FIXTURE_TOKEN.to_owned(),
+            ),
+        ]
+    }
+
+    /// What the stubbed `op` holds for one item, if it holds anything.
+    ///
+    /// Read out of the stub's own layout rather than the service's, which is
+    /// the point of the stub having one: the service has no filesystem at all,
+    /// so a runtime that reached past the command would find a directory of hex
+    /// names holding hex bytes.
+    pub fn onepassword_holds(&self, vault: &str, item: &str) -> Option<String> {
+        let held = std::fs::read_to_string(
+            self.onepassword_spool()
+                .join("store")
+                .join(to_hex(vault))
+                .join(format!("{}.item", to_hex(item))),
+        )
+        .ok()?;
+        from_hex(&held)
+    }
+
+    /// Put an item into the stubbed `op` without going through safix.
+    ///
+    /// The person's own item, which is what every divergence and every
+    /// round-trip fixture is: the JSON is stored exactly as given, so a test
+    /// can seed a passkey, a one-time-password field or a section no
+    /// declaration names and assert afterwards that all three survived.
+    pub fn onepassword_seed_item(&self, vault: &str, item: &str, document: &serde_json::Value) {
+        let directory = self.onepassword_spool().join("store").join(to_hex(vault));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join(format!("{}.item", to_hex(item))),
+            to_hex(&document.to_string()),
+        )
+        .unwrap();
+    }
+
+    /// One of the stubbed `op`'s record files, as lines.
+    ///
+    /// `argv`, `env`, `stdin` and `exit`, one line per invocation each.
+    pub fn onepassword_recorded(&self, name: &str) -> Vec<String> {
+        std::fs::read_to_string(self.onepassword_spool().join(name))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Where the stubbed clan keeps its store, its spool and its switches.
@@ -1296,6 +1931,9 @@ impl Fixture {
         write_json(&self.work.join("genplan.json"), &self.genplan);
         write_json(&self.work.join("bridge.json"), &self.bridge);
         write_json(&self.work.join("keepassxc.json"), &self.keepassxc);
+        write_json(&self.work.join("pass.json"), &self.pass);
+        write_json(&self.work.join("bitwarden.json"), &self.bitwarden);
+        write_json(&self.work.join("onepassword.json"), &self.onepassword);
         write_json(&self.work.join("recipients.json"), &self.subjects);
         write_json(&self.work.join("subjects-lib.json"), &self.subject_records);
         write_json(&self.work.join("governed.json"), &governed);
@@ -1422,6 +2060,9 @@ impl Fixture {
 
         refuse_a_real_card(arguments, extra);
         refuse_a_real_database(self, arguments, extra);
+        refuse_a_real_store(self, arguments, extra);
+        refuse_a_real_vault(self, arguments, extra);
+        refuse_a_real_onepassword(self, arguments, extra);
         let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("no pseudo-terminal");
         grantpt(&master).expect("could not grant the pseudo-terminal");
         unlockpt(&master).expect("could not unlock the pseudo-terminal");
@@ -1975,6 +2616,9 @@ impl Fixture {
     ) -> Run {
         refuse_a_real_card(arguments, extra);
         refuse_a_real_database(self, arguments, extra);
+        refuse_a_real_store(self, arguments, extra);
+        refuse_a_real_vault(self, arguments, extra);
+        refuse_a_real_onepassword(self, arguments, extra);
         let mut command = match (stdin, detached()) {
             (Some(_), Some(setsid)) => {
                 let mut command = Command::new(setsid);
@@ -2032,6 +2676,12 @@ impl Fixture {
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
             .env("SAFIX_FIXTURE_KEEPASSXC", self.work.join("keepassxc.json"))
+            .env("SAFIX_FIXTURE_PASS", self.work.join("pass.json"))
+            .env("SAFIX_FIXTURE_BITWARDEN", self.work.join("bitwarden.json"))
+            .env(
+                "SAFIX_FIXTURE_ONEPASSWORD",
+                self.work.join("onepassword.json"),
+            )
             .env("SAFIX_FIXTURE_HOOK", self.work.join("hook.json"))
             .env(
                 "SAFIX_FIXTURE_ENROLL_HOOK",
@@ -2800,8 +3450,14 @@ fn refuse_a_real_card(arguments: &[&str], extra: &[(&str, &str)]) {
 /// environment any way other than [`Fixture::store_env`] fails on the first, and
 /// one that declares a database of its own fails on the second.
 fn refuse_a_real_database(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
+    // A run narrowed to another target never opens a database, real or fixture,
+    // so it is exempt the way `sync clan` always was. The bare form still
+    // reaches keepassxc and is still guarded.
     let touches_keepassxc = match arguments.first() {
-        Some(&("sync" | "audit")) => arguments.get(1) != Some(&"clan"),
+        Some(&("sync" | "audit")) => !matches!(
+            arguments.get(1),
+            Some(&("clan" | "pass" | "bitwarden" | "1password"))
+        ),
         _ => false,
     } && !arguments.contains(&"-h")
         && !arguments.contains(&"--help");
@@ -2832,6 +3488,250 @@ fn refuse_a_real_database(fixture: &Fixture, arguments: &[&str], extra: &[(&str,
              scratch directory {scratch}. Declare Fixture::kdbx and nothing else."
         );
     }
+}
+
+/// Refuse a sync or audit run that has not been pointed at the `pass` stub.
+///
+/// The counterpart of [`refuse_a_real_database`] for this target, and named for
+/// the store rather than for a file because a `pass` store is a tree. The loss
+/// at the end of it is the same shape: a machine that develops this suite
+/// plausibly holds the operator's own `~/.password-store` and a gpg-agent that
+/// would answer for it, and a run that reached them would replace entries in
+/// somebody's own store — `pass insert --force` asks nothing, which is exactly
+/// why the transport passes it.
+///
+/// Both halves are checked, because either one alone would let the accident
+/// through: `SAFIX_PASS` has to name the stub, so a test that built its
+/// environment any way other than [`Fixture::pass_env`] fails on the first; and
+/// `PASSWORD_STORE_DIR` has to be under the fixture's own scratch directory, so
+/// a run that would have inherited the operator's root — or resolved the tool's
+/// own `$HOME/.password-store` default — fails on the second.
+///
+/// `sync` and `audit` both reach this target, bare or named, so both are
+/// guarded; a run narrowed to another target reaches no store at all. A bare run
+/// over a fixture declaring no mapping of this target is exempt, which is the
+/// same rule [`refuse_a_real_onepassword`] carries and for its reason: such a
+/// consumer reaches the store not at all, not even for the preflight, so there
+/// is nothing for the guard to prevent and requiring the variables would make
+/// every unrelated bare run carry them.
+fn refuse_a_real_store(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
+    let named_target = arguments.get(1);
+    let declares = std::fs::read_to_string(fixture.work.join("pass.json"))
+        .unwrap_or_default()
+        .contains("\"id\"");
+    let touches_pass = match arguments.first() {
+        Some(&("sync" | "audit")) => match named_target {
+            Some(&"pass") => true,
+            None => declares,
+            Some(word) if word.starts_with('-') => declares,
+            Some(_) => false,
+        },
+        _ => false,
+    } && !arguments.contains(&"-h")
+        && !arguments.contains(&"--help");
+    if !touches_pass {
+        return;
+    }
+    let named = |variable: &str| {
+        extra
+            .iter()
+            .find(|(held, _)| *held == variable)
+            .map(|(_, value)| *value)
+    };
+    assert_eq!(
+        named("SAFIX_PASS"),
+        Some(pass_stub()),
+        "a run reaching the pass target was not pointed at the pass stub through \
+         SAFIX_PASS; it would have reached the real pass, and the store on this machine \
+         is not a fixture. Build the environment with Fixture::pass_env."
+    );
+    let scratch = fixture.work.to_string_lossy().into_owned();
+    let root = named("PASSWORD_STORE_DIR").unwrap_or_default();
+    assert!(
+        root.starts_with(&scratch),
+        "a run reaching the pass target declared PASSWORD_STORE_DIR '{root}', which is \
+         outside the fixture's own scratch directory {scratch}. Build the environment \
+         with Fixture::pass_env, which points it at Fixture::pass_store."
+    );
+}
+
+/// Refuse a sync or audit run that has not been pointed at the `bw` stub.
+///
+/// The counterpart of [`refuse_a_real_database`] for the vault, and the loss it
+/// stands between is the largest of the four: a machine that develops this suite
+/// plausibly holds a `bw` an operator logged into and left unlocked, and a run
+/// that reached it would create or edit items in a person's own vault, or in a
+/// fleet's. Nothing in a hermetic build could have reached it, and there is no
+/// undo.
+///
+/// Three conditions rather than one, because each alone lets a different
+/// accident through, and `design.md`'s B9 records why the cost justifies all
+/// three:
+///
+/// - `SAFIX_BW` has to name the stub, so a test that built its environment any
+///   way other than [`Fixture::bitwarden_env`] fails on the first. This is the
+///   condition that catches an override left unset, which is the accident that
+///   reaches a real client.
+/// - `BITWARDENCLI_APPDATA_DIR` has to be under the fixture's own scratch
+///   directory, so a run that would have read — or written — the session and
+///   local copy in the operator's own `~/.config/Bitwarden CLI` fails on the
+///   second, even where the override did name the stub.
+/// - A declared server has to be one that cannot be anybody's vault, so a
+///   fixture that named a real deployment fails on the third.
+///
+/// The third condition admits a reserved documentation name as well as loopback,
+/// which is one widening of task 7.9's literal wording and is deliberate: the
+/// server-mismatch fixture has to declare a server the client does *not* report,
+/// and `example.org` is guaranteed by RFC 2606 to resolve to nothing, so it can
+/// no more be somebody's vault than `127.0.0.1` can. A declaration naming
+/// anything else is refused.
+///
+/// `sync` and `audit` both reach this target — bare, or named — so both are
+/// guarded; a run narrowed to another target reaches no client at all. A bare run
+/// over a fixture declaring no mapping of this target is exempt, the rule
+/// [`refuse_a_real_onepassword`] carries and for its reason: such a consumer
+/// reaches the client not at all, not even for the status preflight.
+fn refuse_a_real_vault(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
+    let named_target = arguments.get(1);
+    let declaration =
+        std::fs::read_to_string(fixture.work.join("bitwarden.json")).unwrap_or_default();
+    let declares = declaration.contains("\"id\"");
+    let touches_bitwarden = match arguments.first() {
+        Some(&("sync" | "audit")) => match named_target {
+            Some(&"bitwarden") => true,
+            None => declares,
+            Some(word) if word.starts_with('-') => declares,
+            Some(_) => false,
+        },
+        _ => false,
+    } && !arguments.contains(&"-h")
+        && !arguments.contains(&"--help");
+    if !touches_bitwarden {
+        return;
+    }
+    let named = |variable: &str| {
+        extra
+            .iter()
+            .find(|(held, _)| *held == variable)
+            .map(|(_, value)| *value)
+    };
+    assert_eq!(
+        named("SAFIX_BW"),
+        Some(bw_stub()),
+        "a run reaching the bitwarden target was not pointed at the bw stub through \
+         SAFIX_BW; it would have reached the real bw, and a client this machine holds \
+         unlocked is not a fixture. Build the environment with Fixture::bitwarden_env."
+    );
+    let scratch = fixture.work.to_string_lossy().into_owned();
+    let data = named("BITWARDENCLI_APPDATA_DIR").unwrap_or_default();
+    assert!(
+        data.starts_with(&scratch),
+        "a run reaching the bitwarden target declared BITWARDENCLI_APPDATA_DIR '{data}', \
+         which is outside the fixture's own scratch directory {scratch}; it would have \
+         read the operator's own session and local copy. Build the environment with \
+         Fixture::bitwarden_env."
+    );
+    let server = serde_json::from_str::<Value>(&declaration)
+        .ok()
+        .and_then(|held| held.get("server")?.as_str().map(str::to_owned));
+    if let Some(server) = server {
+        assert!(
+            [
+                "127.0.0.1",
+                "localhost",
+                "example.org",
+                "example.com",
+                "example.net"
+            ]
+            .iter()
+            .any(|allowed| server.contains(allowed))
+                || server.contains(".invalid"),
+            "a run reaching the bitwarden target declared the server '{server}', which is \
+             neither loopback nor a reserved documentation name. No fixture of this \
+             repository names a server that could be anybody's vault."
+        );
+    }
+}
+
+/// Refuse a sync or audit run that has not been pointed at the `op` stub.
+///
+/// The counterpart of [`refuse_a_real_database`], with its own loss at the end
+/// of it. A machine that develops this suite plausibly holds a real, signed-in
+/// `op` and the operator's own vaults, and a run that reached them would create
+/// or edit items in somebody's personal 1Password — or, with a service account
+/// in the environment, in a fleet's. There is no undo for a value overwritten
+/// there, and nothing in a hermetic build could have reached it.
+///
+/// Three halves, because each one alone would let the accident through: the
+/// override has to name the stub, so a test that built its environment any way
+/// other than [`Fixture::onepassword_env`] fails on the first; the token has to
+/// be the fixture's own fake, so a run that inherited a real one from the
+/// developing shell fails on the second; and `OP_ACCOUNT` has to be absent, so
+/// a run that would resolve one of the operator's own accounts fails on the
+/// third.
+///
+/// `sync` and `audit` both reach this target — bare, or named — so both are
+/// guarded; a run narrowed to another target reaches no service at all. A bare
+/// run over a fixture declaring no mapping of this target is exempt, and that is
+/// the target's own rule rather than a hole: such a consumer reaches the service
+/// not at all, not even for the session preflight, so there is nothing for the
+/// guard to prevent and requiring the variable would make every unrelated bare
+/// run carry it.
+fn refuse_a_real_onepassword(fixture: &Fixture, arguments: &[&str], extra: &[(&str, &str)]) {
+    let named_target = arguments.get(1);
+    let declares = std::fs::read_to_string(fixture.work.join("onepassword.json"))
+        .unwrap_or_default()
+        .contains("\"id\"");
+    let touches_onepassword = match arguments.first() {
+        Some(&("sync" | "audit")) => match named_target {
+            Some(&"1password") => true,
+            None => declares,
+            Some(word) if word.starts_with('-') => declares,
+            Some(_) => false,
+        },
+        _ => false,
+    } && !arguments.contains(&"-h")
+        && !arguments.contains(&"--help");
+    if !touches_onepassword {
+        return;
+    }
+    let named = |variable: &str| {
+        extra
+            .iter()
+            .find(|(held, _)| *held == variable)
+            .map(|(_, value)| *value)
+    };
+    // The stub, or a path inside the fixture's own scratch directory — which is
+    // on tmpfs, is made per test and is removed on every exit path, so it cannot
+    // be a real program. That second form is what the "the command could not be
+    // run at all" refusal needs: it points the override at a name nothing is
+    // installed under, and a guard admitting only the stub would make that
+    // refusal untestable while preventing nothing.
+    let scratch = fixture.work.to_string_lossy().into_owned();
+    let pointed = named("SAFIX_OP");
+    assert!(
+        pointed == Some(op_stub()) || pointed.is_some_and(|named| named.starts_with(&scratch)),
+        "a run reaching the 1password target was not pointed at the op stub through \
+         SAFIX_OP, and not at a name inside the fixture's own scratch directory \
+         either; it would have reached the real op, and the vaults this machine's \
+         session can see are not fixtures. Build the environment with \
+         Fixture::onepassword_env. It was pointed at {pointed:?}."
+    );
+    assert_eq!(
+        named("OP_SERVICE_ACCOUNT_TOKEN"),
+        Some(OP_FIXTURE_TOKEN),
+        "a run reaching the 1password target did not carry the fixture's own fake \
+         service-account token; whatever this shell holds would have been inherited. \
+         Build the environment with Fixture::onepassword_env."
+    );
+    assert_eq!(
+        named("OP_ACCOUNT"),
+        None,
+        "a run reaching the 1password target named an account through OP_ACCOUNT. \
+         Fixture::onepassword_env deliberately sets none: an undeclared account is a \
+         working configuration for this target, and naming one here would resolve an \
+         account of the operator's."
+    );
 }
 
 /// One list the fixture keeps for the modelled database, as lines.

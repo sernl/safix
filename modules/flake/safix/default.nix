@@ -18,6 +18,9 @@ let
   checks = import ./checks.nix { inherit lib; };
   bridgeLib = import ./bridge.nix { inherit lib; };
   keepassxcLib = import ./keepassxc.nix { inherit lib; };
+  passLib = import ./pass.nix { inherit lib; };
+  bitwardenLib = import ./bitwarden.nix { inherit lib; };
+  onepasswordLib = import ./onepassword.nix { inherit lib; };
 
   cfg = config.flake.safix;
 
@@ -342,6 +345,48 @@ in
         keyFile
         ;
       mappings = keepassxcLib.mappingsOf cfg.keepassxc;
+    };
+
+    # The declared pass store, flattened into what `safix sync` reads: the store
+    # root and one record per mapping carrying the attribute name it was
+    # declared under. No group here, because a `pass` path is already absolute
+    # within the store.
+    #
+    # `store` is not stringified the way `clanFlake` is, because the option is
+    # already a string: a nix path here would copy the whole encrypted tree into
+    # the world-readable store on every evaluation, and it would additionally
+    # make this value root-dependent, which `safix-examples` compares.
+    pass = {
+      inherit (cfg.pass) store;
+      mappings = passLib.mappingsOf cfg.pass;
+    };
+
+    # The declared vault, flattened into what `safix sync` reads: the optional
+    # server and one record per mapping carrying the attribute name it was
+    # declared under. No folder here, because a folder is per mapping — an item
+    # lives in one folder or in the vault's root.
+    #
+    # `server` is not stringified the way `clanFlake` is, because the option is
+    # already a string — and unlike `clanFlake` it is a URL rather than a path,
+    # so nothing is copied into the store by naming it at all.
+    bitwarden = {
+      inherit (cfg.bitwarden) server;
+      mappings = bitwardenLib.mappingsOf cfg.bitwarden;
+    };
+
+    # The declared 1Password mirror, flattened into what `safix sync` reads: the
+    # optional account shorthand and one record per mapping carrying the
+    # attribute name it was declared under.
+    #
+    # Every member is a string, a null or a list of them, and none is a
+    # function: `modules/flake/checks/examples.nix` compares this record field
+    # for field between the flake-parts consumer and the standalone one, and a
+    # function member is invisible to that comparison. Nothing here is derived
+    # from the flake's own root either, for the same reason — a root-dependent
+    # value resolves to two different strings for those two consumers.
+    onepassword = {
+      inherit (cfg.onepassword) account;
+      mappings = onepasswordLib.mappingsOf cfg.onepassword;
     };
 
     # The alphabet a user, anchor or secret name must be drawn from, as the

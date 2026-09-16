@@ -69,6 +69,47 @@ path = "tests/support/transport-stub.rs"
 name = "safix-git-shim"
 path = "tests/support/git-shim.rs"
 
+# The `pass` the pass suite delegates to. Stubbed for the reason clan is — the
+# claims are about the delegation, and a stub can be asked what it saw — and
+# unlike every other stub here it is not the only instrument for this boundary:
+# `checks.safix-pass-cli` drives the real `pass` over a store it mints in its
+# own `GNUPGHOME`, because this is the one target whose tool is free-licensed,
+# needs no network and needs no account. So this file answers "what vectors did
+# safix send" and that check answers "do those vectors mean to `pass` what
+# safix thinks they mean". It refuses an `insert` carrying neither
+# `--multiline` nor `--force` and any invocation whose argv carries a value it
+# holds, so two of the transport's promises are enforced by the thing safix
+# runs.
+[[bin]]
+name = "safix-pass-stub"
+path = "tests/support/pass-stub.rs"
+
+# The Bitwarden client the bitwarden suite delegates to. Stubbed for the reason
+# clan is — the claims are about the delegation, and a stub can be asked what it
+# saw — and for one the free-licensed `pass` does not have: no check of this
+# repository runs the real `bw`, because it cannot authenticate without a
+# network and a `nix build` has none, so this file is the only client the suite
+# has. `modules/flake/checks/bitwarden.nix` records that absence where the
+# checks live rather than leaving it silent. It refuses an invocation missing
+# `--nointeraction`, a positional that decodes to a JSON payload, a session key
+# anywhere but `BW_SESSION`, and an `edit` whose payload is not a whole item, so
+# four of the transport's promises are enforced by the thing safix runs.
+[[bin]]
+name = "safix-bw-stub"
+path = "tests/support/bw-stub.rs"
+
+# The 1Password command the onepassword suite delegates to. Stubbed for the
+# reason clan is — the claims are about the delegation, and a stub can be asked
+# what it saw — and for one the others do not have: no check of this repository
+# may ever run the real program. It is unfree, there is no self-hostable server,
+# and every authentication path needs the network, so this file is not a
+# stand-in until a real check exists; it is the only `op` this suite will have.
+# It refuses any argument word carrying `=` and any item command naming no
+# vault, so two of the transport's promises are enforced by the thing safix runs.
+[[bin]]
+name = "safix-op-stub"
+path = "tests/support/op-stub.rs"
+
 [dependencies]
 safix-core.workspace = true
 thiserror.workspace = true

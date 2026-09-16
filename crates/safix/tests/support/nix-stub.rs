@@ -33,7 +33,7 @@ use std::process::Command;
 /// The read mode is part of the assertion: `--raw` is a string taken verbatim
 /// and `--json` is a document, and a runtime that swapped them would be reading
 /// a quoted string as a pattern.
-const ATTRIBUTES: [(&str, Mode, Source); 15] = [
+const ATTRIBUTES: [(&str, Mode, Source); 18] = [
     (
         "safix.lib.placements",
         Mode::Json,
@@ -73,6 +73,21 @@ const ATTRIBUTES: [(&str, Mode, Source); 15] = [
         "safix.lib.keepassxc",
         Mode::Json,
         Source::Fixture("SAFIX_FIXTURE_KEEPASSXC"),
+    ),
+    (
+        "safix.lib.pass",
+        Mode::Json,
+        Source::Fixture("SAFIX_FIXTURE_PASS"),
+    ),
+    (
+        "safix.lib.bitwarden",
+        Mode::Json,
+        Source::Fixture("SAFIX_FIXTURE_BITWARDEN"),
+    ),
+    (
+        "safix.lib.onepassword",
+        Mode::Json,
+        Source::Fixture("SAFIX_FIXTURE_ONEPASSWORD"),
     ),
     (
         "safix.onboardingHook",

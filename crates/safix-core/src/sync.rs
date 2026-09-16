@@ -48,6 +48,7 @@
 //! returns, and the digest that decides a two-way tiebreak never leaves the
 //! database.
 
+use crate::endpoint::{self, ResolvedFields, Verdict};
 use crate::enroll::custody::DatabasePassword;
 use crate::error::{Error, Result};
 use crate::model::{Keepassxc, Mode, SyncMapping};
@@ -79,6 +80,19 @@ pub enum Outcome {
     Updated,
     /// safix now holds what the database holds, through the ordinary write path.
     Pulled,
+    /// The two sides' values already agreed and the declared fields were
+    /// written, in one write carrying the value the database already held.
+    ///
+    /// The names of the fields written, never their contents: a note may itself
+    /// be sensitive, so the report is a `&'static str` per field and no
+    /// run-time string can reach it.
+    FieldsUpdated(Vec<&'static str>),
+    /// The declared fields differ from the entry's and this mode does not write
+    /// them, so nothing was written.
+    ///
+    /// The names of the fields, for the reason [`Self::FieldsUpdated`] carries
+    /// them.
+    FieldsDiverged(Vec<&'static str>),
     /// The two sides disagree and the mode does not say who wins, so nothing was
     /// written.
     Conflict,
@@ -101,6 +115,8 @@ impl Outcome {
             Self::Unchanged => "unchanged",
             Self::Updated => "updated",
             Self::Pulled => "pulled",
+            Self::FieldsUpdated(_) => "fields updated",
+            Self::FieldsDiverged(_) => "fields diverged",
             Self::Conflict => "conflict",
             Self::Refused(_) => "refused",
             Self::NotJudged(_) => "not judged",
@@ -111,10 +127,17 @@ impl Outcome {
     ///
     /// A conflict does, because it is a state the operator has to resolve; a
     /// mapping that could not be judged does, because a clean exit would say
-    /// something the run does not know.
+    /// something the run does not know. A field divergence does, on the same
+    /// footing: a declared field that is not there is a declaration that is not
+    /// true, and answering whether the declarations are true is the whole
+    /// purpose of reporting at all. A field that *was* written does not, for
+    /// the reason an updated value does not: the run resolved it.
     #[must_use]
     pub const fn is_failure(&self) -> bool {
-        matches!(self, Self::Conflict | Self::Refused(_) | Self::NotJudged(_))
+        matches!(
+            self,
+            Self::Conflict | Self::Refused(_) | Self::NotJudged(_) | Self::FieldsDiverged(_)
+        )
     }
 }
 
@@ -172,6 +195,8 @@ impl Report {
             unchanged: count("unchanged"),
             updated: count("updated"),
             pulled: count("pulled"),
+            fields_updated: count("fields updated"),
+            fields_diverged: count("fields diverged"),
             conflict: count("conflict"),
             refused: count("refused"),
             not_judged: count("not judged"),
@@ -188,6 +213,12 @@ pub struct Tally {
     pub updated: usize,
     /// Mappings whose safix side was written.
     pub pulled: usize,
+    /// Mappings whose value already agreed and whose declared fields were
+    /// written.
+    pub fields_updated: usize,
+    /// Mappings whose declared fields differ and whose mode does not write
+    /// them.
+    pub fields_diverged: usize,
     /// Mappings whose two sides disagree with nobody to decide.
     pub conflict: usize,
     /// Mappings refused.
@@ -215,12 +246,53 @@ impl ValueSource for Held {
 enum Decision {
     /// Nothing to do.
     Settled(Outcome),
-    /// Write this value into the database, and record the agreement when the
-    /// mode remembers one.
-    Push { value: Secret, remember: bool },
+    /// Write the database's side.
+    Push(Pushing),
     /// Write this value into safix, and record the agreement when the mode
     /// remembers one.
     Pull { value: Secret, remember: bool },
+}
+
+/// One database write: the value, the declared fields beside it, and whether
+/// the agreement is recorded afterwards.
+///
+/// One push arm and one struct rather than a second arm for a field repair,
+/// because a value repair and a field repair are the same single `add` or
+/// `edit`: a kdbx save rewrites the whole file, so a second write path to the
+/// same command would be a second whole-file save of the same entry.
+///
+/// A struct rather than four fields on the variant so that [`push`] takes one
+/// parameter for them rather than four; the four are what
+/// `openspec/changes/extend-bridge-fields/tasks.md` names.
+struct Pushing {
+    /// The value the entry will hold, which is the one it already holds when
+    /// only the fields moved.
+    value: Secret,
+    /// Whether this mode records the agreement afterwards.
+    remember: bool,
+    /// The declared fields, resolved, that ride along in the same write.
+    resolved: ResolvedFields,
+    /// The declared fields the entry did not match, when the value itself
+    /// agreed; empty when the value is what moved.
+    ///
+    /// Empty is what makes the report say `updated`: a value divergence is
+    /// decided first and a field divergence never displaces it, so the only
+    /// push that reports `fields updated` is one whose value agreed.
+    drifted: Vec<&'static str>,
+}
+
+impl Pushing {
+    /// What a completed write of this push is reported as.
+    ///
+    /// The whole of the precedence between a value and a field, in one place:
+    /// an empty `drifted` is a value that moved, and a non-empty one is a value
+    /// that agreed and fields that did not.
+    fn outcome(self) -> Outcome {
+        if self.drifted.is_empty() {
+            return Outcome::Updated;
+        }
+        Outcome::FieldsUpdated(self.drifted)
+    }
 }
 
 /// Converge every declared mapping, or the ones named.
@@ -281,8 +353,8 @@ pub fn run(
     for (mapping, decision) in decided {
         match decision {
             Decision::Settled(outcome) => written.push((mapping, outcome)),
-            Decision::Push { value, remember } => {
-                let outcome = push(progress, &mut database, mirror, mapping, &value, remember);
+            Decision::Push(pushing) => {
+                let outcome = push(progress, &mut database, mirror, mapping, pushing);
                 written.push((mapping, outcome));
             }
             // Held rather than acted on here, so that the database writes stay
@@ -336,6 +408,13 @@ pub fn run(
 /// `pub(crate)` rather than private: [`crate::audit`]'s keepassxc target reuses
 /// this exact selection so that scoping a comparison and scoping a write cannot
 /// answer "which mappings" differently.
+///
+/// Deliberately not shared with [`crate::bridge::selected`], which answers the
+/// same question for the clan target. Their refusals name different declared
+/// lists and that one additionally refuses `MappingWrongDirection`, so one
+/// generic selection would cost a per-target refusal closure and a per-target
+/// mapping trait to save these lines. The duplication that [`crate::endpoint`]
+/// exists to delete is the judge, not this.
 pub(crate) fn selected<'a>(mirror: &'a Keepassxc, only: &[String]) -> Result<Vec<&'a SyncMapping>> {
     if only.is_empty() {
         return Ok(mirror.mappings.iter().collect());
@@ -375,6 +454,23 @@ pub(crate) fn lingering(database: &Database, mirror: &Keepassxc) -> Vec<String> 
 }
 
 /// Read both sides of one mapping and decide what its mode says to do.
+///
+/// # The order, which is a precedence rather than a sequence
+///
+/// The value verdict is decided first and a field divergence never displaces
+/// it: a mapping whose value and whose declared fields both differ is `updated`
+/// or `conflict`, never `fields diverged`, because the same write that repairs
+/// the value carries the fields, and reporting the lesser fact would bury the
+/// greater one. That is held in the code by where `drifted` is filled in: only
+/// the arms whose two values already agree carry it, so a push that repairs a
+/// value reports `updated` by construction rather than by a later check.
+///
+/// # Two reads, and the second only sometimes
+///
+/// The fields read is its own invocation and happens only for a mapping that
+/// declares a field over an entry that is there. Both reads are in this
+/// function, which is entirely before the first write of a run, so the write
+/// burst the whole-file save requires is unaffected.
 fn decide(
     workspace: &Workspace,
     database: &Database,
@@ -383,9 +479,32 @@ fn decide(
 ) -> Decision {
     let entry = mirror.entry_of(mapping);
 
+    // Before either side is read: a declaration this target cannot honour is
+    // refused rather than partly written, and the refusal costs no read.
+    let declared = match endpoint::resolve_fields(
+        workspace,
+        "keepassxc",
+        &mapping.safix.user,
+        &mapping.kdbx.fields,
+        &database.capabilities(),
+    ) {
+        Ok(declared) => declared,
+        Err(reason) => return Decision::Settled(Outcome::Refused(reason)),
+    };
+
     let theirs = match database.read(&entry) {
         Ok(held) => held,
         Err(reason) => return Decision::Settled(Outcome::NotJudged(reason)),
+    };
+    // An entry that is not there carries no field, and asking the store about
+    // one would be asking about an entry its own listing says is absent.
+    let held_fields = if theirs.is_some() {
+        match database.read_fields(&entry, &declared) {
+            Ok(held) => held,
+            Err(reason) => return Decision::Settled(Outcome::NotJudged(reason)),
+        }
+    } else {
+        ResolvedFields::default()
     };
     let ours = match bridge::held_by_safix(
         workspace,
@@ -397,16 +516,20 @@ fn decide(
         Err(reason) => return Decision::Settled(Outcome::NotJudged(reason)),
     };
 
+    let drifted = declared.diff(&held_fields);
+
     match mapping.mode {
         Mode::SafixToKeepassxc => match (ours, theirs) {
             (None, _) => Decision::Settled(Outcome::Refused(empty_source(workspace, mapping))),
             (Some(ours), Some(theirs)) if ours.equals(&theirs) => {
-                Decision::Settled(Outcome::Unchanged)
+                repairing_fields(ours, declared, drifted, false)
             }
-            (Some(ours), _) => Decision::Push {
+            (Some(ours), _) => Decision::Push(Pushing {
                 value: ours,
                 remember: false,
-            },
+                resolved: declared,
+                drifted: Vec::new(),
+            }),
         },
 
         Mode::KeepassxcToSafix => match (ours, theirs) {
@@ -415,9 +538,10 @@ fn decide(
                 entry,
                 mode: mapping.mode.as_str(),
             })),
-            (Some(ours), Some(theirs)) if ours.equals(&theirs) => {
-                Decision::Settled(Outcome::Unchanged)
-            }
+            // The declaration is the author of a field, and this mode writes
+            // safix rather than the database, so a field difference is reported
+            // and nothing is written.
+            (Some(ours), Some(theirs)) if ours.equals(&theirs) => diverging_fields(drifted),
             (_, Some(theirs)) => Decision::Pull {
                 value: theirs,
                 remember: false,
@@ -426,70 +550,100 @@ fn decide(
 
         Mode::Backup => match (ours, theirs) {
             (None, _) => Decision::Settled(Outcome::Refused(empty_source(workspace, mapping))),
-            (Some(ours), None) => Decision::Push {
+            // Absence is the one case `backup` writes, so the declared fields
+            // ride along with the value that creates the entry.
+            (Some(ours), None) => Decision::Push(Pushing {
                 value: ours,
                 remember: false,
-            },
-            (Some(ours), Some(theirs)) if ours.equals(&theirs) => {
-                Decision::Settled(Outcome::Unchanged)
-            }
+                resolved: declared,
+                drifted: Vec::new(),
+            }),
+            // `backup` never overwrites an existing entry, and writing its
+            // fields while refusing its value would make `backup` half a mode.
+            (Some(ours), Some(theirs)) if ours.equals(&theirs) => diverging_fields(drifted),
             // The whole of what `backup` is: an existing differing value is
             // reported and never overwritten.
             (Some(_), Some(_)) => Decision::Settled(Outcome::Conflict),
         },
 
-        Mode::TwoWay => two_way(database, &entry, ours, theirs),
+        Mode::TwoWay => two_way(database, &entry, ours, theirs, declared, drifted),
     }
 }
 
-/// The three-way decision, against the agreement the companion entry remembers.
+/// A two-way mapping's decision: the shared judge's verdict over the two
+/// values and the agreement the companion entry remembers, worded as this
+/// target's own.
 ///
-/// A memory that is absent, unreadable or written under a tag this version does
-/// not know takes bootstrap semantics: write where one side is empty, report
-/// everything else. Never a guess — the one thing that cannot happen here is
-/// picking a winner from a clock.
+/// `agrees` is passed into the judge rather than derived inside it, because
+/// this mechanism's memory carries [`FORMAT`] and the bridge target's carries
+/// its own, deliberately distinct tag.
 fn two_way(
     database: &Database,
     entry: &str,
     ours: Option<Secret>,
     theirs: Option<Secret>,
+    declared: ResolvedFields,
+    drifted: Vec<&'static str>,
 ) -> Decision {
     let remembered = recorded(database, entry);
-
-    match (ours, theirs) {
-        (None, None) => Decision::Settled(Outcome::Unchanged),
-        (Some(ours), None) => Decision::Push {
-            value: ours,
-            remember: true,
+    let agreement = |remembered: &Secret, value: &Secret| agrees(remembered, value);
+    let verdict = endpoint::judge(
+        ours.as_ref(),
+        theirs.as_ref(),
+        remembered.as_ref(),
+        &agreement,
+    );
+    match verdict {
+        Verdict::Unchanged => match ours {
+            // A field has one author, so a two-way mapping's fields converge
+            // toward the declaration — and no agreement is recorded for one,
+            // because there is nothing for a memory to arbitrate.
+            Some(ours) => repairing_fields(ours, declared, drifted, false),
+            None => Decision::Settled(Outcome::Unchanged),
         },
-        (None, Some(theirs)) => Decision::Pull {
-            value: theirs,
-            remember: true,
+        Verdict::Conflict => Decision::Settled(Outcome::Conflict),
+        Verdict::PushValue { remember } => match ours {
+            Some(value) => Decision::Push(Pushing {
+                value,
+                remember,
+                resolved: declared,
+                drifted: Vec::new(),
+            }),
+            None => unreachable!("a push was asked for where safix holds no value"),
         },
-        (Some(ours), Some(theirs)) => {
-            if ours.equals(&theirs) {
-                return Decision::Settled(Outcome::Unchanged);
-            }
-            let Some(remembered) = remembered else {
-                return Decision::Settled(Outcome::Conflict);
-            };
-            match (agrees(&remembered, &ours), agrees(&remembered, &theirs)) {
-                // safix is where the agreement left it, so the database is the
-                // side that moved.
-                (true, false) => Decision::Pull {
-                    value: theirs,
-                    remember: true,
-                },
-                (false, true) => Decision::Push {
-                    value: ours,
-                    remember: true,
-                },
-                // Both moved, or neither matches an agreement this run cannot
-                // account for. Either way nothing is written.
-                _ => Decision::Settled(Outcome::Conflict),
-            }
-        }
+        Verdict::PullValue { remember } => match theirs {
+            Some(value) => Decision::Pull { value, remember },
+            None => unreachable!("a pull was asked for where the database holds no value"),
+        },
     }
+}
+
+/// The two sides' values agree: either there is nothing to do, or the declared
+/// fields moved and this mode writes them.
+fn repairing_fields(
+    ours: Secret,
+    resolved: ResolvedFields,
+    drifted: Vec<&'static str>,
+    remember: bool,
+) -> Decision {
+    if drifted.is_empty() {
+        return Decision::Settled(Outcome::Unchanged);
+    }
+    Decision::Push(Pushing {
+        value: ours,
+        remember,
+        resolved,
+        drifted,
+    })
+}
+
+/// The two sides' values agree and this mode does not write the database's
+/// side, so a field difference is the finding.
+fn diverging_fields(drifted: Vec<&'static str>) -> Decision {
+    if drifted.is_empty() {
+        return Decision::Settled(Outcome::Unchanged);
+    }
+    Decision::Settled(Outcome::FieldsDiverged(drifted))
 }
 
 /// The agreement the companion entry remembers, as the bytes it holds.
@@ -539,14 +693,18 @@ fn empty_source(workspace: &Workspace, mapping: &SyncMapping) -> Error {
     }
 }
 
-/// Write the database's side, and the agreement when the mode remembers one.
+/// Write the database's side — the value and the declared fields in one write —
+/// and the agreement when the mode remembers one.
+///
+/// The log line names the two endpoints and no field, because the log is about
+/// which sides a value moved between; which fields were written is the report's
+/// own sentence, under the mapping's line.
 fn push(
     progress: &dyn Progress,
     database: &mut Database,
     mirror: &Keepassxc,
     mapping: &SyncMapping,
-    value: &Secret,
-    remember: bool,
+    pushing: Pushing,
 ) -> Outcome {
     let entry = mirror.entry_of(mapping);
     log(
@@ -556,17 +714,23 @@ fn push(
             mapping.safix.user, mapping.safix.name,
         ),
     );
-    if let Err(reason) = database.write(&entry, value, mapping.kdbx.username.as_deref()) {
+    if let Err(reason) = database.write(&entry, &pushing.value, &pushing.resolved) {
         return Outcome::Refused(reason);
     }
-    if let Err(reason) = remembered_after(database, &entry, value, remember) {
+    if let Err(reason) = remembered_after(database, &entry, &pushing.value, pushing.remember) {
         return Outcome::Refused(reason);
     }
-    Outcome::Updated
+    pushing.outcome()
 }
 
 /// Write safix's side through the ordinary write path, and the agreement when
 /// the mode remembers one.
+///
+/// Only the value crosses. A field is a declaration and safix's side has
+/// nowhere to hold one — a safix entry is a file, a key inside it and an
+/// audience — so this function is unchanged by the field axis except for the
+/// companion's own write, which carries no field because a companion is
+/// safix's bookkeeping rather than a mirrored entry.
 fn pull(
     workspace: &Workspace,
     progress: &dyn Progress,
@@ -616,7 +780,11 @@ fn pull(
             Ok(recorded) => recorded,
             Err(reason) => return Outcome::Refused(reason),
         };
-        if let Err(reason) = database.write(&store::companion_of(&entry), &recorded, None) {
+        if let Err(reason) = database.write(
+            &store::companion_of(&entry),
+            &recorded,
+            &ResolvedFields::default(),
+        ) {
             return Outcome::Refused(reason);
         }
     }
@@ -630,6 +798,10 @@ fn pull(
 /// value only one of them holds, and the next run would read that as "the side
 /// holding the new value never changed" and converge the other way — overwriting
 /// the new value with the old one.
+///
+/// The companion carries no declared field, because it is safix's own
+/// bookkeeping rather than an entry a mapping mirrors: nothing declares it, so
+/// there is nothing to declare about it.
 fn remembered_after(
     database: &mut Database,
     entry: &str,
@@ -641,7 +813,11 @@ fn remembered_after(
     }
     let line = memory_of(value);
     let recorded = Secret::read_from(&mut line.as_bytes())?;
-    database.write(&store::companion_of(entry), &recorded, None)
+    database.write(
+        &store::companion_of(entry),
+        &recorded,
+        &ResolvedFields::default(),
+    )
 }
 
 /// The commit subject a mirrored value lands under, for a caller that wants to
@@ -672,7 +848,7 @@ mod tests {
                   "id": "grafana",
                   "mode": "{mode}",
                   "safix": {{ "user": "alice", "name": "grafana-password" }},
-                  "kdbx": {{ "path": "alice/grafana", "username": null }}
+                  "kdbx": {{ "path": "alice/grafana", "fields": {{}} }}
                 }}
               ]
             }}"#
@@ -723,6 +899,16 @@ mod tests {
             (Outcome::Unchanged, "unchanged", false),
             (Outcome::Updated, "updated", false),
             (Outcome::Pulled, "pulled", false),
+            (
+                Outcome::FieldsUpdated(vec!["notes"]),
+                "fields updated",
+                false,
+            ),
+            (
+                Outcome::FieldsDiverged(vec!["url"]),
+                "fields diverged",
+                true,
+            ),
             (Outcome::Conflict, "conflict", true),
             (Outcome::Refused(Error::StorePipeMissing), "refused", true),
             (
@@ -735,5 +921,42 @@ mod tests {
             assert_eq!(outcome.as_str(), word);
             assert_eq!(outcome.is_failure(), failure, "{word} fails the run");
         }
+    }
+
+    /// A value divergence is decided first and a field divergence never
+    /// displaces it.
+    ///
+    /// Held here at the seam where the precedence lives: `decide` fills
+    /// `drifted` only in the arms whose two values already agree, so a push
+    /// that repairs a value carries an empty one and reports the value's
+    /// outcome however far the fields have drifted. The other half of this
+    /// claim — that a run really does report `updated` for a mapping whose
+    /// value and declared fields both differ — is
+    /// `crates/safix/tests/sync_path.rs`'s
+    /// `each_mode_converges_exactly_as_its_name_says`, whose pushing mapping
+    /// declares a field and differs in its value.
+    #[test]
+    fn a_field_drift_does_not_displace_a_value_divergence() {
+        let declared = || endpoint::ResolvedFields {
+            username: Some(endpoint::Field::Literal("alice@example".to_owned())),
+            ..endpoint::ResolvedFields::default()
+        };
+        let value = || Secret::read_from(&mut b"safix-side".as_slice()).expect("a fixture value");
+
+        let moved = Pushing {
+            value: value(),
+            remember: false,
+            resolved: declared(),
+            drifted: Vec::new(),
+        };
+        assert_eq!(moved.outcome().as_str(), "updated");
+
+        let repaired = Pushing {
+            value: value(),
+            remember: false,
+            resolved: declared(),
+            drifted: vec!["username"],
+        };
+        assert_eq!(repaired.outcome().as_str(), "fields updated");
     }
 }

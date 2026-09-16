@@ -1,0 +1,185 @@
+# Tasks: add-onepassword-bridge
+
+Citations are as read while designing this change; re-read the named lines before editing, since this change lands after `extend-bridge-fields` and line numbers drift.
+That change is assumed applied: `modules/flake/safix/fields.nix` exports the `fields` submodule and `fieldValue`, `modules/flake/safix/reserved.nix` exports the complete six-word list `[ "clan" "keepassxc" "pass" "bitwarden" "1password" "all" ]`, `crates/safix-core/src/bridge.rs`'s `RESERVED_MAPPING_WORDS` is `[&str; 6]`, and `crates/safix-core/src/endpoint.rs` carries `Record`, `Endpoint`, `Existing` and `Capabilities` with one shared `judge` over `Record`s.
+This change creates neither `fields.nix` nor `reserved.nix` and appends nothing to the reserved list.
+No real fleet identifier, hostname, vault, account or recipient enters this repository; fixtures use `alice`, `bob` and `carol`, synthetic `age1` strings, the vault name `fixture-vault`, the account shorthand `fixture.example.com`, and the fake service-account token `ops-fixture-not-a-real-token`.
+Where a task says "hold", add a check that fails when the claim stops being true, not a sentence asserting it.
+
+Group order is the landing order, and it is forced: the nix surface must exist before the model can deserialize it, the model before the transport, the transport before the refusals have call sites, the refusals before the reporter's match is exhaustive, the stub before any integration claim can run, and the checks last because they reference every name above.
+
+## 1. The declaration surface
+
+- [x] 1.1 Add `modules/flake/safix/onepassword.nix`, taking `{ lib }` and importing `./resolve.nix`, `./bridge.nix`, `./fields.nix` and `./reserved.nix`, exporting `modes`, `pullCapable`, `opSide`, `mapping`, `mappingsOf`, `itemPathOf`, `violationsOf` — the same export set `modules/flake/safix/keepassxc.nix:234-245` has, minus `stateSuffix` and `companionOf`, which this target has no use for because its memory is a field of the mapped item.
+- [x] 1.2 Write `modes = [ "safix-to-1password" "1password-to-safix" "two-way" "backup" ]` and `pullCapable = mode: mode == "1password-to-safix" || mode == "two-way"`, mirroring `keepassxc.nix:34-43`.
+- [x] 1.3 Write `opSide` as a `lib.types.submodule` declaring exactly `vault` (`lib.types.str`, required, example `"Private"`), `item` (`lib.types.str`, required, example `"grafana"`), and `fields` (the `fields.nix` submodule, defaulting to the submodule's own defaults).
+  Each description states what the option is for and, for `vault` and `item`, why each is a string and not a nix path — the reason `options.nix:516-521` gives for `keepassxc.database`, plus the second reason that a root-dependent absolute string makes the two `safix-examples` consumers resolve to different values (`modules/flake/checks/examples.nix:57-67`).
+  `vault` carries no default: a service account cannot reach the built-in Private, Personal or Employee vault and the service's own `item get` requires the vault under one, so a default would be a value that fails for the most likely posture.
+- [x] 1.4 Write `mapping` as a `lib.types.submodule` declaring `mode` (`lib.types.enum modes`, required), `safix` (`bridge.safixSide`), and `onepassword` (`opSide`), with `mode`'s description carrying all four modes' semantics and the no-deletion sentence, in the shape `keepassxc.nix:92-142` uses.
+  The `onepassword` description states that evaluation verifies neither the vault nor the item, because both are content of a remote service and answering needs a session.
+- [x] 1.5 Write `mappingsOf = onepassword: lib.mapAttrsToList (id: m: m // { inherit id; }) onepassword.mappings` and `itemPathOf = m: "${m.onepassword.vault}/${m.onepassword.item}"` — the vault-qualified item, so two mappings naming one item name in two vaults do not collide.
+- [x] 1.6 Write `violationsOf = registry: onepassword:` with exactly four rules and the `resolve.violations registry != [ ]` short-circuit, each message a literal sentence naming `flake.safix.onepassword.mappings.<id>`, copied in structure from `keepassxc.nix:151-232`: `unresolvableSafixSide` (unknown user, then unheld name), `twoProducers` (over `pullCapable`), `twoMappingsOneItem` (grouped by `itemPathOf`), `reservedId` (over the imported `reserved.nix` list, not a local literal).
+  There is no `reservedName` rule; the file's header records why.
+- [x] 1.7 Write the file's header, in the shape `keepassxc.nix:1-20` and `modules/flake/checks/integration.nix:112-116` establish: what this declares, why the far side is unverifiable at evaluation, that the memory is a concealed field of the mapped item so no name is reserved, and — as its own paragraph — that no check of this repository drives a real `op`, naming all three grounds (the unfree licence of `_1password-cli`, no self-hostable server, no network in a hermetic build) and stating that none of them expires.
+- [x] 1.8 Add the `flake.safix.onepassword` block to `modules/flake/safix/options.nix` after `keepassxc`'s (`:507-622`): `account` (`nullOr str`, default `null`, example `"fixture.example.com"`) and `mappings` (`attrsOf onepassword.mapping`, default `{ }`, with a `lib.literalExpression` example carrying one mapping including a `fields` block).
+  `account`'s description states that `null` means whatever account the program resolves for itself, that a service-account token names one implicitly, and that an undeclared account is therefore a working configuration rather than a missing declaration.
+  `mappings`' description enumerates the four refusals and states what evaluation refuses nothing about.
+- [x] 1.9 Register the module in `modules/flake/safix/default.nix`: the `onepassword = import ./onepassword.nix { inherit lib; };` binding beside the existing lib imports, and the flattened `lib.onepassword` record beside `lib.bridge` and `lib.keepassxc`, carrying `account` and the `mappings` list in declaration order.
+  The record must be JSON-serializable with no function member, because `modules/flake/checks/examples.nix:57-67` compares it field-for-field between two consumers and a function is invisible to that comparison.
+- [x] 1.10 Severity drill: drop `twoMappingsOneItem` from `violationsOf`'s list and confirm the structural check's `oneItemMessages` field empties while no other field moves; separately change `itemPathOf` to `m.onepassword.item` alone and confirm the check's "two vaults, one item name, accepted" row reddens, which is the evidence the vault is part of the identity rather than decoration.
+- [x] 1.11 Verify: `nix build .#checks.x86_64-linux.safix-onepassword` and `.#checks.x86_64-linux.safix-onepassword-refusals` green once group 8 lands; before then, `nix eval .#safix.lib.onepassword` over the fixture fleet resolves and the drill in 1.10 is observed.
+
+## 2. The model, the attribute and the accessor
+
+- [x] 2.1 Add to `crates/safix-core/src/model.rs`, beside `KdbxSide`/`SyncMapping`/`Keepassxc` (`:904-958`): `OpSide { vault: String, item: String, fields: Fields }`, `OnepasswordMapping { id: String, mode: Mode, safix: SafixSide, onepassword: OpSide }`, and `Onepassword { account: Option<String>, mappings: Vec<OnepasswordMapping> }`, every struct `#[serde(deny_unknown_fields)]` per the module doc at `model.rs:1-15`.
+- [x] 2.2 Give this target's four mode spellings their serde renames — `safix-to-1password`, `1password-to-safix`, `two-way`, `backup` — following `Mode`'s existing arrangement (`model.rs:844-872`), and give `Onepassword` an `item_of(&OnepasswordMapping) -> String` returning `"{vault}/{item}"`, the counterpart of `Keepassxc::entry_of`.
+- [x] 2.3 Add `Attribute::Onepassword` to `crates/safix-core/src/nix.rs:32-52` with both spellings — `safix.lib.onepassword` (`:79-80`) and `flake.safix.lib.onepassword` (`:101-102`).
+- [x] 2.4 Add the `onepassword: OnceLock<Onepassword>` field, its `OnceLock::new()` initialisation, and the `pub fn onepassword(&self) -> Result<&Onepassword>` accessor to `crates/safix-core/src/workspace.rs:43,104,236-240`, exactly in `keepassxc()`'s shape.
+- [x] 2.5 Add `Target::OnePassword` to `crates/safix-core/src/bridge.rs:74-78` and its `as_str` arm spelled `1password`.
+- [x] 2.6 Add unit tests in `model.rs`'s own test module: each of the four mode spellings round-trips, an unknown member of `OpSide` is refused, an unknown top-level member of `Onepassword` is refused, and a mapping declaring no field deserializes with every field at its default.
+- [x] 2.7 Severity drill: remove `#[serde(deny_unknown_fields)]` from `OpSide` and confirm the unknown-member test in 2.6 turns green when it should refuse, which is the evidence the attribute is what refuses rather than a coincidence of member ordering.
+- [x] 2.8 Verify: `cargo test -p safix-core model::` green and the drill in 2.7 observed.
+
+## 3. The transport
+
+- [x] 3.1 Add `crates/safix-core/src/onepassword.rs` and register it in `crates/safix-core/src/lib.rs`, carrying `pub struct OnePassword` holding the resolved program, the optional account and the run's own `Progress` handle, and implementing `endpoint::Endpoint` for it.
+- [x] 3.2 Add `pub const OP_OVERRIDE: &str = "SAFIX_OP";` and a `fn op_binary()` resolving it with the fallback `op`, following `crates/safix-core/src/enroll/custody.rs:44,352-357` exactly.
+- [x] 3.3 Implement `unlock()`: run `op whoami --format json`, prefixed by `--account <shorthand>` when one is declared, with all three descriptors set explicitly; a spawn failure is `Error::OnePasswordUnavailable { program, cause }` and a non-zero exit is `Error::OnePasswordSignedOut { account, output }` carrying the program's own standard error verbatim.
+  It is called once per run before any mapping's side is read, the position `crates/safix-core/src/sync.rs:240-336` gives `enroll::terminal_present()`.
+- [x] 3.4 Implement `read(id)`: run `op item get <item> --vault <vault> --format json --reveal`, deserialize into a private `Item` type mirroring the documented shape — `{ id, title, category, tags: Vec<String>, urls: Vec<Url>, fields: Vec<Field { id, type, purpose, label, value }> }` — and return `Some(Record { value, fields })` built from `purpose: "PASSWORD"`, `purpose: "USERNAME"`, `purpose: "NOTES"`, the first `urls[]` entry, and `tags`.
+  A "not found" exit is `Ok(None)`; a vault the session cannot see is `Error::OnePasswordVaultAbsent { mapping, vault, output }`; any other non-zero exit is `Error::OnePasswordCommandFailed { item, arguments, output }` whose `arguments` by construction carries no value.
+  `Item` retains every member it does not understand in a `#[serde(flatten)] rest: serde_json::Map<String, Value>`, which is what makes task 3.6's round-trip possible.
+- [x] 3.5 Implement `write(id, record, Existing::Absent)`: `op item create --vault <vault> --category login --title <item> -` with the whole item as one JSON object on standard input, holding the value in a `CONCEALED`/`PASSWORD` field, the declared fields in their documented homes (`purpose: "USERNAME"`, `notesPlain` with `purpose: "NOTES"`, the autofill `urls[]` entry rather than the `URL` custom-field type, and the item's own `tags`), and — under `two-way` — the `safix-sync-state` field of 3.7.
+- [x] 3.6 Implement `write(id, record, Existing::Present)` as a round-trip: start from the `Item` `read()` returned, including its `rest`, replace only the value field, the declared fields and the memory field, and write the whole object back through `op item edit <item> --vault <vault> -` on standard input.
+  No code path constructs an item from a template on the edit leg; the header records the published danger that a template-assembled edit loses the item's passkeys.
+- [x] 3.7 Implement the memory: a custom field named `safix-sync-state` of type `CONCEALED`, carrying the shared `safix-sync-v1 <fingerprint>` line (`crates/safix-core/src/sync.rs:68`), read through the shared `recorded`/`agrees` pair (`sync.rs:500-524`) so an absent, unreadable or unknown-tagged line is treated as absent rather than as a refusal.
+- [x] 3.8 Implement `list()`: `op item list --vault <vault> --format json`, returning item titles only, which is what the lingering report reads; no field of an unmapped item is ever requested.
+- [x] 3.9 Implement `capabilities()`: all four fields, each with a standard-input channel, so `Error::FieldUnsupported` and `Error::FieldSourceInArgv` are unreachable for this target.
+  Add a unit test asserting the capability set is the full four and that the channel named for each is standard input.
+- [x] 3.10 Hold the argv discipline in code, not only in the stub: a `fn arguments(...)` that builds every vector, and a unit test asserting that no vector any of the five operations produces contains a word carrying `=`.
+- [x] 3.11 Write the file's header in the shape `crates/safix-core/src/store.rs:1-52` uses, with the difference stated plainly: `store.rs` records *measured* `keepassxc-cli` behaviour, and this file records *documented* behaviour, listing each fact taken from the published CLI reference (the item JSON shape, `--reveal`, the stdin `-` form on create and edit, `--format json`, the `urls[]` autofill semantics, the template-edit passkey danger) and naming what a contributor holding a licensed program should re-measure.
+  The same paragraph states that no check drives the real program and why.
+- [x] 3.12 Severity drill: replace the `Existing::Present` round-trip with a freshly assembled item and confirm the "an unrecognised member survives an edit" test of 7.5 reddens while every other test of that target stays green, which is the evidence the round-trip is what preserves a passkey rather than the stub's tolerance.
+- [x] 3.13 Severity drill: move the `unlock()` preflight to after the first `read()` and confirm the signed-out test of 7.6 reddens on having decrypted safix's side, which is the evidence the ordering is load-bearing rather than incidental.
+- [x] 3.14 Verify: `cargo test -p safix-core onepassword::` green, both drills observed.
+
+## 4. The refusals
+
+- [x] 4.1 Add to `crates/safix-core/src/error/mod.rs`, after the store block (`:1146-1250`): `OnePasswordUnavailable { program: String, #[source] cause: io::Error }`, `OnePasswordSignedOut { account: Option<String>, output: String }`, `OnePasswordCommandFailed { item: String, arguments: String, output: String }`, `OnePasswordItemAbsent { mapping: String, vault: String, item: String, mode: &'static str }`, `OnePasswordVaultAbsent { mapping: String, vault: String, output: String }`, each with `#[error("{}", prose::…)]` and a doc comment per variant and per field.
+- [x] 4.2 Add the five sentences to `crates/safix-core/src/error/prose.rs` beside `store_locked`/`database_unreadable`/`store_command_failed`/`store_entry_absent` (`:646-760`).
+  `onepassword_signed_out` names the declared account when one is declared and carries the program's own words; `onepassword_vault_absent` names the mapping and the vault and gives a service account's permissions as the remedy; `onepassword_item_absent` names the mapping, the vault, the item and the mode, which is what makes the far side the source; `onepassword_command_failed` carries the argument vector with the statement that it holds no value.
+- [x] 4.3 Add the five codes to `crates/safix-core/src/error/code.rs`'s table (`:178-188`): `safix::onepassword_unavailable`, `safix::onepassword_signed_out`, `safix::onepassword_command_failed`, `safix::onepassword_item_absent`, `safix::onepassword_vault_absent`.
+- [x] 4.4 Reuse `UnknownSyncMapping` and `SyncSourceEmpty` (`error/mod.rs:1179-1186,1226-1239`) for this target rather than adding per-target twins, and add nothing analogous to `ValueSpansLines`: record in the transport header that the absence is deliberate because the stdin payload carries a multi-line value whole.
+- [x] 4.5 Add one `sample` arm per new `Code` to `crates/safix/src/reporter.rs:237-675` and accept the ten snapshots they produce: `crates/safix/src/snapshots/safix__reporter__tests__{plain,graphical}-onepassword_{unavailable,signed_out,command_failed,item_absent,vault_absent}.snap`.
+- [x] 4.6 Severity drill: make `OnePasswordVaultAbsent` render through `onepassword_item_absent`'s sentence and confirm two snapshots redden and the other eight do not, which is the evidence the two faults have distinct prose rather than one sentence serving both.
+- [x] 4.7 Verify: `cargo test -p safix reporter::` green with ten new snapshot files committed, drill in 4.6 observed.
+
+## 5. Dispatch, usage and render
+
+- [x] 5.1 Add the target keyword to `crates/safix/src/main.rs:718`: `Some("1password") => Some(bridge::Target::OnePassword)`, and nothing accepting `op`.
+- [x] 5.2 Add the `Some(bridge::Target::OnePassword) => "the 1password target"` arm to `DirectionOnWrongTarget`'s rendering (`main.rs:770-778`).
+- [x] 5.3 Extend `sync_command` and `audit_command`'s per-target gates (`main.rs:790-850`) with this target's arm, each contributing its `refused |= …` and its `out.push_str(&render::…)`, and update both `FORM` strings (`main.rs:794,820`) to the five-target form.
+- [x] 5.4 Add this target's usage: the two forms at `crates/safix/src/usage.rs:82,133`, the target section after the keepassxc one (`:205-`), the verb table rows (`:904-905`), and the "what sync's 1password target is" paragraph beside the keepassxc one (`:977-`).
+  The section states the four modes, that the value and all four fields travel standard input, that the memory is a concealed field of the item itself so nothing is reserved, that the session is the operator's and safix signs nothing in, and that a failure against the service refuses its own mapping and does not end the run.
+- [x] 5.5 Add this target's render functions to `crates/safix/src/render.rs` beside `push_keepassxc_audit` (`:733-800`) and the sync detail path, with the diverged remedy line `safix sync 1password <mapping>` under a pushing mode and "the declaration is the author" under `1password-to-safix`, and a field-divergence line naming fields and never their contents.
+- [x] 5.6 Regenerate `crates/safix/tests/snapshots/upload__safix_help.snap` and both `unknown_subcommand` snapshots from the verb table.
+- [x] 5.7 Severity drill: accept `op` as a second target keyword in 5.1 and confirm a test asserting that `sync op` is an unknown-mapping refusal reddens, which is the evidence one spelling per target is enforced rather than merely intended.
+- [x] 5.8 Verify: `cargo test -p safix --test onepassword_path` green once group 7 lands, `safix sync 1password -h` and `safix audit -h` read correctly by hand, drill in 5.7 observed.
+
+## 6. The stub and the harness guard
+
+- [x] 6.1 Add `crates/safix/tests/support/op-stub.rs`, one binary dispatching on the first argument word — `whoami`, `vault`, `item` — and for `item` on its subcommand `get`/`create`/`edit`/`list`, following `crates/safix/tests/support/clan-stub.rs`'s shape: a header stating what contract it stands in for and with what citations, a spool directory named by `SAFIX_OP_STUB_SPOOL`, and one record per invocation carrying `argv`, `env`, `stdin` and the exit path taken.
+- [x] 6.2 Store items as JSON files under the spool keyed by `<vault>/<title>`, a layout deliberately unlike the service's own, so a transport that tried to read the tool's own storage instead of asking finds nothing — the discipline `clan-stub.rs` records.
+- [x] 6.3 Make the stub exit non-zero, with a message naming the offending word, on any argv word containing `=`, and on an `item get`/`create`/`edit`/`list` carrying no `--vault`.
+- [x] 6.4 Add the failure switches: `SAFIX_OP_STUB_SIGNED_OUT` (the `whoami` preflight refuses), `SAFIX_OP_STUB_UNKNOWN_ITEM` (`item get` reports the item as not found), `SAFIX_OP_STUB_UNKNOWN_VAULT` (every item command refuses naming the vault), `SAFIX_OP_STUB_REFUSES` (the next write refuses), each printing on standard error the shape the real program's messages have.
+- [x] 6.5 Add `Fixture::onepassword_env` to `crates/safix/tests/harness/mod.rs` beside `store_env` (`:1104-1110`), setting `SAFIX_OP` to the stub, `SAFIX_OP_STUB_SPOOL` under the fixture's scratch, `OP_SERVICE_ACCOUNT_TOKEN` to `ops-fixture-not-a-real-token`, and explicitly *not* setting `OP_ACCOUNT`.
+- [x] 6.6 Add `refuse_a_real_onepassword` to `crates/safix/tests/harness/mod.rs` beside `refuse_a_real_database` (`:2802-2835`), called from the same two places `refuse_a_real_database` is (`:1424,:1977`): for a `sync` or `audit` run not narrowed to another target, assert `SAFIX_OP` names the stub, assert `OP_SERVICE_ACCOUNT_TOKEN` is the fixture's fake, and assert no `OP_ACCOUNT` is present, each with a message naming `Fixture::onepassword_env` as the remedy.
+  Its doc comment states the loss being guarded against, the way `refuse_a_real_database`'s does: a machine that develops this suite plausibly holds a real, signed-in program and the operator's own vaults.
+- [x] 6.7 Export the stub from the suite: `SAFIX_TEST_OP_STUB = "${suite}/libexec/safix-op-stub";` in `modules/flake/checks/integration.nix:122-132`, and nothing added to `backends` (`:25-99`) — this target contributes no package to any check's closure.
+- [x] 6.8 Severity drill: remove the `=` refusal from 6.3 and confirm the argv test of 7.3 turns green when it should refuse, which is the evidence the instrument enforces the rule rather than the review; separately point `SAFIX_OP` at `/bin/true` in one test and confirm 6.6 refuses the run before a process is spawned.
+- [x] 6.9 Verify: `cargo test -p safix --test onepassword_path` green, both halves of the drill in 6.8 observed.
+
+## 7. The integration suite
+
+- [x] 7.1 Add `crates/safix/tests/onepassword_path.rs` built on `crates/safix/tests/sync_path.rs`'s shape, with a `seed_onepassword_mapping` helper taking the mode, the user, the entry name, the vault, the item and the fields, and every run built through `Fixture::onepassword_env`.
+- [x] 7.2 `each_mode_converges_exactly_as_its_name_says` — one mapping per mode in one run: the item converges to safix's value, safix converges to the item's value through the ordinary write path, a `two-way` mapping with an absent far side bootstraps and records its agreement in the item's `safix-sync-state` field, and a `backup` mapping writes into absence.
+  Every declared field reaches the item in its documented home, no value reaches standard output, and no digest of one reaches the repository.
+- [x] 7.3 `no_value_and_no_field_ever_travels_an_argument_vector` — read the stub's spool after a run carrying all four fields including one `{ entry = … }`-sourced field, assert every value and every field appears in a recorded standard input and in no recorded argv or env, and assert the stub was never given a word containing `=`.
+- [x] 7.4 `a_multi_line_value_crosses_whole` — a value carrying two newlines is written and read back byte-identically, with no refusal anywhere, which is the positive statement that this target has no value-shape refusal.
+- [x] 7.5 `an_edit_preserves_what_the_declaration_does_not_name` — seed an item carrying a passkey member, a one-time-password field and an unrecognised custom section; run a `safix-to-1password` mapping; assert all three are byte-identical afterwards and only the value and the declared fields moved.
+- [x] 7.6 `a_signed_out_run_refuses_before_reading_any_side` — with `SAFIX_OP_STUB_SIGNED_OUT` set, assert the code `safix::onepassword_signed_out`, assert the stub recorded exactly one invocation and it was `whoami`, and assert no `sops` decryption of any mapping's safix side happened.
+- [x] 7.7 `the_refusals_each_have_their_own_code_and_leave_both_sides_alone` — one case per refusal: an unknown mapping name (`safix::unknown_sync_mapping`), a safix side holding nothing (`safix::sync_source_empty`), a far side holding no item under a pulling mode (`safix::onepassword_item_absent`), a vault the session cannot see (`safix::onepassword_vault_absent`), the program refusing over one item (`safix::onepassword_command_failed`), and the program absent (`safix::onepassword_unavailable`).
+  None leaves a commit, a dirty tree or a partial write.
+- [x] 7.8 `a_failure_on_one_mapping_does_not_end_the_run` — three mappings with `SAFIX_OP_STUB_REFUSES` arming the second one's write; assert all three appear in the report, that the first and third converged, that the second is refused, and that the exit status is non-zero.
+- [x] 7.9 `two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did` — the three-way decision over the item's own recorded state, including that a state the fixture corrupts is treated as absent and bootstraps rather than refusing.
+- [x] 7.10 `an_item_no_mapping_declares_is_reported_and_never_removed` — an extra item in the declared vault is reported as information, is still there afterwards, and does not move `audit`'s exit status.
+- [x] 7.11 `audit_compares_without_writing_and_names_a_field_without_printing_it` — a value-agreeing, field-diverging mapping reports the field by name with neither content in any output, a value-diverging mapping reports the value divergence and not the field one, and the stub's spool shows no `item create` and no `item edit`.
+- [x] 7.12 Register each test in `modules/flake/checks/cli.nix` beside the `sync_path` block (`:777-836`) through the existing `mode` helper, each with the comment naming what it holds: `safix-onepassword-sync`, `safix-onepassword-argv`, `safix-onepassword-multiline`, `safix-onepassword-round-trip`, `safix-onepassword-signed-out`, `safix-onepassword-refusals`, `safix-onepassword-partial`, `safix-onepassword-two-way`, `safix-onepassword-leftovers`, `safix-onepassword-audit`.
+  None uses `runOneWith`: there is no package to add.
+- [x] 7.13 Severity drill: make `read()` request the whole vault's items rather than the named one and confirm 7.10 reddens on the stub's recorded argv, which is the evidence the read is scoped to the mapping rather than to the vault.
+- [x] 7.14 Verify: `cargo test -p safix --test onepassword_path` green (ten tests), and each `nix build .#checks.x86_64-linux.safix-onepassword-*` of 7.12 green, drill in 7.13 observed.
+
+## 8. The structural checks
+
+- [x] 8.1 Add `onepasswordMessages` and `mkOnepasswordCheck` to `modules/flake/safix/checks.nix` beside `keepassxcMessages`/`mkKeepassxcCheck` (`:139-152`), with `name = "safix-onepassword-refusals"` and `subject = "safix 1password: these mappings break rules evaluation refuses on."`, and wire them into the default-argument record and the exported attribute set (`:435-457,479-485`) as `safix-onepassword-refusals`.
+- [x] 8.2 Add `modules/flake/checks/onepassword.nix` modelled on `modules/flake/checks/keepassxc.nix`, exporting `checks.safix-onepassword` through `mk-structural-check.nix` with fields: `modes`, `pullCapable` (mapped over `modes`), `itemPath`, `unknownUserMessages`, `unknownNameMessages`, `pullOntoGeneratedMessages`, `twoWayOntoGeneratedMessages`, `pushOntoGeneratedMessages` (empty), `oneItemMessages`, `twoVaultsOneItemNameMessages` (empty), `reservedIdMessages` (one field per reserved word), `bothFaultsMessages`, `brokenCustody` (empty), `badMode`, `vaultDeclaredAsAPathTypechecks` (expected `false`), and `wellFormed` (empty).
+- [x] 8.3 Write that file's header in `checks/keepassxc.nix:1-60`'s shape: every fixture synthetic and no vault real, what this cannot check (whether the vault exists, whether the item does, whether either side holds a value, whether the session authenticates), the per-claim severity paragraph naming which field each dropped rule empties, and the paragraph stating that no check anywhere drives a real `op` and why — with the three grounds and the sentence that an unstated absence is a claim nobody decided to stop making.
+- [x] 8.4 Add `checks.safix-onepassword-drill`, running the same `safixChecks.refuseScript` bytes the real check runs over a perturbed declaration, in `checks/keepassxc.nix:205-226`'s shape.
+- [x] 8.5 Add a check row asserting that `flake.safix.lib.onepassword` contains no function member and no absolute path derived from the flake's own root, so `modules/flake/checks/examples.nix:57-67`'s field-for-field comparison between the two consumers stays meaningful.
+- [x] 8.6 Severity drill: drop `reservedId` from `violationsOf` and confirm every field of `reservedIdMessages` empties while nothing else moves; separately loosen `vault`'s type in `options.nix` from `str` to `either str path` and confirm `vaultDeclaredAsAPathTypechecks` turns `true`.
+- [x] 8.7 Verify: `nix build .#checks.x86_64-linux.safix-onepassword`, `.#checks.x86_64-linux.safix-onepassword-drill` and `.#checks.x86_64-linux.safix-onepassword-refusals` green, both drills in 8.6 observed.
+
+## 9. Documentation
+
+- [x] 9.1 Add the `[Unreleased]` entries to `CHANGELOG.md`: the new target and its option surface, the four mode words, `SAFIX_OP`, the five refusal codes, the concealed-field memory, and the checks added.
+- [x] 9.2 Add the migration note to the same entry: a mapping of any target whose id is `1password` stops evaluating, naming the refusal's own sentence and the remedy (rename the mapping).
+- [x] 9.3 Record, in the same entry, the two absences this change deliberately ships: no real-binary check for this target and no reference to `_1password-cli` anywhere in the flake, with the three grounds; and no value-shape refusal, because the transport carries a multi-line value whole.
+- [x] 9.4 Leave `README.md` alone: `rewrite-readme-and-examples` owns the five-target restructure, and this change's surface is the shape that rewrite assumes.
+- [x] 9.5 Verify: `openspec validate add-onepassword-bridge --strict` green, and the changelog entry read against this change's own `proposal.md` "What Changes" list with nothing in one that is missing from the other.
+
+## Verification, as run
+
+- `cargo test -p safix-core --lib` — 354 passed, 0 failed; includes `onepassword::tests` (8) and `model::tests::*onepassword*` (6).
+- `cargo test -p safix --test onepassword_path` — 10 passed, 0 failed, one test per group-7 claim.
+- `cargo test -p safix --bin safix reporter::` — green with the ten new snapshots accepted:
+  `crates/safix/src/snapshots/safix__reporter__tests__{plain,graphical}-onepassword_{unavailable,signed_out,command_failed,item_absent,vault_absent}.snap`.
+- `nix build .#checks.x86_64-linux.{safix-onepassword,safix-onepassword-drill,safix-onepassword-refusals}` — all three green.
+- `nix eval .#checks.x86_64-linux --apply builtins.attrNames` — succeeds with no `allowUnfree`; the twelve
+  `safix-onepassword*` attributes are present. `nix eval .#safix.lib.onepassword` resolves to
+  `{"account":null,"mappings":[]}` over the fixture fleet.
+- `crates/safix/tests/snapshots/upload__safix_help.snap` regenerated from the verb table. The two
+  `unknown_subcommand` snapshots are deliberately untouched: they are another slice's.
+- Drills observed: dropping `reservedId` from `violationsOf` reddens `safix-onepassword` by emptying every
+  field of `reservedIdMessages` and the second half of `bothFaultsMessages` while `oneItemMessages`,
+  `pullOntoGeneratedMessages` and every other field stay put; the declaration was restored and the check is
+  green again. The transport's own argv and round-trip drills are held in code by
+  `onepassword::tests::{no_argument_vector_this_transport_builds_carries_an_assignment,
+  an_edit_writes_back_every_member_the_declaration_does_not_name}` and behaviourally by
+  `safix-onepassword-argv` and `safix-onepassword-round-trip`.
+
+## Deviations, recorded
+
+- The converge loop lives in `crates/safix-core/src/onepassword.rs` beside the transport rather than as a
+  fourth per-target loop inside `sync.rs`. `sync.rs`'s `selected`/`lingering` are `&Keepassxc`-typed, and
+  three more targets hosted there would be three slices appending to one file. `endpoint::judge` is reached
+  from here, which is the shape that contract was written for. The same deviation is recorded by
+  `add-pass-bridge` and `add-bitwarden-bridge`.
+- `main.rs`'s `audit_command` stays one `audit::run` call; the per-target gate is inside `audit::run`, where
+  `run_keepassxc`'s already is. `sync_command` gained this target's arm as task 5.3 describes.
+- `bridge::Target` has no `as_str`, so task 2.5's arm has no place to go; the variant alone landed.
+- The behavioural check task 7.12 names `safix-onepassword-refusals` is registered as
+  `safix-onepassword-run-refusals`: task 8.1 gives the structural check that exact name, and flake-parts
+  refuses one option defined twice.
+- `model.rs` spells the types `OnePasswordMode`, `OpSide`, `OnePasswordMapping`, `OnePassword`, and `nix.rs`
+  `Attribute::OnePassword`, matching `Error::OnePassword*` and `Target::OnePassword` rather than tasks 2.1-2.3's
+  `Onepassword` spelling.
+- `refuse_a_real_onepassword` admits `SAFIX_OP` naming either the stub or a path inside the fixture's own
+  scratch directory. The second form is what the `onepassword_unavailable` refusal needs — a name nothing is
+  installed under — and a scratch path on tmpfs cannot be a real program, so the guard prevents nothing by
+  admitting it. A bare `sync`/`audit` over a fixture declaring no mapping of this target is exempt, because
+  such a consumer reaches the service not at all.
+- `SAFIX_OP_STUB_REFUSES` names the item titles whose write refuses rather than being a bare switch: task
+  7.8's claim needs exactly one of three writes to refuse, which an unconditional switch cannot express. The
+  shape `clan-stub.rs`'s own `REFUSES` has.
+- `README.md` untouched (task 9.4). `openspec validate` was not run: `openspec` is not on this environment's
+  PATH.

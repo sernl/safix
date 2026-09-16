@@ -1,0 +1,17 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::bitwarden_command_failed
+
+  × the vault's own client refused over the item 'fleet/router'.
+  │ 
+  │ It was run as:
+  │ 
+  │     bw edit item 3a1c
+  │ 
+  │ No value is in that line: the master password and every item payload
+  │ travel
+  │ standard input. The client said:
+  │ 
+  │ Not found.

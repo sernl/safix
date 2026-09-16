@@ -38,6 +38,51 @@ nix build .#checks.x86_64-linux.safix-set-new
 `nix flake check` evaluates the current system only.
 `nix flake show` currently fails for a reason that predates the rust work: the flake declares a darwin platform the pinned nixpkgs has dropped.
 
+## Where the suite stands
+
+The evaluation half, the command, the exported checks, the materializations and the two consumption modules are all here and green under `nix flake check`.
+Every push and pull request builds the whole surface on x86_64-linux and aarch64-darwin, and evaluates it for aarch64-linux, which nothing there builds.
+
+Three platform conditions decide what a given machine actually runs, and each of them is a real gap rather than a formality.
+A skipped check is not a passing one: it made no claim on that platform, so read the summary of the leg you are on before you read the green tick.
+
+Ubuntu denies unprivileged user namespaces, and the checks that drive a generator are made of them.
+`.github/workflows/check.yml` carries the one line a linux runner has to be told first, and a local linux machine with the namespaces enabled runs the same checks unaided.
+
+darwin has no tmpfs, so `Staging::establish` refuses there and `--allow-disk-staging` is the acknowledgement the runtime documents.
+The suite runs under that flag on darwin, and the refusal itself is asserted.
+The tmpfs guarantee needs a memory-backed mount to compare against, so it is claimed on linux and absent on darwin rather than half-made there.
+
+A GitHub macOS runner refuses `sandbox_apply`, so the envelope a generator fragment runs inside cannot be applied on that runner.
+That leg builds the checks which do not need the integration suite, derived from the store rather than listed by hand, and says in its own summary what it left out.
+The narrowing belongs to the runner and lives in the workflow: a Mac that can apply a sandbox profile gets the whole surface under `nix flake check`.
+
+Two things were retired and are worth knowing about, because their absence looks like an omission otherwise.
+The shell runtime and its two python helpers are deleted, and `packages.safix` is the rust binary that replaced them.
+The differential harness that compared the two runtimes subcommand by subcommand — 6205 lines — was deleted with the runtime it compared against, and its claims were rewritten as `crates/safix/tests/`, which drives the built binary against throwaway repositories and asserts against literals.
+The five places the two runtimes deliberately differ are recorded in the changelog's "Known differences".
+
+## Keeping the README honest
+
+Three clauses of `README.md`'s own contract are mechanical, and each is a command you run rather than a check the flake declares.
+
+```console
+$ grep -nE 'safix-[a-z][a-z-]*' README.md
+$ awk '/^```/{f=!f;next} f{next} /^[|#]/{next} {print}' README.md \
+    | tr '\n' ' ' | sed 's/\([.!?]\)  */\1\n/g' \
+    | awk '{ if (NF > 40) printf "%d words: %.90s\n", NF, $0 }'
+$ grep -nEi '\b(thirteen|fourteen|fifteen|sixteen|two|three|five) (of )?(safix.s )?(subcommands?|verbs?|targets?|relationship families)' README.md
+```
+
+The first holds that no name only a contributor can use appears in the operator's document, since a reader cannot act on a check name and `nix flake check` prints the names itself.
+It over-matches: a mapping mode and a sync-state name are declaration vocabulary rather than check attributes, so the document states each of those by the rule that builds it and the command stays at zero.
+The second holds that no sentence runs past forty words, skipping fenced blocks, table rows and headings because none of those is a sentence.
+The third holds that no sentence counts the verbs or the sync targets, which is the defect that let four disagreeing counts stand in one document.
+
+None of the three is a flake check on purpose.
+A word-count check's failure mode is rewording to please a counter, and a names-every-option check would have to read the module system from a check that exists to read prose.
+A command named where contributors look holds the same three clauses without adding a mechanism that must itself be kept true.
+
 ## The fixture fleet
 
 The checks drive the real `sops`, the real `age` and the real `git` against a throwaway repository built from scratch each run.

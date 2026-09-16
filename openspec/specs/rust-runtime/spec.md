@@ -99,6 +99,8 @@ The type SHALL provide construction from a readable stream only, and SHALL NOT p
 ### Requirement: No plaintext value reaches a child process except through a pipe
 
 Every invocation of the cryptographic backend that carries a plaintext value SHALL pass it on a pipe, and no plaintext value SHALL be placed in the argument vector or the environment of any child process.
+A declared field resolved out of another secret entry is a plaintext value in the sense this requirement governs, and a declared field written as a literal in an evaluated declaration is not, because that declaration is already world-readable.
+A target whose only channel for a field is an argument vector SHALL therefore refuse a field resolved out of an entry rather than place it there, and the refusal SHALL be a variant of the library's error type naming the target and the field.
 
 #### Scenario: The value's path to the backend
 
@@ -111,6 +113,18 @@ Every invocation of the cryptographic backend that carries a plaintext value SHA
 - **WHEN** any child process is spawned
 - **THEN** each of its three standard descriptors is set explicitly
 - **AND** none is inherited by omission
+
+#### Scenario: A field resolved out of an entry never reaches an argument vector
+
+- **WHEN** a declared field is resolved out of another entry and the target's only channel for that field is an argument vector
+- **THEN** the run refuses, naming the target and the field
+- **AND** the refusal is reachable before any child process is spawned for that mapping
+
+#### Scenario: The two provenances are distinguishable by type rather than by care
+
+- **WHEN** a resolved field is inspected
+- **THEN** a field resolved out of an entry is held by the type that cannot be rendered, serialized or turned into a string, and a literal field is held as an ordinary string
+- **AND** placing a resolved field in an argument vector is therefore not expressible, rather than being permitted and avoided
 
 ### Requirement: Refusals are library data rendered at the command edge
 
@@ -205,6 +219,7 @@ No second definition of its shape SHALL exist in the runtime.
 ### Requirement: Every external program the runtime invokes is selectable by a named variable
 
 Each external program the runtime invokes SHALL be selectable through a named environment variable, so a hermetic check can substitute a build of its own, and the set of such programs and the set of such variables SHALL be the same size.
+A program no check of this repository may ever run for real SHALL still have its variable, because the variable is the seam a stand-in stands in.
 
 #### Scenario: The set is complete
 
@@ -217,3 +232,9 @@ Each external program the runtime invokes SHALL be selectable through a named en
 - **WHEN** a check exercises the key generator or the ssh-key converter
 - **THEN** it drives the behaviour by pointing that program's variable at a build of its own
 - **AND** the check fails if the variable is ignored, which is what makes the override evidence rather than documentation
+
+#### Scenario: A program that is never run for real still has its variable
+
+- **WHEN** the 1Password command is invoked by the sync and audit paths
+- **THEN** it is located through its own named variable, defaulting to the program's ordinary name on the operator's path
+- **AND** every check of that target drives the variable at a stand-in, which is the only way the target is exercised at all, because the real package is unfree and enters no check, package or development shell of this flake

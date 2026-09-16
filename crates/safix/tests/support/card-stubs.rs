@@ -450,7 +450,7 @@ fn database_model(words: &[&str]) -> ! {
         .filter(|word| word.starts_with("--"))
         .copied()
         .collect();
-    let username = following_flag(words, "--username");
+    let declared = declared_fields(words);
     let entry = positionals(words).get(1).copied().unwrap_or_default();
 
     record("kdbx-argv", &words.join(" "));
@@ -473,9 +473,13 @@ fn database_model(words: &[&str]) -> ! {
             if !flags.contains(&"--password-prompt") {
                 refuse("keepassxc-cli: the value must arrive on standard input");
             }
-            write_entry(verb == "add", entry, &value, username.as_deref());
+            refuse_a_value_in_argv(entry, &declared, &value);
+            write_entry(verb == "add", entry, &value, &declared);
         }
-        "show" => show_entry(entry),
+        "show" => match repeated_flag(words, "--attributes") {
+            asked if asked.iter().all(|name| name == "Password") => show_entry(entry),
+            asked => show_fields(entry, &asked),
+        },
         other => {
             eprintln!("keepassxc-cli: unrecognized arguments: {other}");
             std::process::exit(2);
@@ -483,16 +487,82 @@ fn database_model(words: &[&str]) -> ! {
     }
 }
 
+/// The three metadata fields this command carries in its argument vector, each
+/// with the attribute name `show` answers it under.
+///
+/// The flags are `keepassxc-cli add --help`'s own and the attribute spellings
+/// are `show`'s, which are deliberately different words for the same field:
+/// `--username` writes what `UserName` reads back. The order is
+/// `fields.nix`'s `fieldNames` order, which is the order every report uses.
+const FIELDS: [(&str, &str); 3] = [
+    ("--username", "UserName"),
+    ("--url", "URL"),
+    ("--notes", "Notes"),
+];
+
+/// What one invocation declared for each of [`FIELDS`], in that order.
+type Declared = [Option<String>; 3];
+
+/// The three fields this argument vector carries, declared or not.
+fn declared_fields(words: &[&str]) -> Declared {
+    [
+        following_flag(words, "--username"),
+        following_flag(words, "--url"),
+        following_flag(words, "--notes"),
+    ]
+}
+
+/// Every value given for one repeatable flag, in the order they were given.
+///
+/// `show -a UserName -a URL` asks for two attributes and expects two lines
+/// back, so the repetition is what the answer's own order comes from.
+fn repeated_flag(words: &[&str], flag: &str) -> Vec<String> {
+    let mut asked = Vec::new();
+    let mut rest = words;
+    while let Some((first, tail)) = rest.split_first() {
+        if *first == flag
+            && let Some(value) = tail.first()
+        {
+            asked.push((*value).to_owned());
+        }
+        rest = tail;
+    }
+    asked
+}
+
+/// The stub's own half of "no value travels an argument vector".
+///
+/// A field whose value is the entry's own password — the one just fed on
+/// standard input, or the one the entry already holds — means a secret reached
+/// argv, which is what `keepassxc-sync`'s store-not-a-keyring requirement
+/// forbids. Refused loudly rather than recorded, so the claim cannot pass by a
+/// test forgetting to read a record.
+fn refuse_a_value_in_argv(entry: &str, declared: &Declared, value: &[u8]) {
+    let held = retrieve(&kdbx_key(entry)).unwrap_or_default();
+    for ((flag, _), declared) in FIELDS.iter().zip(declared.iter()) {
+        let Some(declared) = declared else {
+            continue;
+        };
+        let carried = (!value.is_empty() && declared.as_bytes() == value)
+            || (!held.is_empty() && declared.as_bytes() == held.as_slice());
+        if carried {
+            refuse(&format!(
+                "keepassxc-cli: {flag} carried the value of {entry} in an argument vector"
+            ));
+        }
+    }
+}
+
 /// The words that are neither the verb, a flag, nor a flag's value.
 ///
 /// The database comes first and the entry or the group second, which is the shape
-/// every one of these commands takes. Two of the flags carry a value, and skipping
-/// it is what keeps `Password` from being read as an entry path.
+/// every one of these commands takes. Four of the flags carry a value, and
+/// skipping it is what keeps `Password` from being read as an entry path.
 fn positionals<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
     let mut positional: Vec<&str> = Vec::new();
     let mut rest = words.get(1..).unwrap_or_default();
     while let Some((first, tail)) = rest.split_first() {
-        if ["--username", "--attributes"].contains(first) {
+        if ["--username", "--url", "--notes", "--attributes"].contains(first) {
             rest = tail.get(1..).unwrap_or_default();
             continue;
         }
@@ -522,7 +592,7 @@ fn list_everything() -> ! {
         println!("{group}/");
     }
     for line in entries {
-        if let Some((name, _)) = line.split_once(' ') {
+        if let Some(name) = line.split('\t').next() {
             println!("{name}");
         }
     }
@@ -545,12 +615,15 @@ fn make_group(group: &str) -> ! {
     std::process::exit(0)
 }
 
-/// One entry's value, added where there is none and edited where there is.
-fn write_entry(adding: bool, entry: &str, value: &[u8], username: Option<&str>) -> ! {
+/// One entry's value and its declared fields, added where there is none and
+/// edited where there is.
+///
+/// A field the invocation does not name is left as the entry held it, which is
+/// what `edit` does: writing an entry's value says nothing about its URL.
+fn write_entry(adding: bool, entry: &str, value: &[u8], declared: &Declared) -> ! {
     let mut entries = read_list(ENTRIES);
-    let held = entries
-        .iter()
-        .position(|line| line.starts_with(&format!("{entry} ")));
+    let prefix = format!("{entry}\t");
+    let held = entries.iter().position(|line| line.starts_with(&prefix));
     if adding {
         if held.is_some() {
             refuse(&format!("Could not create entry with path {entry}."));
@@ -560,13 +633,15 @@ fn write_entry(adding: bool, entry: &str, value: &[u8], username: Option<&str>) 
         {
             refuse(&format!("Could not create entry with path {entry}."));
         }
-        entries.push(format!("{entry} {}", username.unwrap_or_default()));
+        entries.push(record_of(entry, &fields_of(None, declared)));
     } else {
         let Some(at) = held else {
             refuse(&format!("Could not find entry with path {entry}."));
         };
-        if let (Some(username), Some(line)) = (username, entries.get_mut(at)) {
-            *line = format!("{entry} {username}");
+        let existing = entries.get(at).cloned().unwrap_or_default();
+        let merged = fields_of(Some(&existing), declared);
+        if let Some(line) = entries.get_mut(at) {
+            *line = record_of(entry, &merged);
         }
     }
     write_list(ENTRIES, &entries);
@@ -574,12 +649,39 @@ fn write_entry(adding: bool, entry: &str, value: &[u8], username: Option<&str>) 
     std::process::exit(0)
 }
 
+/// One entry's line in the model's own listing: the path, then the three fields
+/// in [`FIELDS`] order, tab separated.
+///
+/// A tab rather than the space the single-username form used, because a note is
+/// prose and a URL carries punctuation, and a separator a field may contain is
+/// a separator that reads a field as two.
+fn record_of(entry: &str, fields: &[String; 3]) -> String {
+    format!("{entry}\t{}", fields.join("\t"))
+}
+
+/// One entry's three fields, as the record holds them with this invocation's
+/// declarations applied on top.
+fn fields_of(existing: Option<&str>, declared: &Declared) -> [String; 3] {
+    let mut held = [String::new(), String::new(), String::new()];
+    if let Some(line) = existing {
+        for (slot, value) in held.iter_mut().zip(line.split('\t').skip(1)) {
+            value.clone_into(slot);
+        }
+    }
+    for (slot, value) in held.iter_mut().zip(declared.iter()) {
+        if let Some(value) = value {
+            slot.clone_from(value);
+        }
+    }
+    held
+}
+
 /// One entry's value, with the newline the real command appends.
 fn show_entry(entry: &str) -> ! {
     let entries = read_list(ENTRIES);
     if !entries
         .iter()
-        .any(|line| line.starts_with(&format!("{entry} ")))
+        .any(|line| line.starts_with(&format!("{entry}\t")))
     {
         refuse(&format!("Could not find entry with path {entry}."));
     }
@@ -588,6 +690,33 @@ fn show_entry(entry: &str) -> ! {
     let _ = out.write_all(&held);
     // The byte the runtime removes on the way back in.
     let _ = out.write_all(b"\n");
+    let _ = out.flush();
+    std::process::exit(0)
+}
+
+/// The named attributes, one per line in the order they were asked for.
+///
+/// An attribute the entry does not carry prints an empty line, which is what
+/// the real command does over an unset field — so an empty line is an absent
+/// field rather than an absent answer. No name outside [`FIELDS`] is answered,
+/// `Password` included: the fields read never asks for it, and answering it
+/// here would be the drill rather than the model.
+fn show_fields(entry: &str, asked: &[String]) -> ! {
+    let entries = read_list(ENTRIES);
+    let prefix = format!("{entry}\t");
+    let Some(line) = entries.iter().find(|line| line.starts_with(&prefix)) else {
+        refuse(&format!("Could not find entry with path {entry}."));
+    };
+    let held = fields_of(Some(line), &[None, None, None]);
+    let mut out = std::io::stdout().lock();
+    for name in asked {
+        let answer = FIELDS
+            .iter()
+            .zip(held.iter())
+            .find_map(|((_, attribute), value)| (attribute == name).then_some(value.as_str()))
+            .unwrap_or_default();
+        let _ = writeln!(out, "{answer}");
+    }
     let _ = out.flush();
     std::process::exit(0)
 }

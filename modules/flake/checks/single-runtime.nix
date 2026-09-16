@@ -209,6 +209,35 @@
         # which a test process may do, and all of which the manifest's own
         # `userMode` field omits here.
         safix-install = claim "safix-install" "install";
+
+        # The bitwarden target, whole: the sixteen claims `./cli.nix` names one
+        # at a time plus the seven no per-mode entry names —
+        # `sync_bitwarden_narrows_to_this_target` and
+        # `bare_sync_converges_bitwarden_alongside_the_others`, which are the
+        # dispatch pair task 6.8 and 6.9's drills redden;
+        # `the_refresh_happens_once_before_the_first_read`, which is the other
+        # half of `safix-bitwarden-stale`'s claim and stays green under the
+        # drill that reddens it;
+        # `no_master_password_or_value_travels_argv_or_env`, which drives the
+        # unlock on a pseudo-terminal and is the master password's own channel
+        # claim where `safix-bitwarden-session` is the session key's;
+        # `audit_refuses_on_a_failed_refresh_exactly_as_sync_does`, which is
+        # what holds audit and sync to one contract rather than to two that
+        # resemble each other; and both lock claims — a run that found the
+        # client unlocked leaves it so, and a run that unlocked it locks it
+        # exactly once, last.
+        #
+        # `crates/safix/tests/bitwarden.rs` needs no `[[test]]` entry in
+        # `crates/safix/Cargo.toml`: test targets there are auto-discovered and
+        # only the support binaries are declared, so the compiled suite installs
+        # this target to `$out/bin/bitwarden` through the existing
+        # `modules/flake/rust.nix` path with no change of its own. Stated here so
+        # the next reader does not go looking for one.
+        #
+        # No real-binary counterpart exists or will: `../checks/bitwarden.nix`'s
+        # header records that absence and the measurement that would unblock a
+        # `services.vaultwarden` VM node.
+        safix-bitwarden-suite = claim "safix-bitwarden-suite" "bitwarden";
       }
       # The tmpfs rule, held against the kernel's own mount table rather than
       # against the probe that enforces it. The drill that exercises the refusal

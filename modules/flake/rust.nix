@@ -160,7 +160,7 @@
                     install -Dm555 "$executable" "$out/libexec/$target"
                   done
 
-              for required in safix safix-nix-stub safix-test-shim safix-clan-stub safix-card-stub; do
+              for required in safix safix-nix-stub safix-test-shim safix-clan-stub safix-card-stub safix-pass-stub safix-op-stub; do
                 [ -x "$out/libexec/$required" ] \
                   || { echo "the suite did not build $required" >&2; exit 1; }
               done

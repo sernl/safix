@@ -677,6 +677,15 @@ pub fn audit(report: &audit::Report) -> String {
     if let Some(keepassxc) = &report.keepassxc {
         push_keepassxc_audit(&mut out, keepassxc);
     }
+    if let Some(pass) = &report.pass {
+        push_pass_audit(&mut out, pass);
+    }
+    if let Some(bitwarden) = &report.bitwarden {
+        push_bitwarden_audit(&mut out, bitwarden);
+    }
+    if let Some(onepassword) = &report.onepassword {
+        push_onepassword_audit(&mut out, onepassword);
+    }
     out
 }
 
@@ -734,11 +743,12 @@ fn push_clan_lingering(out: &mut String, entries: &[String]) {
 ///
 /// One line per compared mapping — agreeing included, the way [`sync`]'s own
 /// report lists every mapping rather than only the ones that need a person —
-/// because a keepassxc mapping's outcome is one of exactly three words rather
+/// because a keepassxc mapping's outcome is one of exactly four words rather
 /// than the clan target's open-ended disagreement, and a report that named
-/// all three is as short as one that named only two of them.
+/// all four is as short as one that named only two of them.
 fn push_keepassxc_audit(out: &mut String, report: &audit::KeepassxcReport) {
     use audit::KeepassxcOutcome;
+    use safix_core::model::Mode;
 
     if report.compared.is_empty() {
         out.push_str(PROGRAM);
@@ -759,6 +769,40 @@ fn push_keepassxc_audit(out: &mut String, report: &audit::KeepassxcReport) {
         match &entry.outcome {
             KeepassxcOutcome::Diverged => {
                 remedy(out, &format!("{PROGRAM} sync keepassxc {}", entry.mapping));
+            }
+            KeepassxcOutcome::FieldsDiverged(fields) => {
+                out.push('\n');
+                detail(
+                    out,
+                    &format!(
+                        "The two sides agree on the value; these declared fields differ: {}.",
+                        named_fields(fields),
+                    ),
+                );
+                match entry.mode {
+                    Mode::KeepassxcToSafix => {
+                        detail(
+                            out,
+                            "A field has one author, and it is the declaration. Edit the \
+                             declaration to",
+                        );
+                        detail(
+                            out,
+                            "say what the entry holds, or declare a mode that writes the database.",
+                        );
+                    }
+                    Mode::Backup => {
+                        detail(
+                            out,
+                            "backup never overwrites an existing entry, so nothing here would \
+                             write them.",
+                        );
+                    }
+                    Mode::SafixToKeepassxc | Mode::TwoWay => {
+                        remedy(out, &format!("{PROGRAM} sync keepassxc {}", entry.mapping));
+                    }
+                }
+                out.push('\n');
             }
             KeepassxcOutcome::Unjudgeable(reason) => {
                 out.push('\n');
@@ -785,18 +829,169 @@ fn push_keepassxc_audit(out: &mut String, report: &audit::KeepassxcReport) {
         .iter()
         .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::Diverged))
         .count();
+    let fields_diverged = report
+        .compared
+        .iter()
+        .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::FieldsDiverged(_)))
+        .count();
     let unjudgeable = report
         .compared
         .iter()
         .filter(|entry| matches!(entry.outcome, KeepassxcOutcome::Unjudgeable(_)))
         .count();
+    // The field count is printed only when there is one, so a report over
+    // mappings declaring no field reads exactly as it read before fields
+    // existed.
+    let fields = counted("fields diverged", fields_diverged);
     let closing = format!(
         "{PROGRAM}: {total} mapping(s) against {database}: {agreeing} agreeing, {diverged} \
-         diverged, {unjudgeable} unjudgeable.\n",
+         diverged, {unjudgeable} unjudgeable{fields}.\n",
         total = report.compared.len(),
         database = report.database,
     );
     out.push_str(&closing);
+}
+
+/// The pass target's section of an audit report.
+///
+/// One line per compared mapping — agreeing included, the way
+/// [`push_keepassxc_audit`] lists every mapping and for its reason.
+fn push_pass_audit(out: &mut String, report: &audit::PassReport) {
+    use audit::PassOutcome;
+    use safix_core::model::PassMode;
+
+    if report.compared.is_empty() {
+        out.push_str(PROGRAM);
+        out.push_str(": no mapping is declared.\n");
+        return;
+    }
+
+    for entry in &report.compared {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {safix} <-> {store} {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            safix = entry.safix,
+            store = entry.entry,
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        match &entry.outcome {
+            PassOutcome::Diverged => {
+                remedy(out, &format!("{PROGRAM} sync pass {}", entry.mapping));
+            }
+            PassOutcome::FieldsDiverged(fields) => {
+                out.push('\n');
+                detail(
+                    out,
+                    &format!(
+                        "The two sides agree on the value; these declared fields differ: {}.",
+                        named_fields(fields),
+                    ),
+                );
+                match entry.mode {
+                    PassMode::PassToSafix => {
+                        detail(
+                            out,
+                            "A field has one author, and it is the declaration. Edit the \
+                             declaration to",
+                        );
+                        detail(
+                            out,
+                            "say what the record holds, or declare a mode that writes the store.",
+                        );
+                    }
+                    PassMode::Backup => {
+                        detail(
+                            out,
+                            "backup never overwrites an existing entry, so nothing here would \
+                             write them.",
+                        );
+                    }
+                    PassMode::SafixToPass | PassMode::TwoWay => {
+                        remedy(out, &format!("{PROGRAM} sync pass {}", entry.mapping));
+                    }
+                }
+                out.push('\n');
+            }
+            PassOutcome::Unjudgeable(reason) => {
+                out.push('\n');
+                for line in reason.to_string().lines() {
+                    out.push_str("  ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            PassOutcome::Agreeing => {}
+        }
+    }
+
+    push_pass_lingering(out, &report.lingering);
+
+    let counting = |wanted: &str| {
+        report
+            .compared
+            .iter()
+            .filter(|entry| entry.outcome.as_str() == wanted)
+            .count()
+    };
+    // The field count is printed only when there is one, so a report over
+    // mappings declaring no field reads as the other store target's does.
+    let fields = counted("fields diverged", counting("fields diverged"));
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {store}: {agreeing} agreeing, {diverged} \
+         diverged, {unjudgeable} unjudgeable{fields}.\n",
+        total = report.compared.len(),
+        store = report.store,
+        agreeing = counting("agreeing"),
+        diverged = counting("diverged"),
+        unjudgeable = counting("unjudgeable"),
+    );
+    out.push_str(&closing);
+}
+
+/// Entries in the store that no declared mapping accounts for, in the shape
+/// both `sync`'s and `audit`'s pass reports give it.
+///
+/// A separate function from [`push_lingering`] rather than a shared one: that
+/// one asks `safix_core::store::is_companion`, and a companion here is an entry
+/// in a `pass` store rather than a kdbx entry. The two suffixes are equal
+/// today, and a shared renderer would make that equality load-bearing for the
+/// prose as well as for the name.
+fn push_pass_lingering(out: &mut String, entries: &[String]) {
+    for entry in entries {
+        out.push('\n');
+        if safix_core::pass::is_companion(entry) {
+            detail(
+                out,
+                &format!("{entry} is safix's own record of a two-way agreement, and the"),
+            );
+            detail(
+                out,
+                "mapping it belonged to is no longer declared. It holds no value \u{2014} only a",
+            );
+            detail(out, "digest of one \u{2014} and removing it is safe.");
+        } else {
+            detail(
+                out,
+                &format!("{entry} is in the store and no mapping declares it."),
+            );
+            detail(
+                out,
+                "A mapping removed after this entry was created leaves it looking",
+            );
+            detail(
+                out,
+                "exactly like this, and so does an entry a person put in the store",
+            );
+            detail(
+                out,
+                "by hand \u{2014} the declarations cannot tell the two apart.",
+            );
+        }
+        detail(out, "Nothing here will remove it; a person does that.");
+    }
 }
 
 /// The one line a run with nothing to report prints.
@@ -969,9 +1164,14 @@ pub fn sync(report: &safix_core::sync::Report) -> String {
     push_lingering(&mut out, &report.lingering);
 
     let tally = report.tally();
+    // The two field counts are printed only when there is one to print, so a
+    // run over mappings declaring no field closes exactly as it closed before
+    // fields existed.
+    let fields_updated = counted("fields updated", tally.fields_updated);
+    let fields_diverged = counted("fields diverged", tally.fields_diverged);
     let closing = format!(
         "{PROGRAM}: {total} mapping(s) against {database}: {} updated, {} pulled, {} unchanged, \
-         {} conflict, {} refused, {} not judged.\n",
+         {} conflict, {} refused, {} not judged{fields_updated}{fields_diverged}.\n",
         tally.updated,
         tally.pulled,
         tally.unchanged,
@@ -989,11 +1189,15 @@ pub fn sync(report: &safix_core::sync::Report) -> String {
 ///
 /// A mapping that wrote nothing has no direction to show, so its endpoints are
 /// joined by a two-headed arrow: the line is about a relationship rather than
-/// about a transfer.
+/// about a transfer. `fields updated` is a write toward the database and points
+/// the way `updated` does; `fields diverged` wrote nothing and therefore shows
+/// no arrow, exactly as a conflict does.
 fn sync_flow(entry: &safix_core::sync::Converged) -> String {
     use safix_core::sync::Outcome;
     match entry.outcome {
-        Outcome::Updated => format!("{} -> {}", entry.safix, entry.kdbx),
+        Outcome::Updated | Outcome::FieldsUpdated(_) => {
+            format!("{} -> {}", entry.safix, entry.kdbx)
+        }
         Outcome::Pulled => format!("{} -> {}", entry.kdbx, entry.safix),
         _ => format!("{} <-> {}", entry.safix, entry.kdbx),
     }
@@ -1064,7 +1268,112 @@ fn push_sync_detail(out: &mut String, entry: &safix_core::sync::Converged) {
             out.push('\n');
         }
 
+        Outcome::FieldsUpdated(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} already held {}'s value; the declared fields written are: {}.",
+                    entry.kdbx,
+                    entry.safix,
+                    named_fields(fields),
+                ),
+            );
+            detail(
+                out,
+                "One write, carrying the value the entry already held: a kdbx save rewrites",
+            );
+            detail(
+                out,
+                "the whole file, so a field repair is one of those and not two.",
+            );
+        }
+
+        Outcome::FieldsDiverged(fields) => push_fields_diverged(out, entry, fields),
+
         Outcome::Unchanged | Outcome::Updated | Outcome::Pulled => {}
+    }
+}
+
+/// The paragraph under a mapping whose declared fields differ and whose mode
+/// does not write them.
+///
+/// The remedy is the mode's: a pushing mode resolves it by running again, a
+/// pulling mode cannot resolve it at all because a field's one author is the
+/// declaration, and `backup` refuses to touch an existing entry on purpose.
+fn push_fields_diverged(
+    out: &mut String,
+    entry: &safix_core::sync::Converged,
+    fields: &[&'static str],
+) {
+    use safix_core::model::Mode;
+
+    out.push('\n');
+    detail(
+        out,
+        &format!(
+            "{} and {} agree on the value; these declared fields differ: {}.",
+            entry.safix,
+            entry.kdbx,
+            named_fields(fields),
+        ),
+    );
+    detail(out, "Nothing was written.");
+    match entry.mode {
+        Mode::KeepassxcToSafix => {
+            detail(
+                out,
+                "This mode writes safix rather than the database, and a field has one",
+            );
+            detail(
+                out,
+                "author: the declaration. Edit the declaration to say what the entry",
+            );
+            detail(out, "holds, or declare a mode that writes the database:");
+            remedy(out, "mode = \"safix-to-keepassxc\";");
+        }
+        Mode::Backup => {
+            detail(
+                out,
+                "backup never overwrites an existing entry, and writing its fields while",
+            );
+            detail(out, "refusing its value would make backup half a mode.");
+        }
+        Mode::SafixToKeepassxc | Mode::TwoWay => {
+            remedy(
+                out,
+                &format!(
+                    "{PROGRAM} sync keepassxc {mapping}",
+                    mapping = entry.mapping
+                ),
+            );
+        }
+    }
+}
+
+/// One count for a report's closing line, or nothing at all when it is zero.
+///
+/// `counted("fields updated", 2)` is `", 2 fields updated"`. Absent rather
+/// than zero, so a report over mappings declaring no field carries no word
+/// about fields anywhere.
+fn counted(word: &str, howmany: usize) -> String {
+    if howmany == 0 {
+        return String::new();
+    }
+    format!(", {howmany} {word}")
+}
+
+/// The declared fields a report names, as a list an operator reads.
+///
+/// The only thing interpolated anywhere in a field's report: every element is a
+/// `&'static str` that came from the field's own name, so no field's content
+/// can reach a report through this function or any other — the property is the
+/// type's rather than a reviewer's.
+fn named_fields(fields: &[&'static str]) -> String {
+    match fields {
+        [] => String::from("none"),
+        [one] => (*one).to_owned(),
+        [others @ .., last] => format!("{} and {last}", others.join(", ")),
     }
 }
 
@@ -1198,6 +1507,831 @@ fn push_bridge_sync_detail(out: &mut String, entry: &safix_core::bridge::bridge_
     }
 }
 
+/// The 1password target's section of an audit report.
+///
+/// The shape [`push_keepassxc_audit`] has, and for its reason: this target's
+/// outcome is one of exactly four words, so a report that names all four is as
+/// short as one that named only the two needing a person. No content of a value
+/// or of a field reaches it — a diverged field is named and never printed,
+/// because a note body and a field sourced from another entry are themselves
+/// secrets.
+fn push_onepassword_audit(out: &mut String, report: &audit::OnePasswordReport) {
+    use audit::OnePasswordOutcome;
+
+    if report.compared.is_empty() {
+        out.push_str(PROGRAM);
+        out.push_str(": no mapping is declared.\n");
+        return;
+    }
+
+    for entry in &report.compared {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {safix} <-> {item}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            safix = entry.safix,
+            item = entry.item,
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        match &entry.outcome {
+            OnePasswordOutcome::Diverged => {
+                onepassword_remedy(out, entry.mode, &entry.mapping);
+            }
+            OnePasswordOutcome::FieldsDiverged(fields) => {
+                out.push('\n');
+                detail(
+                    out,
+                    &format!(
+                        "The two sides agree on the value; these declared fields differ: {}.",
+                        named_fields(fields),
+                    ),
+                );
+                onepassword_remedy(out, entry.mode, &entry.mapping);
+                out.push('\n');
+            }
+            OnePasswordOutcome::Unjudgeable(reason) => {
+                out.push('\n');
+                for line in reason.to_string().lines() {
+                    detail(out, line);
+                }
+                out.push('\n');
+            }
+            OnePasswordOutcome::Agreeing => {}
+        }
+    }
+
+    push_onepassword_lingering(out, &report.lingering);
+
+    let counting = |wanted: &str| {
+        report
+            .compared
+            .iter()
+            .filter(|entry| entry.outcome.as_str() == wanted)
+            .count()
+    };
+    let fields = counted("fields diverged", counting("fields diverged"));
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {account}: {agreeing} agreeing, {diverged} \
+         diverged, {unjudgeable} unjudgeable{fields}.\n",
+        total = report.compared.len(),
+        account = onepassword_account(report.account.as_deref()),
+        agreeing = counting("agreeing"),
+        diverged = counting("diverged"),
+        unjudgeable = counting("unjudgeable"),
+    );
+    out.push_str(&closing);
+}
+
+/// What a diverged 1password mapping's remedy is, which the mode decides.
+///
+/// A pushing mode resolves it by running again. `1password-to-safix` cannot:
+/// for that mode converging toward the declaration is what the mode already
+/// means, so the declaration is the author and the remedy is to edit it.
+/// `backup` refuses to touch an existing item on purpose.
+fn onepassword_remedy(out: &mut String, mode: safix_core::model::OnePasswordMode, mapping: &str) {
+    use safix_core::model::OnePasswordMode;
+
+    match mode {
+        OnePasswordMode::OnePasswordToSafix => {
+            detail(
+                out,
+                "This mode writes safix rather than the item, and a field has one author:",
+            );
+            detail(
+                out,
+                "the declaration. Edit the declaration to say what the item holds, or",
+            );
+            detail(out, "declare a mode that writes the item:");
+            remedy(out, "mode = \"safix-to-1password\";");
+        }
+        OnePasswordMode::Backup => {
+            detail(
+                out,
+                "backup never overwrites an existing item, and writing its fields while",
+            );
+            detail(out, "refusing its value would make backup half a mode.");
+        }
+        OnePasswordMode::SafixToOnePassword | OnePasswordMode::TwoWay => {
+            remedy(out, &format!("{PROGRAM} sync 1password {mapping}"));
+        }
+    }
+}
+
+/// Items in a declared vault that no declared mapping accounts for.
+///
+/// Placed the way [`push_lingering`] is: after the section's own lines and
+/// before its closing line. No companion counterpart to distinguish, because
+/// this target's memory is a field of the mapped item rather than a second
+/// object beside it, so every entry renders the same way.
+fn push_onepassword_lingering(out: &mut String, entries: &[String]) {
+    for entry in entries {
+        out.push('\n');
+        detail(
+            out,
+            &format!("{entry} is in a declared vault and no mapping declares it."),
+        );
+        detail(
+            out,
+            "A mapping removed after this item was created leaves it looking exactly",
+        );
+        detail(
+            out,
+            "like this, and so does an item a person put in the vault themselves \u{2014} the",
+        );
+        detail(out, "declarations cannot tell the two apart.");
+        detail(out, "Nothing here will remove it; a person does that.");
+    }
+}
+
+/// How a report names the account it converged against.
+///
+/// An undeclared account is a working configuration rather than a missing
+/// declaration, so the report says which posture it was rather than printing an
+/// empty string where a name would be.
+fn onepassword_account(account: Option<&str>) -> String {
+    match account {
+        Some(account) => account.to_owned(),
+        None => String::from("the account op resolved"),
+    }
+}
+
+/// What a pass sync run did, one line per declared mapping.
+///
+/// The shape [`sync`] has, because the two store targets report the same set
+/// of outcomes. The difference is the closing line's subject — a store root
+/// rather than a database — and that there is no value-shape refusal to
+/// explain, because this store's write takes the whole body on a pipe.
+#[must_use]
+pub fn pass(report: &safix_core::pass::Report) -> String {
+    let mut out = String::new();
+    if report.converged.is_empty() {
+        let empty = format!("{PROGRAM}: no mapping is declared.\n");
+        out.push_str(&empty);
+        return out;
+    }
+
+    for entry in &report.converged {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {flow}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            flow = pass_flow(entry),
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        push_pass_detail(&mut out, entry);
+    }
+
+    push_pass_lingering(&mut out, &report.lingering);
+
+    let tally = report.tally();
+    let fields_updated = counted("fields updated", tally.fields_updated);
+    let fields_diverged = counted("fields diverged", tally.fields_diverged);
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {store}: {} updated, {} pulled, {} unchanged, \
+         {} conflict, {} refused, {} not judged{fields_updated}{fields_diverged}.\n",
+        tally.updated,
+        tally.pulled,
+        tally.unchanged,
+        tally.conflict,
+        tally.refused,
+        tally.not_judged,
+        total = report.converged.len(),
+        store = report.store,
+    );
+    out.push_str(&closing);
+    out
+}
+
+/// One mapping's endpoints, in the order the value moved between them.
+///
+/// [`sync_flow`]'s rule, over this target's own endpoints: a mapping that wrote
+/// nothing has no direction to show, `fields updated` is a write toward the
+/// store and points the way `updated` does, and `fields diverged` wrote nothing
+/// and therefore shows no arrow.
+fn pass_flow(entry: &safix_core::pass::Converged) -> String {
+    use safix_core::pass::Outcome;
+    match entry.outcome {
+        Outcome::Updated | Outcome::FieldsUpdated(_) => {
+            format!("{} -> {}", entry.safix, entry.entry)
+        }
+        Outcome::Pulled => format!("{} -> {}", entry.entry, entry.safix),
+        _ => format!("{} <-> {}", entry.safix, entry.entry),
+    }
+}
+
+/// The paragraph under a pass mapping whose two sides both moved.
+fn push_pass_conflict(out: &mut String, entry: &safix_core::pass::Converged) {
+    use safix_core::model::PassMode;
+
+    out.push('\n');
+    if entry.mode == PassMode::Backup {
+        detail(
+            out,
+            &format!(
+                "{} holds a value that is not {}'s, and backup never overwrites one.",
+                entry.entry, entry.safix
+            ),
+        );
+        detail(
+            out,
+            "Nothing was written, and no field either. Either accept the store's value,",
+        );
+        detail(out, "or declare");
+        remedy(out, "mode = \"safix-to-pass\";");
+        detail(out, "on that mapping, which makes the store follow safix.");
+        return;
+    }
+    detail(
+        out,
+        &format!(
+            "{} and {} have both changed since the last agreement.",
+            entry.safix, entry.entry
+        ),
+    );
+    detail(
+        out,
+        "Nothing was written, and nothing here decides which of the two was meant:",
+    );
+    detail(
+        out,
+        "last-writer-wins over secrets rewards whichever clock lied best.",
+    );
+    remedy(out, "to keep safix's value, declare on this mapping:");
+    remedy(out, "    mode = \"safix-to-pass\";");
+    remedy(out, "to keep the store's, declare instead:");
+    remedy(out, "    mode = \"pass-to-safix\";");
+    remedy(
+        out,
+        &format!(
+            "then:  {PROGRAM} sync pass {mapping}",
+            mapping = entry.mapping
+        ),
+    );
+    remedy(out, "and put the mode back to two-way afterwards.");
+}
+
+/// The paragraph under a pass mapping that needs a person.
+fn push_pass_detail(out: &mut String, entry: &safix_core::pass::Converged) {
+    use safix_core::model::PassMode;
+    use safix_core::pass::Outcome;
+
+    match &entry.outcome {
+        Outcome::Conflict => push_pass_conflict(out, entry),
+
+        Outcome::Refused(reason) | Outcome::NotJudged(reason) => {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+            out.push('\n');
+        }
+
+        Outcome::FieldsUpdated(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} already held {}'s value; the declared fields written are: {}.",
+                    entry.entry,
+                    entry.safix,
+                    named_fields(fields),
+                ),
+            );
+            detail(
+                out,
+                "One write, carrying the value the record already held: the whole body",
+            );
+            detail(
+                out,
+                "crosses on one pipe, so a field repair is one write and not two.",
+            );
+        }
+
+        Outcome::FieldsDiverged(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} agree on the value; these declared fields differ: {}.",
+                    entry.safix,
+                    entry.entry,
+                    named_fields(fields),
+                ),
+            );
+            detail(out, "Nothing was written.");
+            match entry.mode {
+                PassMode::PassToSafix => {
+                    detail(
+                        out,
+                        "This mode writes safix rather than the store, and a field has one",
+                    );
+                    detail(
+                        out,
+                        "author: the declaration. Edit the declaration to say what the record",
+                    );
+                    detail(out, "holds, or declare a mode that writes the store:");
+                    remedy(out, "mode = \"safix-to-pass\";");
+                }
+                PassMode::Backup => {
+                    detail(
+                        out,
+                        "backup never overwrites an existing entry, and writing its fields while",
+                    );
+                    detail(out, "refusing its value would make backup half a mode.");
+                }
+                PassMode::SafixToPass | PassMode::TwoWay => {
+                    remedy(
+                        out,
+                        &format!("{PROGRAM} sync pass {mapping}", mapping = entry.mapping),
+                    );
+                }
+            }
+        }
+
+        Outcome::Unchanged | Outcome::Updated | Outcome::Pulled => {}
+    }
+}
+
+/// What a 1password sync run did, one line per declared mapping.
+///
+/// The shape [`sync`] has. The difference is the closing line's subject — an
+/// account rather than a database — and that a refusal here is one mapping's:
+/// a failure against the service refuses its own mapping and the run goes on,
+/// so every declared mapping has a line whatever happened.
+#[must_use]
+pub fn onepassword(report: &safix_core::onepassword::Report) -> String {
+    let mut out = String::new();
+    if report.converged.is_empty() {
+        let empty = format!("{PROGRAM}: no mapping is declared.\n");
+        out.push_str(&empty);
+        return out;
+    }
+
+    for entry in &report.converged {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {flow}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            flow = onepassword_flow(entry),
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        push_onepassword_detail(&mut out, entry);
+    }
+
+    push_onepassword_lingering(&mut out, &report.lingering);
+
+    let counting = |wanted: &str| {
+        report
+            .converged
+            .iter()
+            .filter(|entry| entry.outcome.as_str() == wanted)
+            .count()
+    };
+    let fields_updated = counted("fields updated", counting("fields updated"));
+    let fields_diverged = counted("fields diverged", counting("fields diverged"));
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {account}: {} updated, {} pulled, {} unchanged, \
+         {} conflict, {} refused, {} not judged{fields_updated}{fields_diverged}.\n",
+        counting("updated"),
+        counting("pulled"),
+        counting("unchanged"),
+        counting("conflict"),
+        counting("refused"),
+        counting("not judged"),
+        total = report.converged.len(),
+        account = onepassword_account(report.account.as_deref()),
+    );
+    out.push_str(&closing);
+    out
+}
+
+/// One mapping's endpoints, in the order the value moved between them.
+fn onepassword_flow(entry: &safix_core::onepassword::Converged) -> String {
+    use safix_core::onepassword::Outcome;
+    match entry.outcome {
+        Outcome::Updated | Outcome::FieldsUpdated(_) => {
+            format!("{} -> {}", entry.safix, entry.item)
+        }
+        Outcome::Pulled => format!("{} -> {}", entry.item, entry.safix),
+        _ => format!("{} <-> {}", entry.safix, entry.item),
+    }
+}
+
+/// The paragraph under a 1password mapping that needs a person.
+fn push_onepassword_detail(out: &mut String, entry: &safix_core::onepassword::Converged) {
+    use safix_core::model::OnePasswordMode;
+    use safix_core::onepassword::Outcome;
+
+    match &entry.outcome {
+        Outcome::Conflict if entry.mode == OnePasswordMode::Backup => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} holds a value that is not {}'s, and backup never overwrites one.",
+                    entry.item, entry.safix
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written. Either accept the item's value, or declare",
+            );
+            remedy(out, "mode = \"safix-to-1password\";");
+            detail(out, "on that mapping, which makes the item follow safix.");
+        }
+
+        Outcome::Conflict => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} have both changed since the last agreement.",
+                    entry.safix, entry.item
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written, and nothing here decides which of the two was meant:",
+            );
+            detail(
+                out,
+                "last-writer-wins over secrets rewards whichever clock lied best.",
+            );
+            remedy(out, "to keep safix's value, declare on this mapping:");
+            remedy(out, "    mode = \"safix-to-1password\";");
+            remedy(out, "to keep the item's, declare instead:");
+            remedy(out, "    mode = \"1password-to-safix\";");
+            remedy(
+                out,
+                &format!(
+                    "then:  {PROGRAM} sync 1password {mapping}",
+                    mapping = entry.mapping
+                ),
+            );
+            remedy(out, "and put the mode back to two-way afterwards.");
+        }
+
+        Outcome::Refused(reason) | Outcome::NotJudged(reason) => {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+            out.push('\n');
+        }
+
+        Outcome::FieldsUpdated(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} already held {}'s value; the declared fields written are: {}.",
+                    entry.item,
+                    entry.safix,
+                    named_fields(fields),
+                ),
+            );
+            detail(
+                out,
+                "One write, carrying the value the item already held: the whole item",
+            );
+            detail(
+                out,
+                "crosses standard input, so a field repair is one edit and not two.",
+            );
+        }
+
+        Outcome::FieldsDiverged(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} agree on the value; these declared fields differ: {}.",
+                    entry.safix,
+                    entry.item,
+                    named_fields(fields),
+                ),
+            );
+            detail(out, "Nothing was written.");
+            onepassword_remedy(out, entry.mode, &entry.mapping);
+        }
+
+        Outcome::Unchanged | Outcome::Updated | Outcome::Pulled => {}
+    }
+}
+
+/// What a bitwarden sync run did, one line per declared mapping.
+///
+/// The shape [`sync`] has. The differences are the closing line's subject — a
+/// server rather than a database — and that a refusal here is one mapping's: a
+/// failure against one item refuses its own mapping and the run goes on, so
+/// every declared mapping has a line whatever happened. A refusal that is the
+/// run's rather than a mapping's — a locked client, a server that is not the
+/// one reached, a failed refresh — never reaches this function at all.
+#[must_use]
+pub fn bitwarden(report: &safix_core::bitwarden::Report) -> String {
+    let mut out = String::new();
+    if report.converged.is_empty() {
+        let empty = format!("{PROGRAM}: no mapping is declared.\n");
+        out.push_str(&empty);
+        return out;
+    }
+
+    for entry in &report.converged {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {flow}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            flow = bitwarden_flow(entry),
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        push_bitwarden_detail(&mut out, entry);
+    }
+
+    push_bitwarden_lingering(&mut out, &report.lingering);
+
+    let tally = report.tally();
+    let fields_updated = counted("fields updated", tally.fields_updated);
+    let fields_diverged = counted("fields diverged", tally.fields_diverged);
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {server}: {} updated, {} pulled, {} unchanged, \
+         {} conflict, {} refused, {} not judged{fields_updated}{fields_diverged}.\n",
+        tally.updated,
+        tally.pulled,
+        tally.unchanged,
+        tally.conflict,
+        tally.refused,
+        tally.not_judged,
+        total = report.converged.len(),
+        server = bitwarden_server(&report.server),
+    );
+    out.push_str(&closing);
+    out
+}
+
+/// How a report names the server it converged against.
+///
+/// An undeclared server is a working configuration rather than a missing
+/// declaration — the client already holds that configuration — so the report
+/// says which posture it was rather than printing an empty string where a URL
+/// would be.
+fn bitwarden_server(server: &str) -> String {
+    if server.is_empty() {
+        return String::from("the server the client is configured against");
+    }
+    server.to_owned()
+}
+
+/// One mapping's endpoints, in the order the value moved between them.
+fn bitwarden_flow(entry: &safix_core::bitwarden::Converged) -> String {
+    use safix_core::sync::Outcome;
+    match entry.outcome {
+        Outcome::Updated | Outcome::FieldsUpdated(_) => {
+            format!("{} -> {}", entry.safix, entry.address)
+        }
+        Outcome::Pulled => format!("{} -> {}", entry.address, entry.safix),
+        _ => format!("{} <-> {}", entry.safix, entry.address),
+    }
+}
+
+/// The paragraph under a bitwarden mapping that needs a person.
+fn push_bitwarden_detail(out: &mut String, entry: &safix_core::bitwarden::Converged) {
+    use safix_core::model::BitwardenMode;
+    use safix_core::sync::Outcome;
+
+    match &entry.outcome {
+        Outcome::Conflict if entry.mode == BitwardenMode::Backup => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} holds a value that is not {}'s, and backup never overwrites one.",
+                    entry.address, entry.safix
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written. Either accept the vault's value, or declare",
+            );
+            remedy(out, "mode = \"safix-to-bitwarden\";");
+            detail(out, "on that mapping, which makes the vault follow safix.");
+        }
+
+        Outcome::Conflict => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} have both changed since the last agreement.",
+                    entry.safix, entry.address
+                ),
+            );
+            detail(
+                out,
+                "Nothing was written, and nothing here decides which of the two was meant:",
+            );
+            detail(
+                out,
+                "last-writer-wins over secrets rewards whichever clock lied best.",
+            );
+            remedy(out, "to keep safix's value, declare on this mapping:");
+            remedy(out, "    mode = \"safix-to-bitwarden\";");
+            remedy(out, "to keep the vault's, declare instead:");
+            remedy(out, "    mode = \"bitwarden-to-safix\";");
+            remedy(
+                out,
+                &format!(
+                    "then:  {PROGRAM} sync bitwarden {mapping}",
+                    mapping = entry.mapping
+                ),
+            );
+            remedy(out, "and put the mode back to two-way afterwards.");
+        }
+
+        Outcome::Refused(reason) | Outcome::NotJudged(reason) => {
+            out.push('\n');
+            for line in reason.to_string().lines() {
+                detail(out, line);
+            }
+            out.push('\n');
+        }
+
+        Outcome::FieldsUpdated(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} already held {}'s value; the declared fields written are: {}.",
+                    entry.address,
+                    entry.safix,
+                    named_fields(fields),
+                ),
+            );
+            detail(
+                out,
+                "One write, carrying the value the item already held: this client replaces",
+            );
+            detail(
+                out,
+                "a whole item, so a field repair is one edit and not two.",
+            );
+        }
+
+        Outcome::FieldsDiverged(fields) => {
+            out.push('\n');
+            detail(
+                out,
+                &format!(
+                    "{} and {} agree on the value; these declared fields differ: {}.",
+                    entry.safix,
+                    entry.address,
+                    named_fields(fields),
+                ),
+            );
+            detail(out, "Nothing was written.");
+            bitwarden_remedy(out, entry.mode, &entry.mapping);
+        }
+
+        Outcome::Unchanged | Outcome::Updated | Outcome::Pulled => {}
+    }
+}
+
+/// The bitwarden target's section of an audit report.
+///
+/// One line per compared mapping, agreeing included, the way
+/// [`push_keepassxc_audit`] lists every one of them.
+fn push_bitwarden_audit(out: &mut String, report: &audit::BitwardenReport) {
+    use audit::BitwardenOutcome;
+
+    if report.compared.is_empty() {
+        out.push_str(PROGRAM);
+        out.push_str(": no mapping is declared.\n");
+        return;
+    }
+
+    for entry in &report.compared {
+        let line = format!(
+            "{PROGRAM}: {mapping}  {safix} <-> {address}  {mode}  {outcome}\n",
+            mapping = entry.mapping,
+            safix = entry.safix,
+            address = entry.address,
+            mode = entry.mode,
+            outcome = entry.outcome.as_str(),
+        );
+        out.push_str(&line);
+        match &entry.outcome {
+            BitwardenOutcome::Diverged => {
+                bitwarden_remedy(out, entry.mode, &entry.mapping);
+            }
+            BitwardenOutcome::FieldsDiverged(fields) => {
+                out.push('\n');
+                detail(
+                    out,
+                    &format!(
+                        "The two sides agree on the value; these declared fields differ: {}.",
+                        named_fields(fields),
+                    ),
+                );
+                bitwarden_remedy(out, entry.mode, &entry.mapping);
+                out.push('\n');
+            }
+            BitwardenOutcome::Unjudgeable(reason) => {
+                out.push('\n');
+                for line in reason.to_string().lines() {
+                    detail(out, line);
+                }
+                out.push('\n');
+            }
+            BitwardenOutcome::Agreeing => {}
+        }
+    }
+
+    push_bitwarden_lingering(out, &report.lingering);
+
+    let counting = |wanted: &str| {
+        report
+            .compared
+            .iter()
+            .filter(|entry| entry.outcome.as_str() == wanted)
+            .count()
+    };
+    let fields = counted("fields diverged", counting("fields diverged"));
+    let closing = format!(
+        "{PROGRAM}: {total} mapping(s) against {server}: {agreeing} agreeing, {diverged} \
+         diverged, {unjudgeable} unjudgeable{fields}.\n",
+        total = report.compared.len(),
+        server = bitwarden_server(&report.server),
+        agreeing = counting("agreeing"),
+        diverged = counting("diverged"),
+        unjudgeable = counting("unjudgeable"),
+    );
+    out.push_str(&closing);
+}
+
+/// What a diverged bitwarden mapping's remedy is, which the mode decides.
+///
+/// A pushing mode resolves it by running again. `bitwarden-to-safix` cannot:
+/// for that mode converging toward the declaration is what the mode already
+/// means, so the declaration is the author and the remedy is to edit it.
+/// `backup` refuses to touch an existing item on purpose.
+fn bitwarden_remedy(out: &mut String, mode: safix_core::model::BitwardenMode, mapping: &str) {
+    use safix_core::model::BitwardenMode;
+
+    match mode {
+        BitwardenMode::BitwardenToSafix => {
+            detail(
+                out,
+                "This mode writes safix rather than the item, and a field has one author:",
+            );
+            detail(
+                out,
+                "the declaration. Edit the declaration to say what the item holds, or",
+            );
+            detail(out, "declare a mode that writes the item:");
+            remedy(out, "mode = \"safix-to-bitwarden\";");
+        }
+        BitwardenMode::Backup => {
+            detail(
+                out,
+                "backup never overwrites an existing item, and writing its fields while",
+            );
+            detail(out, "refusing its value would make backup half a mode.");
+        }
+        BitwardenMode::SafixToBitwarden | BitwardenMode::TwoWay => {
+            remedy(out, &format!("{PROGRAM} sync bitwarden {mapping}"));
+        }
+    }
+}
+
+/// Items under a declared folder that no declared mapping accounts for.
+///
+/// Placed the way [`push_lingering`] is: after the section's own lines and
+/// before its closing line. No companion counterpart to distinguish, because
+/// this target's memory is a hidden field of the mapped item rather than a
+/// second object beside it, so every entry renders the same way.
+fn push_bitwarden_lingering(out: &mut String, entries: &[String]) {
+    for entry in entries {
+        out.push('\n');
+        detail(
+            out,
+            &format!("{entry} is under a declared folder and no mapping declares it."),
+        );
+        detail(
+            out,
+            "A mapping removed after this item was created leaves it looking exactly",
+        );
+        detail(
+            out,
+            "like this, and so does an item a person put in the vault themselves \u{2014} the",
+        );
+        detail(out, "declarations cannot tell the two apart.");
+        detail(out, "Nothing here will remove it; a person does that.");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use safix_core::audit::{ClanReport, Report};
@@ -1213,6 +2347,9 @@ mod tests {
                 lingering: vec!["meridian ntfy/orphan".into()],
             }),
             keepassxc: None,
+            pass: None,
+            bitwarden: None,
+            onepassword: None,
         };
         let rendered = audit(&report);
         assert!(rendered.contains(

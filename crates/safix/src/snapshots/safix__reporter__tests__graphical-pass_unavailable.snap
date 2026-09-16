@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_graphical(&refusal)
+---
+safix::pass_unavailable
+
+  × could not run pass, so no pass mapping was judged and nothing was
+  │ written on either side.
+  │ 
+  │ safix reaches the store only through the store's own command; it never
+  │ reads or decrypts the files itself, because how a store encrypts an entry
+  │ is the whole of what the store is. Install it, or point safix at the one
+  │ you have:
+  │ 
+  │     SAFIX_PASS=/path/to/pass safix sync pass
+  ╰─▶ entity not found

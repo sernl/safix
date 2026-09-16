@@ -56,6 +56,26 @@
 # not standalone-evaluable outside the full flake-parts module.
 # Dropping `reservedId` from the list empties `reservedIdMessages`' three
 # fields, one per reserved word a mapping id may collide with.
+# Dropping `fieldUnsupported` from the list empties `tagsRefusedMessages` and
+# the field half of `bothFaultsMessages`, and changing
+# `../safix/fields.nix`'s `channels.keepassxc.tags` from `"unsupported"` to
+# `"argv"` empties `tagsRefusedMessages` alone — which is the evidence the
+# refusal is driven by the shared table rather than by a hard-coded field name.
+# Dropping `fieldSourceInArgv` empties `entrySourcedFieldMessages`.
+# Judging either new rule over the sound mappings rather than over every
+# declared one empties the field half of `bothFaultsMessages`, which is the
+# same drill `reservedName` already carries.
+# Forking `capabilities` in ../safix/keepassxc.nix from
+# `../safix/fields.nix`'s own row turns `capabilitiesAreTheSharedTable` false.
+# Re-adding a `username` option to `kdbxSide` turns
+# `oldUsernameSpellingTypechecks` true, which is how the migration's
+# before-and-after is evaluated against the real option tree rather than
+# asserted in the changelog's prose.
+#
+# ../safix/checks.nix needs no new `mk*Check` for any of this: the field
+# refusals are messages of `keepassxc.violationsOf`, which `keepassxcMessages`
+# already returns whole, so the refusal script this file drills is the one that
+# already runs.
 {
   perSystem =
     {
@@ -149,11 +169,17 @@
         };
       };
 
-      mapping = mode: user: name: path: {
+      # `fields` is curried ahead of the four positional endpoints rather than
+      # added after them, because a nix function cannot take an optional
+      # positional argument: `mapping` is `mappingWith { }`, so every fixture
+      # that declares no field reads exactly as it did before fields existed.
+      mappingWith = fields: mode: user: name: path: {
         inherit mode;
         safix = { inherit user name; };
-        kdbx = { inherit path; };
+        kdbx = { inherit path fields; };
       };
+
+      mapping = mappingWith { };
 
       violations = fleet': record: keepassxc.violationsOf { users = fleet'; } (recordOf record);
 
@@ -200,6 +226,29 @@
       keyFileDeclaredAsAPathTypechecks =
         (builtins.tryEval (builtins.deepSeq (recordOf { keyFile = ./mk-structural-check.nix; }) "resolved"))
         .success;
+
+      # The migration, evaluated rather than asserted in prose. The spelling
+      # this change deleted is refused by the module system itself, which is
+      # the whole of what makes `kdbx.fields.username` a cutover rather than a
+      # second convention beside an existing one.
+      #
+      # Severity: re-adding a `username` option to `kdbxSide` turns this `true`.
+      oldUsernameSpellingTypechecks =
+        (builtins.tryEval (
+          builtins.deepSeq (recordOf {
+            mappings.a = {
+              mode = "safix-to-keepassxc";
+              safix = {
+                user = "alice";
+                name = "tok";
+              };
+              kdbx = {
+                path = "alice/grafana";
+                username = "alice@example.com";
+              };
+            };
+          }) "resolved"
+        )).success;
 
       drill =
         pkgs.runCommand "safix-keepassxc-drill"
@@ -289,12 +338,52 @@
             };
           };
 
-          # Two faults in one mapping, both reported. The safix side does not
-          # resolve and the entry path is reserved, and the second is judged on
-          # the database half alone so the first does not suppress it.
+          # Two faults in one mapping, both reported, over the old rules and
+          # the new ones alike. `a`'s safix side does not resolve and its entry
+          # path is reserved; `b`'s safix side does not resolve and it declares
+          # a field this transport cannot carry. Both second faults are judged
+          # on the kdbx side alone, so the first does not suppress them.
           bothFaultsMessages = violations fleet {
-            mappings.a = mapping "two-way" "carol" "tok" "carol/x.safix-sync-state";
+            mappings = {
+              a = mapping "two-way" "carol" "tok" "carol/x.safix-sync-state";
+              b = mappingWith { tags = [ "work" ]; } "two-way" "carol" "tok" "carol/y";
+            };
           };
+
+          # A field this transport cannot carry at all, declared. Asserted
+          # against the sentence rather than against a count, so a refusal that
+          # fired naming the wrong field fails the literal.
+          tagsRefusedMessages = violations fleet {
+            mappings.a = mappingWith { tags = [ "work" ]; } "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+          };
+
+          # A field this transport carries in an argument vector, sourced from
+          # another entry — a secret value, and argv is not a channel one may
+          # travel.
+          entrySourcedFieldMessages = violations fleet {
+            mappings.a = mappingWith {
+              notes = {
+                entry = "grafana-note";
+              };
+            } "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+          };
+
+          # The three fields this transport does carry, declared as literals.
+          # Without this the two fields above are vacuous: a rule that refused
+          # every declaration would satisfy them both.
+          soundFieldsMessages = violations fleet {
+            mappings.a = mappingWith {
+              username = "alice@example.com";
+              url = "https://grafana.example.com";
+              notes = "minted by safix";
+            } "safix-to-keepassxc" "alice" "tok" "alice/grafana";
+          };
+
+          # The table this module refuses on is the shared one rather than a
+          # copy of it, which is what stops the two from being forked.
+          capabilities = keepassxc.capabilities;
+          capabilitiesAreTheSharedTable =
+            keepassxc.capabilities == (import ../safix/fields.nix { inherit lib; }).channels.keepassxc;
 
           # A declaration with no mapping is what a consumer who does not use
           # this evaluates, and it must be silent — including with no database
@@ -320,6 +409,7 @@
           badMode = badMode;
           compositeKeyDeclared = compositeKeyDeclared;
           keyFileDeclaredAsAPathTypechecks = keyFileDeclaredAsAPathTypechecks;
+          oldUsernameSpellingTypechecks = oldUsernameSpellingTypechecks;
         };
         expected = {
           modes = [
@@ -382,8 +472,28 @@
 
           bothFaultsMessages = [
             "flake.safix.keepassxc.mappings.a names the user 'carol', which flake.safix.users does not declare"
+            "flake.safix.keepassxc.mappings.b names the user 'carol', which flake.safix.users does not declare"
             "flake.safix.keepassxc.mappings.a names the entry safix/carol/x.safix-sync-state, and '.safix-sync-state' is the suffix safix reserves for the entry a two-way mapping records its last agreement in"
+            "flake.safix.keepassxc.mappings.b declares the field 'tags', and keepassxc cannot carry it: the store's own command has no way to write it, so accepting the declaration would mean writing less than it says"
           ];
+
+          tagsRefusedMessages = [
+            "flake.safix.keepassxc.mappings.a declares the field 'tags', and keepassxc cannot carry it: the store's own command has no way to write it, so accepting the declaration would mean writing less than it says"
+          ];
+
+          entrySourcedFieldMessages = [
+            "flake.safix.keepassxc.mappings.a sources the field 'notes' from the entry 'grafana-note', and keepassxc carries that field in an argument vector, where a secret value may not travel"
+          ];
+
+          soundFieldsMessages = [ ];
+
+          capabilities = {
+            username = "argv";
+            url = "argv";
+            notes = "argv";
+            tags = "unsupported";
+          };
+          capabilitiesAreTheSharedTable = true;
 
           emptyMirrorMessages = [ ];
           noDatabaseMessages = [ ];
@@ -401,6 +511,7 @@
             mappings = { };
           };
           keyFileDeclaredAsAPathTypechecks = false;
+          oldUsernameSpellingTypechecks = false;
         };
       };
 

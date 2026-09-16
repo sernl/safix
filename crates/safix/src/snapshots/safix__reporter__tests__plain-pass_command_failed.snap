@@ -1,0 +1,16 @@
+---
+source: crates/safix/src/reporter.rs
+expression: render_plain(&refusal)
+---
+safix: the store's own command refused over the entry 'alice/grafana'.
+
+It was run as:
+
+    pass insert --multiline --force alice/grafana
+
+No value and no field is in that line: the whole record body travels
+standard input, and what the argument vector carries is the entry path.
+The store's location is in the child's environment, which is a location
+rather than a value. The command said:
+
+Error: alice/grafana is not in the password store.

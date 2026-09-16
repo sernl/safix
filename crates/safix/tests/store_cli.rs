@@ -203,16 +203,27 @@ fn vectors(entry: &str) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) 
     (
         safix_core::store::listing_arguments(database, None, None),
         safix_core::store::group_arguments(database, "safix", None, None),
-        safix_core::store::write_arguments(
-            database,
-            entry,
-            Some("alice@example.com"),
-            false,
-            None,
-            None,
-        ),
+        safix_core::store::write_arguments(database, entry, &declared_fields(), false, None, None),
         safix_core::store::read_arguments(database, entry, None, None),
     )
+}
+
+/// The three literal fields a mapping may declare for this target, which the
+/// write vector carries in argv.
+///
+/// Literals rather than resolved secrets, because a resolved one is refused for
+/// this target before a write is built — `endpoint::resolve_fields` raises
+/// `FieldSourceInArgv` — so a literal is the only shape this vector can hold.
+fn declared_fields() -> safix_core::endpoint::ResolvedFields {
+    use safix_core::endpoint::{Field, ResolvedFields};
+    ResolvedFields {
+        username: Some(Field::Literal("alice@example.com".to_owned())),
+        url: Some(Field::Literal("https://grafana.example.com".to_owned())),
+        notes: Some(Field::Literal(
+            "minted by the fleet's own runbook".to_owned(),
+        )),
+        tags: Vec::new(),
+    }
 }
 
 fn words(arguments: &[String]) -> Vec<&str> {
@@ -293,24 +304,38 @@ fn the_runtimes_own_vectors_round_trip_a_value_through_a_real_database() {
         "the value did not come back with exactly one newline appended"
     );
 
-    // The username reached the entry, which is the one field beyond the value a
-    // mapping may set.
+    // The declared fields reached the entry, which is what the runtime's three
+    // argv flags are for. Measured against the real command rather than
+    // assumed: `--url` and `--notes` are spelled differently from the
+    // attributes they write.
     let summary = scratch.run(
         &["show", "--quiet", "--show-protected", "DATABASE", entry],
         &format!("{UNLOCK}\n"),
     );
-    assert!(
-        String::from_utf8_lossy(&summary.stdout).contains("UserName: alice@example.com"),
-        "the username did not reach the entry: {}",
-        String::from_utf8_lossy(&summary.stdout)
-    );
+    let shown_summary = String::from_utf8_lossy(&summary.stdout).into_owned();
+    for expected in [
+        "UserName: alice@example.com",
+        "URL: https://grafana.example.com",
+        "Notes: minted by the fleet's own runbook",
+    ] {
+        assert!(
+            shown_summary.contains(expected),
+            "a declared field did not reach the entry: {expected} is not in {shown_summary}"
+        );
+    }
 
     // An edit replaces the value of an entry that is there, and an add over one
     // refuses — which is why the runtime chooses between them by the listing.
     let again = scratch.run(&words(&write), &format!("{UNLOCK}\nsomething-else"));
     assert!(!again.status, "add created an entry that already exists");
-    let edit =
-        safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true, None, None);
+    let edit = safix_core::store::write_arguments(
+        Path::new("DATABASE"),
+        entry,
+        &safix_core::endpoint::ResolvedFields::default(),
+        true,
+        None,
+        None,
+    );
     assert!(
         scratch
             .run(&words(&edit), &format!("{UNLOCK}\nthe-second-value"))
@@ -357,8 +382,14 @@ fn a_wrong_password_and_an_absent_entry_are_both_refusals_and_a_newline_is_lost(
     // it. This is the measurement the runtime's refusal exists for — the refusal
     // is asserted in `sync_path.rs`, and what is asserted here is that the
     // constraint it defends is real.
-    let edit =
-        safix_core::store::write_arguments(Path::new("DATABASE"), entry, None, true, None, None);
+    let edit = safix_core::store::write_arguments(
+        Path::new("DATABASE"),
+        entry,
+        &safix_core::endpoint::ResolvedFields::default(),
+        true,
+        None,
+        None,
+    );
     assert!(
         scratch
             .run(&words(&edit), &format!("{UNLOCK}\nfirst\nsecond"))

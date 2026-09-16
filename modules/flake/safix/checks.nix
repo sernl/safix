@@ -22,6 +22,9 @@ let
   policy = import ./policy.nix { inherit lib; };
   bridge = import ./bridge.nix { inherit lib; };
   keepassxc = import ./keepassxc.nix { inherit lib; };
+  pass = import ./pass.nix { inherit lib; };
+  bitwarden = import ./bitwarden.nix { inherit lib; };
+  onepassword = import ./onepassword.nix { inherit lib; };
 
   # The one shell every message-bearing check runs: it fails while the file it
   # is handed has any line in it. Exposed so a drill runs these bytes rather
@@ -149,6 +152,57 @@ let
       name = "safix-keepassxc-refusals";
       subject = "safix keepassxc: these mappings break rules evaluation refuses on.";
       messages = keepassxcMessages registry keepassxcRecord;
+    };
+
+  # ── the pass store ──
+  # Only the half of each mapping that lives in the consumer's own
+  # declarations. The store's half is not checked here and cannot be: an entry
+  # is a gpg-encrypted file, and answering whether the store or the entry is
+  # there needs the operator's own key.
+  passMessages = registry: passRecord: pass.violationsOf registry passRecord;
+
+  mkPassCheck =
+    pkgs: registry: passRecord:
+    mkMessageCheck pkgs {
+      name = "safix-pass-refusals";
+      subject = "safix pass: these mappings break rules evaluation refuses on.";
+      messages = passMessages registry passRecord;
+    };
+
+  # ── the bitwarden vault ──
+  # Only the half of each mapping that lives in the consumer's own
+  # declarations. The vault's half is not checked here and cannot be: whether
+  # the item is there, whether the folder is, and whether the client is
+  # unlocked or even logged in are run-time questions that need a session.
+  # Five rules where the keepassxc mirror has five and the 1password one has
+  # four: this target's memory is a hidden field of the mapped item, so it
+  # reserves no name, and the field rule it does carry is `tags` alone.
+  bitwardenMessages = registry: bitwardenRecord: bitwarden.violationsOf registry bitwardenRecord;
+
+  mkBitwardenCheck =
+    pkgs: registry: bitwardenRecord:
+    mkMessageCheck pkgs {
+      name = "safix-bitwarden-refusals";
+      subject = "safix bitwarden: these mappings break rules evaluation refuses on.";
+      messages = bitwardenMessages registry bitwardenRecord;
+    };
+
+  # ── the 1password mirror ──
+  # Only the half of each mapping that lives in the consumer's own
+  # declarations. The far half is not checked here and cannot be: the vault and
+  # the item are content of a remote service, and answering whether either is
+  # there needs a session. Four rules where the keepassxc mirror has five: this
+  # target's memory is a field of the mapped item, so it reserves no name and
+  # has no `reservedName` refusal.
+  onepasswordMessages =
+    registry: onepasswordRecord: onepassword.violationsOf registry onepasswordRecord;
+
+  mkOnepasswordCheck =
+    pkgs: registry: onepasswordRecord:
+    mkMessageCheck pkgs {
+      name = "safix-onepassword-refusals";
+      subject = "safix 1password: these mappings break rules evaluation refuses on.";
+      messages = onepasswordMessages registry onepasswordRecord;
     };
 
   # ── the shape of a generated rule ──
@@ -437,6 +491,18 @@ let
         group = "safix";
         mappings = { };
       },
+      pass ? {
+        store = "~/.password-store";
+        mappings = { };
+      },
+      bitwarden ? {
+        server = null;
+        mappings = { };
+      },
+      onepassword ? {
+        account = null;
+        mappings = { };
+      },
     }:
     let
       registry = {
@@ -455,6 +521,9 @@ let
     {
       safix-bridge-refusals = mkBridgeCheck pkgs registry bridge;
       safix-keepassxc-refusals = mkKeepassxcCheck pkgs registry keepassxc;
+      safix-pass-refusals = mkPassCheck pkgs registry pass;
+      safix-bitwarden-refusals = mkBitwardenCheck pkgs registry bitwarden;
+      safix-onepassword-refusals = mkOnepasswordCheck pkgs registry onepassword;
       safix-custody-refusals = mkCustodyCheck pkgs registry;
       safix-generator-tools = mkGeneratorToolCheck pkgs registry;
       safix-rule-shape = mkRuleShapeCheck pkgs registry;
@@ -481,6 +550,12 @@ in
     mkBridgeCheck
     keepassxcMessages
     mkKeepassxcCheck
+    passMessages
+    mkPassCheck
+    bitwardenMessages
+    mkBitwardenCheck
+    onepasswordMessages
+    mkOnepasswordCheck
     generatorsDeclaredIn
     generatorToolMessages
     ruleShapeMessages

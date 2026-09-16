@@ -55,8 +55,9 @@ use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use safix_core::{
-    Error, Progress, Workspace, adduser, audit, bridge, check, edit, enroll, fix, generate, group,
-    install, keygen, model::Direction, nix::Nix, set, sync, upload,
+    Error, Progress, Workspace, adduser, audit, bitwarden, bridge, check, edit, enroll, fix,
+    generate, group, install, keygen, model::Direction, nix::Nix, onepassword, pass, set, sync,
+    upload,
 };
 
 use reporter::Refusal;
@@ -716,6 +717,11 @@ fn parse_dispatch(
     let target = match rest.first().map(String::as_str) {
         Some("clan") => Some(bridge::Target::Clan),
         Some("keepassxc") => Some(bridge::Target::Keepassxc),
+        Some("pass") => Some(bridge::Target::Pass),
+        Some("bitwarden") => Some(bridge::Target::Bitwarden),
+        // `1password` and never `op`: one spelling per target, and `op` is the
+        // name of the program the transport invokes.
+        Some("1password") => Some(bridge::Target::OnePassword),
         _ => None,
     };
     if target.is_some()
@@ -771,6 +777,9 @@ fn parse_dispatch(
         return Err(Error::DirectionOnWrongTarget {
             target: match target {
                 Some(bridge::Target::Keepassxc) => "the keepassxc target",
+                Some(bridge::Target::Pass) => "the pass target",
+                Some(bridge::Target::Bitwarden) => "the bitwarden target",
+                Some(bridge::Target::OnePassword) => "the 1password target",
                 _ => "every target, with none named",
             },
         }
@@ -791,7 +800,8 @@ fn parse_dispatch(
 /// when every compared mapping's two sides agree, one when any of them does
 /// not. `lingering` entries never move the exit status, on either target.
 fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "audit [clan|keepassxc] [<mapping>...] [--direction <value>]";
+    const FORM: &str =
+        "audit [clan|keepassxc|pass|bitwarden|1password] [<mapping>...] [--direction <value>]";
     let dispatch = parse_dispatch("audit", FORM, arguments)?;
 
     let workspace = workspace()?;
@@ -817,7 +827,8 @@ fn audit_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// The exit code is zero when every mapping on every target the run scoped to
 /// converged without a conflict, a refusal, or an unjudgeable side.
 fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "sync [clan|keepassxc] [<mapping>...] [--direction <value>]";
+    const FORM: &str =
+        "sync [clan|keepassxc|pass|bitwarden|1password] [<mapping>...] [--direction <value>]";
     let dispatch = parse_dispatch("sync", FORM, arguments)?;
 
     let workspace = workspace()?;
@@ -847,6 +858,26 @@ fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         )?;
         refused |= !report.is_clean();
         out.push_str(&render::sync(&report));
+    }
+    if matches!(dispatch.target, None | Some(bridge::Target::Pass)) {
+        let report = pass::run(&workspace, &Terminal, &dispatch.names)?;
+        refused |= !report.is_clean();
+        out.push_str(&render::pass(&report));
+    }
+    if matches!(dispatch.target, None | Some(bridge::Target::Bitwarden)) {
+        let report = bitwarden::run(
+            &workspace,
+            &Terminal,
+            &mut prompt::Prompted,
+            &dispatch.names,
+        )?;
+        refused |= !report.is_clean();
+        out.push_str(&render::bitwarden(&report));
+    }
+    if matches!(dispatch.target, None | Some(bridge::Target::OnePassword)) {
+        let report = onepassword::run(&workspace, &Terminal, &dispatch.names)?;
+        refused |= !report.is_clean();
+        out.push_str(&render::onepassword(&report));
     }
 
     eprint!("{out}");
@@ -1379,5 +1410,44 @@ mod tests {
              refusals carry:\n{}",
             safix_core::delegation::BOUNDARY
         );
+    }
+
+    /// Every target keyword the dispatch accepts is named by both forms.
+    ///
+    /// The failure this exists for: a keyword added to
+    /// [`parse_dispatch`](super::parse_dispatch) and not to `usage::SYNC`
+    /// leaves the help and the dispatch disagreeing — `safix sync pass`
+    /// converges a target the page never mentions, and nothing else in the
+    /// tree reads both. The accepted set is derived from the parser rather
+    /// than written out here, so a keyword the parser learns is one this test
+    /// starts demanding of the page.
+    #[test]
+    fn every_target_keyword_the_dispatch_accepts_is_in_both_forms() {
+        let mut accepted = Vec::new();
+        for word in safix_core::bridge::RESERVED_MAPPING_WORDS {
+            let given = words(&[word]);
+            let Ok(dispatch) = super::parse_dispatch("sync", "form", &given) else {
+                continue;
+            };
+            if dispatch.target.is_some() {
+                accepted.push(word);
+            }
+        }
+        assert!(
+            accepted.len() >= 4,
+            "the dispatch accepts {} target keywords, which is fewer than the \
+             targets that exist: {accepted:?}",
+            accepted.len()
+        );
+        for word in accepted {
+            assert!(
+                usage::AUDIT.contains(word),
+                "`audit {word}` is dispatchable and usage::AUDIT never names it"
+            );
+            assert!(
+                usage::SYNC.contains(word),
+                "`sync {word}` is dispatchable and usage::SYNC never names it"
+            );
+        }
     }
 }

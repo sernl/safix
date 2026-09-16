@@ -19,6 +19,223 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### Fields on the far side of a mapping, one judge, and one reserved-word list
+
+A mapping's far side now declares what the entry carries beside its value: `fields.username`, `fields.url`, `fields.notes` and `fields.tags`.
+Each is either a literal — a bare string, written in a declaration that is evaluated into the world-readable nix store and therefore not a secret — or `{ entry = "<name>"; }`, naming another entry of the mapping's own person, decrypted when the mapping is converged and never at evaluation.
+The submodule is `modules/flake/safix/fields.nix` and it sits on the far side only, never on `safix`: a safix entry is a file, a key inside it and an audience, with no slot for a url and nowhere to hold a second authoring surface beside the declaration that already carries one.
+A clan mapping declares no fields at all, because a clan var is a file's bytes and clan's own command offers no field beside it.
+
+**BREAKING**: `flake.safix.keepassxc.mappings.<id>.kdbx.username` is gone.
+It is not aliased and there is no deprecation window: `kdbx.fields.username` is the same field with the same meaning, and a declaration still spelling the old name fails with the module system's own "unknown option" sentence naming `kdbx.username` — a better error than any shim would produce.
+The runtime half refuses it on the same footing, because `crates/safix-core/src/model.rs`'s structs deny unknown fields, so there is no half-migrated state to land in.
+
+```nix
+kdbx = { path = "alice/grafana"; username = "alice@example.com"; };      # before
+kdbx = { path = "alice/grafana"; fields.username = "alice@example.com"; };  # after
+```
+
+Each target declares, per field, whether it can carry the field at all and over which channel, and refuses what it cannot — in both halves, evaluation and runtime, the way `Mode::pulls` is already refused in both.
+keepassxc carries `username`, `url` and `notes` in an argument vector and cannot carry `tags` at all: `keepassxc-cli`'s `add` and `edit` have no tags flag and no custom-attribute write, so a declared tag is refused rather than accepted and dropped.
+An `{ entry = … }` source is refused for every keepassxc field, because the resolved value is a secret and this target's only channel for a field is an argument vector, where a secret value may not travel.
+Two refusal codes carry both: `safix::field_unsupported` and `safix::field_source_in_argv`, each naming the target and the field, the second naming the entry to edit as well.
+
+Convergence widened from "the values differ" to "the values differ or the declared fields differ".
+`safix sync keepassxc` gained two report words, `fields updated` — the value already agreed and the declared fields were written — and `fields diverged` — the declared fields differ and this mode does not write them.
+`safix audit keepassxc`'s comparison gained a fourth outcome, `fields diverged`, beside `agreeing`, `diverged` and `unjudgeable`.
+A value divergence dominates a field divergence, so a mapping whose value and fields both differ is `conflict` or `updated` and never `fields diverged`.
+A field divergence names the fields and never their contents — a note may itself be sensitive, and an entry-sourced field is a secret — and it moves the exit status on the same footing as a value divergence, because a declared field that is not there is a declaration that is not true.
+The fields read is its own narrower invocation, without `--show-protected` and without `Password`, issued only for a mapping that declares a field, so a value cannot return on that pipe by construction and a mapping declaring no field issues exactly the argument vector it issued before.
+
+**BREAKING** for a consumer holding a mapping named `pass`, `bitwarden` or `1password`: those three ids are now refused, on both mapping modules, beside the existing `clan`, `keepassxc` and `all`.
+All six land before three of the targets that will answer to them exist, so that those three changes consume a settled list rather than moving the same equality check three times.
+`modules/flake/safix/reserved.nix` is the one declaration of the list, `crates/safix-core/src/bridge.rs`'s `RESERVED_MAPPING_WORDS` is the runtime's copy, and the new `checks.safix-reserved-words` holds the two equal.
+`op` is deliberately not reserved: one spelling per target, and `1password` is it.
+
+`crates/safix-core/src/endpoint.rs` is new and states what a far side is asked — unlock, read, write, list, capabilities — and nothing else.
+The three-way decision a two-way convergence rests on is written once there as `endpoint::judge`, and both targets reach it: `sync::two_way` and `bridge_sync::judge` were line-for-line the same decision over two different far sides and are deleted rather than wrapped.
+Every refusal only one far side can raise stays outside that contract and is documented as belonging to it.
+
+No dependency was added, `Cargo.toml`, `Cargo.lock` and `deny.toml` are unedited, and no new crate reaches the graph.
+
+`README.md`'s sync chapter carries the `kdbx.fields` spelling, landed by `rewrite-readme-and-examples`, which owns that prose.
+
+### A third sync target: the operator's `pass` store
+
+`safix sync pass` and `safix audit pass` converge declared safix entries with entries in the operator's `pass` store, bare or with `pass` as the target keyword.
+The option root is `flake.safix.pass`: `store` (`str`, default `"~/.password-store"`) and `mappings.<id> = { mode; safix = { user; name; }; pass = { path; fields; }; }`.
+`store` is a string rather than a nix path, for the reason `keepassxc.database` is one — a path is copied into the world-readable store on every evaluation — and for a second: a path stringifies to a root-dependent absolute value, which reddens `safix-examples`, the check that compares the flattened `flake.safix.lib.*` records field-for-field between two examples evaluated under different roots.
+It carries a default where `database` cannot, because the tool itself has one; the leading `~` is expanded by the runtime, because evaluation has no home to expand against.
+`path` is the entry path inside the store, with no leading slash and no `.gpg` suffix, and there is no group option: a `pass` path is already absolute within the store.
+
+Four modes, named by their endpoints: `safix-to-pass`, `pass-to-safix`, `two-way` and `backup`.
+No mode deletes an entry on either side, and `pass rm` is never run.
+
+The record layout is safix's own, because the store fixes no metadata schema — its convention is that the value is the first line and further information follows it, and the `login:`/`url:`/`notes:` spellings are the ecosystem's rather than the tool's.
+A write emits the value's bytes, then — only when at least one field is declared — one blank line, then one `login:`, `url:`, `notes:` or `tags:` line per set field in that order, with `tags` joined by `", "`; a read takes the field block to be the trailing run of such lines, consumes one blank line before it as the separator, and takes every byte above it as the value, verbatim, so a record safix wrote with no field is indistinguishable from one written by hand and `pass -c` still copies the value.
+The one ambiguity is documented rather than refused: a *value* whose own trailing lines are spelled like fields reads back as fields, and safix's own writes stay out of that case because they always emit the separator.
+
+This is the one target that carries all four fields, because the whole record body crosses on standard input — so `Error::FieldUnsupported` and `Error::FieldSourceInArgv` are unreachable here, which a unit test over `capabilities()` holds rather than a sentence, and an `{ entry = "<name>"; }` field source is admissible on every one of the four.
+A value carrying newlines is written and read back byte-identically, a trailing newline included: `Error::ValueSpansLines` is not raised and `Secret::without_one_trailing_newline` is not applied, because both exist for `keepassxc-cli`'s own one-line value channel rather than for secrets.
+
+A `two-way` mapping's last agreement is a companion entry beside the mapped one, `<path>.safix-sync-state`, under the shared `safix-sync-v1` tag, written as its own second write strictly after the value's — so a run interrupted between the two leaves the older memory and the next run reports a conflict rather than overwriting the newer value.
+Evaluation refuses a declared path carrying that suffix, and each mapping accounts for its own companion, so a mapping's memory is never reported as an entry nothing declares.
+
+There is no unlock step and no passphrase prompt: `pass` shells to gpg, and the unlock belongs to the ambient `gpg-agent`.
+Before any mapping is read, a declared store that is not one — absent, or carrying no `.gpg-id` — refuses the run.
+A decrypt the agent declined is its own refusal carrying gpg's words, told apart from an absent entry, which is answered from the store's own `*.gpg` names rather than from an exit status.
+`SAFIX_PASS` (default `pass`) names the command, in the shape `SAFIX_KEEPASSXC_CLI` has.
+
+Five new refusal codes, each with its own prose and two accepted snapshots: `safix::pass_unavailable`, `safix::pass_locked`, `safix::pass_command_failed`, `safix::no_pass_store` and `safix::pass_entry_absent`.
+`Error::StoreLocked` is deliberately not reused: its prose is about a database password and a terminal safix could have asked on, and printing it at an operator whose agent declined would name a remedy safix does not own.
+
+New check attributes: `safix-pass` and `safix-pass-drill` in `modules/flake/checks/pass.nix`, thirteen per-test `safix-pass-*` integration checks, `safix-pass-cli`, and `safix-pass-refusals` in the record a consumer's own `safixChecks` call returns.
+No existing check attribute was renamed or removed.
+`safix-pass-cli` is linux-only, and the guard is a claim rather than a convenience: it drives the real `pass` over `pkgs.pass` and `pkgs.gnupg` against a store it mints in its own `GNUPGHOME`, and the nixpkgs derivation for `pass` disables its own insert, show, edit and reencryption tests on darwin.
+It is the one far side of a sync mapping any check of this repository drives for real, because `pass` is free-licensed and needs neither a network nor an account.
+
+**BREAKING** for a consumer holding a mapping whose id is the word `pass`: that id stops evaluating, on every mapping module, because `sync` and `audit` read it as a target keyword.
+The reserved list itself — `[ "clan" "keepassxc" "pass" "bitwarden" "1password" "all" ]` — landed in the `extend-bridge-fields` entry above, which this change depends on and only consumes; this is the change that makes the word mean something.
+
+No dependency was added: the transport is a subprocess over `std::process::Command`, the shape `crates/safix-core/src/clan.rs` and `store.rs` already have, so `Cargo.toml`, `Cargo.lock` and `deny.toml` are unedited.
+
+`README.md` documents all five targets in one chapter, landed by `rewrite-readme-and-examples`, which owns that file in this programme — there is no pass section here to go looking for.
+
+### A fourth sync target: the operator's Bitwarden vault
+
+`safix sync bitwarden` and `safix audit bitwarden` converge declared safix entries with items in the operator's Bitwarden vault, bare or with `bitwarden` as the target keyword.
+The option root is `flake.safix.bitwarden`: `server` (`nullOr str`, default `null`) and `mappings.<id> = { mode; safix = { user; name; }; bitwarden = { folder; item; fields; }; }`.
+An item is addressed by folder and name — `folder = null` meaning the vault's root — and never by the vault's own item identifier: an identifier says nothing a reviewer can check, is not what the person holding the item sees, and is reissued when a vault is exported and re-imported, so a declaration written against one silently stops naming anything.
+The address resolves at run time and is memoised for the run; it is the address every report and every refusal names, and it is not an argument any command takes.
+`server` is optional and its absence is not a refusal: a client an operator logged into already knows its server, so an undeclared one is a working configuration rather than a missing declaration.
+A declared URL is checked against the one the unlocked client reports and a difference refuses the run before any side is read; safix never runs `bw config server`, because pinning the client's server is the operator's own act.
+
+Four modes, named by their endpoints: `safix-to-bitwarden`, `bitwarden-to-safix`, `two-way` and `backup`.
+No mode deletes an item on either side.
+
+**The credential-channel invariant is narrowed here, deliberately and in one place.**
+It was: no secret value in any argument vector or any environment, on any invocation, asserted unconditionally by the card stand-in over every record.
+It now reads: no master password and no mapped value in any argument vector or any environment, on any invocation; the session key in the environment of the invocations that need it, and in no argument, no file safix writes, and no output path.
+The narrowing is forced rather than chosen: `bw` takes its session key as `--session <key>` in argv or as `BW_SESSION` in the environment and offers no third channel, and an argument vector is readable by every process on the host through `/proc/*/cmdline` where an environment is readable by the same uid and root alone.
+So the key is placed in the lesser exposure rather than in none, the run ends with `bw lock` which invalidates it, and `crates/safix/tests/bitwarden.rs`'s `the_session_key_is_in_the_environment_and_nowhere_else` is what holds the narrowed claim over every recorded invocation rather than this paragraph.
+The master password itself stays on a pipe: one hidden prompt, then `--passwordfile /dev/stdin`, measured against `bitwarden-cli` 2026.8.0 at this flake's pin to be a stream read rather than a `stat`. `--passwordenv` is not used under any outcome, because it would move the credential that outlives the run into an environment.
+
+One `bw sync` runs per run, after the unlock and before the first read, and a failed one refuses every mapping on this target rather than warning: the client's read commands answer from a local copy that may predate another device's change, so a comparison against a stale copy would report agreement that is not there and `backup` would write into an item that already holds a value.
+
+A `two-way` mapping's last agreement is a hidden custom field of the mapped item itself — `{ name = "safix-sync-state"; type = 1; }`, carrying the same `safix-sync-v1 <fingerprint>` line every other target records — written in the same item write as the value.
+So this target reserves no item name, has no reserved-name refusal, and cannot report a mapping's own memory as an item nobody declared.
+The companion object the keepassxc target uses exists only because `keepassxc-cli` 2.7.12 can write no custom attribute on any verb; Bitwarden can write the field, and copying the workaround would have imported a reserved suffix, an evaluation refusal and a lingering-companion report shape to reproduce a limitation that is not here.
+Because one write carries both, there is no window in which the memory describes a value that was not written — the ordering the keepassxc and `pass` targets have to insist on does not arise.
+
+`bw edit item` replaces the whole item, so every write is a read–modify–write: the item is fetched, the value, the declared fields and the memory are set on that object, and the whole object goes back.
+A `totp`, a second URI, or somebody's own custom field therefore survives a value repair.
+The payload crosses as base64 JSON on standard input, encoded in process — no `bw encode` child, and the documented positional `<encodedJson>` form is never used, because a payload carrying a value in an argument vector is what the invariant above forbids.
+
+Three fields are carried and one is refused: `username` becomes `login.username`, `url` becomes the first entry of `login.uris`, `notes` becomes the item's own top-level note, and a declared `tags` is refused **at evaluation**, naming the mapping, the target and the field.
+Bitwarden genuinely has no tag concept — a folder is a single placement and a collection is an organizational permission boundary, so neither is a label — and declaring two tags cannot put an item in two folders, so accepting the declaration would mean either dropping it silently or doing something the declaration did not say.
+Because this target's fields travel standard input, an `{ entry = "<name>"; }` field source is admissible on all three and `Error::FieldSourceInArgv` is unreachable here, which the capability table states positively rather than leaving as an absence.
+A value carrying newlines crosses whole: `safix::value_spans_lines` is a property of `keepassxc-cli`'s one-line entry password and not one this target inherits.
+
+Seven refusal codes are new, each with its own prose and two accepted snapshots: `safix::bitwarden_unavailable`, `safix::bitwarden_locked`, `safix::bitwarden_command_failed`, `safix::bitwarden_server_mismatch`, `safix::bitwarden_item_ambiguous`, `safix::bitwarden_item_absent` and `safix::bitwarden_stale`.
+`safix::bitwarden_locked` tells a locked client apart from an unauthenticated one, because safix unlocks a vault and never logs one in.
+`safix::bitwarden_item_ambiguous` refuses an address more than one item answers to and picks between them by nothing — not recency, not an identifier's order — because a vault legitimately holds two items with one name and a mirror that chose would converge a person's secret with whichever one sorted first.
+`safix::unknown_sync_mapping` and `safix::sync_source_empty` are reused rather than twinned per target.
+
+Evaluation refuses five things, and `checks.safix-bitwarden`, `checks.safix-bitwarden-refusals` and `checks.safix-bitwarden-drill` hold them against their literal sentences: a mapping whose safix side does not resolve, a pull-capable mapping onto an entry a generator also produces, two mappings naming one item, a mapping whose id is a word `sync` and `audit` read as a target keyword, and a declared `tags`.
+Sixteen behavioural checks are new — `checks.safix-bitwarden-{locked,unauthenticated,server,stale,ambiguous,absent,argv,session,edit,two-way,conflict,multiline,tags,audit,lingering,fields}` — plus `checks.safix-bitwarden-suite`, which runs the target whole and is the only thing that runs the seven claims no per-mode entry names.
+No existing check attribute was renamed or removed.
+
+**BREAKING** on the nix surface, in two ways, both consequences of the target existing rather than of anything being renamed.
+First, `flake.safix.bitwarden` is a new option block: a consumer who set no such option is unaffected, and a consumer who had an unrelated `bitwarden` attribute under `flake.safix` is now typechecked against this one.
+Second, `safix sync` with no target named now converges bitwarden mappings too — a consumer who declares them and expects `sync` to mean the targets they had gets one more in the same run.
+No existing option is renamed or removed by this change.
+
+**The absence of a real-binary check is recorded rather than silent.**
+No check of this repository runs a real `bw`: `login` registers a device against an account, every path to a session goes through it, and a `nix build` has no network.
+So the stand-in `crates/safix/tests/support/bw-stub.rs` is the only client any check drives, `modules/flake/checks/bitwarden.nix`'s header states the absence where the structural checks live, and that header also states what the stand-in cannot establish — that the argument vector means to the real client what safix thinks it means.
+The deferred alternative is a NixOS VM node against `services.vaultwarden`, and it is not minted here because the upstream `nixos/tests/vaultwarden.nix` has its own `bw login`/`sync`/`list` assertions commented out, so adopting its shape would produce a check whose green means nothing was measured.
+What would unblock it is one measurement: that `bw login --apikey` followed by `bw unlock` completes against a local vaultwarden with snakeoil certificates.
+Measured toward it on 2026-09-16 against the pinned client, out of its shipped bundle: `login --apikey` exists and reads `BW_CLIENTID`/`BW_CLIENTSECRET` from the environment, and the bundle carries no TLS-trust override of its own, so a snakeoil certificate would have to be trusted through node's own environment.
+The end-to-end handshake itself was **not** measured — it needs a booted node rather than a bundle read — and no VM check is minted on the strength of the two reads that were.
+
+No dependency was added: the transport is a subprocess over `std::process::Command`, the shape `crates/safix-core/src/clan.rs` and `store.rs` already have, so `Cargo.toml`, `Cargo.lock` and `deny.toml` are unedited and `bitwarden-cli` never enters the flake's closure.
+
+`README.md` documents every target in one `## Syncing to other stores` chapter, owned by `rewrite-readme-and-examples` in this programme, and the bitwarden subsection is that change's to place — there is no bitwarden section here to go looking for.
+One gap is recorded rather than papered over: none of that prose is machine-checkable, and inventing a prose-counting check to pretend otherwise is refused, so what holds the documentation honest is review and the option descriptions the module itself carries.
+
+### A fifth sync target: 1Password, on a command no check of this repository may run
+
+`safix sync 1password` and `safix audit 1password` converge declared safix entries with items in the operator's 1Password vaults.
+The option root is `flake.safix.onepassword`: `account` (`nullOr str`, default `null`) and `mappings.<id> = { mode; safix = { user; name; }; onepassword = { vault; item; fields; }; }`.
+`vault` and `item` are required plain strings rather than nix paths, for the reason `keepassxc.database` is one — a path is copied into the world-readable store on every evaluation — and for a second this option has: a root-dependent absolute string makes the two `safix-examples` consumers resolve the same projection to two different values.
+`vault` carries no default because a service account cannot reach a built-in Private, Personal or Employee vault at all, so a default would be a value that fails for the most likely automation posture.
+`account` is optional and its absence is not a refusal: `op` resolves its own default account and a service-account token names one implicitly, so an undeclared account is a working configuration rather than a missing declaration.
+
+The four mode words are `safix-to-1password`, `1password-to-safix`, `two-way` and `backup`, with the semantics every other target's modes already have and no deletion in any of them.
+The target keyword is `1password` and only `1password`: `op` is the name of the program the runtime invokes, selectable through `SAFIX_OP`, and is accepted as a target keyword nowhere.
+
+Every value and all four declared fields cross on the standard input of the command that carries them, as one JSON item payload; no `field=value` assignment statement is ever spelled, because 1Password's own documentation states such a statement is recorded in shell history and can be visible to other processes.
+So this target declares all four fields on one channel, and a field sourced from another entry is admissible on every one of them — the asymmetry against keepassxc, whose `url` and `notes` are argument-bound and whose `tags` cannot be written at all, which is why a per-target capability table exists rather than a shared default.
+A declared `url` becomes the item's own `urls[]` autofill website rather than a `url`-typed custom field, because 1Password's documentation is explicit that the field type is not what autofill reads.
+
+A `two-way` mapping's last agreement is a `CONCEALED` custom field of the mapped item itself, named `safix-sync-state`, carrying the same `safix-sync-v1 <fingerprint>` line the keepassxc target records.
+So this target reserves no item name and has no reserved-name refusal: the companion object keepassxc needs exists only because `keepassxc-cli` cannot write a custom attribute on any verb, and `op` can.
+An unreadable or unrecognised recorded state is treated as absent, which converts the mapping to bootstrap semantics rather than to a refusal.
+
+A write onto an existing item is a round trip through that item's own JSON: only the value, the declared fields and the recorded state are replaced, and every other member survives.
+1Password's documentation carries an explicit danger that an item edited from a JSON template loses the passkeys on it, and safix cannot reach that outcome because it never sends a template — so there is no refusal about passkey-bearing items and an ordinary login item carrying one stays mappable.
+
+A failure against the service on one mapping refuses that mapping and does not end the run, so the report is complete over the declarations whatever happened and the run exits non-zero.
+Five refusal codes are new: `safix::onepassword_unavailable`, `safix::onepassword_signed_out`, `safix::onepassword_command_failed`, `safix::onepassword_item_absent` and `safix::onepassword_vault_absent`.
+`safix::unknown_sync_mapping` and `safix::sync_source_empty` are reused rather than twinned per target.
+
+Evaluation refuses four things, and `checks.safix-onepassword`, `checks.safix-onepassword-refusals` and `checks.safix-onepassword-drill` hold them: a mapping whose safix side does not resolve, a pull-capable mapping onto an entry a generator also produces, two mappings naming one item in one vault, and a mapping whose id is a word `sync` and `audit` read as a target keyword.
+Ten behavioural checks are new — `checks.safix-onepassword-{sync,argv,multiline,round-trip,signed-out,refusals,partial,two-way,leftovers,audit}` — driven against the stand-in `crates/safix/tests/support/op-stub.rs`.
+
+**BREAKING** for a consumer holding a mapping named `1password` on any target: that id stops evaluating, with the sentence every other target already gives for the same collision — "flake.safix.\<target\>.mappings.1password is named '1password', which sync and audit read as a target keyword rather than a mapping name".
+The remedy is to rename the mapping; the word was reserved by the change that landed the six-word list, and this change is what makes it a target keyword in fact.
+
+Two absences ship deliberately.
+No check of this repository drives a real `op`, and none ever will: `_1password-cli` at this flake's pin is unfree, so naming it from a check, a package or a development shell makes evaluation fail for every consumer who has not allowed unfree packages; there is no self-hostable 1Password server to point a sandboxed node at; and every authentication path needs the network, which no `nix build` and no hermetic VM node has.
+Each ground alone is sufficient and none of them expires, which is why the flake references that package from nowhere and why the absence is written into the declaring module, the transport and the specification rather than left to be inferred from a missing file.
+And there is no value-shape refusal for this target — no analogue of `safix::value_spans_lines` — because the standard-input payload carries a multi-line value whole; that refusal is a `keepassxc-cli` limitation rather than a truth about secrets, and the capability states the difference positively so nobody adds it back by analogy.
+
+No dependency was added for any of this, and no new crate reaches the graph.
+
+### `README.md` is rewritten, and contributor-facing status moves to `CONTRIBUTING.md`
+
+`README.md` is written from scratch against a fixed chapter outline, in the order a reader meets the tool: install, the model, declaring, subjects, generators, verbs, syncing, where files go, profiles, fitting it to an existing tree, the opinions, the file map.
+Every subcommand arrives as one row of one table, stating what it does, what it reads, what it writes and whether it needs a terminal — `install` included and marked as the one an activation runs rather than a person.
+No sentence counts the subcommands or the sync targets, which is what the four disagreeing counts and the six "two targets" sites were.
+The two target chapters became one `## Syncing to other stores`, with the mapping shape, the modes, the conflict rule, the sync-state memory, the never-delete rule and the field surface stated once, and one same-shaped subsection per target under it.
+"Narrowing an audience does not retract what an old recipient already holds" and "safix reads no option outside its own namespace" are each stated once and cross-referenced from everywhere that restated them.
+No check of this repository's own suite is named in it: a check name is contributor evidence, and `nix flake check` prints the names itself.
+
+**BREAKING** for a reader, not for an evaluation: `## Status` is gone from `README.md` and is now `CONTRIBUTING.md`'s `## Where the suite stands`, with the platform conditions kept and the statement that a skipped check is not a passing one.
+`CONTRIBUTING.md` also gains `## Keeping the README honest`, carrying the three commands that hold the prose contract — no check name in the body, no sentence over forty words, no count of verbs or targets — and why each is a command a contributor runs rather than a flake check.
+
+`examples/README.md` is rewritten against what the checks actually read, and every coverage claim it makes now names the assertion that holds it.
+Two of its statements were false and are gone: `entry.nix` reaches `mkVault` by importing `lib/` and supplying its own `lib`, never through `builtins.getFlake`, and `examples/dendritic/flake.nix` is read by no check as nix — it is read as text, for the assertion that it names no module path by hand.
+No option, default, verb or refusal changed, so nothing here is a migration note.
+
+### The examples declare the whole namespace, at both scopes, with coverage held by a check
+
+`examples/plain-nix/fleet.nix` and `examples/dendritic/modules/` declare every feature of the declaration surface rather than seventeen of them: a grant to the owner of a machine, a grant to an organization, a legal `perHost.<h>.add`, a `perTag` `force`, machine, service and nested-group members, a second silo group, a delegation with both consenting sides, a recovery recipient, an entry `mode`, an entry `path` that is a function of the consuming configuration, generator `prompts`, `dependencies`, `validation` and `network`, a public output, `extraGovernedFiles`, and a mapping for each sync target whose options exist.
+
+`examples/profiles/` is new: a NixOS system profile serving the machine `deck`, a home-manager profile serving `alice`, and a storage-and-vault overlay, all three over that one fleet.
+It is the first worked example of `safix.enable`, `safix.lib`, `safix.user`, `safix.machine`, `safix.hostname`, `safix.tags`, `safix.secrets`, `safix.identity.*`, `safix.identityPreflight` and `safix.installer.*` in this repository, and the new `checks.safix-examples-profiles` evaluates both profiles for real — a `nixosSystem` and a `homeManagerConfiguration` — and compares what each resolves against literals.
+It is a second check rather than a field of the first because what a profile resolves is a materialization under a scope: an entry's `mode` and its `path` are not placement fields, and `path` cannot be serialized at all, so all three are invisible to a comparison over the pre-scope projection.
+
+Three defects in `checks.safix-examples` are fixed.
+The hooks were compared with themselves — one file supplied both operands — and are now each consumer's own declaration compared against the other's, with one literal row holding that the onboarding hook carries its fixture's text and that the enrollment hook is null, so both sides losing a hook fails instead of comparing empty to empty.
+`examples/dendritic/flake.nix` no longer names its module files one by one: it reads its own module directory, the way the check already did, and the check asserts the file contains no path under `modules/`, naming the offending line — so the hand list cannot come back and cannot silently shrink.
+Every compared field now passes through one elision that replaces a leading example root with `<example-root>` and nothing else, which is what lets both examples declare `bridge.clanFlake` against their own tree; a general store-path elision was refused, because a store path appearing where one is not expected is itself a finding.
+
+The compared set is no longer ten chosen fields but every attribute the runtime reads that serializes, adding `subjects`, `vaultDeclared` and `vaultCreationRulesText`, with serializability stated as the criterion and the function-valued exclusions named beside it.
+Beside it the check gained `coverageProbes`, one literal row per feature family: a comparison between two consumers holds that they agree and stays green when a feature is deleted from both, which is the failure this repository had no way to see.
+
+No option, default, verb or refusal changed.
+
 ### The picker is drawn bottom-up, searched the way a password database is, and remembers itself
 
 `safix view` and the nameless `safix edit` draw their list from the bottom of the terminal upwards.

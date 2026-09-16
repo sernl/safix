@@ -35,6 +35,7 @@
 mod harness;
 
 use harness::{ALICE_FILE, Fixture};
+use serde_json::json;
 
 /// The password the modelled database is opened with, fed to the one prompt.
 const UNLOCK: &str = "fixture-database-password\n";
@@ -52,28 +53,28 @@ fn declared() -> Fixture {
         "safix-to-keepassxc",
         ("alice", "push-me"),
         "alice/pushed",
-        Some("alice@example.com"),
+        json!({"username": "alice@example.com"}),
     );
     fixture.seed_sync_mapping(
         "pull",
         "keepassxc-to-safix",
         ("alice", "pull-me"),
         "alice/pulled",
-        None,
+        json!({}),
     );
     fixture.seed_sync_mapping(
         "both",
         "two-way",
         ("alice", "both-ways"),
         "alice/both",
-        None,
+        json!({}),
     );
     fixture.seed_sync_mapping(
         "copy",
         "backup",
         ("alice", "back-me-up"),
         "alice/copied",
-        None,
+        json!({}),
     );
     fixture
 }
@@ -146,13 +147,13 @@ fn each_mode_converges_exactly_as_its_name_says() {
         "a backup mapping did not write into absence"
     );
 
-    // The username a mapping declares reaches the entry; one that declares none
-    // leaves the field alone.
+    // A field a mapping declares reaches the entry; a mapping that declares
+    // none leaves every field alone.
     assert_eq!(
-        fixture.store_username("safix/alice/pushed"),
+        fixture.store_field("safix/alice/pushed", "username"),
         "alice@example.com"
     );
-    assert_eq!(fixture.store_username("safix/alice/both"), "");
+    assert!(fixture.store_fields("safix/alice/both").is_empty());
 
     // The two-way mapping recorded its agreement, and it is beside the entry
     // rather than in the repository.
@@ -255,7 +256,7 @@ fn a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write() {
         "keepassxc-to-safix",
         ("alice", "pull-me"),
         "alice/pulled",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -312,7 +313,7 @@ fn two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did
         "two-way",
         ("alice", "both-ways"),
         "alice/both",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -396,7 +397,7 @@ fn a_backup_mapping_never_overwrites_and_reports_the_divergence() {
         "backup",
         ("alice", "back-me-up"),
         "alice/copied",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -435,14 +436,14 @@ fn the_refusals_each_have_their_own_code_and_leave_both_sides_alone() {
         "safix-to-keepassxc",
         ("alice", "push-me"),
         "alice/pushed",
-        None,
+        json!({}),
     );
     fixture.seed_sync_mapping(
         "pull",
         "keepassxc-to-safix",
         ("alice", "pull-me"),
         "alice/pulled",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -521,7 +522,7 @@ fn the_refusal_codes_are_each_their_own() {
         "safix-to-keepassxc",
         ("alice", "push-me"),
         "alice/pushed",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -548,14 +549,14 @@ fn a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped() {
         "safix-to-keepassxc",
         ("alice", "push-me"),
         "alice/pushed",
-        None,
+        json!({}),
     );
     fixture.seed_sync_mapping(
         "opaque",
         "safix-to-keepassxc",
         ("alice", "unreadable"),
         "alice/opaque",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -607,7 +608,7 @@ fn the_database_writes_of_a_run_are_one_burst() {
         ("three", "third", "alice/third"),
     ] {
         fixture.seed_output(name, ALICE_FILE);
-        fixture.seed_sync_mapping(id, "safix-to-keepassxc", ("alice", name), path, None);
+        fixture.seed_sync_mapping(id, "safix-to-keepassxc", ("alice", name), path, json!({}));
         fixture
             .run_with(&["set", "alice", name], &format!("value-of-{name}"))
             .expect_success("seeding a mapping");
@@ -658,7 +659,7 @@ fn an_entry_no_mapping_declares_is_reported_and_never_removed() {
         "safix-to-keepassxc",
         ("alice", "push-me"),
         "alice/pushed",
-        None,
+        json!({}),
     );
     let extra = store_env(&fixture);
     let extra = borrowed(&extra);
@@ -706,6 +707,245 @@ fn an_empty_mirror_is_silent() {
     assert!(
         fixture.store_invocations().is_empty(),
         "a run with no mapping opened the database"
+    );
+}
+
+// ── the fields declared beside a value ────────────────────────────────────
+
+/// A field drift on an otherwise-agreeing entry is repaired under a pushing
+/// mode, in one write.
+#[test]
+fn a_field_drift_on_an_agreeing_entry_is_repaired_under_a_pushing_mode() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "push",
+        "safix-to-keepassxc",
+        ("alice", "push-me"),
+        "alice/pushed",
+        json!({"notes": "CANARY-the-declaration-says-this"}),
+    );
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+
+    fixture
+        .run_with(&["set", "alice", "push-me"], "CANARY-agreeing-value")
+        .expect_success("seeding the safix side");
+    fixture.store_seed("safix/alice/pushed", "CANARY-agreeing-value");
+    fixture.store_seed_fields(
+        "safix/alice/pushed",
+        &[("notes", "CANARY-the-entry-says-this")],
+    );
+
+    let run = fixture
+        .run_sync(&["sync"], UNLOCK, &extra)
+        .expect_success("a field drift under a pushing mode");
+    run.says("safix-to-keepassxc  fields updated");
+    run.says("notes");
+
+    // One write, carrying the value the entry already held.
+    let writes: Vec<String> = fixture
+        .store_invocations()
+        .into_iter()
+        .filter(|line| line.starts_with("edit ") || line.starts_with("add "))
+        .collect();
+    assert_eq!(
+        writes.len(),
+        1,
+        "a field repair was not one write: {writes:?}"
+    );
+    assert!(
+        writes[0].starts_with("edit "),
+        "an existing entry was not edited: {writes:?}"
+    );
+    assert_eq!(
+        fixture.store_holds("safix/alice/pushed").as_deref(),
+        Some("CANARY-agreeing-value"),
+        "a field repair moved the value"
+    );
+    assert_eq!(
+        fixture.store_field("safix/alice/pushed", "notes"),
+        "CANARY-the-declaration-says-this",
+        "the declared field did not reach the entry"
+    );
+
+    // The report names the field and neither side's content.
+    run.silent_about("CANARY-the-declaration-says-this");
+    run.silent_about("CANARY-the-entry-says-this");
+}
+
+/// `backup` never overwrites an existing entry's field either.
+#[test]
+fn a_backup_mapping_never_overwrites_a_field_either() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("back-me-up", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "copy",
+        "backup",
+        ("alice", "back-me-up"),
+        "alice/copied",
+        json!({"url": "https://CANARY-declared.example"}),
+    );
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+
+    fixture
+        .run_with(&["set", "alice", "back-me-up"], "CANARY-agreeing-value")
+        .expect_success("seeding the safix side");
+    fixture.store_seed("safix/alice/copied", "CANARY-agreeing-value");
+    fixture.store_seed_fields(
+        "safix/alice/copied",
+        &[("url", "https://CANARY-the-person-typed.example")],
+    );
+
+    let run = fixture
+        .run_sync(&["sync"], UNLOCK, &extra)
+        .expect_refusal("a backup mapping whose declared field differs");
+    run.says("backup  fields diverged");
+    run.says("url");
+    run.says("backup never overwrites an existing entry");
+
+    assert_eq!(
+        fixture.store_field("safix/alice/copied", "url"),
+        "https://CANARY-the-person-typed.example",
+        "backup overwrote a field"
+    );
+    assert_eq!(
+        fixture.store_holds("safix/alice/copied").as_deref(),
+        Some("CANARY-agreeing-value")
+    );
+    assert!(
+        fixture
+            .store_invocations()
+            .iter()
+            .all(|line| !line.starts_with("add ") && !line.starts_with("edit ")),
+        "a backup mapping wrote the database"
+    );
+    run.silent_about("https://CANARY-declared.example");
+    run.silent_about("https://CANARY-the-person-typed.example");
+}
+
+/// A declared tag is refused naming the target and the field, rather than
+/// dropped.
+///
+/// The evaluation half of this claim is
+/// `modules/flake/checks/keepassxc.nix`'s `tagsRefusedMessages`, over the real
+/// option tree. This is the runtime half: a record handed to the runtime — as
+/// `--entry` and an embedder both can — meets the same refusal, so a projection
+/// no `violationsOf` ever saw cannot quietly write three fields of four.
+#[test]
+fn a_declared_tag_is_refused_at_evaluation_rather_than_dropped() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "push",
+        "safix-to-keepassxc",
+        ("alice", "push-me"),
+        "alice/pushed",
+        json!({"tags": ["work"]}),
+    );
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+
+    fixture
+        .run_with(&["set", "alice", "push-me"], "CANARY-a-value")
+        .expect_success("seeding the safix side");
+
+    let run = fixture
+        .run_sync(&["sync"], UNLOCK, &extra)
+        .expect_refusal("a mapping declaring a field this target cannot carry");
+    run.says("refused");
+    run.says("declares the field 'tags'");
+    run.says("keepassxc cannot carry it");
+    assert!(
+        fixture.store_holds("safix/alice/pushed").is_none(),
+        "a refused mapping was written anyway"
+    );
+}
+
+/// A field sourced from another entry is refused for this target, before a
+/// read.
+#[test]
+fn a_field_read_out_of_another_entry_is_refused_for_this_target() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "push",
+        "safix-to-keepassxc",
+        ("alice", "push-me"),
+        "alice/pushed",
+        json!({"notes": {"entry": "grafana-note"}}),
+    );
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+
+    fixture
+        .run_with(&["set", "alice", "push-me"], "CANARY-a-value")
+        .expect_success("seeding the safix side");
+
+    let run = fixture
+        .run_sync(&["sync"], UNLOCK, &extra)
+        .expect_refusal("a field sourced from another entry");
+    run.says("sources the field 'notes' from the entry 'grafana-note'");
+    run.says("argument vector");
+
+    // Nothing about this mapping's entry was issued at all: the refusal is
+    // reached before either side is read.
+    assert!(
+        fixture
+            .store_invocations()
+            .iter()
+            .all(|line| !line.contains("safix/alice/pushed")),
+        "a refused mapping's entry was still addressed"
+    );
+}
+
+/// A mapping declaring no field issues no second read.
+///
+/// The unit half is `store.rs`'s `a_mapping_declaring_no_field_issues_no_fields_read`;
+/// this is the same property against the real argument vectors a run issues.
+#[test]
+fn a_mapping_declaring_no_field_issues_no_second_read() {
+    let mut fixture = Fixture::new();
+    fixture.seed_output("push-me", ALICE_FILE);
+    fixture.seed_sync_mapping(
+        "push",
+        "safix-to-keepassxc",
+        ("alice", "push-me"),
+        "alice/pushed",
+        json!({}),
+    );
+    let extra = store_env(&fixture);
+    let extra = borrowed(&extra);
+
+    fixture
+        .run_with(&["set", "alice", "push-me"], "CANARY-agreeing-value")
+        .expect_success("seeding the safix side");
+    fixture.store_seed("safix/alice/pushed", "CANARY-agreeing-value");
+
+    fixture
+        .run_sync(&["sync"], UNLOCK, &extra)
+        .expect_success("one agreeing mapping declaring no field");
+
+    let shows: Vec<String> = fixture
+        .store_invocations()
+        .into_iter()
+        .filter(|line| line.starts_with("show "))
+        .collect();
+    assert_eq!(
+        shows.len(),
+        1,
+        "a mapping declaring no field issued more than its value read: {shows:?}"
+    );
+    assert!(
+        shows[0].contains("--show-protected --attributes Password"),
+        "the one read is not the value read: {shows:?}"
+    );
+    assert!(
+        shows
+            .iter()
+            .all(|line| !line.contains("UserName") && !line.contains("Notes")),
+        "a fields read was issued for a mapping declaring none: {shows:?}"
     );
 }
 

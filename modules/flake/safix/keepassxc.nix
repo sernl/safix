@@ -22,6 +22,14 @@
 let
   resolve = import ./resolve.nix { inherit lib; };
   bridge = import ./bridge.nix { inherit lib; };
+  fields = import ./fields.nix { inherit lib; };
+  reserved = import ./reserved.nix;
+
+  # Which channel this transport carries each field on, read straight off the
+  # shared table rather than restated, so the rules below and the Rust half's
+  # own `Capabilities` cannot be forked from it. Exported so
+  # `modules/flake/checks/keepassxc.nix` can assert that.
+  capabilities = fields.channels.keepassxc;
 
   # Written as their endpoints rather than as push and pull, which is the
   # decision ./bridge.nix records for `direction` and holds for the same reason:
@@ -71,18 +79,23 @@ let
         '';
       };
 
-      username = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        example = "alice@example.com";
+      fields = lib.mkOption {
+        type = fields.fields;
+        default = { };
         description = ''
-          The username to set on the entry, or null to leave the field alone.
+          What the entry carries beside its value: a username, a url, notes and
+          tags, as ./fields.nix declares them for every target.
 
-          The one field beyond the value and the title that a mapping may set.
-          Arbitrary field templating is deliberately absent: every field safix
-          writes is a field its report and its refusals have to be able to speak
-          about, and a person's own database is not a projection of a
-          declaration.
+          `tags` is refused for this target rather than accepted and dropped:
+          keepassxc's own command has no tags flag and no custom-attribute
+          write, so accepting the declaration would mean writing less than it
+          says. An `{ entry = …; }` source is refused for this target too, for
+          a different reason: keepassxc's only channel for a field is an
+          argument vector, and a value read out of another entry is a secret,
+          which may not travel one.
+
+          This option replaces `kdbx.username`, which is gone rather than
+          aliased — the same field, spelled `fields.username`.
         '';
       };
     };
@@ -126,8 +139,8 @@ let
       kdbx = lib.mkOption {
         type = kdbxSide;
         description = ''
-          The database half: a path under the declared group, and optionally a
-          username.
+          The database half: a path under the declared group, and the fields the
+          entry carries beside its value.
 
           Evaluation verifies neither. The group and the entry are content of an
           encrypted file, and the only thing that can answer whether they are
@@ -217,24 +230,67 @@ let
       # faults hears about both.
       reservedId = lib.concatMap (
         m:
-        lib.optional
-          (builtins.elem m.id [
-            "clan"
-            "keepassxc"
-            "all"
-          ])
-          "flake.safix.keepassxc.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+        lib.optional (builtins.elem m.id reserved.ids) "flake.safix.keepassxc.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+      ) declared;
+
+      # Whether the mapping says anything about one field, which is what makes
+      # it subject to the two rules below. An unnamed field is not a claim: an
+      # entry's own username is the operator's until a declaration takes it.
+      declaresField =
+        m: name:
+        let
+          value = m.kdbx.fields.${name};
+        in
+        if name == "tags" then value != [ ] else value != null;
+
+      # A field this transport cannot carry at all. Judged over every declared
+      # mapping rather than the sound ones, the same way `reservedName` is and
+      # for its reason: a mapping with two faults is entitled to hear about
+      # both.
+      fieldUnsupported = lib.concatMap (
+        m:
+        lib.concatMap (
+          name:
+          lib.optional (fields.channels.keepassxc.${name} == "unsupported" && declaresField m name)
+            "flake.safix.keepassxc.mappings.${m.id} declares the field '${name}', and keepassxc cannot carry it: the store's own command has no way to write it, so accepting the declaration would mean writing less than it says"
+        ) fields.fieldNames
+      ) declared;
+
+      # A field whose value is read out of another entry, on a field this
+      # transport carries in an argument vector. The resolved value is a
+      # secret, and `keepassxc-sync`'s own rule is that a secret value travels
+      # standard input or a pipe and never an argument vector — so the
+      # declaration is refused here rather than resolved and then refused with
+      # a database already open.
+      fieldSourceInArgv = lib.concatMap (
+        m:
+        lib.concatMap (
+          name:
+          let
+            value = m.kdbx.fields.${name};
+          in
+          lib.optional
+            (fields.channels.keepassxc.${name} == "argv" && declaresField m name && lib.isAttrs value)
+            "flake.safix.keepassxc.mappings.${m.id} sources the field '${name}' from the entry '${value.entry}', and keepassxc carries that field in an argument vector, where a secret value may not travel"
+        ) fields.fieldNames
       ) declared;
     in
     if resolve.violations registry != [ ] then
       [ ]
     else
-      unresolvableSafixSide ++ twoProducers ++ twoMappingsOneEntry ++ reservedName ++ reservedId;
+      unresolvableSafixSide
+      ++ twoProducers
+      ++ twoMappingsOneEntry
+      ++ reservedName
+      ++ reservedId
+      ++ fieldUnsupported
+      ++ fieldSourceInArgv;
 in
 {
   inherit
     modes
     pullCapable
+    capabilities
     stateSuffix
     companionOf
     mapping

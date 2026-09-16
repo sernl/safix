@@ -1223,6 +1223,28 @@ pub enum Error {
         entry: String,
     },
 
+    /// A declared field the target cannot carry at all.
+    #[error("{}", prose::field_unsupported(target, field))]
+    FieldUnsupported {
+        /// The target that has no channel for it.
+        target: &'static str,
+        /// The field, as the declaration spells it.
+        field: &'static str,
+    },
+
+    /// A declared field read out of another entry, on a field the target
+    /// carries in an argument vector.
+    #[error("{}", prose::field_source_in_argv(target, field, entry))]
+    FieldSourceInArgv {
+        /// The target whose channel for the field is an argument vector.
+        target: &'static str,
+        /// The field, as the declaration spells it.
+        field: &'static str,
+        /// The entry the value would have been read from, which is the
+        /// declaration to edit.
+        entry: String,
+    },
+
     /// A mirror mapping whose safix side holds nothing to mirror.
     #[error("{}", prose::sync_source_empty(mapping, user, name, file, *.generated))]
     SyncSourceEmpty {
@@ -1247,6 +1269,207 @@ pub enum Error {
         entry: String,
         /// The mapping's mode, which is what makes the database the source.
         mode: &'static str,
+    },
+
+    /// The `pass` store's own command could not be run at all.
+    #[error("{}", prose::pass_unavailable(program))]
+    PassUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The operator's own agent declined to decrypt one entry.
+    ///
+    /// Its own refusal rather than [`Error::StoreLocked`]'s, and the distinction
+    /// is the remedy: `StoreLocked`'s prose is about a database password and a
+    /// terminal safix could have asked on, and printing it at an operator whose
+    /// gpg-agent declined would name a remedy safix does not own. Nothing here
+    /// prompts for a passphrase, because the unlock belongs to that agent.
+    ///
+    /// Distinct from [`Error::PassEntryAbsent`] too: absence and a declined
+    /// decrypt both exit non-zero, and conflating them would let a `backup`
+    /// mapping write over an entry it merely could not read.
+    #[error("{}", prose::pass_locked(entry, output))]
+    PassLocked {
+        /// The entry the decrypt was declined over.
+        entry: String,
+        /// gpg's own words, verbatim.
+        output: String,
+    },
+
+    /// The `pass` store's own command refused over one entry.
+    #[error("{}", prose::pass_command_failed(entry, arguments, output))]
+    PassCommandFailed {
+        /// The entry it refused over.
+        entry: String,
+        /// The argument vector it was run with, which carries no value.
+        arguments: String,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// The declared store root is not a store.
+    #[error("{}", prose::no_pass_store(store, *.mappings))]
+    NoPassStore {
+        /// The store root, as the declaration names it and as the runtime
+        /// expanded it.
+        store: String,
+        /// How many mappings are declared against it.
+        mappings: usize,
+    },
+
+    /// A mapping whose store side holds no entry to read.
+    #[error("{}", prose::pass_entry_absent(mapping, entry, mode))]
+    PassEntryAbsent {
+        /// The mapping being converged.
+        mapping: String,
+        /// The entry path the store holds nothing at.
+        entry: String,
+        /// The mapping's mode, which is what makes the store the source.
+        mode: &'static str,
+    },
+
+    /// The vault's own client could not be run at all.
+    #[error("{}", prose::bitwarden_unavailable(program))]
+    BitwardenUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The client is not unlocked, and either cannot be or is not logged in.
+    #[error("{}", prose::bitwarden_locked(state))]
+    BitwardenLocked {
+        /// What the client reported about itself: `"locked"` or
+        /// `"unauthenticated"`. Two states rather than one word, because the
+        /// remedies differ — one is a password on a terminal and the other is
+        /// an operator logging a vault in, which safix never does.
+        state: &'static str,
+    },
+
+    /// The client refused one invocation.
+    #[error("{}", prose::bitwarden_command_failed(address, arguments, output))]
+    BitwardenCommandFailed {
+        /// The address it refused over, as folder and item name.
+        address: String,
+        /// The argument vector it was run with, which carries no value.
+        arguments: String,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// The declared server is not the one the unlocked client reached.
+    #[error("{}", prose::bitwarden_server_mismatch(declared, reached))]
+    BitwardenServerMismatch {
+        /// The server the declaration names.
+        declared: String,
+        /// The server the client reports reaching.
+        reached: String,
+    },
+
+    /// One declared address matches more than one item, and nothing picks
+    /// between them.
+    #[error("{}", prose::bitwarden_item_ambiguous(mapping, address, *.matched))]
+    BitwardenItemAmbiguous {
+        /// The mapping being converged.
+        mapping: String,
+        /// The address it names, as folder and item name.
+        address: String,
+        /// How many items matched.
+        matched: usize,
+    },
+
+    /// A mapping whose vault side holds no item to read.
+    #[error("{}", prose::bitwarden_item_absent(mapping, address, mode))]
+    BitwardenItemAbsent {
+        /// The mapping being converged.
+        mapping: String,
+        /// The address the vault holds nothing at.
+        address: String,
+        /// The mapping's mode, which is what makes the vault the source.
+        mode: &'static str,
+    },
+
+    /// The client's refresh of its own local copy failed, so nothing on this
+    /// target can be compared.
+    #[error("{}", prose::bitwarden_stale(output))]
+    BitwardenStale {
+        /// The client's own words about the failure, verbatim.
+        output: String,
+    },
+
+    /// The 1Password command could not be run at all.
+    ///
+    /// The analogue of [`Error::StoreUnavailable`], and its own variant rather
+    /// than a reuse: the remedy names this target's own program and the
+    /// override that points at another one.
+    #[error("{}", prose::onepassword_unavailable(program))]
+    OnePasswordUnavailable {
+        /// The program that was reached for.
+        program: String,
+        /// The underlying failure.
+        #[source]
+        cause: io::Error,
+    },
+
+    /// The session preflight did not answer, so no side of any mapping was
+    /// read.
+    ///
+    /// Raised once per run, before the first read, which is what makes it a
+    /// refusal that costs the operator nothing: safix's own side of no mapping
+    /// has been decrypted when it is raised.
+    #[error("{}", prose::onepassword_signed_out(account.as_deref(), output))]
+    OnePasswordSignedOut {
+        /// The account the declaration names, or none where it names none.
+        account: Option<String>,
+        /// The program's own standard error, verbatim — safix has no better
+        /// sentence about somebody else's session than theirs.
+        output: String,
+    },
+
+    /// The program refused over one item.
+    #[error("{}", prose::onepassword_command_failed(item, arguments, output))]
+    OnePasswordCommandFailed {
+        /// The item it refused over, as vault and title.
+        item: String,
+        /// The argument vector it was run with, which by construction carries
+        /// no value and no field.
+        arguments: String,
+        /// Its own standard error, verbatim.
+        output: String,
+    },
+
+    /// A mapping whose 1Password side holds no item to read.
+    #[error("{}", prose::onepassword_item_absent(mapping, vault, item, mode))]
+    OnePasswordItemAbsent {
+        /// The mapping being converged.
+        mapping: String,
+        /// The vault the item was looked for in.
+        vault: String,
+        /// The item the vault holds nothing under.
+        item: String,
+        /// The mapping's mode, which is what makes the far side the source.
+        mode: &'static str,
+    },
+
+    /// The declared vault is not one this session can see.
+    ///
+    /// Distinct from [`Error::OnePasswordItemAbsent`] because the remedy is
+    /// distinct: an absent item is written by a pushing mode, and a vault the
+    /// session cannot reach is a permission a service account has to be given.
+    #[error("{}", prose::onepassword_vault_absent(mapping, vault, output))]
+    OnePasswordVaultAbsent {
+        /// The mapping being converged.
+        mapping: String,
+        /// The vault the declaration names.
+        vault: String,
+        /// The program's own standard error, verbatim.
+        output: String,
     },
 
     /// clan refused to register the recipient, both ways of asking.

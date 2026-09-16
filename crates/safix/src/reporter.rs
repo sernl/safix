@@ -580,6 +580,15 @@ mod tests {
             Code::ValueSpansLines => Error::ValueSpansLines {
                 entry: "safix/alice/grafana".into(),
             },
+            Code::FieldUnsupported => Error::FieldUnsupported {
+                target: "keepassxc",
+                field: "tags",
+            },
+            Code::FieldSourceInArgv => Error::FieldSourceInArgv {
+                target: "keepassxc",
+                field: "notes",
+                entry: "grafana-note".into(),
+            },
             Code::SyncSourceEmpty => Error::SyncSourceEmpty {
                 mapping: "grafana".into(),
                 user: "alice".into(),
@@ -591,6 +600,83 @@ mod tests {
                 mapping: "router".into(),
                 entry: "safix/bob/router".into(),
                 mode: "keepassxc-to-safix",
+            },
+            Code::PassUnavailable => Error::PassUnavailable {
+                program: "pass".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::PassLocked => Error::PassLocked {
+                entry: "alice/grafana".into(),
+                output: "gpg: decryption failed: No secret key".into(),
+            },
+            Code::PassCommandFailed => Error::PassCommandFailed {
+                entry: "alice/grafana".into(),
+                arguments: "insert --multiline --force alice/grafana".into(),
+                output: "Error: alice/grafana is not in the password store.".into(),
+            },
+            Code::NoPassStore => Error::NoPassStore {
+                store: "/home/alice/.password-store".into(),
+                mappings: 3,
+            },
+            Code::PassEntryAbsent => Error::PassEntryAbsent {
+                mapping: "grafana".into(),
+                entry: "alice/grafana".into(),
+                mode: "pass-to-safix",
+            },
+            Code::BitwardenUnavailable => Error::BitwardenUnavailable {
+                program: "bw".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::BitwardenLocked => Error::BitwardenLocked { state: "locked" },
+            Code::BitwardenCommandFailed => Error::BitwardenCommandFailed {
+                address: "fleet/router".into(),
+                arguments: "edit item 3a1c".into(),
+                output: "Not found.".into(),
+            },
+            Code::BitwardenServerMismatch => Error::BitwardenServerMismatch {
+                declared: "https://vault.example.org".into(),
+                reached: "https://vault.bitwarden.com".into(),
+            },
+            Code::BitwardenItemAmbiguous => Error::BitwardenItemAmbiguous {
+                mapping: "router".into(),
+                address: "fleet/router".into(),
+                matched: 2,
+            },
+            Code::BitwardenItemAbsent => Error::BitwardenItemAbsent {
+                mapping: "router".into(),
+                address: "fleet/router".into(),
+                mode: "bitwarden-to-safix",
+            },
+            Code::BitwardenStale => Error::BitwardenStale {
+                output: "Failed to sync: connect ECONNREFUSED 127.0.0.1:8222".into(),
+            },
+            Code::OnePasswordUnavailable => Error::OnePasswordUnavailable {
+                program: "op".into(),
+                cause: io::Error::from(io::ErrorKind::NotFound),
+            },
+            Code::OnePasswordSignedOut => Error::OnePasswordSignedOut {
+                account: Some("fixture.example.com".into()),
+                output: "[ERROR] 2026/09/16 12:00:00 you are not currently signed in. \
+                    Please run `op signin --help` for instructions"
+                    .into(),
+            },
+            Code::OnePasswordCommandFailed => Error::OnePasswordCommandFailed {
+                item: "fixture-vault/grafana".into(),
+                arguments: "item edit grafana --vault fixture-vault -".into(),
+                output: "[ERROR] 2026/09/16 12:00:00 the service is unavailable".into(),
+            },
+            Code::OnePasswordItemAbsent => Error::OnePasswordItemAbsent {
+                mapping: "router".into(),
+                vault: "fixture-vault".into(),
+                item: "router".into(),
+                mode: "1password-to-safix",
+            },
+            Code::OnePasswordVaultAbsent => Error::OnePasswordVaultAbsent {
+                mapping: "grafana".into(),
+                vault: "fixture-vault".into(),
+                output: "[ERROR] 2026/09/16 12:00:00 \"fixture-vault\" isn't a vault in \
+                    this account. Specify the vault with its ID or name"
+                    .into(),
             },
             Code::ClanUserRegistrationFailed => Error::ClanUserRegistrationFailed {
                 user: "alice".into(),

@@ -323,7 +323,12 @@
 { ... }:
 {
   perSystem =
-    { config, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       integration = import ./integration.nix { inherit pkgs; };
 
@@ -341,6 +346,27 @@
       withStore =
         name: target: test:
         integration.runOneWith [ integration.keepassxc ] config.checks.safix-integration name target test;
+
+      # The second mode that needs a tool the rest of the page has no use for,
+      # and the only one of the three targets this programme adds that gets a
+      # real one: `pass` is free-licensed, needs no network and needs no
+      # account, so a `nix build` sandbox can drive it for real where it can
+      # never drive `bw` or `op`. `gnupg` comes with it, because a store is a
+      # tree of gpg files and the check mints its own key in its own
+      # `GNUPGHOME`.
+      #
+      # Its use site is guarded on `pkgs.stdenv.hostPlatform.isLinux`: the
+      # nixpkgs derivation for `pass` deletes its own `t0100-insert`,
+      # `t0020-show`, `t0200-edit` and `t0300-reencryption` tests on darwin,
+      # because `pass edit` needs `hdid` there — so a check that ran
+      # unconditionally would state a claim on a platform where the tool's own
+      # suite does not make it.
+      withPass =
+        name: target: test:
+        integration.runOneWith [
+          pkgs.pass
+          pkgs.gnupg
+        ] config.checks.safix-integration name target test;
     in
     {
       # A file the declarations place a secret in but that nobody has run sops
@@ -833,6 +859,394 @@
         mode "safix-sync-leftovers" "sync_path"
           "an_entry_no_mapping_declares_is_reported_and_never_removed";
 
+      # A field drift on an otherwise-agreeing entry is repaired under a pushing
+      # mode, in exactly one write carrying the value the entry already held, and
+      # the report says `fields updated` naming the field. Reddened by dropping
+      # the field half of the stub's own record, which leaves the notes assertion
+      # false while every value assertion stays true.
+      checks.safix-sync-fields-push =
+        mode "safix-sync-fields-push" "sync_path"
+          "a_field_drift_on_an_agreeing_entry_is_repaired_under_a_pushing_mode";
+
+      # `backup` never overwrites an existing entry's field either: the entry
+      # keeps what the person typed, the run fails, and the report says `fields
+      # diverged` naming the field. Reddened by letting the backup-with-an-
+      # existing-entry case push its fields.
+      checks.safix-sync-fields-backup =
+        mode "safix-sync-fields-backup" "sync_path"
+          "a_backup_mapping_never_overwrites_a_field_either";
+
+      # A field sourced from another entry is refused for this target before
+      # either side is read, naming the field and the entry, and nothing about
+      # that mapping's entry is issued at all. Reddened by resolving an
+      # entry-sourced field on an argv channel instead of refusing it.
+      checks.safix-sync-fields-refused =
+        mode "safix-sync-fields-refused" "sync_path"
+          "a_field_read_out_of_another_entry_is_refused_for_this_target";
+
+      # A declared tag is refused naming the target and the field rather than
+      # silently dropped — the runtime half of the refusal
+      # `checks.safix-keepassxc` holds at evaluation. Reddened by giving
+      # `tags` any channel other than `unsupported` on this target.
+      checks.safix-sync-fields-tag-refused =
+        mode "safix-sync-fields-tag-refused" "sync_path"
+          "a_declared_tag_is_refused_at_evaluation_rather_than_dropped";
+
+      # A mapping declaring no field issues exactly one `show` — its value read,
+      # with the same arguments it issued before fields existed. Reddened by
+      # making the fields read spawn unconditionally.
+      checks.safix-sync-fields-one-read =
+        mode "safix-sync-fields-one-read" "sync_path"
+          "a_mapping_declaring_no_field_issues_no_second_read";
+
+      # A field divergence names the field and never its content, on either
+      # side: both distinctive literals are searched for in both streams.
+      # Reddened by making the stub answer `show --attributes` with the
+      # password, or by interpolating a field's value into the report.
+      checks.safix-audit-fields =
+        mode "safix-audit-fields" "audit"
+          "no_field_reaches_the_report_only_its_name_does";
+
+      # ── the pass target ──
+      #
+      # Every one of these drives the stub `tests/support/pass-stub.rs`, which
+      # answers the vectors safix sends because it was written to.
+      # `safix-pass-cli` below is what keeps that from being the whole story:
+      # it drives the real `pass`, and it is the one place the argument vectors
+      # meet the tool.
+
+      # The value and every declared field cross in one record body, in the
+      # layout design D2 fixes: the value's bytes, a blank line, then the four
+      # field lines in order. Reddened by dropping the blank separator from
+      # `body_of`, which moves the asserted literal.
+      checks.safix-pass-push =
+        mode "safix-pass-push" "pass_path"
+          "a_push_writes_the_value_and_the_declared_fields_in_one_record";
+
+      # A pull writes the value alone into safix: a safix entry is a placement
+      # with no slot for a field, so the record's field block does not cross.
+      # Reddened by writing a read field into safix's side.
+      checks.safix-pass-pull =
+        mode "safix-pass-pull" "pass_path"
+          "a_pull_writes_only_the_value_into_safix";
+
+      # `backup` never overwrites an existing entry holding a different value,
+      # and writes no field either. Reddened by letting the
+      # backup-with-an-existing-entry case push.
+      checks.safix-pass-backup =
+        mode "safix-pass-backup" "pass_path"
+          "a_backup_never_overwrites_a_differing_entry";
+
+      # A two-way mapping bootstraps into an empty store side and then
+      # converges toward whichever side moved. Reddened by taking the verdict
+      # from anything but the recorded agreement.
+      checks.safix-pass-two-way =
+        mode "safix-pass-two-way" "pass_path"
+          "a_two_way_mapping_converges_toward_the_changed_side";
+
+      # Both sides moved is a conflict that writes nothing and names the two
+      # one-way modes that each resolve it. Reddened by picking a winner.
+      checks.safix-pass-conflict =
+        mode "safix-pass-conflict" "pass_path"
+          "both_sides_changed_is_a_conflict_naming_two_remedies";
+
+      # A mapping accounts for its own companion, so its memory is never
+      # reported as an entry nothing declares. Reddened by dropping the
+      # companion from `lingering`'s claimed list.
+      checks.safix-pass-memory =
+        mode "safix-pass-memory" "pass_path"
+          "a_two_way_mappings_memory_is_not_lingering";
+
+      # The memory is written after the value, so an interrupted run leaves the
+      # older memory and the next run reports a conflict rather than
+      # overwriting the newer value. Reddened by writing the memory first.
+      checks.safix-pass-interrupted =
+        mode "safix-pass-interrupted" "pass_path"
+          "an_interrupted_two_way_run_leaves_the_older_memory";
+
+      # A value spanning lines round-trips byte for byte, a trailing newline
+      # included, and a second run over it writes nothing. Reddened by applying
+      # the trailing-newline trim, or by dropping `--multiline`.
+      checks.safix-pass-multiline =
+        mode "safix-pass-multiline" "pass_path"
+          "a_multi_line_value_round_trips_byte_for_byte";
+
+      # A decrypt the operator's agent declined is its own refusal carrying
+      # gpg's words, told apart from an absent entry, so a backup mapping never
+      # writes over an entry it merely could not read. Reddened by mapping a
+      # declined decrypt to `Ok(None)`.
+      checks.safix-pass-locked =
+        mode "safix-pass-locked" "pass_path"
+          "a_locked_agent_is_not_an_absent_entry";
+
+      # A declared store that is not one refuses before any mapping is read and
+      # before the store's own command is invoked at all. Reddened by moving
+      # the check after the first read.
+      checks.safix-pass-no-store =
+        mode "safix-pass-no-store" "pass_path"
+          "an_absent_store_refuses_before_any_mapping_is_read";
+
+      # No value and no field reaches an argument vector or an environment
+      # variable; the store's location reaches the child's environment and
+      # nothing else does. Reddened by putting any field in argv.
+      checks.safix-pass-pipes =
+        mode "safix-pass-pipes" "pass_path"
+          "no_value_and_no_field_reaches_an_argument_vector_or_the_environment";
+
+      # An `{ entry = …; }` field source is admissible on this target, resolved
+      # at run time, written into the body, and never printed. Reddened by
+      # refusing it, or by letting the resolved value reach argv or a report.
+      checks.safix-pass-field-source =
+        mode "safix-pass-field-source" "pass_path"
+          "a_field_sourced_from_another_entry_is_resolved_and_never_printed";
+
+      # A field-only divergence is its own word, naming the field and never
+      # either side's content. Reddened by interpolating a field's value into
+      # the report.
+      checks.safix-pass-fields-diverged =
+        mode "safix-pass-fields-diverged" "pass_path"
+          "a_field_only_divergence_is_reported_as_its_own_word";
+
+      # ── the 1password target ──
+      #
+      # None of these uses `runOneWith`: this target contributes no package to
+      # any check's closure, and never will. `_1password-cli` is unfree, there
+      # is no self-hostable server to point a sandboxed node at, and every
+      # authentication path needs the network — so the stand-in
+      # `tests/support/op-stub.rs` is the only `op` these checks have, and the
+      # absence of a real-binary row here is a decision rather than an omission.
+
+      # One mapping of each mode over one run: the item converges to safix,
+      # safix converges to the item through the ordinary write path, a two-way
+      # mapping with an absent far side bootstraps and records its agreement in
+      # the item's own concealed field, and a backup mapping writes into
+      # absence. Every declared field reaches its documented home, no value
+      # reaches standard output, and no digest of one reaches the repository.
+      checks.safix-onepassword-sync =
+        mode "safix-onepassword-sync" "onepassword_path"
+          "each_mode_converges_exactly_as_its_name_says";
+
+      # No value and no field is in an argument vector or in the child's
+      # environment, including an `{ entry = … }`-sourced field, and the
+      # stand-in was never given a word carrying an assignment. Reddened by
+      # dropping the stand-in's own `=` refusal, which turns the argv assertion
+      # green when it should refuse.
+      checks.safix-onepassword-argv =
+        mode "safix-onepassword-argv" "onepassword_path"
+          "no_value_and_no_field_ever_travels_an_argument_vector";
+
+      # A value carrying newlines is written and read back byte-identically,
+      # with no refusal anywhere: the positive statement that this target has no
+      # value-shape refusal, because the transport that would have needed one is
+      # not the transport in use.
+      checks.safix-onepassword-multiline =
+        mode "safix-onepassword-multiline" "onepassword_path"
+          "a_multi_line_value_crosses_whole";
+
+      # A passkey, a one-time-password field and a section no declaration names
+      # are byte-identical after a push rewrote the value. Reddened by
+      # assembling the edit's payload from a template instead of from the item's
+      # own JSON, which is the published danger the round trip removes.
+      checks.safix-onepassword-round-trip =
+        mode "safix-onepassword-round-trip" "onepassword_path"
+          "an_edit_preserves_what_the_declaration_does_not_name";
+
+      # A signed-out run refuses before any side is read: one invocation, and it
+      # was the preflight, with no sops decrypt of any mapping's safix side.
+      # Reddened by moving the preflight after the first read.
+      checks.safix-onepassword-signed-out =
+        mode "safix-onepassword-signed-out" "onepassword_path"
+          "a_signed_out_run_refuses_before_reading_any_side";
+
+      # Each refusal has its own sentence and its own remedy — an unknown
+      # mapping name, a safix side holding nothing, a far side holding no item
+      # under a pulling mode, a vault the session cannot see, the program
+      # refusing over one item, and the program absent — and none leaves a
+      # commit, a dirty tree or a partial write.
+      checks.safix-onepassword-run-refusals =
+        mode "safix-onepassword-run-refusals" "onepassword_path"
+          "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
+
+      # A failure against the service on one mapping refuses that mapping and
+      # does not end the run: all three appear in the report, the first and
+      # third converged, and the run exits non-zero.
+      checks.safix-onepassword-partial =
+        mode "safix-onepassword-partial" "onepassword_path"
+          "a_failure_on_one_mapping_does_not_end_the_run";
+
+      # The three-way decision over the item's own recorded state, including
+      # that a state a person corrupted is treated as absent and bootstraps
+      # rather than refusing.
+      checks.safix-onepassword-two-way =
+        mode "safix-onepassword-two-way" "onepassword_path"
+          "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
+
+      # An item in a declared vault that no mapping declares is reported as
+      # information, is still there afterwards, and does not move audit's exit
+      # status — and every read is scoped to the mapped item rather than to the
+      # vault. Reddened by making the read ask for the whole vault's items.
+      checks.safix-onepassword-leftovers =
+        mode "safix-onepassword-leftovers" "onepassword_path"
+          "an_item_no_mapping_declares_is_reported_and_never_removed";
+
+      # audit compares and writes nothing — no create and no edit in the
+      # stand-in's own record — and names a diverged field without printing
+      # either side's content, with a value divergence taking precedence over a
+      # field one.
+      checks.safix-onepassword-audit =
+        mode "safix-onepassword-audit" "onepassword_path"
+          "audit_compares_without_writing_and_names_a_field_without_printing_it";
+
+      # ── the bitwarden target ──
+      #
+      # None of these uses `runOneWith`, and this is the one target where that
+      # is a recorded absence rather than a passing remark: `bw` cannot
+      # authenticate without a network — `login` registers a device against an
+      # account, and every path to a session goes through it — and a `nix build`
+      # has none. So the stand-in `tests/support/bw-stub.rs` is the only `bw`
+      # any check of this repository runs, `../checks/bitwarden.nix`'s header
+      # states that absence where the structural checks live, and the deferred
+      # alternative — a NixOS VM node against `services.vaultwarden` — names its
+      # own precondition there rather than being minted half-measured.
+
+      # A locked client with no terminal refuses before either side of any
+      # mapping is read: one invocation in the stand-in's spool, and it was the
+      # client's own state. Reddened by moving the terminal test after the first
+      # mapping's read, which leaves the sentence intact and the spool carrying
+      # a `get`.
+      checks.safix-bitwarden-locked =
+        mode "safix-bitwarden-locked" "bitwarden"
+          "a_locked_client_with_no_terminal_refuses_before_any_read";
+
+      # An unauthenticated client is told apart from a locked one, and the run
+      # never tries to unlock it. Reddened by task 3.8's drill: making
+      # `prose::bitwarden_locked` ignore its `state` and print one sentence for
+      # both collapses the two states and turns this red while the locked check
+      # above stays green.
+      checks.safix-bitwarden-unauthenticated =
+        mode "safix-bitwarden-unauthenticated" "bitwarden"
+          "an_unauthenticated_client_names_logging_in";
+
+      # A declared server that is not the one the client reports refuses before
+      # any side is read, naming both URLs. Reddened by comparing the declared
+      # server after the first read, which would have decrypted safix's side of
+      # every mapping into a run that then refused.
+      checks.safix-bitwarden-server =
+        mode "safix-bitwarden-server" "bitwarden"
+          "a_declared_server_that_is_not_reached_refuses_before_any_read";
+
+      # A failed refresh refuses every mapping, and nothing is read or written.
+      # Reddened by task 8.24's drill: making the pre-read `sync` non-fatal
+      # turns this red while `safix-bitwarden-suite`'s refresh-ordering test
+      # stays green, which is what separates "the refresh happens" from "a
+      # failed refresh refuses".
+      checks.safix-bitwarden-stale =
+        mode "safix-bitwarden-stale" "bitwarden"
+          "a_failed_refresh_refuses_every_mapping";
+
+      # An address two items answer to is refused rather than resolved, naming
+      # the count, with no create and no edit. Reddened by picking the first
+      # match — which is the failure the refusal exists to prevent, because a
+      # vault legitimately holds two items with one name.
+      checks.safix-bitwarden-ambiguous =
+        mode "safix-bitwarden-ambiguous" "bitwarden"
+          "an_ambiguous_address_is_refused_rather_than_resolved";
+
+      # An absent item is created by a pushing mode and refused by a pulling
+      # one, which is B8's asymmetry: safix authors what safix mints and does
+      # not author what a person types. Reddened by creating the item for the
+      # pulling mode too, which turns the refusal into an empty item.
+      checks.safix-bitwarden-absent =
+        mode "safix-bitwarden-absent" "bitwarden"
+          "an_absent_item_is_created_by_a_pushing_mode_and_refused_by_a_pulling_one";
+
+      # No payload is ever a positional argument, on a create or on an edit:
+      # every write's payload is on standard input and no argument is base64 of
+      # a JSON object. Reddened by task 7.11's drill — making the stand-in
+      # accept a positional payload — and by using the documented
+      # `<encodedJson>` form, either of which turns this red.
+      checks.safix-bitwarden-argv =
+        mode "safix-bitwarden-argv" "bitwarden"
+          "no_payload_is_ever_a_positional_argument";
+
+      # The session key travels `BW_SESSION` and nothing else: in the
+      # environment of every invocation after the unlock, in no argument vector,
+      # on no output stream, and in no file safix writes. This is the one
+      # invariant this change narrows rather than inherits, and it is the check
+      # that holds the narrowing. Reddened by task 4.13's drill, moving the key
+      # into `--session <key>`.
+      checks.safix-bitwarden-session =
+        mode "safix-bitwarden-session" "bitwarden"
+          "the_session_key_is_in_the_environment_and_nowhere_else";
+
+      # An edit preserves every member of the item the declaration does not
+      # govern — a totp, a second URI, somebody's own custom field — and the
+      # three declared fields still reach their documented homes. Reddened by
+      # task 4.12's drill: constructing a fresh payload instead of mutating the
+      # fetched item, which deletes all three.
+      checks.safix-bitwarden-edit =
+        mode "safix-bitwarden-edit" "bitwarden"
+          "an_edit_preserves_every_field_the_declaration_does_not_govern";
+
+      # A two-way mapping records its agreement in a hidden custom field of the
+      # item itself, in the same write as the value, with no companion object
+      # and nothing in the repository. Reddened by task 8.25's drill: writing
+      # the memory in a second `edit` after the value's own leaves the field
+      # assertion green and adds a second write to the spool, which the count
+      # assertion catches.
+      checks.safix-bitwarden-two-way =
+        mode "safix-bitwarden-two-way" "bitwarden"
+          "two_way_records_the_agreement_in_a_hidden_field_of_the_item";
+
+      # Both sides moved since the agreement is a conflict that writes nothing
+      # and names the two one-way remedies. Reddened by picking a side by fiat,
+      # which overwrites whichever half the tiebreak decided against.
+      checks.safix-bitwarden-conflict =
+        mode "safix-bitwarden-conflict" "bitwarden"
+          "two_way_both_changed_is_a_conflict_and_writes_nothing";
+
+      # A value carrying newlines crosses whole, with no refusal anywhere: the
+      # positive statement that the keepassxc target's `ValueSpansLines` is a
+      # property of that transport's one-line entry password and not one this
+      # target inherits.
+      checks.safix-bitwarden-multiline =
+        mode "safix-bitwarden-multiline" "bitwarden"
+          "a_multi_line_value_crosses_whole";
+
+      # A declared `tags` is refused, and no item is read, created or edited.
+      # The refusal this repository leans on is evaluation's, which
+      # `safix-bitwarden`'s own `tagsMessages` holds against its literal
+      # sentence; this is the runtime's second refusal, reddened by reporting
+      # `tags` as carried in `bitwarden::CAPABILITIES`.
+      checks.safix-bitwarden-tags =
+        mode "safix-bitwarden-tags" "bitwarden"
+          "tags_are_refused_at_evaluation";
+
+      # audit compares and writes nothing — no create and no edit in the
+      # stand-in's own record — and reports the agreeing mappings as well as the
+      # diverged one. Reddened by having audit reuse the converging pass, which
+      # writes.
+      checks.safix-bitwarden-audit =
+        mode "safix-bitwarden-audit" "bitwarden"
+          "audit_bitwarden_writes_nothing";
+
+      # An item under a declared folder that no mapping names is reported as
+      # information, and the run still exits zero: no mode deletes an item, so a
+      # mapping that was removed leaves its last value behind on purpose.
+      # Reddened by counting a lingering item as a finding, which turns a clean
+      # run into a failure.
+      checks.safix-bitwarden-lingering =
+        mode "safix-bitwarden-lingering" "bitwarden"
+          "a_lingering_item_is_information_and_does_not_move_the_exit_status";
+
+      # A field-only divergence names the field and never either side's
+      # content. Reddened by interpolating a field's value into the report,
+      # which is the same drill `safix-pass-fields-diverged` carries and for the
+      # same reason: a note is itself a secret.
+      checks.safix-bitwarden-fields =
+        mode "safix-bitwarden-fields" "bitwarden"
+          "the_report_names_a_diverged_field_and_never_its_content";
+
       # Neither side holding a value writes nothing anywhere: no clan write,
       # no companion write, no commit.
       checks.safix-bridge-sync-unchanged =
@@ -889,6 +1303,26 @@
       # one thing no model would have: `ls` prints `[empty]` rather than nothing for
       # a database holding no entry, which the runtime has to skip.
       checks.safix-store-cli = withStore "safix-store-cli" "store_cli" "";
+
+      # The store's own command, driven for real against a store the check
+      # creates in its own directory with its own `GNUPGHOME` and a key minted
+      # inside it. Every other pass check drives the stub, which answers the
+      # vectors safix sends because it was written to; this one establishes that
+      # those vectors mean to `pass` what the runtime thinks they mean, and it
+      # is where the byte-exactness of `--multiline` was measured.
+      #
+      # Linux only, and the guard is a claim rather than a convenience: the
+      # nixpkgs derivation for `pass` disables its own insert, show, edit and
+      # reencryption tests on darwin, so a check that built there would be
+      # stating something the tool's own suite does not.
+      #
+      # `lib.mkIf` on the one attribute rather than a guarded attribute set:
+      # `checks` is an `attrsOf package` option, so the module system drops the
+      # entry on a platform the condition excludes, and the rest of this page is
+      # untouched by the platform question.
+      checks.safix-pass-cli = lib.mkIf pkgs.stdenv.hostPlatform.isLinux (
+        withPass "safix-pass-cli" "pass_cli" ""
+      );
 
       # A shared entry is one value: both carriers' placements name one file and
       # one key, one of them mints, the other reads back what was minted, and

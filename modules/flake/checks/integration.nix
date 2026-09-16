@@ -127,6 +127,23 @@ let
           SAFIX_TEST_CARD_STUB = "${suite}/libexec/safix-card-stub";
           SAFIX_TEST_TRANSPORT_STUB = "${suite}/libexec/safix-transport-stub";
           SAFIX_TEST_GIT_SHIM = "${suite}/libexec/safix-git-shim";
+          # The one stubbed target that also has a real-binary check beside it:
+          # `checks.safix-pass-cli` drives the real `pass` over a store it
+          # mints, because this tool is free-licensed and needs neither a
+          # network nor an account. So this stub answers "what vectors did
+          # safix send" and that check answers "do they mean what safix thinks".
+          SAFIX_TEST_PASS_STUB = "${suite}/libexec/safix-pass-stub";
+          # The vault's client, whose absence from `backends` is recorded rather
+          # than incidental: `bw` cannot authenticate without a network and a
+          # `nix build` has none, so no check of this repository runs a real
+          # one. `../checks/bitwarden.nix`'s header states that absence and
+          # names the measurement that would unblock a VM check.
+          SAFIX_TEST_BW_STUB = "${suite}/libexec/safix-bw-stub";
+          # This target contributes nothing to `backends` and never will: the
+          # real program is unfree, there is no self-hostable server, and every
+          # authentication path needs the network, so the stand-in is the only
+          # `op` any check of this repository runs.
+          SAFIX_TEST_OP_STUB = "${suite}/libexec/safix-op-stub";
           INSTA_WORKSPACE_ROOT = "${instaWorkspaceRoot}";
         }
         // stagingEnv;

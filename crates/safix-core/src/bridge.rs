@@ -55,6 +55,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::clan::{Clan, Reading};
+use crate::endpoint::{Verdict, judge};
 use crate::error::{Error, Result};
 use crate::model::{Direction, Mapping};
 use crate::progress::{Progress, log};
@@ -64,8 +65,8 @@ use crate::set::{self, ValueSource};
 use crate::sops::document;
 use crate::workspace::Workspace;
 
-/// Which of `sync`'s and `audit`'s two targets a run acts on, or both when
-/// neither is named.
+/// Which of `sync`'s and `audit`'s targets a run acts on, or every one of them
+/// when none is named.
 ///
 /// `safix-cli`'s dispatch grammar is what owns the "bare means every target"
 /// and "a target keyword narrows" rules; this is the value that grammar
@@ -76,9 +77,18 @@ pub enum Target {
     Clan,
     /// `flake.safix.keepassxc.mappings`.
     Keepassxc,
+    /// `flake.safix.pass.mappings`.
+    Pass,
+    /// `flake.safix.bitwarden.mappings`.
+    Bitwarden,
+    /// `flake.safix.onepassword.mappings`.
+    ///
+    /// Spelled `1password` on the command line and never `op`: one spelling
+    /// per target, and `op` is the name of the program the transport invokes.
+    OnePassword,
 }
 
-/// The three words `sync` and `audit` read as a target keyword rather than a
+/// The six words `sync` and `audit` read as a target keyword rather than a
 /// mapping name.
 ///
 /// Evaluation refuses a declared mapping id spelled one of these — see
@@ -86,7 +96,15 @@ pub enum Target {
 /// so a name reaching this far that still matches one is not a declared
 /// mapping at all; it is the target-keyword role showing up where a mapping
 /// name was expected.
-pub const RESERVED_MAPPING_WORDS: [&str; 3] = ["clan", "keepassxc", "all"];
+///
+/// `modules/flake/safix/reserved.nix` is the one declaration of the list and
+/// both mapping modules read it; this array is the runtime's copy, and
+/// `checks.safix-reserved-words` is what holds the two equal. Three of the
+/// words — `pass`, `bitwarden` and `1password` — are reserved before the
+/// targets that answer to them exist, so that those three changes consume a
+/// settled list rather than moving the same equality check three times.
+pub const RESERVED_MAPPING_WORDS: [&str; 6] =
+    ["clan", "keepassxc", "pass", "bitwarden", "1password", "all"];
 
 /// What happened to one mapping.
 ///
@@ -379,6 +397,15 @@ pub fn sync(
 /// `pub(crate)` rather than private: [`crate::audit`]'s clan target reuses this
 /// exact selection so that scoping a comparison and scoping a write cannot
 /// answer "which mappings" differently.
+///
+/// Deliberately not shared with [`crate::sync::selected`], which answers the
+/// same question for the keepassxc target. The two refuse over different
+/// declared lists and this one additionally refuses
+/// [`Error::MappingWrongDirection`], so unifying them means one generic
+/// function with a per-target refusal closure and a per-target mapping trait —
+/// more apparatus than the handful of lines it deletes. What
+/// [`crate::endpoint`] exists to deduplicate here is the judge, and the judge
+/// is what it deduplicates.
 pub(crate) fn selected<'a>(
     workspace: &'a Workspace,
     direction: Option<Direction>,
@@ -611,13 +638,26 @@ pub fn commit_subject(mapping: &Mapping) -> String {
 /// Converging a two-way mapping toward whichever side changed since the last
 /// recorded agreement.
 ///
-/// [`decide`]/[`judge`] mirror [`crate::sync::two_way`] (`sync.rs:451-493`)
-/// exactly, adapted to [`Reading`] and [`Secret`] rather than a database read.
+/// [`decide`] reaches [`crate::endpoint::judge`], which is the one statement of
+/// the three-way decision every target's convergence rests on; what stays here
+/// is the mapping of its verdict onto this target's own five outcome words, and
+/// the `agrees` closure this target's own format tag builds.
 /// `push`/`pull` reuse the identical write paths a one-way transfer already
 /// has — [`Addressing::write`] under the same stale-generator refusal
 /// [`one_export`] carries (D9), and [`set::run_committing`] under the same
 /// discipline [`one_import`] carries — and record the agreement afterward as
 /// its own, separate commit, never folded into the value's own.
+///
+/// # What stays this target's own rather than joining the shared contract
+///
+/// Five behaviours, each raised here and nowhere else, and each stated so that
+/// a later target does not inherit a rule that was never about it: the
+/// stale-generator refusal, on both the one-way and the two-way push paths;
+/// [`Addressing`]'s shared-placement discovery of the machine a var is reached
+/// on; no commit on clan's side, because `clan vars set` commits in its own
+/// repository; [`Reading::AbsentAtSource`] as an ordinary absence rather than a
+/// failure; and the companion's agreement as its own, separately ordered
+/// commit. None of them is a question [`crate::endpoint::Endpoint`] asks.
 ///
 /// See `openspec/changes/sync-clan-vars-two-way/design.md`'s D6\u{2013}D11 for
 /// why the agreement lives in a companion entry inside safix's own
@@ -627,7 +667,7 @@ pub fn commit_subject(mapping: &Mapping) -> String {
 pub mod bridge_sync {
     use super::{
         Addressing, Clan, Direction, Error, Held, Mapping, Progress, Reading, Result, Secret,
-        Workspace, endpoints, held_for, log, scratch, selected, set,
+        Verdict, Workspace, endpoints, held_for, judge, log, scratch, selected, set,
     };
 
     /// The tag the recorded agreement carries.
@@ -772,6 +812,11 @@ pub mod bridge_sync {
     /// A read failure on either side is [`Outcome::Refused`] rather than a
     /// `NotJudged` outcome: `bridge_sync::Outcome` has no unjudged variant,
     /// per D8/D10's five classes.
+    ///
+    /// The decision itself is [`crate::endpoint::judge`]'s, and what happens
+    /// here is the mapping of its verdict onto this target's own five words.
+    /// `agrees` is passed in rather than derived because this target's format
+    /// tag is deliberately not [`crate::sync::FORMAT`]'s.
     fn decide(workspace: &Workspace, addressing: &Addressing<'_>, mapping: &Mapping) -> Decision {
         let clan_value = match addressing.read(mapping) {
             Ok(Reading::Present(value)) => Some(value),
@@ -788,49 +833,25 @@ pub mod bridge_sync {
             }
             _ => None,
         };
-        judge(safix_value, clan_value, remembered)
-    }
 
-    /// The pure four-way decision, over values already read: mirrors
-    /// [`crate::sync::two_way`] exactly. Both absent is unchanged; exactly
-    /// one absent is a bootstrap push or pull, remembered; both present and
-    /// equal is unchanged; both present and unequal consults `remembered` \u{2014}
-    /// one side still agreeing is a converge toward the other, remembered;
-    /// neither agreeing, or no agreement recorded yet, is a conflict.
-    fn judge(safix: Option<Secret>, clan: Option<Secret>, remembered: Option<Secret>) -> Decision {
-        match (safix, clan) {
-            (None, None) => Decision::Settled(Outcome::Unchanged),
-            (Some(safix), None) => Decision::Push {
-                value: safix,
-                remember: true,
+        let agreement = |remembered: &Secret, value: &Secret| agrees(remembered, value);
+        let verdict = judge(
+            safix_value.as_ref(),
+            clan_value.as_ref(),
+            remembered.as_ref(),
+            &agreement,
+        );
+        match verdict {
+            Verdict::Unchanged => Decision::Settled(Outcome::Unchanged),
+            Verdict::Conflict => Decision::Settled(Outcome::Conflict),
+            Verdict::PushValue { remember } => match safix_value {
+                Some(value) => Decision::Push { value, remember },
+                None => unreachable!("a push was asked for where safix holds no value"),
             },
-            (None, Some(clan)) => Decision::Pull {
-                value: clan,
-                remember: true,
+            Verdict::PullValue { remember } => match clan_value {
+                Some(value) => Decision::Pull { value, remember },
+                None => unreachable!("a pull was asked for where clan holds no value"),
             },
-            (Some(safix), Some(clan)) => {
-                if safix.equals(&clan) {
-                    return Decision::Settled(Outcome::Unchanged);
-                }
-                let Some(remembered) = remembered else {
-                    return Decision::Settled(Outcome::Conflict);
-                };
-                match (agrees(&remembered, &safix), agrees(&remembered, &clan)) {
-                    // safix is where the agreement left it, so clan is the
-                    // side that moved.
-                    (true, false) => Decision::Pull {
-                        value: clan,
-                        remember: true,
-                    },
-                    (false, true) => Decision::Push {
-                        value: safix,
-                        remember: true,
-                    },
-                    // Both moved, or neither matches an agreement this run
-                    // cannot account for. Either way nothing is written.
-                    _ => Decision::Settled(Outcome::Conflict),
-                }
-            }
         }
     }
 
@@ -1130,92 +1151,110 @@ pub mod bridge_sync {
             secret(&memory_of(&secret(value)))
         }
 
+        /// This target's verdict for two values and a remembered agreement,
+        /// through the one judge every target reaches and this target's own
+        /// `agrees` — which is where its format tag enters.
+        fn verdict(
+            safix: Option<&Secret>,
+            clan: Option<&Secret>,
+            remembered: Option<&Secret>,
+        ) -> Verdict {
+            let agreement = |remembered: &Secret, value: &Secret| agrees(remembered, value);
+            judge(safix, clan, remembered, &agreement)
+        }
+
         #[test]
         fn neither_side_holding_anything_is_unchanged() {
-            assert!(matches!(
-                judge(None, None, None),
-                Decision::Settled(Outcome::Unchanged)
-            ));
+            assert!(matches!(verdict(None, None, None), Verdict::Unchanged));
         }
 
         #[test]
         fn a_side_that_has_never_held_a_value_is_bootstrap_not_a_failure() {
-            match judge(Some(secret("alpha")), None, None) {
-                Decision::Push { remember, .. } => assert!(remember),
-                other => unreachable!("safix-only became {other:?}", other = describe(&other)),
+            let alpha = secret("alpha");
+            match verdict(Some(&alpha), None, None) {
+                Verdict::PushValue { remember } => assert!(remember),
+                other => unreachable!("safix-only became {other:?}", other = named(other)),
             }
-            match judge(None, Some(secret("alpha")), None) {
-                Decision::Pull { remember, .. } => assert!(remember),
-                other => unreachable!("clan-only became {other:?}", other = describe(&other)),
+            match verdict(None, Some(&alpha), None) {
+                Verdict::PullValue { remember } => assert!(remember),
+                other => unreachable!("clan-only became {other:?}", other = named(other)),
             }
         }
 
         #[test]
         fn agreeing_values_are_unchanged_whatever_the_companion_says() {
+            let alpha = secret("alpha");
+            let other = secret("alpha");
             assert!(matches!(
-                judge(Some(secret("alpha")), Some(secret("alpha")), None),
-                Decision::Settled(Outcome::Unchanged)
+                verdict(Some(&alpha), Some(&other), None),
+                Verdict::Unchanged
             ));
+            let unrelated = secret("unrelated companion bytes");
             assert!(matches!(
-                judge(
-                    Some(secret("alpha")),
-                    Some(secret("alpha")),
-                    Some(secret("unrelated companion bytes")),
-                ),
-                Decision::Settled(Outcome::Unchanged)
+                verdict(Some(&alpha), Some(&other), Some(&unrelated)),
+                Verdict::Unchanged
             ));
         }
 
         #[test]
         fn disagreeing_with_no_agreement_recorded_yet_is_a_conflict() {
+            let alpha = secret("alpha");
+            let beta = secret("beta");
             assert!(matches!(
-                judge(Some(secret("alpha")), Some(secret("beta")), None),
-                Decision::Settled(Outcome::Conflict)
+                verdict(Some(&alpha), Some(&beta), None),
+                Verdict::Conflict
             ));
         }
 
         #[test]
         fn one_side_moved_since_the_agreement_converges_toward_it() {
             let remembered = agreement_of("alpha");
-            match judge(
-                Some(secret("beta")),
-                Some(secret("alpha")),
-                Some(remembered),
-            ) {
-                Decision::Push { remember, .. } => assert!(remember),
-                other => unreachable!("safix-moved became {other:?}", other = describe(&other)),
+            let alpha = secret("alpha");
+            let beta = secret("beta");
+            match verdict(Some(&beta), Some(&alpha), Some(&remembered)) {
+                Verdict::PushValue { remember } => assert!(remember),
+                other => unreachable!("safix-moved became {other:?}", other = named(other)),
             }
 
-            let remembered = agreement_of("alpha");
-            match judge(
-                Some(secret("alpha")),
-                Some(secret("gamma")),
-                Some(remembered),
-            ) {
-                Decision::Pull { remember, .. } => assert!(remember),
-                other => unreachable!("clan-moved became {other:?}", other = describe(&other)),
+            let gamma = secret("gamma");
+            match verdict(Some(&alpha), Some(&gamma), Some(&remembered)) {
+                Verdict::PullValue { remember } => assert!(remember),
+                other => unreachable!("clan-moved became {other:?}", other = named(other)),
             }
         }
 
         #[test]
         fn both_sides_moving_since_the_agreement_is_a_conflict_not_a_guess() {
             let remembered = agreement_of("alpha");
+            let beta = secret("beta");
+            let gamma = secret("gamma");
             assert!(matches!(
-                judge(
-                    Some(secret("beta")),
-                    Some(secret("gamma")),
-                    Some(remembered),
-                ),
-                Decision::Settled(Outcome::Conflict)
+                verdict(Some(&beta), Some(&gamma), Some(&remembered)),
+                Verdict::Conflict
+            ));
+        }
+
+        /// A memory written under another mechanism's format tag is no memory
+        /// at all, which is this target's own half of the shared decision:
+        /// `agrees` is what reads the tag, and `agrees` is what this target
+        /// passes in.
+        #[test]
+        fn a_memory_written_under_syncs_own_tag_is_read_as_no_memory() {
+            let alpha = secret("alpha");
+            let beta = secret("beta");
+            let foreign = secret(&crate::sync::memory_of(&alpha));
+            assert!(matches!(
+                verdict(Some(&beta), Some(&alpha), Some(&foreign)),
+                Verdict::Conflict
             ));
         }
 
         /// The interruption case design.md's D8 names: a companion write
         /// interrupted after the value landed leaves the companion holding
         /// an agreement older than either side's current bytes. Both sides
-        /// here already differ from the stale companion \u{2014} one because it
+        /// here already differ from the stale companion — one because it
         /// is what an interrupted push already landed, the other because it
-        /// changed again afterward \u{2014} so this exercises the same conflict
+        /// changed again afterward — so this exercises the same conflict
         /// arm as `both_sides_moving_since_the_agreement_is_a_conflict_not_a_guess`
         /// through the branch where one side coincides with what the
         /// interrupted write produced rather than with a value neither side
@@ -1230,8 +1269,8 @@ pub mod bridge_sync {
             let further_edit = secret("edited-again-after-the-interruption");
 
             assert!(matches!(
-                judge(Some(further_edit), Some(landed), Some(remembered)),
-                Decision::Settled(Outcome::Conflict)
+                verdict(Some(&further_edit), Some(&landed), Some(&remembered)),
+                Verdict::Conflict
             ));
         }
 
@@ -1283,13 +1322,14 @@ pub mod bridge_sync {
             assert_eq!(companion_name(mapping), "tok-safix-bridge-sync-state");
         }
 
-        /// A `Decision` printed for an `unreachable!` message, since it has
-        /// no `Debug` of its own \u{2014} see the type's own doc comment.
-        fn describe(decision: &Decision) -> &'static str {
-            match decision {
-                Decision::Settled(outcome) => outcome.as_str(),
-                Decision::Push { .. } => "push",
-                Decision::Pull { .. } => "pull",
+        /// A `Verdict` printed for an `unreachable!` message, since it has no
+        /// `Debug` of its own.
+        fn named(verdict: Verdict) -> &'static str {
+            match verdict {
+                Verdict::Unchanged => "unchanged",
+                Verdict::Conflict => "conflict",
+                Verdict::PushValue { .. } => "push",
+                Verdict::PullValue { .. } => "pull",
             }
         }
     }
@@ -1303,6 +1343,22 @@ mod tests {
 
     use super::*;
     use crate::model::Bridge;
+
+    /// The runtime's copy of the reserved list, against the six literals.
+    ///
+    /// A literal against a literal on purpose: this holds only that the array
+    /// was not reordered or shortened here. That it still equals
+    /// `modules/flake/safix/reserved.nix` is a claim across the two halves,
+    /// and `checks.safix-reserved-words` is the only thing that can hold it —
+    /// reordering the nix list alone turns that check red while every test in
+    /// this file stays green.
+    #[test]
+    fn the_reserved_words_are_the_six_the_declaration_carries() {
+        assert_eq!(
+            RESERVED_MAPPING_WORDS,
+            ["clan", "keepassxc", "pass", "bitwarden", "1password", "all"]
+        );
+    }
 
     /// A single shared-placement two-way mapping, deserialized the way the
     /// runtime reads one off `nix eval`.

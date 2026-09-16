@@ -12,6 +12,7 @@
 mod harness;
 
 use harness::{ALICE_FILE, Fixture};
+use serde_json::json;
 
 /// `safix edit` reads the current value from the vault root: an editor that
 /// leaves the buffer untouched reports "unchanged" only if what it opened was
@@ -116,7 +117,7 @@ fn sync_keepassxc_reads_the_vault_document_from_the_vault_root() {
         "safix-to-keepassxc",
         ("alice", "api-token"),
         "alice/pushed",
-        Some("alice@example.com"),
+        json!({"username": "alice@example.com"}),
     );
     fixture.encrypt_to_vault(
         ALICE_FILE,

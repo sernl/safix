@@ -15,6 +15,7 @@
 { lib }:
 let
   resolve = import ./resolve.nix { inherit lib; };
+  reserved = import ./reserved.nix;
 
   # Written as its endpoints rather than as a verb.
   #
@@ -146,6 +147,12 @@ let
           the only thing that can answer whether it resolves is clan itself. A
           clan side that does not resolve is refused when a transfer reaches
           that mapping, and the refusal names all of it.
+
+          This half declares no fields, and the absence is the design rather
+          than an omission: a clan var is a file's bytes, clan's own command
+          offers no field beside it, and so there is nothing for
+          ./fields.nix's submodule to be attached to here. A mapping that
+          wants a username or a url wants a target that carries one.
         '';
       };
 
@@ -420,13 +427,7 @@ let
       # two faults hears about both.
       reservedId = lib.concatMap (
         m:
-        lib.optional
-          (builtins.elem m.id [
-            "clan"
-            "keepassxc"
-            "all"
-          ])
-          "flake.safix.bridge.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
+        lib.optional (builtins.elem m.id reserved.ids) "flake.safix.bridge.mappings.${m.id} is named '${m.id}', which sync and audit read as a target keyword rather than a mapping name"
       ) declared;
 
       # A two-way mapping's companion reserves a name in its own user's
