@@ -846,6 +846,7 @@ identity has been minted here yet.
 /// `safix migrate -h`.
 pub const MIGRATE: &str = "\
 safix migrate <plan.json>
+safix migrate --abandon <plan.json>
 
 Execute a version-1 migration plan. Paths are relative to the plan's directory.
 Each entry names source and destination {path, format, key}, public recipients,
@@ -861,8 +862,30 @@ Unsupported target deployment semantics are refused rather than dropped.
 Templates use <safix:secret-name> references. Agenix cannot retain templates,
 service hooks or early-user metadata. Native sops-nix needs whole binary files
 for binary or intentional empty values, not Safix's keyed byte envelope.
-Recoverable errors roll back new outputs; a process crash may leave a subset
-of verified artifacts. Sources remain the recovery path.
+
+\u{2500}\u{2500} interruption and recovery \u{2500}\u{2500}
+Before the first output lands, the run writes a journal at <receipt>.journal
+naming the plan by a digest of its bytes and directory, and records each
+output as it is published: path, file identity and a digest of its bytes. The
+journal is removed once the receipt is published, so a completed migration
+leaves none.
+
+Rerunning the same plan while its journal exists resumes that run rather than
+refusing its outputs: each recorded output is re-verified \u{2014} identity, bytes,
+and for ciphertext a fresh decryption through the target identities \u{2014} and
+kept, the rest are published, and the journal is removed last. A journal
+written for a different plan is refused, naming both plans. A recorded output
+whose identity or bytes changed is refused by name and is neither removed nor
+overwritten.
+
+--abandon discards an interrupted run: it removes exactly the outputs the
+journal records, still matching their records, plus the staging directories
+the journal names, and then the journal. It refuses when there is no journal,
+when the journal names another plan, and when any recorded output no longer
+matches. Sources are retained on every path, abandonment included.
+
+An interrupting signal between steps rolls the run back the way any other
+recoverable error does and exits with the signal's own status.
 ";
 
 /// `safix identity -h`.
@@ -1229,11 +1252,14 @@ safix \u{2014} secrets by declaration name, with explicit migration and key cust
   safix sync     [<target>] [<mapping>...]          converge declared relationships
                  <target> is clan, keepassxc, pass, bitwarden or 1password
   safix keygen   [--kind age|pgp] [...]             create a protected local identity
-  safix migrate <plan.json>                        convert and verify before publishing
+  safix migrate [--abandon] <plan.json>            convert and verify before publishing
   safix identity backup|restore [...]              verified independent recovery
   safix adduser  <name> <recipient> [...]           declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
   safix group    add|remove <group> <subject>       edit a group's membership
+  safix rotate   [--due] [--yes] [<user>] [<name>]  mint a new value for an aged one
+  safix rotation set|unset <user> <name> [<policy>]
+                                                    declare how long a value lives
   safix upload   <machine> --directory DIR | --to ADDRESS
                                                     seed a machine's host identity
   safix install  <manifest> [--check-mode=...] [--dry-run]
@@ -1369,4 +1395,74 @@ of the three alone is sufficient, and none of them expires.
            ongoing basis: activation already does, through `safix install`
            reading the manifest safix's own nix half built, once a machine
            holds the identity this verb seeds.
+";
+
+/// `safix rotate -h`.
+pub const ROTATE: &str = "\
+safix rotate [--yes] [--allow-disk-staging] [<user>] <name>
+safix rotate --due [--yes] [--allow-disk-staging] [<user>]
+
+Mint a new value because the one there is too old. The named form rotates one
+entry now; --due rotates everything past the deadline its rotation policy set.
+
+The value travels exactly the path `safix generate` writes one on: the same
+sandbox, the same pipe, the same per-generator commit, the same definition and
+stamp records. What this verb adds is which generators run and why \u{2014} the
+deadline, rather than the declaration.
+
+\u{2500}\u{2500} the cascade \u{2500}\u{2500}
+Every generator reading the rotated value re-runs, in the plan's own order, and
+--due merges the cascades of everything due into one ordered set announced
+before the first commit. Declining afterwards takes nothing back out of
+history, which is why the question comes first; --yes answers it in advance and
+is what the workstation timer passes.
+
+\u{2500}\u{2500} what it will not mint \u{2500}\u{2500}
+A value no generator declares. The named form refuses and names `safix set`,
+because a verb that sometimes stops to ask a person for a value is a verb no
+timer can run. --due lists every due typed entry with the `safix set` each one
+needs and exits zero, because refusing over one would leave the values it could
+mint unminted.
+
+Nothing due is a quiet success: it says so and exits zero.
+";
+
+/// `safix rotation -h`.
+pub const ROTATION: &str = "\
+safix rotation set <user> <name> <policy>
+safix rotation unset <user> <name>
+
+Edit the rotation policy one entry's declaration names: one
+`rotation = \"<policy>\";` line inserted, replaced or removed in
+safix/users/<user>.nix, parsed before anything is staged and committed.
+
+It writes no value, encrypts nothing and re-wraps nothing. A deadline places no
+key in any audience, so the recipient policy the edit implies is the one already
+committed.
+
+\u{2500}\u{2500} what a policy is \u{2500}\u{2500}
+`flake.safix.rotation.<policy>.every` declares an interval once \u{2014} a positive
+whole number of hours, days or weeks, as <n>h, <n>d or <n>w \u{2014} and every entry
+naming that policy is due an interval after its last recorded write. Shortening
+the interval moves all of them at the next evaluation, with no entry edited.
+
+An entry with a policy and no recorded write is due at once. That is the only
+reading that cannot silently extend a value's life: a deadline that had not
+started yet would let a policy applied to an old value wait out a whole interval
+it never spent.
+
+\u{2500}\u{2500} what is refused \u{2500}\u{2500}
+An entry or a policy the declarations do not name, before anything is read: an
+entry naming an undeclared policy is refused at the next evaluation, so writing
+one would commit a tree that no longer resolves.
+
+A declaration this cannot read is refused rather than compounded. What it edits
+is the entry's own block, or a dotted declaration of one of its fields; a
+declaration living elsewhere or computed rather than written is supported and is
+edited by hand.
+
+\u{2500}\u{2500} the delegation \u{2500}\u{2500}
+Where an organization manages the person, only that organization's managers may
+edit their entries, judged against the identity the resulting commit will carry.
+A person no organization manages is scaffolded by whoever can commit.
 ";

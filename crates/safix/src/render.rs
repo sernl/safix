@@ -109,6 +109,7 @@ fn push_finding(out: &mut String, finding: &Finding) {
         }
         Finding::ValuelessName { .. } | Finding::UnclaimedValue { .. } => push_values(out, finding),
         Finding::DefinitionDrift { .. } => push_definition(out, finding),
+        Finding::RotationDue { .. } => push_rotation(out, finding),
         _ => {}
     }
 }
@@ -476,19 +477,88 @@ fn push_definition(out: &mut String, finding: &Finding) {
     }
 }
 
-/// The eight facts `list` reports about one entry, in column order.
+/// A value that has outlived the policy governing it.
+///
+/// The remedy is the entry's own: a generator-backed value is re-minted by
+/// `rotate`, and a value nothing can mint is typed by a person through `set`.
+/// Naming both would leave the operator to work out which of the two their
+/// entry is, which is the one fact the finding already knows.
+///
+/// `rotate` rather than `generate --regenerate`, though the two do the same
+/// thing to a generator-backed value: what is wrong here is the value's age
+/// and not its declaration, and the verb the report names should be the one
+/// whose meaning is the deadline.
+///
+/// No value appears, and none could: the finding is arithmetic over a declared
+/// interval and a plaintext timestamp, and `check` opened no ciphertext.
+fn push_rotation(out: &mut String, finding: &Finding) {
+    if let Finding::RotationDue {
+        user,
+        name,
+        policy,
+        overdue_seconds,
+        generator,
+    } = finding
+    {
+        headline(
+            out,
+            &format!(
+                "flake.safix.users.{user} holds '{name}', which the '{policy}' rotation \
+                 policy says may not be this old."
+            ),
+        );
+        detail(
+            out,
+            &format!("Its deadline passed {}.", elapsed(*overdue_seconds)),
+        );
+        detail(
+            out,
+            "A value past its deadline has been readable for longer than the declarations",
+        );
+        detail(out, "allow. Only a new value shortens that.");
+        if *generator {
+            remedy(out, "mint a new value from the generator that mints it:");
+            remedy(out, &format!("    {PROGRAM} rotate {user} {name}"));
+        } else {
+            remedy(out, "nothing here can mint this value; type a new one:");
+            remedy(out, &format!("    {PROGRAM} set {user} {name}"));
+        }
+    }
+}
+
+/// How long ago something happened, in the coarsest unit that says it.
+///
+/// A deadline is days, so a report that said "7776012 seconds ago" would be
+/// making the reader do the division. Under a day the answer is hours, and
+/// under an hour it is "just now": a value overdue by minutes is overdue, and
+/// the minute count is not what the operator acts on.
+fn elapsed(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    if days > 0 {
+        return format!("{days} day(s) ago");
+    }
+    let hours = seconds / 3_600;
+    if hours > 0 {
+        return format!("{hours} hour(s) ago");
+    }
+    String::from("within the hour")
+}
+
+/// The nine facts `list` reports about one entry, in column order.
 ///
 /// Named once because two tables show them: `list`'s own output and the
-/// picker's candidate rows. Two tables claiming to show the same eight facts,
+/// picker's candidate rows. Two tables claiming to show the same nine facts,
 /// built by two pieces of code, drift on the first column that gains a rule —
 /// the `GENERATOR` column's description/`yes`/`-` fallback below is already
-/// such a rule, and the two stamp columns are two more.
+/// such a rule, the two stamp columns are two more, and `ROTATES` is the
+/// fourth.
 ///
-/// `FILE` is last because it is the column the picker keeps behind tab: where a
-/// value is served from answers a question about one entry rather than about a
-/// list, so hiding it is hiding the end of the row rather than a hole in the
-/// middle of one.
-const LISTING_COLUMNS: [&str; 8] = [
+/// `FILE` is not the last column any more, and the tail of the row is still
+/// what the picker keeps behind tab: where a value is served from and how long
+/// it has left both answer a question about one entry rather than about a
+/// list. `list` prints both unconditionally, because a deadline is not
+/// optional information about a value that has one.
+const LISTING_COLUMNS: [&str; 9] = [
     "NAME",
     "ORIGIN",
     "SHARED",
@@ -497,6 +567,7 @@ const LISTING_COLUMNS: [&str; 8] = [
     "CREATED",
     "UPDATED",
     "FILE",
+    "ROTATES",
 ];
 
 /// The header row `list` and the picker both align their columns against.
@@ -505,12 +576,66 @@ pub fn listing_header() -> Vec<String> {
     LISTING_COLUMNS.into_iter().map(str::to_owned).collect()
 }
 
+/// How long one entry has left, as its `ROTATES` cell reads.
+///
+/// `12d 04:12:09` under a year, `due` past the deadline, `-` for an entry
+/// naming no policy. Days are separated from the clock because a countdown
+/// measured in days is read as a date and one measured in seconds is read as a
+/// clock, and a cell carrying only one of the two is unreadable at whichever
+/// end the reader was not looking at.
+///
+/// A year or more prints as days alone — `410d` — because the seconds of a
+/// countdown that long are a column width spent on a digit nobody reads.
+///
+/// `now` arrives rather than being read here, so the picker can recompute the
+/// cell on every frame from its own clock and a test can assert each of the
+/// three states without one.
+#[must_use]
+pub fn rotation_cell(
+    placement: &safix_core::model::Placement,
+    stamps: Option<safix_core::stamps::Stamps>,
+    now: u64,
+) -> String {
+    deadline_cell(safix_core::stamps::Deadline::at(stamps, placement, now))
+}
+
+/// The `ROTATES` cell for a deadline already computed, which is what the
+/// picker holds per candidate so it can tick without a placement in hand.
+#[must_use]
+pub fn deadline_cell(deadline: safix_core::stamps::Deadline) -> String {
+    match deadline {
+        safix_core::stamps::Deadline::None => "-".to_owned(),
+        safix_core::stamps::Deadline::Due(_) => "due".to_owned(),
+        safix_core::stamps::Deadline::Remaining(left) => remaining(left),
+    }
+}
+
+/// Seconds left, as the cell spells them.
+fn remaining(left: u64) -> String {
+    let days = left / 86_400;
+    if days >= 365 {
+        return format!("{days}d");
+    }
+    let clock = left % 86_400;
+    format!(
+        "{days}d {:02}:{:02}:{:02}",
+        clock / 3_600,
+        (clock % 3_600) / 60,
+        clock % 60
+    )
+}
+
 /// One held name, as the row `list` aligns and the picker offers.
 ///
 /// The stamps arrive rather than being read here, because the two callers reach
 /// them differently — `list` walks a whole user's entries and the picker holds
 /// one record per candidate — and because a row builder that read files would
 /// be a row builder a test could not call.
+///
+/// The clock does not arrive, and the `ROTATES` cell is therefore this row's
+/// one perishable value: it is right at the instant the row is built, which is
+/// what `list` prints and what the picker recomputes through [`rotation_cell`]
+/// while it is open.
 #[must_use]
 pub fn listing_row(
     name: &str,
@@ -534,6 +659,7 @@ pub fn listing_row(
         crate::picker::stamp(stamps.map(|stamps| stamps.created)),
         crate::picker::stamp(stamps.map(|stamps| stamps.updated)),
         placement.file.clone(),
+        rotation_cell(placement, stamps, safix_core::stamps::now()),
     ]
 }
 
@@ -2367,5 +2493,89 @@ mod tests {
             "meridian ntfy/orphan is a clan var and no declared mapping accounts for it."
         ));
         assert!(rendered.contains("no disagreement. All 1 declared mapping(s) agree."));
+    }
+
+    /// A placement with a policy of `seconds`, or with none at all.
+    fn governed(seconds: Option<u64>) -> safix_core::model::Placement {
+        let rotation = seconds.map(|every_seconds| {
+            serde_json::json!({ "policy": "quarterly", "everySeconds": every_seconds })
+        });
+        serde_json::from_value(serde_json::json!({
+            "file": "secrets/safix/users/alice/secrets.yaml", "key": "api-token",
+            "origin": "private", "owner": "alice", "shared": false,
+            "generator": null, "public": null,
+            "definitionRecord": "state/safix/definitions/alice/api-token",
+            "logicalFile": null, "logicalKey": null, "logicalPublic": null,
+            "logicalRecord": null,
+            "stampRecord": "state/safix/definitions/alice/api-token.stamps",
+            "logicalStamp": null,
+            "rotation": rotation,
+        }))
+        .expect("the fixture is the shape the resolver emits")
+    }
+
+    fn written_at(updated: u64) -> safix_core::stamps::Stamps {
+        safix_core::stamps::Stamps {
+            created: 0,
+            updated,
+        }
+    }
+
+    /// The three states the column has, and the two shapes a remaining time
+    /// is written in.
+    #[test]
+    fn the_rotates_cell_counts_down_says_due_and_marks_an_ungoverned_entry_absent() {
+        let thirty_days = governed(Some(30 * 86_400));
+        assert_eq!(
+            rotation_cell(
+                &thirty_days,
+                Some(written_at(1_000_000)),
+                1_000_000 + 10 * 86_400
+            ),
+            "20d 00:00:00"
+        );
+        assert_eq!(
+            rotation_cell(
+                &thirty_days,
+                Some(written_at(1_000_000)),
+                1_000_000 + 18 * 86_400 - (4 * 3_600 + 12 * 60 + 9)
+            ),
+            "12d 04:12:09"
+        );
+        assert_eq!(
+            rotation_cell(
+                &thirty_days,
+                Some(written_at(1_000_000)),
+                1_000_000 + 30 * 86_400
+            ),
+            "due"
+        );
+        assert_eq!(rotation_cell(&thirty_days, None, 1_000_000), "due");
+        assert_eq!(
+            rotation_cell(&governed(None), Some(written_at(1_000_000)), 2),
+            "-"
+        );
+    }
+
+    /// A countdown of a year or more drops the clock: the seconds of it are a
+    /// column width spent on a digit nobody reads.
+    #[test]
+    fn a_countdown_of_a_year_or_more_is_days_alone() {
+        let long = governed(Some(500 * 86_400));
+        assert_eq!(
+            rotation_cell(&long, Some(written_at(0)), 90 * 86_400),
+            "410d"
+        );
+    }
+
+    /// The header and every row carry the same number of cells, which is what
+    /// the aligner and the picker's column narrowing both rest on.
+    #[test]
+    fn the_listing_row_is_as_wide_as_the_header_and_ends_in_the_rotation_cell() {
+        let placement = governed(None);
+        let row = listing_row("api-token", &placement, None);
+        assert_eq!(row.len(), listing_header().len());
+        assert_eq!(listing_header().last().map(String::as_str), Some("ROTATES"));
+        assert_eq!(row.last().map(String::as_str), Some("-"));
     }
 }

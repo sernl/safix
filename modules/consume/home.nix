@@ -80,6 +80,76 @@ in
           default = false;
           description = "Generate the configured age keyFile at activation if absent. Its public recipient must still be enrolled separately. Existing private identities are not overwritten.";
         };
+        rotation = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = ''
+              Install a systemd user timer running `safix rotate --due --yes`
+              against `safix.rotation.repository`.
+
+              Off by default, and independent of `safix.enable`: installing
+              secrets and re-minting them are different acts on different
+              machines. This is the operator's workstation, where the
+              declarations and the git identity are; a machine that only
+              consumes secrets holds neither.
+
+              The identity it runs under must decrypt without a prompt and
+              without a card. A unit has no terminal and no pinentry, so a
+              rotation needing either fails the unit with the underlying
+              refusal rather than hanging, and the repository is left
+              uncommitted.
+
+              The timer commits locally and pushes nothing. Reviewing and
+              pushing are yours; machines receive the rotated values on their
+              next rebuild.
+            '';
+          };
+
+          repository = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "/home/alice/fleet";
+            description = ''
+              The absolute path of the declaring repository the verb runs in,
+              as the unit's `WorkingDirectory`.
+
+              A string rather than a path: a nix path would copy the
+              repository into the store at evaluation, and what is wanted is
+              the mutable working tree on this machine.
+
+              `safix generate` refuses a dirty tree, so a timer that fires over
+              uncommitted work fails visibly and rotates nothing.
+            '';
+          };
+
+          onCalendar = lib.mkOption {
+            type = lib.types.str;
+            default = "daily";
+            example = "Mon *-*-* 03:00:00";
+            description = ''
+              When the timer fires, as `OnCalendar` takes it. The unit is
+              persistent, so a machine that was asleep at the hour catches up
+              on its next boot rather than skipping the interval.
+            '';
+          };
+
+          environment = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = { };
+            example = lib.literalExpression ''{ SOPS_AGE_KEY_FILE = "/home/alice/.config/sops/age/keys.txt"; }'';
+            description = ''
+              Environment the rotation unit runs with: the identity the values
+              are decrypted and re-encrypted under, and anything a generator's
+              own script needs.
+
+              It names no secret value. A key file's path is not its contents,
+              and a value written here would be world-readable in the nix
+              store.
+            '';
+          };
+        };
+
         installer = common.installerOptions { inherit cfg pkgs; } // {
           manifest = lib.mkOption {
             type = lib.types.package;
@@ -117,6 +187,39 @@ in
           || common.wasSet options.safix.lib;
       };
     }
+    # Outside the `cfg.enable` gate, and Linux-only like the install unit: a
+    # workstation that rotates values need not install any, and a machine with
+    # no user manager has nowhere to put a timer.
+    (lib.mkIf (cfg.rotation.enable && pkgs.stdenv.hostPlatform.isLinux) {
+      assertions = [
+        {
+          assertion = cfg.rotation.repository != null;
+          message = "safix.rotation.enable is set, but safix.rotation.repository names no repository for `safix rotate --due --yes` to run in.";
+        }
+      ];
+
+      systemd.user.services.safix-rotate = {
+        Unit.Description = "Re-mint every safix value past its rotation deadline";
+        Service = {
+          Type = "oneshot";
+          WorkingDirectory = cfg.rotation.repository;
+          Environment = lib.mapAttrsToList (name: value: "${name}=${value}") cfg.rotation.environment;
+          # `--yes` answers the cascade confirmation, which is the one decision
+          # a unit answers on the operator's behalf: a rotation that stopped to
+          # ask would hang a timer rather than fail it.
+          ExecStart = "${cfg.installer.package}/bin/safix rotate --due --yes";
+        };
+      };
+
+      systemd.user.timers.safix-rotate = {
+        Unit.Description = "Schedule safix rotation";
+        Timer = {
+          OnCalendar = cfg.rotation.onCalendar;
+          Persistent = true;
+        };
+        Install.WantedBy = [ "timers.target" ];
+      };
+    })
     (lib.mkIf cfg.enable {
       assertions = map (message: {
         assertion = false;

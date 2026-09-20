@@ -2,7 +2,7 @@
 //!
 //! `KeePassXC`'s search syntax, because an operator who keeps a password database
 //! beside this one already knows it and because it answers the questions a
-//! table of eight columns raises: "this word, in the name column only", "not
+//! table of named columns raises: "this word, in the name column only", "not
 //! this one", "these two names and nothing between them".
 //!
 //! One query is whitespace-separated terms, each
@@ -40,6 +40,8 @@
 //! `*[a-` is a half-typed character class, not an error worth refusing a frame
 //! for, and offering every row for it — the other available answer — would
 //! flash the whole list up between two keystrokes.
+
+use std::ops::Range;
 
 use regex_lite::Regex;
 
@@ -129,6 +131,30 @@ pub(crate) struct Query {
     terms: Vec<Term>,
 }
 
+/// Which columns' titles a query searches.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Searched {
+    /// None of them, which is what an empty query and a query of nothing but
+    /// exclusions search.
+    Nothing,
+    /// Every column, because a positive term names no field and so is asked of
+    /// every cell.
+    Everything,
+    /// These columns alone, which is what field terms name.
+    Columns(Vec<usize>),
+}
+
+impl Searched {
+    /// Whether this column is one the query looked in.
+    pub(crate) fn includes(&self, column: usize) -> bool {
+        match self {
+            Self::Nothing => false,
+            Self::Everything => true,
+            Self::Columns(columns) => columns.contains(&column),
+        }
+    }
+}
+
 impl Query {
     /// Parse one query as typed.
     pub(crate) fn parse(text: &str) -> Self {
@@ -137,27 +163,66 @@ impl Query {
         }
     }
 
-    /// Whether this row is offered.
+    /// Where every positive term matched in every cell, or `None` for a row
+    /// this query rejects.
     ///
-    /// An empty query has no terms and every row satisfies all of them, which
-    /// is how the unfiltered list is the same code path as a filtered one.
-    pub(crate) fn admits(&self, cells: &[String]) -> bool {
-        self.terms.iter().all(|term| term.admits(cells))
+    /// The ranges are characters rather than bytes, because what reads them
+    /// draws them. Per cell they are sorted and disjoint, so two terms that
+    /// found the same letters emphasise them once.
+    ///
+    /// An empty query has no terms, every row satisfies all of them and no cell
+    /// carries a range, which is how the unfiltered list is the same code path
+    /// as a filtered one.
+    pub(crate) fn spans(&self, cells: &[String]) -> Option<Vec<Vec<Range<usize>>>> {
+        let mut spans: Vec<Vec<Range<usize>>> = vec![Vec::new(); cells.len()];
+        for term in &self.terms {
+            let mut found = false;
+            for (column, cell) in cells.iter().enumerate() {
+                if term.field.is_some_and(|field| field.column() != column) {
+                    continue;
+                }
+                if !term.hits(cell) {
+                    continue;
+                }
+                found = true;
+                // An exclusion contributes nothing: the characters it found are
+                // why a row is not offered, and a row that is offered matched
+                // it nowhere.
+                if !term.exclude
+                    && let Some(cell_spans) = spans.get_mut(column)
+                {
+                    cell_spans.extend(term.ranges(cell));
+                }
+            }
+            if found == term.exclude {
+                return None;
+            }
+        }
+        Some(spans.into_iter().map(merged).collect())
+    }
+
+    /// Which columns this query looked in, which are the titles worth
+    /// emphasising.
+    pub(crate) fn searched_columns(&self) -> Searched {
+        let mut columns: Vec<usize> = Vec::new();
+        for term in self.terms.iter().filter(|term| !term.exclude) {
+            let Some(field) = term.field else {
+                return Searched::Everything;
+            };
+            let column = field.column();
+            if !columns.contains(&column) {
+                columns.push(column);
+            }
+        }
+        if columns.is_empty() {
+            Searched::Nothing
+        } else {
+            Searched::Columns(columns)
+        }
     }
 }
 
 impl Term {
-    /// Whether this one term admits the row.
-    fn admits(&self, cells: &[String]) -> bool {
-        let found = match self.field {
-            Some(field) => cells
-                .get(field.column())
-                .is_some_and(|cell| self.hits(cell)),
-            None => cells.iter().any(|cell| self.hits(cell)),
-        };
-        found != self.exclude
-    }
-
     /// Whether this one term matches this one cell.
     fn hits(&self, cell: &str) -> bool {
         match &self.compare {
@@ -167,6 +232,58 @@ impl Term {
             Match::Unusable => false,
         }
     }
+
+    /// Which of a matched cell's characters this term found.
+    fn ranges(&self, cell: &str) -> Vec<Range<usize>> {
+        let whole = 0..cell.chars().count();
+        match &self.compare {
+            Match::Contains(text) => {
+                let lowered = cell.to_lowercase();
+                // Lowercasing can add characters — `\u{130}` becomes two — and
+                // a count that changed makes an offset in the lowered copy no
+                // offset in the original. Such a cell is emphasised whole
+                // rather than at a place the mapping cannot name.
+                if lowered.chars().count() != cell.chars().count() {
+                    return vec![whole];
+                }
+                lowered
+                    .match_indices(text.as_str())
+                    .map(|(at, found)| characters(&lowered, at, found.len()))
+                    .collect()
+            }
+            Match::Exact(_) => vec![whole],
+            Match::Pattern(pattern) => pattern
+                .find_iter(cell)
+                .map(|found| characters(cell, found.start(), found.as_str().len()))
+                .collect(),
+            Match::Unusable => Vec::new(),
+        }
+    }
+}
+
+/// The character range one byte run of this text covers.
+fn characters(text: &str, at: usize, length: usize) -> Range<usize> {
+    let start = text.get(..at).unwrap_or_default().chars().count();
+    let width = text
+        .get(at..at.saturating_add(length))
+        .unwrap_or_default()
+        .chars()
+        .count();
+    start..start.saturating_add(width)
+}
+
+/// These ranges sorted, with the ones that touch fused into one.
+fn merged(spans: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let mut sorted = spans;
+    sorted.sort_by_key(|span| (span.start, span.end));
+    let mut fused: Vec<Range<usize>> = Vec::with_capacity(sorted.len());
+    for span in sorted {
+        match fused.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => fused.push(span),
+        }
+    }
+    fused
 }
 
 /// Which characters make a term a shape rather than a fragment.
@@ -284,7 +401,7 @@ fn split(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Query, split};
+    use super::{Query, Range, Searched, split};
 
     /// One row of the table, in the column order a field names.
     fn row(name: &str, generator: &str, file: &str) -> Vec<String> {
@@ -303,9 +420,10 @@ mod tests {
         .collect()
     }
 
-    /// Whether one query offers one row.
+    /// Whether one query offers one row, which is whether it found anything in
+    /// it: the filter and the emphasis are one answer.
     fn admits(query: &str, cells: &[String]) -> bool {
-        Query::parse(query).admits(cells)
+        Query::parse(query).spans(cells).is_some()
     }
 
     #[test]
@@ -448,5 +566,100 @@ mod tests {
         assert_eq!(split("a \"b c\" d"), vec!["a", "b c", "d"]);
         assert_eq!(split("  spaced   out "), vec!["spaced", "out"]);
         assert_eq!(split("\"unclosed run"), vec!["unclosed run"]);
+    }
+
+    /// Where one query matched in one row, per cell.
+    fn spans(query: &str, cells: &[String]) -> Vec<Vec<std::ops::Range<usize>>> {
+        Query::parse(query)
+            .spans(cells)
+            .expect("the query rejected the row")
+    }
+
+    /// One span, as the list a cell carries.
+    fn only(span: Range<usize>) -> Vec<Range<usize>> {
+        std::iter::once(span).collect()
+    }
+
+    /// A plain term marks the letters it found, in every cell that has them.
+    #[test]
+    fn a_contains_term_marks_its_letters_case_insensitively() {
+        let entry = row("api-token", "-", "secrets/token.yaml");
+        let found = spans("TOK", &entry);
+        assert_eq!(found.first(), Some(&only(4..7)), "{found:?}");
+        assert_eq!(found.get(7), Some(&only(8..11)), "{found:?}");
+        assert_eq!(found.get(1), Some(&Vec::new()), "{found:?}");
+    }
+
+    /// A field term marks that column and leaves the others alone, even where
+    /// they carry the same letters.
+    #[test]
+    fn a_field_term_marks_its_own_column_only() {
+        let entry = row("api-token", "-", "secrets/token.yaml");
+        let found = spans("name:tok", &entry);
+        assert_eq!(found.first(), Some(&only(4..7)), "{found:?}");
+        assert_eq!(found.get(7), Some(&Vec::new()), "{found:?}");
+    }
+
+    /// An exact term is the whole cell, and a regular expression is each run it
+    /// finds.
+    #[test]
+    fn an_exact_term_marks_the_cell_and_a_regex_marks_each_run() {
+        let entry = row("api-token", "-", "secrets/alice.yaml");
+        assert_eq!(spans("+api-token", &entry).first(), Some(&only(0..9)));
+        assert_eq!(spans("*n:to.en", &entry).first(), Some(&only(4..9)));
+        assert_eq!(spans("*n:[ao]", &entry).first(), Some(&vec![0..1, 5..6]));
+    }
+
+    /// Two terms finding the same letters mark them once.
+    #[test]
+    fn overlapping_terms_leave_one_range() {
+        let entry = row("api-token", "-", "secrets/alice.yaml");
+        assert_eq!(
+            spans("name:tok name:oke", &entry).first(),
+            Some(&only(4..8))
+        );
+    }
+
+    /// An exclusion marks nothing in the rows it leaves standing.
+    #[test]
+    fn an_exclusion_marks_nothing() {
+        let mail = row("mail-password", "-", "secrets/alice.yaml");
+        let found = spans("!tok", &mail);
+        assert!(
+            found.iter().all(Vec::is_empty),
+            "an exclusion emphasised something\n{found:?}"
+        );
+        assert_eq!(Query::parse("!tok").searched_columns(), Searched::Nothing);
+    }
+
+    /// A rejected row has no spans at all, which is what makes the filter and
+    /// the emphasis one answer rather than two.
+    #[test]
+    fn a_rejected_row_has_no_spans() {
+        let entry = row("api-token", "-", "secrets/alice.yaml");
+        assert!(Query::parse("wifi").spans(&entry).is_none());
+        assert!(
+            Query::parse("*[a-").spans(&entry).is_none(),
+            "an unparsable regex offered the row"
+        );
+    }
+
+    /// Which titles a query lights: its fields' own, all of them, or none.
+    #[test]
+    fn the_searched_columns_are_the_fields_or_every_column() {
+        assert_eq!(Query::parse("").searched_columns(), Searched::Nothing);
+        assert_eq!(Query::parse("tok").searched_columns(), Searched::Everything);
+        assert_eq!(
+            Query::parse("name:tok file:alice").searched_columns(),
+            Searched::Columns(vec![0, 7])
+        );
+        // A bare term beside a field term still looks everywhere.
+        assert_eq!(
+            Query::parse("name:tok alice").searched_columns(),
+            Searched::Everything
+        );
+        let name = Query::parse("name:tok").searched_columns();
+        assert!(name.includes(0));
+        assert!(!name.includes(7));
     }
 }

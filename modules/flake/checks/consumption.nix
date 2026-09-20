@@ -215,8 +215,9 @@ in
         } (mkHome user [ ]).config;
 
       # The cfg safix's entry type's `path` default is a function of, and the
-      # only thing it reads outside its own fields.
-      entryCfg.installer.symlinkPath = "/run/safix";
+      # only thing it reads outside its own fields. The user-scope module's own
+      # default, so the hand form lands its entries where the module form does.
+      entryCfg.installer.symlinkPath = "%r/safix";
 
       # Every field of every entry as safix's own entry type resolved it — the
       # type `modules/consume/nixos.nix` hands `common.sharedOptions` as its
@@ -250,6 +251,29 @@ in
 
       moduleView = viewOf (moduleForm "alice").config.safix.secrets;
       handView = viewOf (handForm "alice");
+
+      # The rotation timer, enabled on a profile that declares nothing else
+      # about it: the unit's existence and its ExecStart are the whole claim,
+      # and `inertProfile` below is the other half — a profile that sets no
+      # rotation option defines no unit.
+      rotationProfile = mkHome "alice" [
+        config.flake.homeModules.default
+        {
+          safix = {
+            lib = safix;
+            inherit hostname;
+            identity.sshKeyPaths = [ "/home/alice/.ssh/agenix" ];
+            rotation = {
+              enable = true;
+              repository = "/home/alice/fleet";
+              onCalendar = "daily";
+              environment.SOPS_AGE_KEY_FILE = "/home/alice/.config/sops/age/keys.txt";
+            };
+          };
+        }
+      ];
+
+      rotationOptions = rotationProfile.options.safix.rotation;
 
       # A person who resolves nothing on this host: carol records a recipient
       # and holds no entry, so every audience excludes them.
@@ -664,6 +688,53 @@ in
               # in `safix-consumption-system`, which only a Linux builder can
               # evaluate.
               userScopeRefusesOwnership = fires bobUserProfile;
+
+              # The rotation timer's options say the three things a person
+              # deciding whether to enable it has to know and cannot infer:
+              # that the identity must open without being asked, that nothing
+              # leaves this machine, and when the values reach the machines
+              # that use them.
+              rotationDocumented = {
+                identityWithoutPrompt =
+                  lib.hasInfix "without a prompt" rotationOptions.enable.description
+                  && lib.hasInfix "without a card" rotationOptions.enable.description;
+                pushesNothing = lib.hasInfix "pushes nothing" rotationOptions.enable.description;
+                machinesRebuild = lib.hasInfix "next rebuild" rotationOptions.enable.description;
+                environmentNamesNoValue = lib.hasInfix "names no secret value" rotationOptions.environment.description;
+              };
+            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              # The units themselves. Linux only, for the reason
+              # `safix-consumption-ordering` gives about the install unit:
+              # darwin's home-manager has no user manager to register one
+              # with, so asserting their shape there would assert an absence.
+              rotationUnits = {
+                service = rotationProfile.config.systemd.user.services ? safix-rotate;
+                timer = rotationProfile.config.systemd.user.timers ? safix-rotate;
+                # home-manager's unit type coerces a scalar into a
+                # single-element list, so the value is flattened before it is
+                # matched rather than the probe assuming which of the two it
+                # is handed.
+                execStart =
+                  let
+                    declared = rotationProfile.config.systemd.user.services.safix-rotate.Service.ExecStart;
+                  in
+                  builtins.match ".*/bin/safix rotate --due --yes" (lib.concatStringsSep " " (lib.toList declared))
+                  != null;
+                workingDirectory = lib.concatStringsSep " " (
+                  lib.toList rotationProfile.config.systemd.user.services.safix-rotate.Service.WorkingDirectory
+                );
+                environment = lib.toList rotationProfile.config.systemd.user.services.safix-rotate.Service.Environment;
+                onCalendar = lib.concatStringsSep " " (
+                  lib.toList rotationProfile.config.systemd.user.timers.safix-rotate.Timer.OnCalendar
+                );
+                persistent = rotationProfile.config.systemd.user.timers.safix-rotate.Timer.Persistent;
+
+                # The other half of the claim: a profile that sets no rotation
+                # option defines neither unit.
+                disabledService = inertProfile.config.systemd.user.services ? safix-rotate;
+                disabledTimer = inertProfile.config.systemd.user.timers ? safix-rotate;
+              };
             };
 
             expected = {
@@ -683,7 +754,7 @@ in
               # Safix's own declared defaults, every one of them. The values are
               # unchanged from what a deleted dependency's type used to supply,
               # and their source is not: `format`, `mode`, `owner`, `group`,
-              # `uid`, `gid`, `restartUnits` and `reloadUnits` are now
+              # `uid`, `gid`, `restartUnits`, `reloadUnits` and `neededForUsers` are now
               # `common.secretEntryType`'s own defaults, so a literal that
               # silently agreed with somebody else's default cannot go
               # unnoticed here.
@@ -694,6 +765,7 @@ in
                 key = "alice_alone";
                 mode = "0440";
                 name = "alice-alone";
+                neededForUsers = false;
                 owner = null;
                 path = "/home/alice/.config/safix-fixture/alice-alone";
                 reloadUnits = [ ];
@@ -711,6 +783,28 @@ in
               };
 
               userScopeRefusesOwnership = true;
+
+              rotationDocumented = {
+                identityWithoutPrompt = true;
+                pushesNothing = true;
+                machinesRebuild = true;
+                environmentNamesNoValue = true;
+              };
+            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              rotationUnits = {
+                service = true;
+                timer = true;
+                execStart = true;
+                workingDirectory = "/home/alice/fleet";
+                environment = [
+                  "SOPS_AGE_KEY_FILE=/home/alice/.config/sops/age/keys.txt"
+                ];
+                onCalendar = "daily";
+                persistent = true;
+                disabledService = false;
+                disabledTimer = false;
+              };
             };
           };
 

@@ -7,32 +7,30 @@ The contract the operator-facing README is held to as a document: that every ver
 
 ### Requirement: Every verb and every option is documented exactly once
 
-The README SHALL document each of the command's subcommands and each option of the declaration and profile namespaces, and SHALL document each of them in exactly one place.
-It SHALL NOT state how many subcommands there are.
+The documentation set — the README together with `docs/` — SHALL document each of the command's subcommands and each option of the declaration and profile namespaces, and SHALL document each of them in exactly one place. The README SHALL be a quickstart that walks one example end to end and SHALL link to the reference page for anything it mentions without expanding. It SHALL NOT state how many subcommands there are.
 
 #### Scenario: The verb inventory is one table
 
 - **WHEN** a reader looks for what the command can do
-- **THEN** one table carries one row per subcommand, stating what it does, what it reads, what it writes, and whether it needs a terminal
+- **THEN** one table in the reference carries one row per subcommand, stating what it does, what it reads, what it writes, and whether it needs a terminal
 - **AND** the subcommand that no operator types is present and marked as such, rather than omitted from the inventory and documented elsewhere
 
 #### Scenario: A verb documented twice is a defect
 
-- **WHEN** a subcommand's behaviour is described outside the row and the one section that expands it
+- **WHEN** a subcommand's behaviour is described outside the row and the one page that expands it
 - **THEN** that is a defect of the same class as a contradiction, because two sites drift and the reader cannot tell which is current
-- **AND** the reason is recorded: the document that said a verb "does not exist here" ninety-two lines above the section documenting it had two sites for one verb
+- **AND** a README snippet that shows a verb in use is not a second site, because it states no behaviour the reference does not
 
 #### Scenario: No count of verbs appears
 
-- **WHEN** the README is read for a number of subcommands
+- **WHEN** the documentation set is read for a number of subcommands
 - **THEN** no sentence states one
-- **AND** the reason is recorded: a count is a second encoding of the table, and the four disagreeing counts the previous document carried are what a second encoding produces
 
 #### Scenario: Every option has exactly one documentation site
 
 - **WHEN** an option of the declaration namespace or of either scope's profile namespace is looked up
-- **THEN** it is found in exactly one chapter
-- **AND** an option present in neither the option table nor a chapter's prose is undocumented, which is a defect rather than an omission left to the option's own description
+- **THEN** it is found in exactly one reference page
+- **AND** an option present in no reference page is undocumented, which is a defect rather than an omission left to the option's own description
 
 ### Requirement: The README names no check
 
@@ -58,20 +56,19 @@ The README SHALL NOT name any check of this repository's own suite.
 
 ### Requirement: The prose is plain, and each load-bearing rule is stated once
 
-No sentence in the README SHALL exceed forty words.
+No sentence in the README or in `docs/` SHALL exceed forty words.
 Each rule the model rests on SHALL be stated in exactly one place, with every later mention naming that place rather than restating the rule.
 
 #### Scenario: Sentence length is bounded
 
-- **WHEN** each sentence of the README is measured
+- **WHEN** each sentence of the README and of every page under `docs/` is measured
 - **THEN** none exceeds forty words
-- **AND** the reason is recorded: the previous document carried a ninety-word sentence spanning a key derivation, an exclusion prefix and an unrelated aside, and a reader cannot hold three subjects across one predicate
 
 #### Scenario: The revocation rule is stated once
 
 - **WHEN** the rule that narrowing an audience does not retroactively revoke what was already encrypted is looked for
-- **THEN** it is stated once, in the chapter that introduces the model
-- **AND** every other mention is a clause naming that chapter, because seven statements of one rule make a reader ask each time whether this one is narrower
+- **THEN** it is stated once, in the concept page that introduces custody
+- **AND** every other mention is a clause naming that page
 
 #### Scenario: The namespace rule is stated once
 
@@ -86,12 +83,12 @@ Each rule the model rests on SHALL be stated in exactly one place, with every la
 
 ### Requirement: One sync chapter, with one same-shaped subsection per target
 
-The README SHALL carry exactly one chapter covering synchronisation with other stores.
-That chapter SHALL state the shared mapping shape, the modes, the direction reading, the conflict judgement and the never-delete rule once, and SHALL then carry one subsection per declared target, each with the same headings, stating only what differs.
+The documentation set SHALL carry exactly one page covering synchronisation with other stores, under the guides.
+That page SHALL state the shared mapping shape, the modes, the direction reading, the conflict judgement and the never-delete rule once, and SHALL then carry one subsection per declared target, each with the same headings, stating only what differs. The README SHALL mention synchronisation in at most one sentence that links to that page.
 
 #### Scenario: The shared shape is stated once
 
-- **WHEN** the chapter is read
+- **WHEN** the page is read
 - **THEN** what a mapping is, the four modes, how a direction is read, how a conflict is judged and what is never deleted are each stated once, before the per-target subsections
 - **AND** no subsection restates any of them
 
@@ -103,9 +100,8 @@ That chapter SHALL state the shared mapping shape, the modes, the direction read
 
 #### Scenario: The number of targets appears nowhere
 
-- **WHEN** the README is read for a count of sync targets
+- **WHEN** the documentation set is read for a count of sync targets
 - **THEN** no sentence states one
-- **AND** the reason is recorded: the previous document stated "two targets" in six places, which is what a change adding three targets has to find and edit before it can be correct
 
 #### Scenario: A target with nothing to say under a heading says so
 
@@ -144,3 +140,35 @@ The document describing the worked examples SHALL describe only what a check eva
 - **WHEN** the document explains how the flakeless example obtains the resolver
 - **THEN** it states the mechanism the file uses
 - **AND** a mechanism the file deliberately no longer uses is not described as current
+
+### Requirement: README snippets are lifted from a checked example
+
+Every fenced code block in the README that shows nix SHALL name the file, or the named region of a file, under `examples/quickstart/` it was lifted from, and SHALL be byte-identical to it. A check SHALL hold that equality, and a separate check SHALL evaluate the example's host and home profiles for real. A block that names nothing SHALL be a shell transcript, not nix.
+
+#### Scenario: A README block matches its source
+- **WHEN** a nix block in the README names `examples/quickstart/secrets.nix`
+- **THEN** its body is byte-identical to that file, or to the region the block names
+
+#### Scenario: Drift fails a check
+- **WHEN** the example file changes and the README does not
+- **THEN** the snippet check fails naming the block and the file
+
+#### Scenario: The example builds
+- **WHEN** the example's host profile and home profile are evaluated
+- **THEN** each materializes the secrets the README says it does
+
+### Requirement: The docs tree follows Diátaxis and the flake-parts route is documented as supported
+
+`docs/` SHALL carry `tutorials/`, `guides/`, `concepts/` and `reference/`, each page with a YAML `title` in front matter. One guide SHALL document the flake-parts route as fully supported, naming the flake module and the worked example, and the README SHALL say the same in one section. Three guides SHALL carry the custody guidance: separating machine identities from human identities for unattended hosts, choosing an inspectable recipient roster over raw age where auditing matters, and rotating a value after removing access.
+
+#### Scenario: A reader finds the page kind by the directory
+- **WHEN** the tree is listed
+- **THEN** every page sits under exactly one of the four directories and carries a front-matter title
+
+#### Scenario: flake-parts is a supported route, not a footnote
+- **WHEN** a flake-parts user reads the README
+- **THEN** one section states the route is fully supported and points at the guide and the example
+
+#### Scenario: The custody guidance has a home
+- **WHEN** an operator asks how an unattended host decrypts, why a raw-age roster cannot be audited, or what to do after removing a person
+- **THEN** one guide each answers, and the README links to them from the step where the question arises

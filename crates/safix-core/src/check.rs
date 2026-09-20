@@ -24,6 +24,7 @@ use crate::definition;
 use crate::error::{Error, Result};
 use crate::model::{Holders, Placements};
 use crate::sops::document::{self, KeyState};
+use crate::stamps::{self, Deadline};
 use crate::workspace::Workspace;
 
 /// How the value a finding asks for is minted.
@@ -161,6 +162,26 @@ pub enum Finding {
         record: String,
     },
 
+    /// An entry whose rotation deadline has passed.
+    ///
+    /// Carries no value and no derivative of one: the two numbers it is
+    /// computed from are the declared interval and the plaintext stamp record,
+    /// and the value itself is never opened to answer this question — which is
+    /// what lets one machine report the overdue values of people whose files it
+    /// cannot decrypt.
+    RotationDue {
+        /// The user who holds the entry.
+        user: String,
+        /// The entry's name.
+        name: String,
+        /// The `flake.safix.rotation` policy that set the deadline.
+        policy: String,
+        /// How long ago the deadline passed, in seconds.
+        overdue_seconds: u64,
+        /// Whether a generator can re-mint it, which decides the remedy.
+        generator: bool,
+    },
+
     /// A vault is declared, but its own `.gitignore` does not cover the
     /// scratch creation rules file — design V10's second, independent
     /// guarantee beside the scratch registry's own sweep-on-every-exit-path
@@ -199,7 +220,7 @@ pub fn run(workspace: &Workspace, only: Option<&str>) -> Result<Vec<Finding>> {
     recipients(workspace, &mut documents, &mut findings)?;
     let strays = shared(workspace, &mut documents, &mut findings)?;
     values(workspace, &mut documents, &strays, only, &mut findings)?;
-    definitions(workspace, only, &mut findings)?;
+    entry_records(workspace, only, &mut findings)?;
     vault_gitignore(workspace, &mut findings)?;
     vault_relocation(workspace, &mut findings)?;
 
@@ -531,13 +552,22 @@ fn values(
     Ok(())
 }
 
-/// Generated values whose recorded definition is not the declared one.
+/// The two questions asked of one entry at a time: whether a generated value's
+/// recorded definition is the declared one, and whether an opted-in value has
+/// outlived its rotation policy.
 ///
-/// Last, because it is the only question here that is not about a file's
-/// contents or its recipients: the four before it read the tree the operator is
-/// converging, and this one reads what a past run recorded about a declaration.
-/// An operator who has just fixed the policy expects the recipient findings under
-/// it, and one who has just edited a generator expects this at the end.
+/// Last, because neither is about a file's contents or its recipients: the four
+/// questions before this one read the tree the operator is converging, and
+/// these two read what a past run recorded about a declaration and about a
+/// write. An operator who has just fixed the policy expects the recipient
+/// findings under it, and one who has just edited a generator expects this at
+/// the end.
+///
+/// One walk rather than two. The deadline and the definition are two facts
+/// about one entry, read out of two records in one tree, and a second walk over
+/// the same placements would be a second order for the report to be read in.
+///
+/// # Definition drift
 ///
 /// Three states are out of scope and produce nothing. An entry nothing generates
 /// has no definition to have drifted from. An entry with no record predates the
@@ -550,20 +580,53 @@ fn values(
 /// One finding per record rather than per carrier. A shared entry is one value
 /// under one record, and reporting it once per person who holds it would be three
 /// findings with one remedy between them.
-fn definitions(
+///
+/// # The deadline
+///
+/// The same one-per-record rule, over the stamp record: a shared value has one
+/// write, one deadline and one remedy, whoever holds it. An entry with no
+/// policy is silent, and an entry with a policy and no stamp record is due —
+/// [`crate::stamps::Deadline::of`] is the single place that decides which, so
+/// the report and the countdown cannot disagree.
+///
+/// The clock is read once, before the walk, so every finding in one report is
+/// judged against one instant.
+fn entry_records(
     workspace: &Workspace,
     only: Option<&str>,
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
     let placements = workspace.placements()?;
     let mut reported: BTreeSet<String> = BTreeSet::new();
+    let mut dated: BTreeSet<String> = BTreeSet::new();
+    let now = stamps::now();
 
     for user in placements.users() {
         if only.is_some_and(|wanted| wanted != user) {
             continue;
         }
         for (name, placement) in placements.held_by(user).into_iter().flatten() {
-            let Some((generator, declared)) = placements.producer_of(user, name) else {
+            let producer = placements.producer_of(user, name);
+
+            if placement.rotation.is_some() && dated.insert(placement.stamp_record.clone()) {
+                let recorded = stamps::read(workspace, placement)?;
+                if let Some(overdue) = Deadline::at(recorded, placement, now).overdue() {
+                    let policy = placement
+                        .rotation
+                        .as_ref()
+                        .map(|rotation| rotation.policy.clone())
+                        .unwrap_or_default();
+                    findings.push(Finding::RotationDue {
+                        user: user.to_owned(),
+                        name: name.clone(),
+                        policy,
+                        overdue_seconds: overdue,
+                        generator: producer.is_some(),
+                    });
+                }
+            }
+
+            let Some((generator, declared)) = producer else {
                 continue;
             };
             let record = definition::record_path(placement);

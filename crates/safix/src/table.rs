@@ -12,6 +12,30 @@
 //! difference could show. It is recorded rather than papered over: making the
 //! two agree there means a display-width table this does not yet carry.
 
+/// How wide each column of these rows is: its widest cell, counted in
+/// characters.
+///
+/// Exposed for the picker, which pads its own cells itself because they carry
+/// emphasis sequences the padding must not count. The two tables therefore
+/// agree on a column's width by construction rather than by two copies of this
+/// loop.
+#[must_use]
+pub fn widths(rows: &[Vec<String>]) -> Vec<usize> {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    (0..columns)
+        .map(|column| {
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// The gap `column -t` leaves between one column and the next.
+pub const GAP: usize = 2;
+
 /// Render rows the way `column -t -s'\t'` renders them, with a trailing newline
 /// per row.
 ///
@@ -20,16 +44,7 @@
 /// rather than per column.
 #[must_use]
 pub fn aligned(rows: &[Vec<String>]) -> String {
-    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let widths: Vec<usize> = (0..columns)
-        .map(|column| {
-            rows.iter()
-                .filter_map(|row| row.get(column))
-                .map(|cell| cell.chars().count())
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
+    let widths = widths(rows);
 
     let mut rendered = String::new();
     for row in rows {
@@ -38,7 +53,9 @@ pub fn aligned(rows: &[Vec<String>]) -> String {
             let is_last = index == row.len().saturating_sub(1);
             if !is_last {
                 let width = widths.get(index).copied().unwrap_or(0);
-                let padding = width.saturating_sub(cell.chars().count()).saturating_add(2);
+                let padding = width
+                    .saturating_sub(cell.chars().count())
+                    .saturating_add(GAP);
                 for _ in 0..padding {
                     rendered.push(' ');
                 }
@@ -79,6 +96,21 @@ mod tests {
     #[test]
     fn a_single_cell_row_is_itself() {
         assert_eq!(aligned(&[row(&["one line"])]), "one line\n");
+    }
+
+    /// A cell padded by these widths lands where `aligned` puts it, which is
+    /// the whole reason the picker is allowed to pad its own.
+    #[test]
+    fn the_widths_are_where_aligned_starts_each_column() {
+        let rows = [row(&["NAME", "ORIGIN"]), row(&["alice-alone", "private"])];
+        let widths = widths(&rows);
+        assert_eq!(widths, vec!["alice-alone".len(), "private".len()]);
+        let first = aligned(&rows).lines().next().unwrap_or_default().to_owned();
+        assert_eq!(
+            first.find("ORIGIN"),
+            widths.first().map(|width| width.saturating_add(GAP)),
+            "a cell padded by these widths would not start where aligned puts it: {first:?}"
+        );
     }
 }
 

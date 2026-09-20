@@ -1167,6 +1167,23 @@ pub(super) fn unknown_subject(subject: &str, declared: &[String]) -> String {
     )
 }
 
+/// An entry declared somewhere this verb cannot edit, or in a shape it cannot.
+pub(super) fn no_entry_declaration(user: &str, name: &str, file: &str) -> String {
+    format!(
+        "{file} does not declare '{name}' in a shape this can edit, so \n\
+        flake.safix.users.{user}'s rotation policy was not touched.\n\
+        \n\
+        This edits one line as text: a `rotation = \"<policy>\";` inserted into the\n\
+        entry's own block, or written beside a dotted declaration of one of its\n\
+        fields, parsed before anything is staged.\n\
+        \n\
+        A declaration living somewhere else is supported, and so is an entry\n\
+        computed rather than written: declarations merge, so where one is written is\n\
+        not something safix knows. But the edit has to have a file to make, so move\n\
+        the declaration to that path or write the policy by hand."
+    )
+}
+
 /// A group declared somewhere this verb cannot edit.
 pub(super) fn no_group_declaration(group: &str, file: &str) -> String {
     format!(

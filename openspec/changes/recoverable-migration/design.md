@@ -34,11 +34,15 @@ No plaintext, no plaintext digest: ciphertext digests are of what is already on 
 
 ### D3. Publish order and the commit point
 
-Publication becomes: write the journal (empty `outputs`) → for each candidate, hard-link, record `(device, inode, sha256)`, rewrite the journal → publish declarations → publish receipt → remove the journal → fsync parents. Removing the journal is the commit point; its presence is the whole meaning of "interrupted".
+Publication becomes: write the journal (empty `outputs`) → for each candidate, record `(device, inode, sha256)` and rewrite the journal, then hard-link → publish declarations → publish receipt → remove the staging directories → remove the journal. Removing the journal is the commit point; its presence is the whole meaning of "interrupted".
+
+The record is written *before* its link rather than after. A hard link shares its file's device, inode and bytes, so a record taken from the staged candidate is already true of the destination the link will create. Recorded afterwards — as an earlier draft of this design had it — a process killed between the two syscalls leaves an output on disk that the journal does not name, and the next run refuses it as an ordinary pre-existing file: a migration that can then neither finish nor be abandoned. The manual kill drill found exactly that, which is why the order is this way round. The cost is the mirror-image window, a record whose link never happened, and D4 says what that means.
 
 ### D4. Resumption re-verifies rather than trusts
 
 On `run`, if the journal exists: parse it, compare `planDigest`; then for each recorded output require `symlink_metadata` to report a regular file with the recorded identity and bytes hashing to the recorded digest. Any mismatch refuses naming the path before anything is published. Kept ciphertext outputs are re-read through the target identities and compared with the source exactly as a fresh candidate is; kept declarations and receipt are recomputed and their digests compared. Only then are the remaining candidates staged and published. Alternative considered: trusting the digest alone — rejected because the verification step is cheap and it is the guarantee the receipt advertises.
+
+A record whose path holds nothing is the one case that is neither a match nor a mismatch: it is the window D3 leaves, and it means the link never happened. Such a record is dropped and its output published afresh, which is also the right answer if an operator removed the file — publishing it is what a rerun is for, and nothing is overwritten because nothing is there. Abandonment reads it the same way: already gone, nothing to remove.
 
 ### D5. Abandonment removes what matches and nothing else
 

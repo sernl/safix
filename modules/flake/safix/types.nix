@@ -43,6 +43,37 @@ let
     "multiline"
   ];
 
+  # An interval, as a whole number of hours, days or weeks. The type is where
+  # the refusal lives, so a malformed interval names the option and the three
+  # accepted forms rather than failing later as arithmetic on a string.
+  #
+  # No minutes, and no fractions. A deadline shorter than the calendar
+  # granularity a timer fires on cannot be met by the mechanism meant to meet
+  # it, and `1.5d` is a deadline whose reader has to decide what half a day is.
+  # Hours exist because a drill and a short-lived token need one.
+  rotationInterval = lib.types.strMatching "[1-9][0-9]*[hdw]" // {
+    description = "interval as a positive whole number of hours, days or weeks: <n>h, <n>d or <n>w";
+  };
+
+  # One named rotation policy: how long a value governed by it may live.
+  #
+  # A record rather than a bare string, because the interval is the first field
+  # of a policy and not the whole of one: a later axis lands here without every
+  # entry that names the policy moving.
+  rotationPolicy = lib.types.submodule {
+    options.every = lib.mkOption {
+      type = rotationInterval;
+      example = "90d";
+      description = ''
+        How long a value this policy governs may live after its last write.
+
+        One declaration decides the deadline of every entry naming this policy,
+        so shortening an interval moves all of them at the next evaluation and
+        no entry is edited.
+      '';
+    };
+  };
+
   prompt = lib.types.submodule (
     { name, ... }:
     {
@@ -490,6 +521,25 @@ let
           would produce a value that opens nothing.
         '';
       };
+      rotation = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "quarterly";
+        description = ''
+          The `flake.safix.rotation` policy deciding how long this value may
+          live, or null for a value with no deadline.
+
+          A policy name rather than an interval, so an interval change is one
+          edit to the policy rather than one per entry that shares it. Naming a
+          policy the declarations do not define is refused at evaluation,
+          naming the entry and the policy.
+
+          The deadline is the entry's last recorded write plus the policy's
+          interval. An entry with a policy and no timestamp record is due at
+          once: a deadline that had not started yet would let a policy applied
+          to an old value extend that value's life by a whole interval.
+        '';
+      };
       sopsFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
@@ -524,6 +574,11 @@ let
         type = lib.types.nullOr (lib.types.functionTo lib.types.str);
         default = null;
         description = "Override the on-disk path in this scope, as a function of the configuration materializing it. null leaves the entry's path standing.";
+      };
+      rotation = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Override the rotation policy in this scope. null leaves the entry's policy standing.";
       };
     };
   };
@@ -1079,6 +1134,7 @@ in
     generator
     override
     scope
+    rotationPolicy
     grant
     profile
     machine

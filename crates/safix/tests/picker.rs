@@ -122,6 +122,22 @@ fn row(drawn: &str, name: &str) -> String {
         )
 }
 
+/// Every query line the run drew, in the order it drew them.
+///
+/// [`lines`] reads the last frame of a stream, so each frame is handed back to
+/// it as a stream of its own: a claim about what was typed halfway through a
+/// run is a claim about a frame that is not the last one.
+fn queries(drawn: &str) -> Vec<String> {
+    frames(drawn)
+        .iter()
+        .filter_map(|frame| {
+            lines(&format!("\x1b[H\x1b[2J{frame}"))
+                .iter()
+                .find_map(|line| line.strip_prefix("> ").map(str::to_owned))
+        })
+        .collect()
+}
+
 /// Whether the cursor is on the row for this name.
 ///
 /// The cursor is reverse video drawn over whatever colour the row already has,
@@ -601,18 +617,18 @@ fn the_bottom_row_is_the_first_entry_and_carries_the_cursor() {
             .unwrap_or_else(|| panic!("no row for {name}\n{drawn:#?}"))
     };
     assert!(
-        at("NAME") < at("wifi-psk"),
-        "the header is not above the rows\n{drawn:#?}"
-    );
-    assert!(
         at("wifi-psk") < at("mail-password")
             && at("mail-password") < at("api-token")
             && at("api-token") < at("aliased-secret"),
         "the rows are not in reverse alphabetical order\n{drawn:#?}"
     );
     assert!(
-        at("aliased-secret") < at(">"),
-        "the bottom row is not against the query line\n{drawn:#?}"
+        at("aliased-secret") < at("NAME"),
+        "the titles are not under the rows\n{drawn:#?}"
+    );
+    assert!(
+        at("NAME") < at(">"),
+        "the titles are not between the list and the query\n{drawn:#?}"
     );
     // The cursor is reverse video, and it is on that bottom row.
     let frame = frames(&picked.drawn).pop().unwrap_or_default();
@@ -643,6 +659,7 @@ fn the_last_line_is_the_key_help() {
         "Enter choose",
         "Esc/^C cancel",
         "move",
+        "edit",
         "scroll",
         "Tab columns",
         "^P preview",
@@ -654,11 +671,12 @@ fn the_last_line_is_the_key_help() {
     }
 }
 
-/// The horizontal arrows scroll the columns and never leave.
+/// Ctrl and the horizontal arrows scroll the columns and never leave.
 ///
 /// Both directions, past both ends: a picker that read either of them as
-/// leaving would take a keystroke someone reached for by accident as a decision
-/// to abandon the choice.
+/// leaving would take a keystroke someone reached for by accident as a
+/// decision to abandon the choice. The unmodified arrows move the caret and
+/// are the subject of `the_caret_edits_the_query_where_it_stands`.
 #[test]
 fn scrolling_the_columns_never_leaves_the_picker() {
     let fixture = Fixture::new();
@@ -668,8 +686,22 @@ fn scrolling_the_columns_never_leaves_the_picker() {
         arguments: &["view", "--no-preview"],
         keystrokes: &[
             // Left at the first column, then right past the last, then back.
-            &["\x1b[D", "\x1b[D", "\x1b[C", "\x1b[C", "\x1b[C", "\x1b[C"],
-            &["\x1b[D", "\x1b[D", "\x1b[D", "\x1b[D", "\x1b[D", "\x1b[D"],
+            &[
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+                "\x1b[1;5C",
+                "\x1b[1;5C",
+                "\x1b[1;5C",
+                "\x1b[1;5C",
+            ],
+            &[
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+                "\x1b[1;5D",
+            ],
             &["mail\r"],
         ],
         ..Pick::default()
@@ -704,13 +736,13 @@ fn scrolling_right_moves_the_table_by_one_column() {
 
     let picked = fixture.pick(&Pick {
         arguments: &["view", "--no-preview"],
-        keystrokes: &[&["\x1b[C"], &["\x1b"]],
+        keystrokes: &[&["\x1b[1;5C"], &["\x1b"]],
         ..Pick::default()
     });
     let drawn = lines(&picked.drawn);
     assert!(
         drawn.iter().any(|line| line.starts_with("ORIGIN")),
-        "the header does not start at the second column\n{drawn:#?}"
+        "the titles do not start at the second column\n{drawn:#?}"
     );
     assert!(
         !drawn.iter().any(|line| line.starts_with("NAME")),
@@ -718,10 +750,134 @@ fn scrolling_right_moves_the_table_by_one_column() {
     );
 }
 
+/// The caret edits the query where it stands rather than only at its end.
+///
+/// Home, Delete, the unmodified arrows and a typed character between two
+/// others: the mistake is `xmal`, and what is left after fixing it is a query
+/// that narrows to one entry, so the value printed at the end is the proof the
+/// edits landed in the right places.
+#[test]
+fn the_caret_edits_the_query_where_it_stands() {
+    let fixture = Fixture::new();
+    three_values(&fixture);
+
+    let picked = fixture.pick(&Pick {
+        arguments: &["view", "--no-preview"],
+        keystrokes: &[
+            &["xmal"],
+            // Home, then Delete under the caret: the leading `x` goes.
+            &["\x1b[H", "\x1b[3~"],
+            // Right twice and an `i` between the `a` and the `l`.
+            &["\x1b[C", "\x1b[C", "i"],
+            &["\r"],
+        ],
+        ..Pick::default()
+    });
+    assert!(
+        picked.run.succeeded(),
+        "the picker did not survive the editing keys, exit {:?}\n{}",
+        picked.run.code,
+        picked.run.stderr
+    );
+    let typed = queries(&picked.drawn);
+    assert!(
+        typed.iter().any(|query| query == "mail"),
+        "the query was never corrected to `mail`\n{typed:#?}"
+    );
+    assert!(
+        picked.drawn.contains("VALUE-FOR-THE-MAIL-PASSWORD"),
+        "the corrected query did not narrow to the entry it names\n{}",
+        picked.drawn
+    );
+}
+
+/// Every encoding of Home, End and Delete a terminal sends reaches the caret.
+///
+/// One key per group, so each arrives in a read of its own and the frame drawn
+/// after it is the frame this reads: the query after every keystroke is the
+/// observable, and the progression is what says which key did what.
+#[test]
+fn each_encoding_of_the_editing_keys_moves_the_caret() {
+    let fixture = Fixture::new();
+    three_values(&fixture);
+
+    let picked = fixture.pick(&Pick {
+        arguments: &["view", "--no-preview"],
+        keystrokes: &[
+            &["token"],
+            // SS3 Home, then a character at the front.
+            &["\x1bOH"],
+            &["z"],
+            // The tilde spelling of Home, and Delete under the caret.
+            &["\x1b[1~"],
+            &["\x1b[3~"],
+            // The tilde spelling of End, and a character at the back.
+            &["\x1b[4~"],
+            &["s"],
+            // SS3 End, and Backspace behind the caret.
+            &["\x1bOF"],
+            &["\x7f"],
+            // ^A and ^E, which are the two ends by another name.
+            &["\x01"],
+            &["\x1b[3~"],
+            &["\x05"],
+            &["!"],
+            &["\x1b"],
+        ],
+        ..Pick::default()
+    });
+    let typed = queries(&picked.drawn);
+    let mut rest = typed.as_slice();
+    for expected in [
+        "token", "ztoken", "token", "tokens", "token", "oken", "oken!",
+    ] {
+        let at = rest
+            .iter()
+            .position(|query| query == expected)
+            .unwrap_or_else(|| {
+                panic!("the query never read {expected:?} in that order\n{typed:#?}")
+            });
+        rest = rest.get(at.saturating_add(1)..).unwrap_or_default();
+    }
+}
+
+/// An escape sequence split across two reads is still one key.
+///
+/// The two writes of a group are two reads, so this arrives as `\x1b[1` and
+/// then `;5C`: the parameters are carried across the boundary with the rest of
+/// the sequence, and neither the tail nor the modifier reaches the query.
+#[test]
+fn a_sequence_split_across_two_reads_is_one_key() {
+    let fixture = Fixture::new();
+    three_values(&fixture);
+
+    let picked = fixture.pick(&Pick {
+        arguments: &["view", "--no-preview"],
+        keystrokes: &[&["\x1b[1", ";5C"], &["\x1b"]],
+        ..Pick::default()
+    });
+    assert!(
+        picked.run.succeeded() || picked.run.code == Some(1),
+        "a split sequence ended the picker some other way, exit {:?}\n{}",
+        picked.run.code,
+        picked.run.stderr
+    );
+    let drawn = lines(&picked.drawn);
+    assert!(
+        drawn.iter().any(|line| line.starts_with("ORIGIN")),
+        "the split Ctrl+Right did not scroll the columns\n{drawn:#?}"
+    );
+    assert_eq!(
+        queries(&picked.drawn),
+        Vec::<String>::new(),
+        "a byte of the split sequence reached the query"
+    );
+}
+
 /// A key the picker does not bind does nothing at all.
 ///
 /// Neither leaving, nor a byte in the query: an escape sequence is parsed to
-/// its end, so the `P` of `\x1bOP` and the `H` of `\x1b[H` are part of a key
+/// its end, so the `P` of `\x1bOP` and the `~` of `\x1b[6~` are part of a key
 /// rather than characters someone typed.
 #[test]
 fn an_unbound_key_leaves_the_query_unchanged() {
@@ -731,9 +887,16 @@ fn an_unbound_key_leaves_the_query_unchanged() {
     let picked = fixture.pick(&Pick {
         arguments: &["view", "--no-preview"],
         keystrokes: &[
-            // F1, Home, End, Delete, Insert, Page Up, Page Down and ^A.
+            // F1, F5, Insert, Page Up, Page Down, Shift+Tab and the sequence a
+            // terminal brackets a paste with.
             &[
-                "\x1bOP", "\x1b[H", "\x1b[F", "\x1b[3~", "\x1b[2~", "\x1b[5~", "\x1b[6~", "\x01",
+                "\x1bOP",
+                "\x1b[15~",
+                "\x1b[2~",
+                "\x1b[5~",
+                "\x1b[6~",
+                "\x1b[Z",
+                "\x1b[200~",
             ],
             &["mail\r"],
         ],
@@ -750,17 +913,20 @@ fn an_unbound_key_leaves_the_query_unchanged() {
         "the query was not `mail` by the time enter arrived\n{}",
         picked.drawn
     );
-    // The query line never carried a byte of a sequence, in any frame.
-    for frame in frames(&picked.drawn) {
-        for line in lines(&frame) {
-            if let Some(query) = line.strip_prefix("> ") {
-                assert!(
-                    "mail".starts_with(query),
-                    "a key this picker does not bind reached the query: {query:?}"
-                );
-            }
-        }
-    }
+    // No frame drew a query at all, because an unbound sequence puts no byte
+    // in it and `mail\r` chose in the same read it arrived in. The frame count
+    // is asserted beside it, so a run that drew nothing cannot satisfy that
+    // trivially.
+    assert!(
+        !frames(&picked.drawn).is_empty(),
+        "the picker drew nothing at all\n{}",
+        picked.drawn
+    );
+    assert_eq!(
+        queries(&picked.drawn),
+        Vec::<String>::new(),
+        "a key this picker does not bind reached the query"
+    );
 }
 
 /// Leaving prints the one line naming the outcome, and no prose.
@@ -973,6 +1139,37 @@ fn a_field_query_narrows_the_list_to_that_column() {
             lines(&empty.drawn)
         );
     }
+}
+
+/// A query emphasises what it matched, and the title of the column it looked
+/// in.
+///
+/// Read off the raw frame rather than the stripped lines, because the claim is
+/// about the sequences themselves: bold and underline on, the matched
+/// characters, and both off again.
+#[test]
+fn a_query_emphasises_its_matches_and_the_column_it_searched() {
+    let fixture = Fixture::new();
+    three_values(&fixture);
+
+    let picked = fixture.pick(&Pick {
+        arguments: &["view", "--no-preview"],
+        keystrokes: &[&["name:mail"], &["\x1b"]],
+        ..Pick::default()
+    });
+    let frame = frames(&picked.drawn).pop().unwrap_or_default();
+    assert!(
+        frame.contains("\x1b[1;4mmail\x1b[22;24m-password"),
+        "the matched letters were not emphasised inside the name cell\n{frame:?}"
+    );
+    assert!(
+        frame.contains("\x1b[1;4mNAME\x1b[22;24m"),
+        "the searched column's title was not emphasised\n{frame:?}"
+    );
+    assert!(
+        !frame.contains("\x1b[1;4mORIGIN"),
+        "a column the query never looked in was emphasised\n{frame:?}"
+    );
 }
 
 /// The stamp columns show the record's dates, and the two coloured rows are the

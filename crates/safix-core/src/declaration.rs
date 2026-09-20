@@ -245,6 +245,156 @@ pub fn remove_group_member(declaration: &str, group: &str, subject: &str) -> Rem
     }
 }
 
+/// Add or replace one entry's rotation policy.
+///
+/// Two shapes are edited, because they are the two an entry is written in: a
+/// block opening on the entry's own name, where the line goes inside it, and a
+/// dotted declaration of one of the entry's fields, where the line goes beside
+/// it carrying the same path. A file declaring neither is [`Edit::NoAnchor`],
+/// which is the caller's cue to refuse rather than this function's to guess at
+/// where a declaration would go.
+///
+/// Unlike the three insertions above this one, it may replace: a policy is one
+/// value per entry, so assigning a second is the operator restating the first
+/// rather than adding to a set. Restating the policy already declared writes
+/// nothing and says so.
+#[must_use]
+pub fn set_entry_rotation(declaration: &str, name: &str, policy: &str) -> Edit {
+    let lines: Vec<&str> = declaration.lines().collect();
+    let rendered = format!("rotation = \"{policy}\";");
+
+    if let Some((index, declared)) =
+        rotation_line(&lines, name).and_then(|at| Some((at, *lines.get(at)?)))
+    {
+        if declared.trim_end().ends_with(&rendered) {
+            return Edit::AlreadyPresent;
+        }
+        let mut edited: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+        if let Some(slot) = edited.get_mut(index) {
+            *slot = format!("{}{rendered}", indent_of(declared));
+        }
+        return Edit::Inserted(joined(&edited, declaration));
+    }
+
+    if let Some((index, opening)) =
+        block_line(&lines, name).and_then(|at| Some((at, *lines.get(at)?)))
+    {
+        let inner = format!("{}  {rendered}", indent_of(opening));
+        return Edit::Inserted(inserted_after(&lines, index, &inner, declaration));
+    }
+
+    if let Some((index, path)) = dotted_field_line(&lines, name) {
+        let indent = lines
+            .get(index)
+            .map_or_else(String::new, |line| indent_of(line));
+        let beside = format!("{indent}{path}.{rendered}");
+        return Edit::Inserted(inserted_after(&lines, index, &beside, declaration));
+    }
+
+    Edit::NoAnchor
+}
+
+/// Remove one entry's rotation policy.
+///
+/// The second removal in this module, and it takes the whole line away: a
+/// policy written as `null` would read as a declared absence the resolver
+/// treats identically, and leaving one behind would make an unset entry and a
+/// never-set entry look different in a file a person reads.
+#[must_use]
+pub fn remove_entry_rotation(declaration: &str, name: &str) -> Removal {
+    let lines: Vec<&str> = declaration.lines().collect();
+    let Some(index) = rotation_line(&lines, name) else {
+        return if block_line(&lines, name).is_some() || dotted_field_line(&lines, name).is_some() {
+            Removal::NotPresent
+        } else {
+            Removal::NoAnchor
+        };
+    };
+    let edited: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at != index)
+        .map(|(_, line)| (*line).to_owned())
+        .collect();
+    Removal::Removed(joined(&edited, declaration))
+}
+
+/// The lines with one inserted after `index`.
+fn inserted_after(lines: &[&str], index: usize, line: &str, original: &str) -> String {
+    let mut edited: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+    edited.insert(index.saturating_add(1), line.to_owned());
+    joined(&edited, original)
+}
+
+/// Where this entry's `rotation` is declared, in either shape.
+///
+/// The dotted form is looked for first because it is unambiguous: the entry is
+/// named on the line that declares the field. The block form's `rotation` is
+/// the one inside the entry's own braces, so a second entry's policy in the
+/// same file is never taken for this one.
+fn rotation_line(lines: &[&str], name: &str) -> Option<usize> {
+    let dotted = lines.iter().position(|line| {
+        path_of(line).is_some_and(|path| {
+            path.len() >= 2
+                && path.last().is_some_and(|last| last == "rotation")
+                && path
+                    .get(path.len().saturating_sub(2))
+                    .is_some_and(|at| at == name)
+        })
+    });
+    if dotted.is_some() {
+        return dotted;
+    }
+    let opening = block_line(lines, name)?;
+    let closing = closing_brace(lines, opening)?;
+    lines
+        .iter()
+        .enumerate()
+        .skip(opening.saturating_add(1))
+        .take(closing.saturating_sub(opening).saturating_sub(1))
+        .find(|(_, line)| {
+            path_of(line).is_some_and(|path| path.last().is_some_and(|last| last == "rotation"))
+        })
+        .map(|(at, _)| at)
+}
+
+/// Where the block declaring this entry opens, when the entry is written as
+/// one.
+fn block_line(lines: &[&str], name: &str) -> Option<usize> {
+    lines.iter().position(|line| {
+        line.trim_end().ends_with('{')
+            && path_of(line).is_some_and(|path| path.last().is_some_and(|last| last == name))
+    })
+}
+
+/// Where the block opened at `opening` closes: the first line at its own
+/// indentation whose content begins with a closing brace.
+fn closing_brace(lines: &[&str], opening: usize) -> Option<usize> {
+    let indent = indent_of(lines.get(opening)?);
+    lines
+        .iter()
+        .enumerate()
+        .skip(opening.saturating_add(1))
+        .find(|(_, line)| line.starts_with(&indent) && line[indent.len()..].starts_with('}'))
+        .map(|(at, _)| at)
+}
+
+/// A dotted declaration of one of this entry's fields, and the attribute path
+/// down to the entry itself.
+///
+/// A dotted `…private.api-token.generator.script = …` answers
+/// `…private.api-token`, which is the path a sibling `rotation` line carries.
+fn dotted_field_line(lines: &[&str], name: &str) -> Option<(usize, String)> {
+    lines.iter().enumerate().find_map(|(at, line)| {
+        let path = path_of(line)?;
+        let position = path.iter().position(|part| part == name)?;
+        if position.saturating_add(1) >= path.len() {
+            return None;
+        }
+        Some((at, path.get(..=position)?.join(".")))
+    })
+}
+
 /// The shape a `members` declaration's value is written in.
 enum List {
     /// `members = [ ];` — the empty form, which becomes the one-per-line form

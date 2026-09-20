@@ -368,6 +368,28 @@ let
     }
   ];
 
+  # What the refusal says is fixed by both scopes' own requirements: every
+  # path it looked at and how that path failed, then — at system scope, where
+  # the identity usually arrives from a store of someone else's — the two
+  # options that order safix behind that store, and last the limit of the
+  # check itself. A message stopping at "no readable identity" leaves a reader
+  # to conclude that a readable one would have opened the files.
+  preflightOrderingRemedy = ''
+
+    On a host where another secret store places the identity, the usual cause is
+    ordering: that store's activation step or unit has not run yet. Name what
+    safix must wait for:
+
+      safix.installer.afterActivation = [ "<that store's activation step>" ];
+      safix.installer.afterUnits = [ "<that store's unit>" ];
+  '';
+  preflightLimit = ''
+
+    Presence and readability were checked; decryption was not. A key that exists
+    and is readable but is not a recipient of these files still fails afterwards,
+    inside safix's own installer, when it decrypts.
+  '';
+
   # Presence/readability only: this deliberately does not decrypt during preflight.
   identityPreflight =
     {
@@ -406,7 +428,9 @@ let
         unset safixIdentityUsable
       ''}
       if [ "$safixIdentityFailed" != 0 ]; then
-        echo 'safix: secret installation refused. Only presence and readability were checked, not decryption.' >&2
+        echo 'safix: secret installation refused.' >&2
+        ${lib.optionalString (scope == "system") "printf '%s\\n' ${q preflightOrderingRemedy} >&2"}
+        printf '%s\n' ${q preflightLimit} >&2
         exit 1
       fi
       unset safixIdentityFailed

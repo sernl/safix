@@ -141,6 +141,55 @@ impl Generator {
     }
 }
 
+/// How long one value may live, as the declarations decided it.
+///
+/// Seconds rather than the interval string the operator wrote: the resolver
+/// owns the unit vocabulary, so nothing in this crate parses `90d` and the two
+/// halves cannot come to disagree about how long a week is. The policy name
+/// rides along because a finding and a countdown both name it, and a name is
+/// the only part of a policy an operator addresses.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rotation {
+    /// The `flake.safix.rotation` policy this entry names.
+    pub policy: String,
+    /// That policy's interval, in seconds.
+    #[serde(rename = "everySeconds")]
+    pub every_seconds: u64,
+}
+
+/// `policy -> its interval`, as `flake.safix.lib.rotation` projects it.
+///
+/// Every declared policy, including one no entry names: the scaffold that
+/// assigns a policy has to refuse a name the declarations do not define, and a
+/// policy's first assignment is exactly the case where no placement carries it
+/// yet.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(transparent)]
+pub struct RotationPolicies(pub BTreeMap<String, Interval>);
+
+/// One declared policy's interval, in the unit the runtime reads.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Interval {
+    /// How long a value this policy governs may live, in seconds.
+    #[serde(rename = "everySeconds")]
+    pub every_seconds: u64,
+}
+
+impl RotationPolicies {
+    /// Whether the declarations define this policy.
+    #[must_use]
+    pub fn declares(&self, policy: &str) -> bool {
+        self.0.contains_key(policy)
+    }
+
+    /// Every declared policy, in name order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+}
+
 /// Where one name lives for one user, and what serves it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,6 +207,20 @@ pub struct Placement {
     pub owner: String,
     /// Whether one value in this file serves every carrier.
     pub shared: bool,
+    /// Whether the value is installed before user creation at system scope.
+    ///
+    /// Deployment metadata rides the placement because the resolver emits one
+    /// record per entry and the profile half reads the same record; the
+    /// command carries it so a real fleet's projection deserializes, and reads
+    /// none of it.
+    #[serde(rename = "neededForUsers", default)]
+    pub needed_for_users: bool,
+    /// Units the profile restarts when the installed value changes.
+    #[serde(rename = "restartUnits", default)]
+    pub restart_units: Vec<String>,
+    /// Units the profile reloads when the installed value changes.
+    #[serde(rename = "reloadUnits", default)]
+    pub reload_units: Vec<String>,
     /// What mints the value, when anything does.
     pub generator: Option<Generator>,
     /// The repository-relative path of the plaintext value, when this entry is
@@ -229,6 +292,13 @@ pub struct Placement {
     /// one stamp without this crate computing either hash.
     #[serde(rename = "logicalStamp")]
     pub logical_stamp: Option<String>,
+    /// How long this value may live, or `null` for an entry naming no policy.
+    ///
+    /// Emitted on every placement by the resolver, for the reason
+    /// [`Placement::stamp_record`] is: the declarations own the deadline, and
+    /// the runtime derives nothing from them but the arithmetic in
+    /// [`crate::stamps::Deadline::of`].
+    pub rotation: Option<Rotation>,
 }
 
 /// `user -> name -> placement`, the whole of what the command resolves against.
@@ -1557,7 +1627,8 @@ mod tests {
           "logicalFile": null,
           "logicalKey": null, "logicalPublic": null, "logicalRecord": null,
           "stampRecord": "state/safix/definitions/alice/api-token.stamps",
-          "logicalStamp": null
+          "logicalStamp": null,
+          "rotation": null
         }
       },
       "carol": {}

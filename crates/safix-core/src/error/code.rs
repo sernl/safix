@@ -202,6 +202,8 @@ refusal_codes! {
     EnrollHookFailed => "safix::enroll_hook_failed",
     ActorUndeclared => "safix::actor_undeclared",
     UnknownGroup => "safix::unknown_group",
+    UnknownRotationPolicy => "safix::unknown_rotation_policy",
+    NoEntryDeclaration => "safix::no_entry_declaration",
     UnknownSubject => "safix::unknown_subject",
     NoGroupDeclaration => "safix::no_group_declaration",
     ScaffoldOutOfScope => "safix::scaffold_out_of_scope",

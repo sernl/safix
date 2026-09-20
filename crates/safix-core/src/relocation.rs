@@ -165,6 +165,7 @@ mod tests {
             "logicalRecord": "state/safix/definitions/alice/api-token",
             "stampRecord": "state/opaque-stamp",
             "logicalStamp": "state/safix/definitions/alice/api-token.stamps",
+            "rotation": null,
         })
     }
 
@@ -177,6 +178,7 @@ mod tests {
             "logicalPublic": null, "logicalRecord": null,
             "stampRecord": "state/safix/definitions/alice/api-token.stamps",
             "logicalStamp": null,
+            "rotation": null,
         })
     }
 
@@ -248,6 +250,7 @@ mod tests {
             "logicalRecord": "state/safix/definitions/alice/host-key",
             "stampRecord": "state/opaque-stamp",
             "logicalStamp": "state/safix/definitions/alice/host-key.stamps",
+            "rotation": null,
         });
         let held = placements(json!({ "alice": { "host-key": entry } }));
         let leaves = public_leaves(&held);
@@ -270,6 +273,7 @@ mod tests {
             "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
             "stampRecord": "state/opaque-stamp",
             "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
+            "rotation": null,
         });
         let bob = json!({
             "file": "secrets/shared-opaque.yaml", "key": "opaque-key", "origin": "carries",
@@ -280,6 +284,7 @@ mod tests {
             "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
             "stampRecord": "state/opaque-stamp",
             "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
+            "rotation": null,
         });
         let held = placements(json!({
             "alice": { "fleet-token": alice },
@@ -311,6 +316,7 @@ mod tests {
                 "logicalRecord": "state/safix/definitions/shared/alice,bob/fleet-token",
                 "stampRecord": "state/opaque-stamp",
                 "logicalStamp": "state/safix/definitions/shared/alice,bob/fleet-token.stamps",
+                "rotation": null,
             })
         };
         let held = placements(json!({

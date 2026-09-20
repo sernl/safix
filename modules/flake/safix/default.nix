@@ -52,6 +52,12 @@ let
     # point reaches them without a second plumbing mechanism. `bound` merges
     # `registry` in, so `selectFor` and `materializeFor` read the same value.
     inherit (cfg) storage;
+
+    # The named rotation policies, threaded the way the two above are. A
+    # placement's deadline is a function of the declarations alone, so the
+    # policies have to reach `placementsIn` through the registry rather than
+    # being read anywhere else.
+    inherit (cfg) rotation;
   };
 
   audiences = resolve.audiencesOf registry;
@@ -294,6 +300,19 @@ in
       }) cfg.services;
       groups = lib.mapAttrs (_: g: { inherit (g) members; }) cfg.groups;
     };
+
+    # policy -> { everySeconds; }: every declared rotation policy, with its
+    # interval reduced to the unit the runtime reads.
+    #
+    # Projected rather than passed through, so `every = "90d"` stays the
+    # declaration's own vocabulary and no consumer of this attribute parses a
+    # unit. A placement carries the policy governing it, so the only reader of
+    # this is `safix rotation set`, which has to refuse a policy the
+    # declarations do not define — the one question placements cannot answer,
+    # because a declared policy nobody names appears in no placement.
+    rotation = lib.mapAttrs (_policy: declared: {
+      everySeconds = resolve.rotationSeconds declared.every;
+    }) cfg.rotation;
 
     # user -> { order; outputs; inputs; }: the order `safix generate` runs that
     # user's generators in, what each one writes, and the name space its script

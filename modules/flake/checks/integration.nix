@@ -40,11 +40,17 @@ let
     # name on a path.
     pkgs.nix
     pkgs.sops
-    # `safix upload`'s local archive step alone: the ssh-adjacent tools it also
-    # shells out to are stubbed through `SAFIX_SSH_KEYGEN`/`SAFIX_SSH_TO_AGE`/
-    # `SAFIX_SSH_KEYSCAN`/`SAFIX_SSH` and never reach a real binary named on
-    # `PATH`, so `tar` is the one real tool that verb needs here.
+    # `safix upload`'s local archive step alone: the ssh-adjacent tools that
+    # verb shells out to are stubbed through `SAFIX_SSH_KEYGEN`/
+    # `SAFIX_SSH_TO_AGE`/`SAFIX_SSH_KEYSCAN`/`SAFIX_SSH` and never reach a real
+    # binary named on `PATH`, so `tar` is the one real tool that verb needs here.
     pkgs.gnutar
+    # A fixture's own `ssh-keygen`, not the runtime's. `install.rs` mints a real
+    # RSA host identity to encrypt to, because what it asserts is that safix
+    # reads an SSH private key natively — and a stub cannot mint a key another
+    # tool's cryptography has to accept. The runtime's own ssh lookups stay
+    # stubbed; nothing here puts a real one on the path for them.
+    pkgs.openssh
   ]
   ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     pkgs.bubblewrap

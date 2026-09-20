@@ -121,12 +121,13 @@
 # ── coexistence, against the binary ──
 # `safix-installer-coexistence` runs the real `safix install` twice in the
 # sandbox, in user mode, over ciphertext and an age identity generated there.
-# Pointed at an ordinary directory holding a sentinel, the binary removes it —
-# the destructive branch is measured, not assumed. Pointed at safix's own roots
-# with the same foreign directory beside it, the sentinel survives, the foreign
-# directory is byte-identical, the rest of the tree is unchanged by a
-# before-and-after walk, and safix's own store holds the decrypted fixture
-# plaintext.
+# Pointed at an ordinary directory holding a sentinel, the binary refuses
+# naming that path, mounts nothing and leaves the directory byte-identical —
+# the branch that must not remove is measured, not assumed. Pointed at
+# safix's own roots with the same foreign directory beside it, the sentinel
+# survives, the foreign directory is byte-identical, the rest of the tree is
+# unchanged by a before-and-after walk, and safix's own store holds the
+# decrypted fixture plaintext.
 #
 # ── severity, each drill observed red ──
 # Mutating one field of the built manifest turns `safix-installer-schema` red
@@ -156,9 +157,10 @@
 # `script.namesTheIdentity` red, and replacing the script's store-path `sops`
 # reference with a bare `sops` turns exactly `script.namesSopsByStorePath` red.
 # Ignoring either environment override turns `safix-installer-overrides` red on
-# that override's own marker. Pointing the coexistence check's second run back
-# at the foreign directory turns it red on the tree walk, with the foreign
-# store's paths gone.
+# that override's own marker. Removing the store's own refusal of a
+# destination it did not create turns the coexistence check red twice over:
+# the first run stops refusing, and the foreign directory it then replaces
+# fails the byte-identical diff.
 {
   config,
   inputs,
@@ -308,6 +310,7 @@
             gid = null;
             group = null;
             mode = null;
+            neededForUsers = null;
             owner = null;
             reloadUnits = null;
             restartUnits = null;
@@ -341,6 +344,7 @@
             "key"
             "mode"
             "name"
+            "neededForUsers"
             "owner"
             "path"
             "reloadUnits"
@@ -354,6 +358,7 @@
             gid = 0;
             group = null;
             mode = "0400";
+            neededForUsers = false;
             owner = null;
             reloadUnits = [ ];
             restartUnits = [ ];
@@ -916,12 +921,11 @@
       refusalsFacts =
         let
           installerText = manifestFixture.config.system.build.safix-installer.text;
-          activationText = manifestFixture.config.system.activationScripts.safixInstallSecrets.text;
 
           # The same fixture with one age plugin named, so the PATH claim is
-          # measured against a value rather than against emptiness: the
-          # activation's PATH is the plugins and nothing else, which is the one
-          # thing design I8 says must be on it.
+          # measured against a value rather than against emptiness: a plugin a
+          # consumer named is on the installer's PATH, ahead of safix's own
+          # tools, and nothing the surrounding activation happened to carry is.
           pluginText =
             (inputs.nixpkgs.lib.nixosSystem {
               modules = [
@@ -942,7 +946,26 @@
                   };
                 }
               ];
-            }).config.system.activationScripts.safixInstallSecrets.text;
+            }).config.system.build.safix-installer.text;
+
+          # The value a script exports for one variable, or null where it
+          # exports none. Read off the text rather than recomputed from the
+          # option the module builds it from, which would be the module
+          # compared with itself, and unquoted rather than matched quoted:
+          # `escapeShellArg` quotes only what needs it, and what is asserted
+          # here is the value the shell ends up with.
+          exportedValue =
+            name: text:
+            let
+              matched = lib.filter (m: m != null) (
+                map (line: builtins.match "export ${name}=(.*)" line) (lib.splitString "\n" text)
+              );
+              raw = if matched == [ ] then null else builtins.head (builtins.head matched);
+            in
+            if raw != null && lib.hasPrefix "'" raw && lib.hasSuffix "'" raw then
+              builtins.substring 1 (builtins.stringLength raw - 2) raw
+            else
+              raw;
         in
         {
           actual = {
@@ -953,7 +976,7 @@
                   [
                     "safix.identity.sshKeyPaths"
                     "safix.identity.keyFile"
-                    "safix.identity.deriveHostKeys"
+                    "safix.identity.gnupgHome"
                   ]
                   [
                     (systemCommon.noSystemIdentityMessage {
@@ -1007,14 +1030,26 @@
               ) (lib.splitString "\n" installerText);
             };
 
-            # The activation's own environment: `HOME` is the empty directory
-            # that stops sops searching for ssh keys, and `PATH` is the age
-            # plugins and nothing else — empty where none are named, and
-            # exactly their bin directories where they are.
+            # The environment the installer runs under, read off the script
+            # the activation execs rather than off the activation step, which
+            # is where the exports live: `HOME` is the empty directory that
+            # stops sops searching a root home for ssh keys, and `PATH` is
+            # composed entirely of store paths — the plugins a consumer named
+            # first, then safix's own tools — so no binary is taken from
+            # whatever `PATH` the activation happened to carry.
             environment = {
-              homeIsEmpty = lib.hasInfix "export HOME='/var/empty'" activationText;
-              pathIsEmptyWithNoPlugins = lib.hasInfix "export PATH=''" activationText;
-              pathIsPluginsAlone = lib.hasInfix (builtins.unsafeDiscardStringContext "export PATH='${lib.makeBinPath [ pkgs.hello ]}'") pluginText;
+              homeIsEmpty = exportedValue "HOME" installerText == "/var/empty";
+              pathIsStorePathsAlone =
+                let
+                  path = exportedValue "PATH" installerText;
+                in
+                path != null && lib.all (dir: lib.hasPrefix "${builtins.storeDir}/" dir) (lib.splitString ":" path);
+              pathLeadsWithThePlugin =
+                let
+                  path = exportedValue "PATH" pluginText;
+                in
+                path != null
+                && lib.hasPrefix (builtins.unsafeDiscardStringContext "${lib.makeBinPath [ pkgs.hello ]}:") path;
             };
           };
 
@@ -1043,8 +1078,8 @@
 
             environment = {
               homeIsEmpty = true;
-              pathIsEmptyWithNoPlugins = true;
-              pathIsPluginsAlone = true;
+              pathIsStorePathsAlone = true;
+              pathLeadsWithThePlugin = true;
             };
           };
         };
@@ -1315,13 +1350,21 @@
               refuse manifest mode.json \
                 "a mode that is not octal was accepted" "$(jq -r '.secrets[0].name' built.json)"
 
-              jq '. + { templates: [] }' built.json > top-field.json
+              # Both injected names are near misses of a field the schema does
+              # carry — `templates` and `neededForUsers` — because a name the
+              # schema has never heard of would be refused by a rule that a
+              # typo of a real one could still slip past. The needle is the
+              # quoted field alone: the renderer wraps a refusal across lines,
+              # so a phrase spanning a space cannot be grepped, and the quoted
+              # form still tells `template` from the `templates` beside it in
+              # the same message.
+              jq '. + { template: [] }' built.json > top-field.json
               refuse manifest top-field.json \
-                "an unknown top-level field was ignored rather than refused" "templates"
+                "an unknown top-level field was ignored rather than refused" '`template`'
 
-              jq '.secrets[0] += { neededForUsers: false }' built.json > entry-field.json
+              jq '.secrets[0] += { neededForUser: false }' built.json > entry-field.json
               refuse manifest entry-field.json \
-                "an unknown entry field was ignored rather than refused" "neededForUsers"
+                "an unknown entry field was ignored rather than refused" '`neededForUser`'
 
               # ── the document tier, over ciphertext this check made ──
               # The built manifest's documents are paths into this flake that no
@@ -1594,12 +1637,15 @@
 
         # What this stands in for, and what it does not: the failure observed
         # on the pilot host was EBUSY — a RemoveAll on a live ramfs mount —
-        # and a build sandbox cannot mount, so the branch demonstrated here is
-        # the removal itself, which is what a mountpoint turns into an error.
-        # The binary is run for real, in user mode so no privilege is needed,
-        # over ciphertext and an age identity generated inside the sandbox.
-        # Linux only, and absent rather than trivially green elsewhere: this
-        # whole file's checks exist only where a NixOS configuration evaluates.
+        # and a build sandbox cannot mount, so what is measured here is the
+        # removal that never happens. Pointed at a directory it did not
+        # create, the binary refuses and leaves it byte-identical, which is
+        # the branch that made the pilot's removal an error in the first
+        # place. The binary is run for real, in user mode so no privilege is
+        # needed, over ciphertext and an age identity generated inside the
+        # sandbox. Linux only, and absent rather than trivially green
+        # elsewhere: this whole file's checks exist only where a NixOS
+        # configuration evaluates.
         safix-installer-coexistence =
           pkgs.runCommand "safix-installer-coexistence"
             {
@@ -1609,7 +1655,7 @@
                 pkgs.jq
                 installerPackage
               ];
-              meta.description = "the destructive branch is real, and safix's roots never reach a foreign store";
+              meta.description = "a store safix did not create is refused rather than replaced, and safix's roots never reach a foreign one";
             }
             ''
               export HOME="$TMPDIR"
@@ -1643,17 +1689,30 @@
                 }' > "$3"
               }
 
-              mkdir foreign-destroyed foreign-preserved
-              echo sentinel > foreign-destroyed/sentinel
+              mkdir foreign-occupied foreign-preserved
+              echo sentinel > foreign-occupied/sentinel
               echo sentinel > foreign-preserved/sentinel
+              cp -r foreign-occupied "$TMPDIR/foreign-occupied.expected"
               cp -r foreign-preserved "$TMPDIR/foreign-preserved.expected"
 
-              manifestFor "$work/foreign-destroyed" "$work/foreign-destroyed.d" manifest-destructive.json
+              manifestFor "$work/foreign-occupied" "$work/foreign-occupied.d" manifest-occupied.json
               manifestFor "$work/safix" "$work/safix.d" manifest-safix.json
 
-              safix install --ignore-passwd manifest-destructive.json
-              if [ -e foreign-destroyed/sentinel ]; then
-                echo "safix-installer-coexistence: the sentinel survived, so the destructive branch did not fire"
+              if safix install --ignore-passwd manifest-occupied.json > occupied.log 2>&1; then
+                echo "safix-installer-coexistence: a directory safix did not create was installed over"
+                exit 1
+              fi
+              if ! grep -q -- "non-symlink destination: $work/foreign-occupied" occupied.log; then
+                cat occupied.log
+                echo "safix-installer-coexistence: the refusal did not name the destination it declined to replace"
+                exit 1
+              fi
+              if ! diff -r "$TMPDIR/foreign-occupied.expected" foreign-occupied; then
+                echo "safix-installer-coexistence: the refused run changed the directory it refused to replace"
+                exit 1
+              fi
+              if [ -e "$work/foreign-occupied.d" ]; then
+                echo "safix-installer-coexistence: the refused run mounted a store before refusing"
                 exit 1
               fi
 

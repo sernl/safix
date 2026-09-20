@@ -242,6 +242,30 @@ in
       '';
     };
 
+    rotation = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf types.rotationPolicy;
+      example = lib.literalExpression ''
+        {
+          quarterly.every = "90d";
+          weekly.every = "7d";
+        }
+      '';
+      description = ''
+        Named rotation policies: how long a class of values may live. An entry
+        opts in by naming one in its own `rotation` field, and its deadline is
+        its last recorded write plus that policy's interval.
+
+        Named rather than written inline on each entry, so that shortening an
+        interval is one edit and every value governed by it moves together. An
+        entry naming a policy declared nowhere here is refused at evaluation.
+
+        Inert until an entry names one. A fleet declaring policies nobody names
+        resolves the same placements, the same audiences and the same policy
+        text as one declaring none.
+      '';
+    };
+
     storage = lib.mkOption {
       default = { };
       type = lib.types.submodule {

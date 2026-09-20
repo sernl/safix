@@ -133,7 +133,12 @@ fn an_unlisted_private_component_cannot_be_lost_in_backup_or_overwritten_by_rest
     let source = Keyring::new(&fixture, "source-keyring");
     let owner = source.generate("owner@example.invalid", None);
     let complete = fixture.scratch("complete-backup.json");
-    assert!(backup(&source, &fixture, &complete).status.success());
+    let taken = backup(&source, &fixture, &complete);
+    assert!(
+        taken.status.success(),
+        "a complete keyring was not backed up: {}",
+        String::from_utf8_lossy(&taken.stderr)
+    );
 
     let other = Keyring::new(&fixture, "other-keyring");
     let other_fingerprint = other.generate("other@example.invalid", None);

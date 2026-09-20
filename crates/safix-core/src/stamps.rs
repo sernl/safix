@@ -48,7 +48,7 @@
 
 use std::path::PathBuf;
 
-use crate::model::Placement;
+use crate::model::{Placement, Rotation};
 use crate::{Error, Result, Workspace, scratch};
 
 /// The tag every stamp record begins with, naming the format the two numbers
@@ -83,6 +83,74 @@ pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
+}
+
+/// How long one value has left, against the policy governing it.
+///
+/// One function rather than four. `list`, the picker, [`crate::check`] and
+/// [`crate::rotate`] all ask when a value is due, and four arithmetics over
+/// two numbers would be four chances for the column to say a day remains
+/// while the report says it is overdue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Deadline {
+    /// The value is governed and has this many seconds left.
+    Remaining(u64),
+    /// The deadline passed this many seconds ago.
+    ///
+    /// Zero at the boundary second itself: a value whose deadline is exactly
+    /// now has lived its whole interval, and calling that "one second left"
+    /// would make an interval mean one second more than it says.
+    Due(u64),
+    /// The entry names no policy, so nothing is owed.
+    None,
+}
+
+impl Deadline {
+    /// What this entry's stamps and policy come to at `now`.
+    ///
+    /// The deadline is the last write plus the interval, and the last write is
+    /// [`Stamps::updated`] — `created` is what a value that has never been
+    /// rewritten carries in both fields, so reading `updated` alone covers it.
+    ///
+    /// A governed entry with no stamp record is [`Deadline::Due`] from the
+    /// epoch of its own policy rather than exempt. There is no date to add an
+    /// interval to, and inventing one would let a policy applied to an old
+    /// value wait out a whole interval that never started — the one reading
+    /// that silently extends a value's life.
+    #[must_use]
+    pub fn of(stamps: Option<Stamps>, rotation: Option<&Rotation>, now: u64) -> Self {
+        let Some(rotation) = rotation else {
+            return Self::None;
+        };
+        let Some(stamps) = stamps else {
+            return Self::Due(0);
+        };
+        let deadline = stamps.updated.saturating_add(rotation.every_seconds);
+        if now < deadline {
+            Self::Remaining(deadline.saturating_sub(now))
+        } else {
+            Self::Due(now.saturating_sub(deadline))
+        }
+    }
+
+    /// This entry's deadline, read off its placement.
+    ///
+    /// The form every caller but a unit test uses: a placement carries the
+    /// policy, so no caller has to pair one with the other and none can pair
+    /// them wrong.
+    #[must_use]
+    pub fn at(stamps: Option<Stamps>, placement: &Placement, now: u64) -> Self {
+        Self::of(stamps, placement.rotation.as_ref(), now)
+    }
+
+    /// How long ago the deadline passed, when it has.
+    #[must_use]
+    pub const fn overdue(self) -> Option<u64> {
+        match self {
+            Self::Due(seconds) => Some(seconds),
+            Self::Remaining(_) | Self::None => None,
+        }
+    }
 }
 
 /// The stamps recorded for one entry, or nothing when it has no record.
@@ -194,9 +262,9 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Stamps, line, parse, read, touch};
+    use super::{Deadline, Stamps, line, parse, read, touch};
     use crate::git::Git;
-    use crate::model::Placement;
+    use crate::model::{Placement, Rotation};
     use crate::nix::Nix;
     use crate::sops::Sops;
     use crate::{Error, Workspace};
@@ -248,6 +316,7 @@ mod tests {
             "logicalRecord": null,
             "stampRecord": RECORD,
             "logicalStamp": null,
+            "rotation": null,
         }))
         .expect("the fixture is the shape the resolver emits")
     }
@@ -256,6 +325,78 @@ mod tests {
         std::fs::create_dir_all(path.parent().expect("the record has a parent"))
             .expect("the record's directory can be made");
         std::fs::write(path, text).expect("the record can be written");
+    }
+
+    /// A policy's interval, as the resolver emits it.
+    fn every(seconds: u64) -> Rotation {
+        Rotation {
+            policy: String::from("quarterly"),
+            every_seconds: seconds,
+        }
+    }
+
+    /// The four answers, at the four instants that decide them.
+    ///
+    /// The boundary second is the one worth pinning: a value written at `t`
+    /// under a `d`-second policy has lived its whole interval at `t + d`, so
+    /// that instant is due by zero seconds rather than the last second of the
+    /// interval it has already spent.
+    #[test]
+    fn a_deadline_is_the_last_write_plus_the_interval() {
+        let written = Stamps {
+            created: 1_000,
+            updated: 2_000,
+        };
+        let policy = every(3_600);
+        assert_eq!(
+            Deadline::of(Some(written), Some(&policy), 5_000),
+            Deadline::Remaining(600)
+        );
+        assert_eq!(
+            Deadline::of(Some(written), Some(&policy), 5_600),
+            Deadline::Due(0)
+        );
+        assert_eq!(
+            Deadline::of(Some(written), Some(&policy), 5_601),
+            Deadline::Due(1)
+        );
+        assert_eq!(Deadline::of(Some(written), None, 5_000), Deadline::None);
+    }
+
+    /// `created` is not consulted: a value rewritten after it was minted is
+    /// due an interval after the rewrite, not after the mint.
+    #[test]
+    fn the_last_write_is_the_updated_stamp_and_not_the_created_one() {
+        let rewritten = Stamps {
+            created: 0,
+            updated: 10_000,
+        };
+        assert_eq!(
+            Deadline::of(Some(rewritten), Some(&every(100)), 10_050),
+            Deadline::Remaining(50)
+        );
+    }
+
+    /// A policy applied to a value nothing has stamped is due at once, so it
+    /// cannot wait out an interval that never started.
+    #[test]
+    fn a_governed_entry_with_no_record_is_due() {
+        assert_eq!(
+            Deadline::of(None, Some(&every(604_800)), 1_758_000_000),
+            Deadline::Due(0)
+        );
+        assert_eq!(
+            Deadline::of(None, Some(&every(604_800)), 1_758_000_000).overdue(),
+            Some(0)
+        );
+    }
+
+    /// An entry naming no policy owes nothing, with or without a record.
+    #[test]
+    fn an_entry_with_no_policy_has_no_deadline() {
+        assert_eq!(Deadline::of(None, None, 42), Deadline::None);
+        assert_eq!(Deadline::None.overdue(), None);
+        assert_eq!(Deadline::Remaining(5).overdue(), None);
     }
 
     /// The line a record holds and the stamps it is read back as are the same

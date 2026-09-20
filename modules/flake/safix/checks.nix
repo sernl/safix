@@ -491,6 +491,10 @@ let
       # the whole thing. None of the checks this function builds are
       # vault-aware, so the field is not read past this pattern.
       namingKey ? null,
+      # Accepted and otherwise unused, for `namingKey`'s reason: the registry
+      # `default.nix` forwards now carries the declared rotation policies, and
+      # no check built here reads a deadline.
+      rotation ? { },
       # Read, unlike `namingKey`: `safix-no-catch-all`'s tree-shaped probes and
       # every generated `pathRegex` follow the configured roots, so a check
       # built here over a renamed root must probe the renamed tree (design

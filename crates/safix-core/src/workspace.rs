@@ -20,7 +20,7 @@ use crate::error::{Error, Result};
 use crate::git::Git;
 use crate::model::{
     Audiences, Bitwarden, Bridge, Delegation, GeneratorPlan, GovernedFiles, Keepassxc, OnePassword,
-    Pass, Placement, Placements, Recipients, Subjects,
+    Pass, Placement, Placements, Recipients, RotationPolicies, Subjects,
 };
 use crate::nix::{Attribute, Nix};
 use crate::sops::Sops;
@@ -45,6 +45,7 @@ pub struct Workspace {
     bitwarden: OnceLock<Bitwarden>,
     onepassword: OnceLock<OnePassword>,
     subjects: OnceLock<Subjects>,
+    rotation: OnceLock<RotationPolicies>,
     vault_creation_rules_text: OnceLock<Option<String>>,
 }
 
@@ -109,6 +110,7 @@ impl Workspace {
             bitwarden: OnceLock::new(),
             onepassword: OnceLock::new(),
             subjects: OnceLock::new(),
+            rotation: OnceLock::new(),
             vault_creation_rules_text: OnceLock::new(),
         }
     }
@@ -175,6 +177,17 @@ impl Workspace {
     pub fn audiences(&self) -> Result<&Audiences> {
         cached(&self.audiences, || {
             self.nix.eval_json(&self.root, Attribute::Audiences)
+        })
+    }
+
+    /// `policy -> { every_seconds }`, every declared rotation policy.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NixEvalFailed`] or [`Error::NixSchemaMismatch`].
+    pub fn rotation_policies(&self) -> Result<&RotationPolicies> {
+        cached(&self.rotation, || {
+            self.nix.eval_json(&self.root, Attribute::Rotation)
         })
     }
 

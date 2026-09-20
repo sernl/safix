@@ -249,18 +249,27 @@ impl Scratch {
         Self::create(parent)
     }
 
+    // A staging directory this code makes is also a GnuPG home, and GnuPG binds
+    // its agent sockets inside a home whenever there is no per-user runtime
+    // directory to redirect them into — which is every system without
+    // `/run/user/<uid>`, the build sandbox among them. `sun_path` is 108 bytes,
+    // so a home deeper than 83 bytes has no agent and every private-key
+    // operation in it fails; the name is therefore as short as a collision-free
+    // name can be rather than as long as it reads well. Eight random bytes name
+    // it: the parent is owner-only and verified so, so the name is a collision
+    // guard rather than a secret, and a taken name is retried.
     fn create(parent: &Path) -> Result<Self> {
         for _ in 0..32 {
-            let mut random = [0_u8; 16];
+            let mut random = [0_u8; 8];
             File::open("/dev/urandom")
                 .and_then(|mut f| f.read_exact(&mut random))
                 .map_err(io_error)?;
-            let mut name = String::with_capacity(32);
+            let mut name = String::with_capacity(16);
             for byte in random {
                 std::fmt::Write::write_fmt(&mut name, format_args!("{byte:02x}"))
                     .map_err(|_| refused("Cannot encode a private staging name"))?;
             }
-            let path = parent.join(format!(".safix-identity-{name}"));
+            let path = parent.join(format!(".safix-{name}"));
             match DirBuilder::new().mode(0o700).create(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}

@@ -83,6 +83,12 @@ None of the three is a flake check on purpose.
 A word-count check's failure mode is rewording to please a counter, and a names-every-option check would have to read the module system from a check that exists to read prose.
 A command named where contributors look holds the same three clauses without adding a mechanism that must itself be kept true.
 
+A fourth clause is a flake check, because it compares text with text rather than judging prose.
+`safix-readme-snippets` extracts every fenced block of `README.md` whose info string starts with `nix`, and each one must carry `title="examples/quickstart/<path>"`, optionally with `#<region>` appended; a nix block with no title fails, naming the README line it opens on.
+A region is the lines strictly between `# --8<-- [start:<region>]` and `# --8<-- [end:<region>]` in the named file, the mkdocs-snippets convention, and those marker lines are stripped from a whole file as well as from a region before the comparison.
+What is left is diffed byte for byte, so a block and its source disagree over one space.
+Edit the example file, run `nixfmt` over it, and copy the region back into the document; retyping the block is what the check exists to catch.
+
 ## The fixture fleet
 
 The checks drive the real `sops`, the real `age` and the real `git` against a throwaway repository built from scratch each run.

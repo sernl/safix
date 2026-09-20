@@ -104,6 +104,7 @@
         ./modules/flake/checks/envelope.nix
         ./modules/flake/checks/examples.nix
         ./modules/flake/checks/examples-profiles.nix
+        ./modules/flake/checks/examples-quickstart.nix
         ./modules/flake/checks/exported.nix
         ./modules/flake/checks/gate-guard.nix
         ./modules/flake/checks/generators.nix
@@ -116,6 +117,7 @@
         ./modules/flake/checks/pass.nix
         ./modules/flake/checks/policy.nix
         ./modules/flake/checks/portability.nix
+        ./modules/flake/checks/readme-snippets.nix
         ./modules/flake/checks/reserved-words.nix
         ./modules/flake/checks/single-runtime.nix
         ./modules/flake/checks/storage.nix

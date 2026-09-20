@@ -128,6 +128,7 @@
           bitwarden
           onepassword
           subjects
+          rotation
           vaultDeclared
           vaultCreationRulesText
           ;
@@ -273,6 +274,16 @@
           bitwardenFields = (lib.head dendriticVault.bitwarden.mappings).bitwarden.fields;
           onepasswordMappings = map (m: m.id) dendriticVault.onepassword.mappings;
           onepasswordFields = (lib.head dendriticVault.onepassword.mappings).onepassword.fields;
+
+          # The rotation feature, read off values it produces rather than off
+          # the declaration: the policy's interval reduced to seconds, and the
+          # deadline carried on each of the two entries that name it — one a
+          # generator mints, one a person types, which are the two remedies a
+          # due finding can name.
+          rotationPolicy = dendriticVault.rotation.quarterly;
+          rotationOnGenerated = placements.alice.generated-token.rotation;
+          rotationOnTyped = placements.alice.laptop-token.rotation;
+          rotationAbsent = placements.alice.escrow-note.rotation;
         };
       };
 
@@ -360,6 +371,19 @@
             notes = "example mapping";
             tags = [ "example" ];
           };
+
+          rotationPolicy = {
+            everySeconds = 7776000;
+          };
+          rotationOnGenerated = {
+            policy = "quarterly";
+            everySeconds = 7776000;
+          };
+          rotationOnTyped = {
+            policy = "quarterly";
+            everySeconds = 7776000;
+          };
+          rotationAbsent = null;
         };
       };
 

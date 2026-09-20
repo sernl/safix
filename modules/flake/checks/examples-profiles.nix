@@ -230,12 +230,20 @@ in
         # entries the service `web` carries onto it.
         systemSecrets = lib.mapAttrs (_name: lib.getAttrs systemFields) systemProfile.safix.secrets;
 
-        # The user scope's set is the untyped projection — what the resolver
-        # emitted, with an entry's `path` already applied to this
-        # configuration — so `deploy-key`'s declared mode and `web-token`'s
-        # `perHost.deck.add` override are both readable here and nowhere in
-        # `./examples.nix`.
-        homeSecrets = homeProfile.safix.secrets;
+        # The user scope's set goes through the same typed entry the system
+        # scope's does now that the user scope installs for itself, so it is
+        # projected to the two fields the declarations decide — `deploy-key`'s
+        # declared mode and `web-token`'s `perHost.deck.add` override are both
+        # readable here and nowhere in `./examples.nix`. The one declared
+        # `path` is held by `entryPath` below; every other path is the
+        # installer's default and is asserted where the installer is.
+        homeSecrets = lib.mapAttrs (
+          _name:
+          lib.getAttrs [
+            "mode"
+            "sopsFile"
+          ]
+        ) homeProfile.safix.secrets;
 
         entryPath = homeProfile.safix.secrets.app-credentials.path;
 
@@ -318,7 +326,6 @@ in
         homeSecrets = {
           app-credentials = {
             mode = "0400";
-            path = "/home/alice/.config/example-app/credentials.toml";
             sopsFile = "/secrets/safix/users/alice/secrets.yaml";
           };
           corp-handover = {

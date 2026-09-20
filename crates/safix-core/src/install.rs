@@ -390,6 +390,7 @@ pub fn run(manifest_path: &Path, options: &Options, progress: &dyn Progress) -> 
     let keys_gid = keys_group(options.ignore_passwd);
     let mount_point = PathBuf::from(&manifest.secrets_mount_point);
     let symlink_path = PathBuf::from(&manifest.symlink_path);
+    refuse_occupied_store(&symlink_path)?;
     mount_store(&manifest, &mount_point, keys_gid)?;
     let identity = assemble_identity(&manifest, &mount_point, progress)?;
     let documents = decrypt_documents(&manifest, Some(&identity))?;
@@ -1334,6 +1335,28 @@ fn mount_memory_backed(mount_point: &Path, filesystem: &str, _use_tmpfs: bool) -
     })
 }
 
+/// Refuse a store symlink path something that is not a symlink already holds.
+///
+/// Read before anything is mounted, decrypted or written: publication refuses
+/// such a destination anyway, and a run that only discovered it at the swap
+/// would have mounted a store and written a generation of plaintext first.
+/// The path is left exactly as it was found — removing it is how another
+/// component's store gets deleted by this one.
+fn refuse_occupied_store(symlink_path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(symlink_path) {
+        Ok(found) if !found.is_symlink() => Err(non_symlink_destination(symlink_path)),
+        _ => Ok(()),
+    }
+}
+
+/// The refusal a destination that exists and is not a symlink carries.
+fn non_symlink_destination(destination: &Path) -> Error {
+    layout_error(&format!(
+        "installation refuses to replace a non-symlink destination: {}",
+        destination.display()
+    ))
+}
+
 /// The number the next generation directory is named.
 ///
 /// Start at one without a recognized counter; never reuse an exhausted counter.
@@ -1516,11 +1539,7 @@ impl<'a> PreparedLink<'a> {
             Ok(metadata) if metadata.is_symlink() => Some(
                 std::fs::read_link(destination).map_err(|cause| unwritable(destination, cause))?,
             ),
-            Ok(_) => {
-                return Err(layout_error(
-                    "installation refuses to replace a non-symlink destination",
-                ));
-            }
+            Ok(_) => return Err(non_symlink_destination(destination)),
             Err(cause) if cause.kind() == io::ErrorKind::NotFound => None,
             Err(cause) => return Err(unwritable(destination, cause)),
         };

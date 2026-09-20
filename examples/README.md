@@ -1,8 +1,9 @@
-# Three consumers of one fleet
+# The worked examples
 
-`examples/plain-nix/fleet.nix` is the only fleet in this repository.
-`examples/dendritic/` declares the identical fleet again, scattered one declaration per file, and `examples/profiles/` consumes that same fleet from a NixOS profile and a home-manager profile.
-Two checks read them: `safix-examples` compares the first two field for field and probes the features they declare, and `safix-examples-profiles` evaluates the third.
+`examples/plain-nix/fleet.nix` is the fleet every feature of safix is declared in.
+`examples/dendritic/` declares that identical fleet again, scattered one declaration per file, and `examples/profiles/` consumes it from a NixOS profile and a home-manager profile.
+`examples/quickstart/` is the one separate fleet, and it is much smaller: it is what `README.md` is written around, kept apart so that document can stay short and so a feature added to the fleet above does not lengthen it.
+Four checks read them: `safix-examples` compares the first two field for field and probes the features they declare, `safix-examples-profiles` evaluates the third, and `safix-examples-quickstart` and `safix-readme-snippets` hold the fourth.
 
 ## `plain-nix`
 
@@ -37,6 +38,17 @@ Copy this one if your tree already uses flake-parts, or if you want your own dec
 
 Copy these if you want a worked example of the `safix.*` consumption surface at either scope.
 
+## `quickstart`
+
+The fleet `README.md` walks a reader through: one person `alice`, one machine `web`, one value she types and one a generator mints, both granted onward to the machine.
+`secrets.nix` holds the declarations, `flake.nix` binds them at the flake output `safix.lib` and builds `nixosConfigurations.web` and `homeConfigurations.alice`, and `hosts/web.nix` and `home/alice.nix` are the two profiles.
+It demonstrates what the fleet above deliberately leaves to a profile: a service reading `config.safix.secrets.<name>.path`, a template rendering two placeholders with `restartUnits`, a rotation policy carried onto a generated entry, and the workstation rotation timer declared and left off.
+
+Every region marked `# --8<-- [start:<name>]` in these four files is a block `README.md` quotes verbatim.
+Editing one side without the other fails `safix-readme-snippets`, so copy the file into the document rather than retyping it.
+
+Copy this one if you want the shortest complete tree that installs a secret on a host.
+
 ## What each check reads
 
 `safix-examples` executes `plain-nix/entry.nix` for real, inside a sandbox holding only `examples/plain-nix`, the top-level `lib/` and `modules/flake/safix`.
@@ -49,6 +61,13 @@ It is separate from `safix-examples` because `safix.secrets` is a materializatio
 
 Root-dependent absolute strings are elided to `<example-root>` before the two projections are diffed, because `bridge.clanFlake` and `vault.root` are `lib.types.path` and stringify against each example's own root.
 Only those two prefixes are elided; a store path anywhere else is still compared, and a divergence in the tail of such a string still fails.
+
+`safix-examples-quickstart` evaluates `quickstart/hosts/web.nix` through a real `nixosSystem` and `quickstart/home/alice.nix` through home-manager's own library, each reached through its own `imports` line with the two consumption modules standing in for the input.
+It holds that both entries materialise at the machine's scope with the audience's own file, mode and restart hooks, that the template renders both placeholders and no plaintext, that the generated entry's placement carries the `quarterly` deadline in seconds, and that the home profile installs no rotation unit while the option is off.
+`quickstart/flake.nix` is read as text for the same reason `dendritic/flake.nix` is, and the assertion over it is that this one file names the declarations and both profiles.
+
+`safix-readme-snippets` extracts every fenced block of `README.md` whose info string starts with `nix`, resolves the `title="examples/quickstart/<path>"` it must carry to a file or a marked region, strips the marker lines, and diffs the bytes.
+An untitled nix block fails naming the README line it opens on.
 
 ## What the examples cover, and what holds each claim
 
@@ -83,5 +102,9 @@ A feature with no assertion is a gap to close in the check rather than a row to 
 | the identity surface at both scopes | `examples/profiles/nixos.nix`, `examples/profiles/home.nix` | `safix-examples-profiles`' `identity` |
 | the installer surface at both scopes | `examples/profiles/nixos.nix`, `examples/profiles/home.nix` | `safix-examples-profiles`' `installerSurface` |
 | relocated storage roots, and a vault | `examples/profiles/relocated.nix` | `safix-examples-profiles`' `relocatedStorage`, `relocatedVault` |
+| a template rendering two placeholders, with a restart hook | `examples/quickstart/hosts/web.nix` | `safix-examples-quickstart`' `template` |
+| a rotation deadline carried onto a placement | `examples/quickstart/secrets.nix` | `safix-examples-quickstart`' `rotationOnGenerated`, `rotationAbsent` |
+| the workstation rotation timer, declared and off | `examples/quickstart/home/alice.nix` | `safix-examples-quickstart`' `homeRotation` |
+| every nix block of the README | `README.md`, `examples/quickstart/` | `safix-readme-snippets` |
 
 Every dendritic file above has a counterpart block in `examples/plain-nix/fleet.nix`: a feature added to one side and not the other fails `safix-examples`, which is the check working.

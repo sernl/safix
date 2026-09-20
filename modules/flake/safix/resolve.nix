@@ -129,6 +129,11 @@ let
       # `namingKey` is: a caller that has not been taught about the option
       # passes none and gets exactly today's spellings, byte for byte.
       storage ? defaultStorage,
+      # The named rotation policies, defaulted for the same reason again: a
+      # fixture registry written as a bare `{ users = …; }` declares none, and
+      # an entry naming none carries no deadline, so every existing caller
+      # resolves exactly today's placements.
+      rotation ? { },
     }:
     {
       inherit
@@ -141,6 +146,7 @@ let
         silos
         namingKey
         storage
+        rotation
         ;
     };
 
@@ -218,6 +224,49 @@ let
     plaintextOutputs = "public/safix";
     generatorRecords = "state/safix/definitions";
   };
+
+  # ── rotation ──
+  # A policy's interval as a whole number of seconds, which is the only form
+  # the runtime ever sees: `Placement.rotation.everySeconds` is what a deadline
+  # is computed from, so no unit is parsed twice and the two halves cannot
+  # disagree about how long a week is.
+  #
+  # The shape is the type's — `types.rotationInterval` admits exactly
+  # `[1-9][0-9]*[hdw]` — so the match below cannot fail on a value that reached
+  # here through the option system.
+  rotationSeconds =
+    every:
+    let
+      parts = builtins.match "([1-9][0-9]*)([hdw])" every;
+      scale = {
+        h = 3600;
+        d = 86400;
+        w = 604800;
+      };
+    in
+    lib.toInt (builtins.elemAt parts 0) * scale.${builtins.elemAt parts 1};
+
+  # What one entry's placement carries about its deadline, or `null` when the
+  # entry names no policy.
+  #
+  # A policy the declarations do not define resolves to `null` here rather than
+  # to a missing-attribute error: `placementsIn` is ungated on purpose — a
+  # report has to answer on a tree whose declarations are wrong — and the
+  # refusal for that entry is `undefinedRotationPolicy` in `violations`, which
+  # names the entry and the policy.
+  rotationOf =
+    policies: entry:
+    let
+      named = entry.rotation or null;
+      declared = if named == null then null else policies.${named} or null;
+    in
+    if declared == null then
+      null
+    else
+      {
+        policy = named;
+        everySeconds = rotationSeconds declared.every;
+      };
 
   # A root is a repository-relative directory path, following the shape
   # `wellFormedNamingKey` establishes: one predicate, and the messages naming
@@ -933,6 +982,17 @@ let
               logicalStamp;
           logicalStamp = if r.namingKey != null then logicalStamp else null;
 
+          # The deadline's two inputs the runtime cannot derive: which policy
+          # governs this value, and how long that policy's interval is in
+          # seconds. Emitted on every placement for the reason `stampRecord`
+          # is — the resolver is the one implementation — and `null` for an
+          # entry naming no policy, which is what the absent marker renders.
+          #
+          # Seconds rather than the declared string, so nothing in the runtime
+          # parses a unit; the policy name rides along because a finding and a
+          # countdown both print it.
+          rotation = rotationOf r.rotation entry;
+
           generator =
             if entry.generator == null then
               null
@@ -1627,6 +1687,45 @@ let
           && key != ""
         ) "${site.where} uses ${format}, which requires an empty sopsKey"
       ) entrySites;
+
+      # Every place a policy name can be written: an entry's own declaration,
+      # and the overrides a scope applies over it. All of them, because an
+      # override naming an undeclared policy resolves to an entry with no
+      # deadline, which reads afterwards exactly like an entry that asked for
+      # none — the failure this refusal exists to prevent.
+      rotationSites =
+        map (site: {
+          inherit (site) where;
+          policy = site.entry.rotation or null;
+        }) entrySites
+        ++ lib.concatMap (
+          user:
+          let
+            profile = r.users.${user};
+            named =
+              where: overrides:
+              lib.mapAttrsToList (name: o: {
+                where = "flake.safix.users.${user}.${where}.${name}";
+                policy = o.rotation or null;
+              }) overrides;
+            # `omit` is left out for the reason `secretNameSites` leaves it
+            # out: only its keys are read, so an override written there
+            # decides nothing and refusing one would refuse a no-op.
+            scopeSites =
+              axis:
+              lib.concatLists (
+                lib.mapAttrsToList (
+                  key: scope: named "${axis}.${key}.add" scope.add ++ named "${axis}.${key}.force" scope.force
+                ) profile.${axis}
+              );
+          in
+          named "carries" profile.carries ++ scopeSites "perHost" ++ scopeSites "perTag"
+        ) names;
+      undefinedRotationPolicy = lib.concatMap (
+        site:
+        lib.optional (site.policy != null && !(r.rotation ? ${site.policy}))
+          "${site.where} names rotation policy '${site.policy}', which flake.safix.rotation does not declare"
+      ) rotationSites;
       recipientErrors =
         lib.concatMap
           (
@@ -2237,7 +2336,12 @@ let
         ++ sharedPrivateEntry
         ++ crossSiloAudience;
     in
-    baseErrors ++ entryErrors ++ recipientErrors ++ formatAudienceErrors ++ fileCollisions;
+    baseErrors
+    ++ entryErrors
+    ++ undefinedRotationPolicy
+    ++ recipientErrors
+    ++ formatAudienceErrors
+    ++ fileCollisions;
 
   guard =
     r: value:
@@ -2416,6 +2520,12 @@ let
       silos ? { },
       namingKey ? null,
       storage ? defaultStorage,
+      # Accepted and forwarded, so a caller handing the whole registry over —
+      # `default.nix`'s `bound` does — reaches the same placements this
+      # selection's `publicOwned` reads. A materialization carries no
+      # deadline: the entry type a provisioner receives has no rotation field,
+      # and a deadline decides nothing about where a value is written.
+      rotation ? { },
       root,
       user ? null,
       machine ? null,
@@ -2433,6 +2543,7 @@ let
           organizations
           silos
           storage
+          rotation
           ;
       };
 
@@ -2753,6 +2864,7 @@ in
     refOfElement
     publicFileOf
     recipientsOf
+    rotationSeconds
     custodyOf
     selectFor
     materializeFor

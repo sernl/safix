@@ -438,6 +438,7 @@ mod tests {
             "logicalRecord": null,
             "stampRecord": format!("{record}.stamps"),
             "logicalStamp": null,
+            "rotation": null,
         }))
         .expect("the fixture is the shape the resolver emits")
     }
@@ -462,6 +463,7 @@ mod tests {
             "logicalRecord": logical_record,
             "stampRecord": format!("{opaque_record}-stamps"),
             "logicalStamp": format!("{logical_record}.stamps"),
+            "rotation": null,
         }))
         .expect("the fixture is the shape the resolver emits")
     }

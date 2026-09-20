@@ -50,7 +50,10 @@ fn both_carriers_resolve_one_file_and_read_one_value() {
                 // stamp columns render as an empty cell.
                 "-",
                 "-",
-                SHARED_FILE
+                SHARED_FILE,
+                // No rotation policy on a seeded declaration: the absent
+                // marker, like the stamps.
+                "-"
             ],
             "{user}'s row does not mark fleet-token shared against the audience file"
         );

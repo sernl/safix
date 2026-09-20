@@ -24,8 +24,8 @@ use prose::{
     HOST_WITHOUT_HOOK, NO_TERMINAL, OTP_REFUSED, PCSCD_UNAVAILABLE, actor_undeclared,
     already_declared, bad_recipient, bad_user_name, bulleted, card_pin_rejected, cards_ambiguous,
     drifted, generator_cycle, hardware_recipient, keygen_for_someone_else, no_declaration_file,
-    no_file_to_prove_with, no_generator, no_group_declaration, recipients_lost,
-    scaffold_out_of_scope, unknown_subject, vault_commit_half_landed,
+    no_entry_declaration, no_file_to_prove_with, no_generator, no_group_declaration,
+    recipients_lost, scaffold_out_of_scope, unknown_subject, vault_commit_half_landed,
 };
 
 /// A refusal from the safix runtime.
@@ -1550,6 +1550,33 @@ pub enum Error {
         group: String,
         /// Every group the declarations do name, in name order.
         declared: Vec<String>,
+    },
+
+    /// The declarations define no such rotation policy.
+    #[error(
+        "'{policy}' is not a declared policy of flake.safix.rotation, so nothing was \
+        written.\n\nAn entry naming an undeclared policy is refused at the next \
+        evaluation, which is why this refuses before it edits.\n\nDeclared \
+        policies:{}",
+        bulleted(.declared)
+    )]
+    UnknownRotationPolicy {
+        /// The name that was asked for.
+        policy: String,
+        /// Every policy the declarations do define, in name order.
+        declared: Vec<String>,
+    },
+
+    /// The entry's declaration is not at the path this verb edits, or is not
+    /// written in a shape it can edit.
+    #[error("{}", no_entry_declaration(.user, .name, .file))]
+    NoEntryDeclaration {
+        /// The user whose entry was being edited.
+        user: String,
+        /// The entry's name.
+        name: String,
+        /// The path it was expected at.
+        file: String,
     },
 
     /// The declarations name no such subject.

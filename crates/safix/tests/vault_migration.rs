@@ -110,6 +110,7 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "logicalRecord": LOGICAL_PRIVATE_RECORD,
         "stampRecord": OPAQUE_PRIVATE_STAMP,
         "logicalStamp": LOGICAL_PRIVATE_STAMP,
+        "rotation": null,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
 
@@ -126,6 +127,7 @@ fn declare_vault_placements(fixture: &mut Fixture) {
         "logicalRecord": LOGICAL_PUBLIC_RECORD,
         "stampRecord": OPAQUE_PUBLIC_STAMP,
         "logicalStamp": LOGICAL_PUBLIC_STAMP,
+        "rotation": null,
     });
     fixture.seed_vault_placement("alice", "host-key", public);
 
@@ -139,6 +141,7 @@ fn declare_vault_placements(fixture: &mut Fixture) {
             "logicalRecord": LOGICAL_SHARED_RECORD,
             "stampRecord": OPAQUE_SHARED_STAMP,
             "logicalStamp": LOGICAL_SHARED_STAMP,
+            "rotation": null,
         });
         fixture.seed_vault_placement(owner, "fleet-token", shared);
     }
@@ -387,6 +390,7 @@ fn an_interrupted_relocation_leaves_the_destination_absent_and_a_re_run_complete
         "logicalRecord": LOGICAL_PRIVATE_RECORD,
         "stampRecord": OPAQUE_PRIVATE_STAMP,
         "logicalStamp": LOGICAL_PRIVATE_STAMP,
+        "rotation": null,
     });
     fixture.seed_vault_placement("alice", "api-token", private);
     let alice = fixture.alice.clone();

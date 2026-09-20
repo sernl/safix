@@ -28,6 +28,11 @@
 # fleet for the one evaluation whose consequence is visible.
 {
   flake.safix = {
+    # One interval, declared once. Two entries below name it: one a generator
+    # mints and one a person types, which are the two remedies `safix check`
+    # can name for a value past its deadline.
+    rotation.quarterly.every = "90d";
+
     catalogue = {
       # Carried separately by alice and bob: each holds their own copy.
       shelf-item = { };
@@ -63,11 +68,18 @@
         };
 
         private = {
-          laptop-token = { };
+          # A typed value under a policy: nothing here can mint it, so the
+          # remedy `check` names for it is `safix set`.
+          laptop-token.rotation = "quarterly";
 
-          generated-token.generator = {
-            script = ''openssl rand -hex 32 > "$out/generated-token"'';
-            runtimeInputs = [ "openssl" ];
+          generated-token = {
+            generator = {
+              script = ''openssl rand -hex 32 > "$out/generated-token"'';
+              runtimeInputs = [ "openssl" ];
+            };
+            # A generated value under the same policy: the remedy `check`
+            # names for this one is `safix rotate`.
+            rotation = "quarterly";
           };
 
           # Each of the six below is granted onward through sharedWith; a

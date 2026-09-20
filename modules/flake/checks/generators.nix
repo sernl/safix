@@ -503,7 +503,7 @@
           noOutputReferenceFires = true;
 
           shareDisagreementMessages = [
-            "flake.safix.users.alice's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs resolve to one audience, so one file, so one write. Make them agree, or split this into two generators and have the second depend on the first."
+            "flake.safix.users.alice's generator on 'split' writes outputs that disagree about sharing: 'split-shared' is shared and 'split' is not. A generator's outputs must agree on shared custody. Make them agree, or split this into two generators and have the second depend on the first."
           ];
           shareDisagreementFires = true;
 

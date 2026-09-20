@@ -202,6 +202,46 @@ pub fn run(
         return Ok(0);
     }
 
+    walk(workspace, progress, interaction, user, &order, options)
+}
+
+/// Run an order somebody else computed, in the order they computed it.
+///
+/// What [`run`] does once it knows which generators to walk, exposed because
+/// [`crate::rotate`] computes a different order — the union of the cascades of
+/// everything past its deadline — and must otherwise travel this exact path:
+/// one generator at a time, one staging root at a time, one commit each. A
+/// second walker would be a second set of those guarantees.
+///
+/// # Errors
+///
+/// Every refusal one generator's run can raise.
+pub fn run_order(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    interaction: &mut dyn Interaction,
+    user: &str,
+    order: &[String],
+    options: Options,
+) -> Result<i32> {
+    scratch::set_floor(workspace.vault_root());
+    let _guard = scratch::Guard;
+    walk(workspace, progress, interaction, user, order, options)
+}
+
+/// The walk itself: the probe once, then each generator in turn.
+fn walk(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    interaction: &mut dyn Interaction,
+    user: &str,
+    order: &[String],
+    options: Options,
+) -> Result<i32> {
+    if order.is_empty() {
+        return Ok(0);
+    }
+
     // `--entry` names a plain file rather than a flake, and the sandbox's
     // tools resolve through `nix shell`, a flake-only operation — see D5 in
     // `support-plain-nix-consumers`'s design. This sits after the empty-order
@@ -218,7 +258,7 @@ pub fn run(
     let envelope = Envelope::probe(workspace.nix(), workspace.root())?;
 
     let mut ran = 0_usize;
-    for generator in &order {
+    for generator in order {
         match run_one(
             workspace,
             progress,
@@ -245,6 +285,53 @@ pub fn run(
 /// retired password reads exactly like a hash of the current one. The set is
 /// therefore announced before the first commit rather than after the last —
 /// declining afterwards takes nothing back out of history.
+/// The same question over a set nobody named: everything due, and everything
+/// derived from it.
+///
+/// A separate announcement rather than [`confirm_cascade`] with a stand-in
+/// generator name, because the set has no one generator at its head — it is the
+/// union of several cascades — and a sentence claiming one would name a
+/// generator the operator did not ask about.
+///
+/// # Errors
+///
+/// [`Error::CascadeDeclined`] when the answer is anything but yes.
+pub fn confirm_rotation(
+    progress: &dyn Progress,
+    interaction: &mut dyn Interaction,
+    order: &[String],
+    assume_yes: bool,
+) -> Result<()> {
+    let count = order.len();
+    let mut announcement = format!(
+        "\nsafix: {count} generator(s) run, which is everything past its deadline\n\
+        and everything derived from one. In this order:\n\n",
+    );
+    for name in order {
+        announcement.push_str("    ");
+        announcement.push_str(name);
+        announcement.push('\n');
+    }
+    announcement.push_str(
+        "\nEach commits as it goes. Leaving them alone would leave values derived\n\
+        from the values being replaced, which nothing afterwards can tell apart\n\
+        from values derived from the new ones.\n\n",
+    );
+    progress.write(&announcement);
+
+    if assume_yes {
+        log(
+            progress,
+            &format!("safix: --yes given; re-running all {count}."),
+        );
+        return Ok(());
+    }
+    if interaction.confirm(&format!("  re-run all {count}? [y/N] "))? {
+        return Ok(());
+    }
+    Err(Error::CascadeDeclined)
+}
+
 fn confirm_cascade(
     progress: &dyn Progress,
     interaction: &mut dyn Interaction,

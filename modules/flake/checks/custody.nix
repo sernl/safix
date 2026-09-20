@@ -128,6 +128,57 @@
 
       violationsOf = users: resolve.violations { inherit users catalogue; };
 
+      # ── rotation ──
+      # One declared policy, typed through the real option so a fixture cannot
+      # pass by writing an interval the option system would have refused.
+      rotationPolicies = typed (lib.types.attrsOf types.rotationPolicy) {
+        quarterly.every = "90d";
+      };
+
+      rotationViolationsOf =
+        users:
+        resolve.violations {
+          inherit users catalogue;
+          rotation = rotationPolicies;
+        };
+
+      rotationPlacementsOf =
+        users:
+        resolve.placementsOf {
+          inherit users catalogue;
+          rotation = rotationPolicies;
+        };
+
+      # An entry naming a policy that is declared, and one naming a policy
+      # that is not. The two fleets differ in that one word, so every claim
+      # below is a claim about the policy name rather than about the fixture.
+      rotationDeclared = fleetOf {
+        alice = {
+          recipient = fixtureRecipient;
+          custody = {
+            private.api-token.rotation = "quarterly";
+            private.plain-token = { };
+          };
+        };
+      };
+
+      rotationUndefined = fleetOf {
+        alice = {
+          recipient = fixtureRecipient;
+          custody.private.api-token.rotation = "monthly";
+        };
+      };
+
+      # Whether the option type admits an interval. The refusal lives in the
+      # type, so this is where the accepted and rejected forms are pinned:
+      # a bare number, a fraction and a zero are not intervals, and hours,
+      # days and weeks are.
+      intervalAccepts =
+        every:
+        (builtins.tryEval (
+          builtins.deepSeq (typed (lib.types.attrsOf types.rotationPolicy) { p.every = every; }) true
+        )).success;
+
       fires = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
 
       resolvesFor =
@@ -757,6 +808,29 @@
           collidingPathsFires = fires (materializes collidingPaths "system");
 
           # The same declaration, refused at one scope and carried at the other.
+          # ── rotation ──
+          rotationValidMessages = rotationViolationsOf rotationDeclared;
+          rotationEmitted = {
+            governed = (rotationPlacementsOf rotationDeclared).alice.api-token.rotation;
+            ungoverned = (rotationPlacementsOf rotationDeclared).alice.plain-token.rotation;
+          };
+          rotationUndefinedMessages = rotationViolationsOf rotationUndefined;
+          rotationUndefinedFires = fires (resolvesFor rotationUndefined "alice");
+          # An undefined policy with no policies declared at all is the same
+          # refusal, which is what says the rule reads the declarations rather
+          # than the presence of a rotation record.
+          rotationUndefinedWithNoPolicies = violationsOf rotationUndefined;
+          intervalRejects = map intervalAccepts [
+            "90"
+            "1.5d"
+            "0d"
+          ];
+          intervalAccepted = map intervalAccepts [
+            "12h"
+            "30d"
+            "4w"
+          ];
+
           ownedEntryFiresAtUserScope = fires (materializes ownedEntry "user");
           ownedEntryAtSystemScope = lib.getAttrs [
             "mode"
@@ -984,6 +1058,32 @@
 
           collidingPathsMessages = [ ];
           collidingPathsFires = true;
+
+          rotationValidMessages = [ ];
+          rotationEmitted = {
+            governed = {
+              policy = "quarterly";
+              everySeconds = 7776000;
+            };
+            ungoverned = null;
+          };
+          rotationUndefinedMessages = [
+            "flake.safix.users.alice.private.api-token names rotation policy 'monthly', which flake.safix.rotation does not declare"
+          ];
+          rotationUndefinedFires = true;
+          rotationUndefinedWithNoPolicies = [
+            "flake.safix.users.alice.private.api-token names rotation policy 'monthly', which flake.safix.rotation does not declare"
+          ];
+          intervalRejects = [
+            false
+            false
+            false
+          ];
+          intervalAccepted = [
+            true
+            true
+            true
+          ];
 
           ownedEntryFiresAtUserScope = true;
           ownedEntryAtSystemScope = {

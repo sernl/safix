@@ -24,7 +24,7 @@ Migration SHALL encrypt to explicitly named recipients, decrypt through explicit
 
 ### Requirement: An interrupted migration is journaled and resumable
 
-Before publishing its first output, a migration SHALL write a journal beside its receipt naming the plan by a digest of the plan's content and recording each output as it is published: the output's path, its file identity and a digest of its bytes. Rerunning the same plan while its journal exists SHALL resume: every recorded output that still matches its record SHALL be re-verified against the source through the target identities and kept; every output not yet published SHALL be published; the journal SHALL be removed only after the receipt is published. A journal naming a different plan SHALL refuse, naming both plan paths. A recorded output that no longer matches its record SHALL refuse, naming the path, and SHALL NOT be removed or overwritten. The journal SHALL carry no plaintext and no digest of plaintext.
+Before publishing its first output, a migration SHALL write a journal beside its receipt naming the plan by a digest of the plan's content and recording each output as it is published: the output's path, its file identity and a digest of its bytes. Rerunning the same plan while its journal exists SHALL resume: every recorded output that still matches its record SHALL be re-verified against the source through the target identities and kept; every output not yet published SHALL be published; the journal SHALL be removed only after the receipt is published. A journal naming a different plan SHALL refuse, naming both plan paths. A recorded output that no longer matches its record SHALL refuse, naming the path, and SHALL NOT be removed or overwritten. A record whose path holds nothing SHALL be published rather than refused: the record is written before the output's link, so a run killed between the two names an output that was never created. The journal SHALL carry no plaintext and no digest of plaintext.
 
 #### Scenario: A rerun finishes what the crash left
 - **WHEN** a migration was killed after publishing some ciphertext outputs and the same plan is run again
@@ -48,7 +48,7 @@ Before publishing its first output, a migration SHALL write a journal beside its
 
 ### Requirement: An interrupted migration can be abandoned
 
-`safix migrate --abandon <plan.json>` SHALL remove every output the journal records that still matches its record, remove the recorded staging directories and remove the journal. It SHALL refuse, removing nothing, when no journal exists, when the journal names a different plan, or when any recorded output no longer matches its record. Sources SHALL never be touched.
+`safix migrate --abandon <plan.json>` SHALL remove every output the journal records that still matches its record, remove the recorded staging directories and remove the journal. It SHALL refuse, removing nothing, when no journal exists, when the journal names a different plan, or when any recorded output no longer matches its record; a record whose path holds nothing is already gone and SHALL NOT refuse. Sources SHALL never be touched.
 
 #### Scenario: Abandoning removes only what the journal proves
 - **WHEN** an interrupted migration is abandoned

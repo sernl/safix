@@ -56,8 +56,8 @@ use std::sync::OnceLock;
 
 use safix_core::{
     Error, Progress, Workspace, adduser, audit, bitwarden, bridge, check, edit, enroll, fix,
-    generate, group, install, keygen, model::Direction, nix::Nix, onepassword, pass, set, sync,
-    upload,
+    generate, group, install, keygen, model::Direction, nix::Nix, onepassword, pass, rotate, set,
+    sync, upload,
 };
 
 use reporter::Refusal;
@@ -197,6 +197,16 @@ const VERBS: &[Verb] = &[
         name: "group",
         help: usage::GROUP,
         run: group_command,
+    },
+    Verb {
+        name: "rotate",
+        help: usage::ROTATE,
+        run: rotate_command,
+    },
+    Verb {
+        name: "rotation",
+        help: usage::ROTATION,
+        run: rotation_command,
     },
     Verb {
         name: "upload",
@@ -960,13 +970,17 @@ fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 }
 
 fn migrate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    let [plan] = arguments else {
-        return Err(Refusal::Usage {
-            form: "migrate <plan.json>",
-        });
+    const FORM: &str = "migrate <plan.json> | migrate --abandon <plan.json>";
+    let status = match arguments {
+        [plan] if plan != "--abandon" => {
+            safix_core::migrate::run(std::path::Path::new(plan), &Terminal)?
+        }
+        [flag, plan] if flag == "--abandon" => {
+            safix_core::migrate::abandon(std::path::Path::new(plan), &Terminal)?
+        }
+        _ => return Err(Refusal::Usage { form: FORM }),
     };
-    safix_core::migrate::run(std::path::Path::new(plan), &Terminal)?;
-    Ok(ExitCode::SUCCESS)
+    Ok(abort::exit_code(status))
 }
 
 fn identity_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
@@ -1210,6 +1224,83 @@ fn group_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Re-mint a value because of its age: one entry, or everything due.
+///
+/// `--due` is the bulk form and takes an optional user; the named form takes
+/// the same `[<user>] <name>` positional grammar every other per-entry verb
+/// takes. The two are one verb because they act on one thing — a deadline —
+/// and a second verb for the bulk case would be a second place the deadline is
+/// computed.
+fn rotate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "rotate [--yes] [--allow-disk-staging] [<user>] <name> | \
+                        rotate --due [--yes] [--allow-disk-staging] [<user>]";
+    let mut options = generate::Options::default();
+    let mut bulk = false;
+    let mut rest = arguments;
+    while let Some((first, tail)) = rest.split_first() {
+        match first.as_str() {
+            "--due" => bulk = true,
+            "--yes" => options.assume_yes = true,
+            flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
+                options.allow_disk_staging = true;
+            }
+            flag if flag.starts_with("--") => return Err(Refusal::Usage { form: FORM }),
+            _ => break,
+        }
+        rest = tail;
+    }
+
+    let workspace = workspace()?;
+    if bulk {
+        let only = match rest {
+            [] => None,
+            [user] => Some(user.clone()),
+            _ => return Err(Refusal::Usage { form: FORM }),
+        };
+        let status = rotate::all(
+            &workspace,
+            &Terminal,
+            &mut prompt::Prompted,
+            only.as_deref(),
+            options,
+        )?;
+        return Ok(abort::exit_code(status));
+    }
+
+    let (user, name) = match rest {
+        [name] => (workspace.default_user()?, name.clone()),
+        [user, name] => (user.clone(), name.clone()),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+    let status = rotate::one(
+        &workspace,
+        &Terminal,
+        &mut prompt::Prompted,
+        &user,
+        &name,
+        options,
+    )?;
+    Ok(abort::exit_code(status))
+}
+
+/// Assign or remove the rotation policy one entry's declaration names.
+///
+/// Two positionals after `set` and one after `unset`, and no flags, for the
+/// reason `group`'s two acts carry none: the act is the whole of the verb.
+fn rotation_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "rotation set <user> <name> <policy> | rotation unset <user> <name>";
+    let workspace = workspace()?;
+    let (act, user, name) = match arguments {
+        [word, user, name, policy] if word == "set" => {
+            (rotate::Act::Set(policy.clone()), user.clone(), name.clone())
+        }
+        [word, user, name] if word == "unset" => (rotate::Act::Unset, user.clone(), name.clone()),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+    rotate::scaffold(&workspace, &Terminal, &act, &user, &name)?;
+    Ok(ExitCode::SUCCESS)
+}
+
 /// A machine's own ed25519 host key, seeded before its first activation:
 /// written straight to `--directory DIR`, or probed and then written over
 /// ssh to `--to ADDRESS`.
@@ -1370,6 +1461,10 @@ mod tests {
             logical_public: None,
             logical_record: None,
             logical_stamp: None,
+            rotation: None,
+            needed_for_users: false,
+            restart_units: Vec::new(),
+            reload_units: Vec::new(),
         };
         let mut held = std::collections::BTreeMap::new();
         held.insert("alice".to_owned(), placement("secrets/alice.yaml"));

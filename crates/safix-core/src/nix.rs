@@ -62,6 +62,15 @@ pub enum Attribute {
     EnrollHook,
     /// The subject records: every declared machine, service and group.
     Subjects,
+    /// The named rotation policies, `policy -> { everySeconds }`.
+    ///
+    /// Read only by the scaffold that assigns one, which has to refuse a
+    /// policy the declarations do not define before it edits anything. A
+    /// placement carries the policy governing it, so nothing that computes a
+    /// deadline reads this: an unnamed policy would not appear here in the
+    /// first place, and the scaffold's question is exactly the one placements
+    /// cannot answer.
+    Rotation,
     /// Whether `flake.safix.vault` is declared.
     VaultDeclared,
     /// The vault's disposable creation rules, or null when no vault is
@@ -90,6 +99,7 @@ impl Attribute {
             Self::OnboardingHook => "safix.onboardingHook",
             Self::EnrollHook => "safix.enrollHook",
             Self::Subjects => "safix.lib.subjects",
+            Self::Rotation => "safix.lib.rotation",
             Self::VaultDeclared => "safix.lib.vaultDeclared",
             Self::VaultCreationRulesText => "safix.lib.vaultCreationRulesText",
         }
@@ -115,6 +125,7 @@ impl Attribute {
             Self::OnboardingHook => "flake.safix.onboardingHook",
             Self::EnrollHook => "flake.safix.enrollHook",
             Self::Subjects => "flake.safix.lib.subjects",
+            Self::Rotation => "flake.safix.lib.rotation",
             Self::VaultDeclared => "flake.safix.lib.vaultDeclared",
             Self::VaultCreationRulesText => "flake.safix.lib.vaultCreationRulesText",
         }

@@ -21,7 +21,7 @@
 //! A ranking was tried and retired. Ranking answers "which of these did you
 //! most likely mean", which is the question a fuzzy finder over a hundred
 //! thousand paths has to answer; the candidates here are the names one person
-//! holds, and the question they ask of a table of eight columns is "which of
+//! holds, and the question they ask of a table of named columns is "which of
 //! these match", to which the answer is a filter. A ranked list also reorders
 //! itself as a query is typed, which is what makes the entry under the cursor
 //! change identity on a keystroke.
@@ -39,9 +39,11 @@ mod time;
 
 use std::fs::File;
 use std::io::{Read as _, Write};
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
-use safix_core::model::Placement;
+use safix_core::model::{Placement, Rotation};
+use safix_core::stamps::{Deadline, Stamps};
 use safix_core::{Error, Secret, Workspace, stamps};
 
 use crate::reporter::Refusal;
@@ -58,16 +60,19 @@ const QUIET: Duration = Duration::from_millis(150);
 /// size.
 const FALLBACK_SIZE: (usize, usize) = (24, 80);
 
-/// How many columns the table has with the extra ones shown, and how many
-/// without.
+/// How many columns the table has with the extra ones shown.
 ///
-/// The eight are [`render::listing_row`]'s, and the one behind tab is the last
-/// of them: the document serving a value answers "where is this" rather than
-/// "what is this", which is a question an operator asks of one entry and not of
-/// a list.
-const COLUMNS: usize = 8;
+/// Read off [`render::listing_header`] rather than written here, because the
+/// row is that function's and a column added there is a column this table has.
+fn columns() -> usize {
+    render::listing_header().len()
+}
 
-/// How many of [`COLUMNS`] are shown before tab is pressed.
+/// How many of [`columns`] are shown before tab is pressed.
+///
+/// The ones behind tab are everything after them, which are the columns that
+/// answer "where is this" rather than "what is this" — a question an operator
+/// asks of one entry and not of a list.
 const DEFAULT_COLUMNS: usize = 7;
 
 /// Which of the entries a user holds are offered.
@@ -144,6 +149,8 @@ pub(crate) fn choose(
             file: placement.file.clone(),
             key: placement.key.clone(),
             created: stamps.map(|stamps| stamps.created),
+            stamps,
+            rotation: placement.rotation.clone(),
         });
     }
     if candidates.is_empty() {
@@ -189,6 +196,31 @@ struct Candidate {
     key: String,
     /// When the value was first written, when anything recorded that.
     created: Option<u64>,
+    /// Its timestamps, kept so the countdown can be recomputed every frame.
+    stamps: Option<Stamps>,
+    /// The rotation policy it names, when it names one.
+    rotation: Option<Rotation>,
+}
+
+impl Candidate {
+    /// Where this entry stands against its policy at `now`.
+    fn deadline(&self, now: u64) -> Deadline {
+        Deadline::of(self.stamps, self.rotation.as_ref(), now)
+    }
+
+    /// The row as it reads at `now`: every cell as `list` built it, except the
+    /// countdown, which is recomputed so it ticks while the picker is open.
+    ///
+    /// The query was matched against the cells as they were built, so a
+    /// countdown that has since changed is drawn without emphasis rather than
+    /// with ranges that no longer point at its characters.
+    fn cells_at(&self, now: u64) -> Vec<String> {
+        let mut cells = self.cells.clone();
+        if let Some(last) = cells.last_mut() {
+            *last = render::deadline_cell(self.deadline(now));
+        }
+        cells
+    }
 }
 
 /// What the escape sequence being read is, when one is being read.
@@ -226,8 +258,18 @@ struct Session<'a> {
     settings: settings::Settings,
     /// What the operator has typed.
     query: String,
+    /// Where the caret is in [`Session::query`], counted in characters.
+    ///
+    /// Characters rather than bytes: it is what a keystroke moves and what the
+    /// terminal's own cursor is placed at, and both of those count characters.
+    caret: usize,
     /// The candidates the query admits, alphabetically.
     order: Vec<usize>,
+    /// Where the query matched in each admitted row's cells: one vector of
+    /// character ranges per cell, aligned with [`Session::order`].
+    spans: Vec<Vec<Vec<std::ops::Range<usize>>>>,
+    /// Which columns the query looked in, which are the titles it emphasises.
+    searched: search::Searched,
     /// Which of [`Session::order`] the cursor is on, counted from the
     /// alphabetically first — which is the bottom row.
     cursor: usize,
@@ -251,6 +293,9 @@ struct Session<'a> {
     rested: Option<Instant>,
     /// The escape sequence being read, when one is.
     pending: Pending,
+    /// The parameter bytes of the sequence being read, which are what tells
+    /// Left from Ctrl+Left and one tilde sequence from another.
+    parameters: String,
 }
 
 impl<'a> Session<'a> {
@@ -276,7 +321,10 @@ impl<'a> Session<'a> {
             user,
             settings,
             query: String::new(),
+            caret: 0,
             order: Vec::new(),
+            spans: Vec::new(),
+            searched: search::Searched::Nothing,
             cursor: 0,
             column: 0,
             newest,
@@ -284,6 +332,7 @@ impl<'a> Session<'a> {
             note: None,
             rested: None,
             pending: Pending::None,
+            parameters: String::new(),
         };
         session.refilter();
         session
@@ -397,15 +446,21 @@ impl<'a> Session<'a> {
     }
 
     /// Narrow the candidates to the query, and put the cursor in range.
+    ///
+    /// One pass over the candidates asking the query where it matched: a row
+    /// with an answer is offered and the answer is what the frame emphasises,
+    /// so nothing can be drawn as a match in a row the filter rejected.
     fn refilter(&mut self) {
         let query = search::Query::parse(&self.query);
-        self.order = self
-            .candidates
-            .iter()
-            .enumerate()
-            .filter(|(_, candidate)| query.admits(&candidate.cells))
-            .map(|(index, _)| index)
-            .collect();
+        self.order.clear();
+        self.spans.clear();
+        for (index, candidate) in self.candidates.iter().enumerate() {
+            if let Some(spans) = query.spans(&candidate.cells) {
+                self.order.push(index);
+                self.spans.push(spans);
+            }
+        }
+        self.searched = query.searched_columns();
         if self.cursor >= self.order.len() {
             self.cursor = self.order.len().saturating_sub(1);
         }
@@ -433,7 +488,10 @@ impl<'a> Session<'a> {
                 // the reading that cannot lose work.
                 Pending::Escape => {
                     self.pending = match *key {
-                        b'[' => Pending::Csi,
+                        b'[' => {
+                            self.parameters.clear();
+                            Pending::Csi
+                        }
                         b'O' => Pending::Ss3,
                         _ => return Act::Cancel,
                     };
@@ -441,17 +499,21 @@ impl<'a> Session<'a> {
                 }
                 // Parameters and intermediates until a final byte, so a
                 // sequence this does not bind is consumed whole rather than
-                // spilling its tail into the query.
+                // spilling its tail into the query, and one it does bind
+                // arrives with the modifier it was pressed with.
                 Pending::Csi => {
                     if (0x40..=0x7e).contains(key) {
                         self.pending = Pending::None;
-                        self.sequence(*key);
+                        let parameters = std::mem::take(&mut self.parameters);
+                        self.sequence(&parameters, *key);
+                    } else {
+                        self.parameters.push(char::from(*key));
                     }
                     continue;
                 }
                 Pending::Ss3 => {
                     self.pending = Pending::None;
-                    self.sequence(*key);
+                    self.sequence("", *key);
                     continue;
                 }
                 Pending::None => {}
@@ -475,10 +537,12 @@ impl<'a> Session<'a> {
                     }
                 }
                 // Backspace, however this terminal spells it.
-                0x08 | 0x7f => {
-                    let _ = self.query.pop();
-                    self.refilter();
-                }
+                0x08 | 0x7f => self.backspace(),
+                // ^A and ^E, which every line editor binds to the two ends and
+                // which cost nothing here: terminals disagree about how they
+                // spell Home and End, and these two they agree about.
+                0x01 => self.caret = 0,
+                0x05 => self.end(),
                 // Tab.
                 0x09 => self.toggle_columns(),
                 // ^P.
@@ -493,31 +557,106 @@ impl<'a> Session<'a> {
         Act::Continue
     }
 
-    /// What the final byte of an escape sequence does.
+    /// What one escape sequence does.
     ///
-    /// The four arrows and nothing else. Both spellings of the sequence reach
-    /// here — a terminal in application cursor mode sends `O` where one in
-    /// normal mode sends `[` — and every other final byte, which is every
-    /// function key, `Home`, `End`, `Delete` and every page key, is consumed
-    /// and ignored.
-    fn sequence(&mut self, final_byte: u8) {
+    /// Both spellings reach here — a terminal in application cursor mode sends
+    /// `O` where one in normal mode sends `[` — and the CSI parameters come
+    /// with the final byte, because they are what tells Left from Ctrl+Left
+    /// and one tilde sequence from another. Modifier 5 is Ctrl in xterm's
+    /// encoding, which every terminal this runs on follows.
+    ///
+    /// A complete sequence this does not bind does nothing at all: it is
+    /// consumed, and the loop carries on. Only a bare escape cancels, and only
+    /// because nothing followed it before the read timed out.
+    fn sequence(&mut self, parameters: &str, final_byte: u8) {
+        let mut fields = parameters.split(';');
+        let number = fields.next().unwrap_or_default();
+        let control = fields.next() == Some("5");
         match final_byte {
             b'A' => self.up(),
             b'B' => self.down(),
-            b'C' => self.right(),
-            b'D' => self.left(),
+            b'C' if control => self.right(),
+            b'D' if control => self.left(),
+            b'C' => self.forward(),
+            b'D' => self.backward(),
+            b'H' => self.caret = 0,
+            b'F' => self.end(),
+            b'~' => match number {
+                "1" | "7" => self.caret = 0,
+                "4" | "8" => self.end(),
+                "3" => self.delete(),
+                _ => {}
+            },
             _ => {}
         }
     }
 
-    /// Append what was typed to the query, and narrow against it.
+    /// Insert what was typed at the caret, and narrow against the query it
+    /// makes.
     fn flush(&mut self, typed: &mut Vec<u8>) {
         if typed.is_empty() {
             return;
         }
-        self.query.push_str(&String::from_utf8_lossy(typed));
+        let text = String::from_utf8_lossy(typed).into_owned();
         typed.clear();
+        let at = self.offset();
+        self.query.insert_str(at, &text);
+        self.caret = self.caret.saturating_add(text.chars().count());
         self.refilter();
+    }
+
+    /// Where the caret is in the query, in bytes.
+    ///
+    /// The end of the query when the caret is past its last character, which is
+    /// where it rests after every append.
+    fn offset(&self) -> usize {
+        self.query
+            .char_indices()
+            .nth(self.caret)
+            .map_or(self.query.len(), |(at, _)| at)
+    }
+
+    /// Delete the character before the caret, which is what Backspace does.
+    fn backspace(&mut self) {
+        if self.caret == 0 {
+            return;
+        }
+        self.caret = self.caret.saturating_sub(1);
+        let at = self.offset();
+        let _ = self.query.remove(at);
+        self.refilter();
+    }
+
+    /// Delete the character under the caret, which is what Delete does.
+    ///
+    /// Nothing at the end of the query: there is no character under the caret
+    /// there, and taking the one before it would make Delete a second
+    /// Backspace.
+    fn delete(&mut self) {
+        let at = self.offset();
+        if at >= self.query.len() {
+            return;
+        }
+        let _ = self.query.remove(at);
+        self.refilter();
+    }
+
+    /// The caret one character towards the start of the query.
+    ///
+    /// A caret move is not an edit: the rows it would narrow are the rows
+    /// already on screen, so nothing is refiltered and nothing is decrypted.
+    fn backward(&mut self) {
+        self.caret = self.caret.saturating_sub(1);
+    }
+
+    /// The caret one character towards the end of the query, stopping there.
+    fn forward(&mut self) {
+        self.caret = self.caret.saturating_add(1).min(self.query.chars().count());
+    }
+
+    /// The caret after the query's last character.
+    fn end(&mut self) {
+        self.caret = self.query.chars().count();
     }
 
     /// The cursor one row towards the top of the screen, which is one entry
@@ -554,7 +693,7 @@ impl<'a> Session<'a> {
     /// How many columns the table has, with or without the ones behind tab.
     fn shown(&self) -> usize {
         if self.settings.extra_columns {
-            COLUMNS
+            columns()
         } else {
             DEFAULT_COLUMNS
         }
@@ -586,14 +725,48 @@ impl<'a> Session<'a> {
         settings::store(&self.settings);
     }
 
-    /// The cells of one row, narrowed to the columns on screen.
-    fn narrowed(&self, cells: &[String]) -> Vec<String> {
+    /// Which columns are on screen: the ones being shown, less the ones
+    /// scrolled off the left.
+    fn window(&self) -> Range<usize> {
         let shown = self.shown();
-        cells
-            .iter()
-            .take(shown)
-            .skip(self.column.min(shown.saturating_sub(1)))
-            .cloned()
+        self.column.min(shown.saturating_sub(1))..shown
+    }
+
+    /// One row's cells, narrowed to the columns on screen, each carrying what
+    /// the query matched inside it.
+    fn row(&self, cells: &[String], spans: &[Vec<Range<usize>>]) -> Vec<layout::Cell> {
+        self.window()
+            .filter_map(|column| {
+                Some(layout::Cell {
+                    text: cells.get(column)?.clone(),
+                    spans: spans.get(column).cloned().unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// The column titles on screen, with the ones the query looked in
+    /// emphasised whole.
+    ///
+    /// Whole rather than per character: a title is not where a term matched, it
+    /// is where the term was asked, which is the column and not a letter of its
+    /// name.
+    fn titles(&self) -> Vec<layout::Cell> {
+        let header = render::listing_header();
+        self.window()
+            .filter_map(|column| {
+                let text = header.get(column)?.clone();
+                let whole = Range {
+                    start: 0,
+                    end: text.chars().count(),
+                };
+                let spans = if self.searched.includes(column) {
+                    Vec::from([whole])
+                } else {
+                    Vec::new()
+                };
+                Some(layout::Cell { text, spans })
+            })
             .collect()
     }
 
@@ -608,32 +781,40 @@ impl<'a> Session<'a> {
             .saturating_add(1)
             .saturating_sub(geometry.rows)
             .min(self.cursor);
+        let nothing: Vec<Vec<Range<usize>>> = Vec::new();
+        // One clock per frame: every countdown on screen ticks together, and a
+        // row that crosses its deadline changes colour on the same frame its
+        // cell starts reading `due`.
+        let now = stamps::now();
         let lines: Vec<layout::Line> = self
             .order
             .iter()
+            .enumerate()
             .skip(first)
             .take(geometry.rows)
-            .enumerate()
-            .filter_map(|(offset, index)| {
+            .filter_map(|(position, index)| {
                 let candidate = self.candidates.get(*index)?;
+                let cells = candidate.cells_at(now);
+                let spans = self.spans.get(position).unwrap_or(&nothing);
                 Some(layout::Line {
-                    cells: self.narrowed(&candidate.cells),
-                    tint: self.tint(*index),
-                    cursor: first.saturating_add(offset) == self.cursor,
+                    cells: self.row(&cells, spans),
+                    tint: self.tint(*index, now),
+                    cursor: position == self.cursor,
                 })
             })
             .collect();
         let view = layout::View {
             geometry,
             columns,
-            header: self.narrowed(&render::listing_header()),
+            titles: self.titles(),
             lines,
             query: &self.query,
+            caret: self.caret,
         };
 
         let mut out: &File = self.terminal;
         let _ = out.write_all(layout::frame(&view).as_bytes());
-        if let Some(line) = geometry.value() {
+        if let Some(line) = geometry.pane {
             let _ = write!(out, "\x1b[{line};1H");
             if let Some(note) = &self.note {
                 let _ = write!(out, "{note}{}", layout::RESET);
@@ -646,28 +827,30 @@ impl<'a> Session<'a> {
                 let _ = held.preview_into(&mut green, layout::VALUE_LINES, columns);
                 let _ = green.flush();
             }
-            let _ = out.write_all(layout::cursor(geometry, &self.query).as_bytes());
+            let _ = out.write_all(layout::cursor(geometry, self.caret).as_bytes());
         }
         let _ = out.flush();
     }
 
     /// What colour one candidate's row is.
     ///
-    /// The last choice wins over the newest entry, because it is the row the
-    /// operator is most likely reaching for and one row cannot be two colours.
-    fn tint(&self, index: usize) -> layout::Tint {
+    /// A value past its deadline outranks everything: it is the row the picker
+    /// exists to make visible, and one row cannot be two colours. Below that the
+    /// last choice wins over the newest entry, because it is the row the
+    /// operator is most likely reaching for.
+    fn tint(&self, index: usize, now: u64) -> layout::Tint {
+        let Some(candidate) = self.candidates.get(index) else {
+            return layout::Tint::Plain;
+        };
         let chosen = self
-            .candidates
-            .get(index)
-            .zip(self.settings.chosen_by(self.user))
-            .is_some_and(|(candidate, chosen)| candidate.name == chosen);
-        if chosen {
-            return layout::Tint::LastChosen;
-        }
-        if self.newest == Some(index) {
-            return layout::Tint::Newest;
-        }
-        layout::Tint::Plain
+            .settings
+            .chosen_by(self.user)
+            .is_some_and(|chosen| candidate.name == chosen);
+        tint_for(
+            candidate.deadline(now).overdue().is_some(),
+            chosen,
+            self.newest == Some(index),
+        )
     }
 }
 
@@ -741,6 +924,20 @@ fn preview_due(preview: bool, rested: Option<Instant>) -> bool {
     preview && rested.is_some_and(|at| at.elapsed() >= QUIET)
 }
 
+/// The one colour a row gets, in precedence order: due, then last chosen,
+/// then newest.
+const fn tint_for(due: bool, chosen: bool, newest: bool) -> layout::Tint {
+    if due {
+        layout::Tint::Due
+    } else if chosen {
+        layout::Tint::LastChosen
+    } else if newest {
+        layout::Tint::Newest
+    } else {
+        layout::Tint::Plain
+    }
+}
+
 /// The terminal's size, or a conservative one when it will not say.
 fn size(terminal: &File) -> (usize, usize) {
     rustix::termios::tcgetwinsize(terminal).map_or(FALLBACK_SIZE, |window| {
@@ -759,7 +956,7 @@ fn size(terminal: &File) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{COLUMNS, DEFAULT_COLUMNS, Options, QUIET, Scope, preview_due};
+    use super::{DEFAULT_COLUMNS, Options, QUIET, Scope, columns, preview_due};
     use safix_core::model::{Origin, Placement};
 
     /// One placement, public or not, with nothing else declared about it.
@@ -780,6 +977,10 @@ mod tests {
             logical_public: None,
             logical_record: None,
             logical_stamp: None,
+            rotation: None,
+            needed_for_users: false,
+            restart_units: Vec::new(),
+            reload_units: Vec::new(),
         }
     }
 
@@ -816,18 +1017,65 @@ mod tests {
         assert_eq!(listing.get(1), rows.first());
     }
 
-    /// Tab adds columns rather than replacing them, and the one it adds is the
-    /// last.
+    /// Tab adds columns rather than replacing them: the default set is the
+    /// first of the listing's columns and the ones behind tab are everything
+    /// after them.
     #[test]
-    fn the_extra_column_is_one_more_than_the_default_set() {
-        assert_eq!(COLUMNS, DEFAULT_COLUMNS.saturating_add(1));
-        assert_eq!(crate::render::listing_header().len(), COLUMNS);
+    fn the_default_columns_are_the_first_of_the_listings() {
+        assert_eq!(columns(), crate::render::listing_header().len());
+        assert!(
+            DEFAULT_COLUMNS < columns(),
+            "tab reveals nothing: the default set is the whole table"
+        );
     }
 
     /// The preview is on unless a caller says otherwise.
     #[test]
     fn the_preview_is_on_by_default() {
         assert!(Options::default().preview);
+    }
+
+    /// A candidate built at one second reads differently at the next, and a
+    /// candidate past its deadline outranks the chosen and the newest tints.
+    #[test]
+    fn the_countdown_ticks_and_a_due_row_outranks_every_other_tint() {
+        use super::{Candidate, layout::Tint, tint_for};
+        use safix_core::model::Rotation;
+        use safix_core::stamps::Stamps;
+
+        let mut governed = placement("secrets/alice.yaml", None);
+        governed.rotation = Some(Rotation {
+            policy: "hourly".to_owned(),
+            every_seconds: 3_600,
+        });
+        let stamps = Some(Stamps {
+            created: 1_000,
+            updated: 1_000,
+        });
+        let candidate = Candidate {
+            name: "api-token".to_owned(),
+            cells: crate::render::listing_row("api-token", &governed, stamps),
+            file: governed.file.clone(),
+            key: governed.key.clone(),
+            created: Some(1_000),
+            stamps,
+            rotation: governed.rotation.clone(),
+        };
+
+        let at_one = candidate.cells_at(1_001);
+        let at_two = candidate.cells_at(1_002);
+        assert_eq!(at_one.last().map(String::as_str), Some("0d 00:59:59"));
+        assert_eq!(at_two.last().map(String::as_str), Some("0d 00:59:58"));
+        assert_eq!(
+            candidate.cells_at(4_600).last().map(String::as_str),
+            Some("due")
+        );
+        assert!(candidate.deadline(4_600).overdue().is_some());
+        assert!(candidate.deadline(4_599).overdue().is_none());
+        assert_eq!(tint_for(true, true, true), Tint::Due);
+        assert_eq!(tint_for(false, true, true), Tint::LastChosen);
+        assert_eq!(tint_for(false, false, true), Tint::Newest);
+        assert_eq!(tint_for(false, false, false), Tint::Plain);
     }
 
     /// Exactly one decrypted value, and it is a field rather than a cache.

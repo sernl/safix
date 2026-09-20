@@ -70,9 +70,10 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "KEY",
             "CREATED",
             "UPDATED",
-            "FILE"
+            "FILE",
+            "ROTATES"
         ],
-        "list does not head the SHARED, GENERATOR and stamp columns"
+        "list does not head the SHARED, GENERATOR, stamp and rotation columns"
     );
     // ORIGIN says how the name reached this user and SHARED says whether the
     // entry is one value. A secret granted through sharedWith is shared in the
@@ -92,7 +93,8 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "api-token",
             "-",
             "-",
-            ALICE_FILE
+            ALICE_FILE,
+            "-"
         ],
     );
     assert_eq!(
@@ -105,7 +107,8 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "wifi-psk",
             "-",
             "-",
-            SHARED_FILE
+            SHARED_FILE,
+            "-"
         ],
     );
     // An entry may be read under a key that is not its name, and the KEY column
@@ -120,7 +123,8 @@ fn get_round_trips_a_value_and_list_reports_where_it_lives() {
             "custom-key",
             "-",
             "-",
-            ALICE_FILE
+            ALICE_FILE,
+            "-"
         ],
     );
     listing.silent_about("fixture-value-for");

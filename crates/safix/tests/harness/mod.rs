@@ -368,6 +368,10 @@ pub struct Fixture {
     /// the nix half does, so a fixture cannot declare a group whose members the
     /// name space does not carry.
     delegation: Value,
+    /// The named rotation policies, as `flake.safix.lib.rotation` projects
+    /// them. Empty by default, which is what a fleet that has never declared
+    /// one evaluates to and what every test that declares none drives.
+    rotation: Value,
     genplan: Value,
     bridge: Value,
     keepassxc: Value,
@@ -498,6 +502,7 @@ impl Fixture {
             // nothing for a target no delegation covers, which is the whole of the
             // compatibility promise.
             delegation: json!({ "managers": {}, "managedBy": {}, "groups": {} }),
+            rotation: json!({}),
             clan_flake: None,
             vault: None,
             vault_rules: None,
@@ -565,6 +570,13 @@ impl Fixture {
         init.arg("-C").arg(&vault).args(["init", "-q"]);
         run_to_success(&mut init, "initializing the vault repository");
         self.vault = Some(vault.clone());
+        // A commit here is a test's own doing rather than safix's, and git
+        // records one only for an author it can name. The fixture repository is
+        // configured at birth for that reason and this one needs the same: a
+        // machine whose hostname carries no domain — a build sandbox — leaves
+        // git nothing to guess an address from.
+        self.vault_git(&["config", "user.email", "selftest@example.com"]);
+        self.vault_git(&["config", "user.name", "selftest"]);
         self.write_fixtures();
         vault
     }
@@ -598,6 +610,7 @@ impl Fixture {
             "logicalPublic": null, "logicalRecord": null,
             "stampRecord": format!("state/safix/definitions/alice/{name}.stamps"),
             "logicalStamp": null,
+            "rotation": null,
         });
         self.write_fixtures();
     }
@@ -637,6 +650,7 @@ impl Fixture {
                 "logicalPublic": null, "logicalRecord": null,
                 "stampRecord": format!("state/safix/definitions/shared/alice,bob/{name}.stamps"),
                 "logicalStamp": null,
+                "rotation": null,
             });
         }
         self.write_fixtures();
@@ -725,6 +739,28 @@ impl Fixture {
         .unwrap();
     }
 
+    /// One person's declaration, written verbatim and committed.
+    ///
+    /// What a test asserting a text edit needs: the file the verb edits, in a
+    /// shape that test chose, rather than the three-line scaffold
+    /// [`Fixture::write_declaration`] writes.
+    pub fn write_declaration_text(&self, user: &str, declaration: &str) {
+        std::fs::create_dir_all(self.repo.join("safix/users")).unwrap();
+        std::fs::write(
+            self.repo.join(format!("safix/users/{user}.nix")),
+            declaration,
+        )
+        .unwrap();
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-q", "-m", "fixture: a declaration to edit"]);
+    }
+
+    /// That declaration as it stands now.
+    #[must_use]
+    pub fn declaration_text(&self, user: &str) -> String {
+        std::fs::read_to_string(self.repo.join(format!("safix/users/{user}.nix"))).unwrap()
+    }
+
     /// The recipient policy, committed and generated alike, over one audience.
     ///
     /// [`Fixture::write_policy`] deliberately leaves the generated half naming
@@ -753,6 +789,7 @@ impl Fixture {
             "logicalPublic": null, "logicalRecord": null,
             "stampRecord": format!("state/safix/definitions/alice/{name}.stamps"),
             "logicalStamp": null,
+            "rotation": null,
         });
 
         // Keyed by the declared name, which is how `resolve.nix` emits the plan
@@ -1017,6 +1054,7 @@ impl Fixture {
             "logicalPublic": null, "logicalRecord": null,
             "stampRecord": format!("state/safix/definitions/{owner}/{companion}.stamps"),
             "logicalStamp": null,
+            "rotation": null,
         });
         self.write_fixtures();
     }
@@ -1046,6 +1084,7 @@ impl Fixture {
             "logicalPublic": null, "logicalRecord": null,
             "stampRecord": format!("state/safix/definitions/{owner}/{companion}.stamps"),
             "logicalStamp": null,
+            "rotation": null,
         });
         self.write_fixtures();
     }
@@ -1983,6 +2022,7 @@ impl Fixture {
         let mut delegation = self.delegation.clone();
         delegation["subjects"] = json!(subjects);
         write_json(&self.work.join("delegation.json"), &delegation);
+        write_json(&self.work.join("rotation.json"), &self.rotation);
         if !self.work.join("hook.json").exists() {
             self.set_hook(None);
         }
@@ -2673,6 +2713,7 @@ impl Fixture {
                 "SAFIX_FIXTURE_DELEGATION",
                 self.work.join("delegation.json"),
             )
+            .env("SAFIX_FIXTURE_ROTATION", self.work.join("rotation.json"))
             .env("SAFIX_FIXTURE_GENPLAN", self.work.join("genplan.json"))
             .env("SAFIX_FIXTURE_BRIDGE", self.work.join("bridge.json"))
             .env("SAFIX_FIXTURE_KEEPASSXC", self.work.join("keepassxc.json"))
@@ -3326,6 +3367,39 @@ fn roots_under(directory: &Path) -> Vec<PathBuf> {
 /// non-nullable. `stampRecord` rides along the same way and for the same
 /// reason, carrying the record path plus the `.stamps` suffix the resolver
 /// appends.
+/// Declare one rotation policy, and put one entry's placement under it.
+///
+/// Two acts in one call because they are never useful apart: a policy nothing
+/// names sets no deadline, and an entry naming a policy the declarations do
+/// not define is a fleet the resolver refuses.
+impl Fixture {
+    pub fn declare_rotation(&mut self, policy: &str, every_seconds: u64) {
+        self.rotation[policy] = json!({ "everySeconds": every_seconds });
+        self.write_fixtures();
+    }
+
+    /// Put one entry under a declared policy, as the resolver emits it.
+    pub fn govern(&mut self, user: &str, name: &str, policy: &str, every_seconds: u64) {
+        self.placements[user][name]["rotation"] =
+            json!({ "policy": policy, "everySeconds": every_seconds });
+        self.write_fixtures();
+    }
+
+    /// Write one entry's stamp record with both stamps at `seconds`.
+    ///
+    /// The record the verbs read is plaintext beside the value, so a test that
+    /// needs a value to be old writes the date rather than waiting for one.
+    pub fn stamp(&self, user: &str, name: &str, seconds: u64) {
+        let relative = self.placements[user][name]["stampRecord"]
+            .as_str()
+            .expect("the fixture placement carries a stamp record")
+            .to_owned();
+        let path = self.repo.join(&relative);
+        std::fs::create_dir_all(path.parent().expect("the record has a parent")).unwrap();
+        std::fs::write(&path, format!("v1 created={seconds} updated={seconds}\n")).unwrap();
+    }
+}
+
 fn placement(file: &str, name: &str, key: &str, origin: &str, owner: &str) -> Value {
     json!({
         "file": file, "key": key, "origin": origin,
@@ -3335,6 +3409,7 @@ fn placement(file: &str, name: &str, key: &str, origin: &str, owner: &str) -> Va
         "logicalPublic": null, "logicalRecord": null,
         "stampRecord": format!("state/safix/definitions/{owner}/{name}.stamps"),
         "logicalStamp": null,
+        "rotation": null,
     })
 }
 

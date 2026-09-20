@@ -2,9 +2,13 @@
 
 use std::{
     collections::HashSet,
+    ffi::OsString,
     fs::{self, DirBuilder, File, OpenOptions},
     io::Write,
-    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    },
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -15,6 +19,8 @@ use zeroize::Zeroizing;
 use crate::{
     Error, Progress, Result,
     ciphertext::{self, Format, Identities, Source},
+    digest::sha256_hex,
+    scratch,
 };
 
 static NEXT_CANDIDATE: AtomicU64 = AtomicU64::new(0);
@@ -138,6 +144,57 @@ struct ReceiptEntry<'a> {
     verification: &'static str,
 }
 
+/// The version a journal this release writes and reads carries.
+const JOURNAL_VERSION: u32 = 1;
+
+/// The suffix the journal's name adds to the receipt's.
+const JOURNAL_SUFFIX: &str = ".journal";
+
+/// The prefix every private staging directory a migration creates is named
+/// with, and the only prefix an abandonment will remove a directory under.
+const STAGING_PREFIX: &str = ".safix-migrate-";
+
+/// Which of a migration's three kinds of output a journal record names.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum OutputKind {
+    Ciphertext,
+    Declarations,
+    Receipt,
+}
+
+/// One published output, as the journal proves it.
+///
+/// The identity and the digest are both recorded because neither alone is the
+/// claim: the identity says this is the file the run created, and the digest
+/// says its bytes are the ones the run verified.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct JournalOutput {
+    path: PathBuf,
+    kind: OutputKind,
+    device: u64,
+    inode: u64,
+    sha256: String,
+}
+
+/// What an interrupted migration left, written beside the receipt and removed
+/// as the run's last step.
+///
+/// Its presence is the whole meaning of "interrupted": a completed migration
+/// has none, and a rerun that finds one resumes the run that wrote it.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Journal {
+    version: u32,
+    /// The plan's content and canonical directory, so the same JSON at another
+    /// path is a different plan.
+    plan_digest: String,
+    plan: PathBuf,
+    staging: Vec<PathBuf>,
+    outputs: Vec<JournalOutput>,
+}
+
 fn refused(reason: impl Into<String>) -> Error {
     Error::MigrationRefused {
         reason: reason.into(),
@@ -203,16 +260,49 @@ fn require_absent(path: &Path) -> Result<()> {
     }
 }
 
+/// Where an output may be resolved, and the canonical form it resolves to.
+///
+/// Split out of [`OutputNames::reserve`] because the journal's own name is
+/// derived from the receipt's canonical path before any reservation happens,
+/// and deriving it any other way would let the two disagree.
+fn canonical_output(base: &Path, requested: &Path) -> Result<(PathBuf, PathBuf)> {
+    let absolute = absolute(base, requested)?;
+    let file_name = absolute
+        .file_name()
+        .ok_or_else(|| refused("migration output must name a file"))?
+        .to_owned();
+    let parent = absolute
+        .parent()
+        .ok_or_else(|| refused("migration output has no parent directory"))?;
+    let parent = io_result(
+        fs::canonicalize(parent),
+        "migration output parent directory does not exist or cannot be resolved",
+    )?;
+    if !io_result(
+        fs::metadata(&parent),
+        "cannot inspect migration output parent",
+    )?
+    .is_dir()
+    {
+        return Err(refused("migration output parent is not a directory"));
+    }
+    Ok((absolute, parent.join(file_name)))
+}
+
 struct OutputNames {
     protected: HashSet<PathBuf>,
     outputs: HashSet<PathBuf>,
+    /// Paths an earlier interrupted run of this plan published, which exist and
+    /// are therefore exempt from the absence rule — and from nothing else.
+    resumed: HashSet<PathBuf>,
 }
 
 impl OutputNames {
-    fn new() -> Self {
+    fn new(resumed: HashSet<PathBuf>) -> Self {
         Self {
             protected: HashSet::new(),
             outputs: HashSet::new(),
+            resumed,
         }
     }
 
@@ -223,27 +313,8 @@ impl OutputNames {
     }
 
     fn reserve(&mut self, base: &Path, requested: &Path) -> Result<PathBuf> {
-        let absolute = absolute(base, requested)?;
+        let (absolute, canonical) = canonical_output(base, requested)?;
         let lexical = lexical(&absolute)?;
-        let file_name = absolute
-            .file_name()
-            .ok_or_else(|| refused("migration output must name a file"))?;
-        let parent = absolute
-            .parent()
-            .ok_or_else(|| refused("migration output has no parent directory"))?;
-        let parent = io_result(
-            fs::canonicalize(parent),
-            "migration output parent directory does not exist or cannot be resolved",
-        )?;
-        if !io_result(
-            fs::metadata(&parent),
-            "cannot inspect migration output parent",
-        )?
-        .is_dir()
-        {
-            return Err(refused("migration output parent is not a directory"));
-        }
-        let canonical = parent.join(file_name);
 
         for name in [&lexical, &canonical] {
             if self.protected.contains(name) {
@@ -258,8 +329,10 @@ impl OutputNames {
             }
         }
 
-        require_absent(&absolute)?;
-        require_absent(&canonical)?;
+        if !self.resumed.contains(&canonical) {
+            require_absent(&absolute)?;
+            require_absent(&canonical)?;
+        }
         self.outputs.insert(lexical);
         self.outputs.insert(canonical.clone());
         Ok(canonical)
@@ -697,6 +770,7 @@ struct Candidate {
     directory: PathBuf,
     path: PathBuf,
     destination: PathBuf,
+    kind: OutputKind,
     parent_identity: FileIdentity,
     verified_identity: Option<FileIdentity>,
 }
@@ -706,9 +780,144 @@ struct Published {
     identity: FileIdentity,
 }
 
+/// A mode-700 directory nobody else can enter, beside the file it stages for.
+fn private_directory(parent: &Path) -> Result<PathBuf> {
+    for _ in 0..256 {
+        let sequence = NEXT_CANDIDATE.fetch_add(1, Ordering::Relaxed);
+        let directory = parent.join(format!("{STAGING_PREFIX}{}-{sequence}", std::process::id()));
+        let mut builder = DirBuilder::new();
+        builder.mode(0o700);
+        match builder.create(&directory) {
+            Ok(()) => return Ok(directory),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err(refused("cannot create private migration staging directory")),
+        }
+    }
+    Err(refused(
+        "cannot allocate a unique private migration staging directory",
+    ))
+}
+
+/// Remove a staging directory this migration created, and only such a
+/// directory.
+///
+/// The name, the type and the mode are all checked, because this is reached
+/// from a journal — and a journal is a file on disk, which is to say something
+/// an operator or anything else could have edited. A directory that is already
+/// gone is not an error: an interrupted run may have removed it before the
+/// journal naming it was rewritten.
+fn remove_private_directory(directory: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(refused("cannot inspect a migration staging directory")),
+    };
+    let named_by_us = directory
+        .file_name()
+        .is_some_and(|name| name.as_bytes().starts_with(STAGING_PREFIX.as_bytes()));
+    if !named_by_us
+        || !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o777 != 0o700
+    {
+        return Err(refused(format!(
+            "{} is not a private staging directory this migration created",
+            directory.display()
+        )));
+    }
+    let entries = io_result(
+        fs::read_dir(directory),
+        "cannot read a migration staging directory",
+    )?;
+    for entry in entries {
+        let entry = io_result(entry, "cannot read a migration staging directory")?;
+        let staged = entry.path();
+        let metadata = io_result(
+            fs::symlink_metadata(&staged),
+            "cannot inspect a staged migration file",
+        )?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(refused(format!(
+                "{} holds something this migration did not stage",
+                directory.display()
+            )));
+        }
+        io_result(
+            fs::remove_file(&staged),
+            "cannot remove a staged migration file",
+        )?;
+    }
+    io_result(
+        fs::remove_dir(directory),
+        "cannot remove migration staging directory",
+    )
+}
+
+/// The journal file, and the record it currently states.
+///
+/// Written with the receipt's own discipline — create-new in a private
+/// directory, fsync, rename — so the file at the journal's path is always a
+/// complete record of what has been published, never a half-written one.
+struct JournalWriter {
+    path: PathBuf,
+    directory: PathBuf,
+    record: Journal,
+    /// How much of the record an earlier run wrote. A rollback returns the
+    /// journal to exactly that, because those outputs are still on disk.
+    resumed_outputs: usize,
+    resumed_staging: usize,
+}
+
+impl JournalWriter {
+    fn write(&self) -> Result<()> {
+        let mut bytes = serde_json::to_vec_pretty(&self.record)
+            .map_err(|_| refused("cannot serialize the migration journal"))?;
+        bytes.push(b'\n');
+        let sequence = NEXT_CANDIDATE.fetch_add(1, Ordering::Relaxed);
+        let candidate = self.directory.join(format!("journal-{sequence}"));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true).mode(0o600);
+        let mut file = io_result(
+            options.open(&candidate),
+            "cannot create the migration journal candidate",
+        )?;
+        io_result(
+            file.write_all(&bytes),
+            "cannot write the migration journal candidate",
+        )?;
+        io_result(
+            file.sync_all(),
+            "cannot synchronize the migration journal candidate",
+        )?;
+        drop(file);
+        io_result(
+            fs::rename(&candidate, &self.path),
+            "cannot publish the migration journal",
+        )?;
+        sync_directory(
+            self.path
+                .parent()
+                .ok_or_else(|| refused("the migration journal has no parent"))?,
+        )
+    }
+
+    fn remove(&self) -> Result<()> {
+        remove_journal(&self.path)
+    }
+}
+
+fn remove_journal(path: &Path) -> Result<()> {
+    io_result(fs::remove_file(path), "cannot remove the migration journal")?;
+    sync_directory(
+        path.parent()
+            .ok_or_else(|| refused("the migration journal has no parent"))?,
+    )
+}
+
 struct Transaction {
     candidates: Vec<Candidate>,
     published: Vec<Published>,
+    journal: Option<JournalWriter>,
     committed: bool,
 }
 
@@ -717,11 +926,12 @@ impl Transaction {
         Self {
             candidates: Vec::with_capacity(capacity),
             published: Vec::with_capacity(capacity),
+            journal: None,
             committed: false,
         }
     }
 
-    fn stage(&mut self, destination: &Path) -> Result<usize> {
+    fn stage(&mut self, destination: &Path, kind: OutputKind) -> Result<usize> {
         let parent = destination
             .parent()
             .ok_or_else(|| refused("migration output has no parent"))?;
@@ -731,32 +941,17 @@ impl Transaction {
             "cannot inspect migration staging parent",
         )?;
         let parent_identity = FileIdentity::of(&parent_metadata);
-
-        for _ in 0..256 {
-            let sequence = NEXT_CANDIDATE.fetch_add(1, Ordering::Relaxed);
-            let directory =
-                parent.join(format!(".safix-migrate-{}-{sequence}", std::process::id()));
-            let mut builder = DirBuilder::new();
-            builder.mode(0o700);
-            match builder.create(&directory) {
-                Ok(()) => {
-                    let index = self.candidates.len();
-                    self.candidates.push(Candidate {
-                        path: directory.join("candidate"),
-                        directory,
-                        destination: destination.to_owned(),
-                        parent_identity,
-                        verified_identity: None,
-                    });
-                    return Ok(index);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err(refused("cannot create private migration staging directory")),
-            }
-        }
-        Err(refused(
-            "cannot allocate a unique private migration staging directory",
-        ))
+        let directory = private_directory(parent)?;
+        let index = self.candidates.len();
+        self.candidates.push(Candidate {
+            path: directory.join("candidate"),
+            directory,
+            destination: destination.to_owned(),
+            kind,
+            parent_identity,
+            verified_identity: None,
+        });
+        Ok(index)
     }
 
     fn candidate(&self, index: usize) -> Result<&Candidate> {
@@ -813,52 +1008,102 @@ impl Transaction {
         Ok(())
     }
 
-    fn publish_all(&mut self) -> Result<()> {
+    /// Publish every candidate, recording each in the journal as it lands.
+    ///
+    /// `Some(status)` is an interruption asked for between two steps: nothing
+    /// further is published and the drop rolls the run back. Removing the
+    /// journal is the commit point, which is why the last check sits in front
+    /// of it.
+    ///
+    /// A record is written *before* its hard link rather than after, which is
+    /// what makes the kill window empty. A hard link shares its file's device,
+    /// inode and bytes, so the record taken from the staged candidate is
+    /// already true of the destination the link will create; recorded
+    /// afterwards, a process killed between the two calls would leave an output
+    /// on disk that the journal does not name, which is exactly the state
+    /// neither a rerun nor an abandonment could act on. A record whose path is
+    /// absent is the other side of the same window and means the link never
+    /// happened: the next run publishes it.
+    fn publish_all(&mut self) -> Result<Option<i32>> {
         for candidate in &self.candidates {
             validate_candidate(candidate)?;
             require_absent(&candidate.destination)?;
         }
 
-        for candidate in &self.candidates {
+        if let Some(journal) = &self.journal {
+            journal.write()?;
+        }
+
+        for index in 0..self.candidates.len() {
+            if let Some(status) = scratch::interrupted() {
+                return Ok(Some(status));
+            }
+            let candidate = self.candidate(index)?;
             validate_candidate(candidate)?;
             let identity = candidate
                 .verified_identity
                 .ok_or_else(|| refused("migration candidate has not been verified"))?;
+            let staged = candidate.path.clone();
+            let destination = candidate.destination.clone();
+            let kind = candidate.kind;
+            let parent = destination
+                .parent()
+                .ok_or_else(|| refused("migration output has no parent"))?
+                .to_owned();
+
+            // Re-checked here and not only in the pass above: a record is
+            // written before its link, so nothing is recorded that the link
+            // would then have to refuse.
+            require_absent(&destination)?;
+            if let Some(journal) = &mut self.journal {
+                journal.record.outputs.push(JournalOutput {
+                    sha256: published_digest(&staged)?,
+                    path: destination.clone(),
+                    kind,
+                    device: identity.device,
+                    inode: identity.inode,
+                });
+                journal.write()?;
+            }
 
             io_result(
-                fs::hard_link(&candidate.path, &candidate.destination),
+                fs::hard_link(&staged, &destination),
                 "cannot publish migration output without overwriting an existing path",
             )?;
             self.published.push(Published {
-                path: candidate.destination.clone(),
+                path: destination.clone(),
                 identity,
             });
 
             let metadata = io_result(
-                fs::symlink_metadata(&candidate.destination),
+                fs::symlink_metadata(&destination),
                 "cannot inspect newly published migration output",
             )?;
             if !metadata.is_file() || FileIdentity::of(&metadata) != identity {
                 return Err(refused("migration output changed during publication"));
             }
             io_result(
-                fs::remove_file(&candidate.path),
+                fs::remove_file(&staged),
                 "cannot unlink published migration staging file",
             )?;
-            sync_directory(
-                candidate
-                    .destination
-                    .parent()
-                    .ok_or_else(|| refused("migration output has no parent"))?,
-            )?;
+            sync_directory(&parent)?;
         }
 
-        for candidate in &self.candidates {
-            io_result(
-                fs::remove_dir(&candidate.directory),
-                "cannot remove migration staging directory",
-            )?;
+        if let Some(status) = scratch::interrupted() {
+            return Ok(Some(status));
         }
+        // Before the journal goes, so a kill here leaves directories the
+        // journal still names rather than orphans nothing names.
+        for candidate in &self.candidates {
+            remove_private_directory(&candidate.directory)?;
+        }
+        if let Some(journal) = &self.journal {
+            for directory in &journal.record.staging {
+                remove_private_directory(directory)?;
+            }
+            journal.remove()?;
+        }
+
         for candidate in &self.candidates {
             sync_directory(
                 candidate
@@ -869,7 +1114,7 @@ impl Transaction {
         }
 
         self.committed = true;
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -938,6 +1183,16 @@ fn sync_directory(path: &Path) -> Result<()> {
     )
 }
 
+/// The digest of what is at a published path.
+///
+/// Of the ciphertext, the declarations or the receipt — all three are public
+/// documents, and the digest of one carries nothing a reader of the file does
+/// not already hold. No plaintext is hashed anywhere in this module.
+fn published_digest(path: &Path) -> Result<String> {
+    let bytes = io_result(fs::read(path), "cannot read a published migration output")?;
+    Ok(sha256_hex(&bytes))
+}
+
 impl Drop for Transaction {
     fn drop(&mut self) {
         if self.committed {
@@ -956,6 +1211,23 @@ impl Drop for Transaction {
             }
         }
 
+        if let Some(journal) = &mut self.journal {
+            journal.record.outputs.truncate(journal.resumed_outputs);
+            journal.record.staging.truncate(journal.resumed_staging);
+            if journal.resumed_outputs == 0 {
+                // Nothing an earlier run published is left, so neither is the
+                // journal: its absence is what tells the next run there is
+                // nothing to resume.
+                let _ = fs::remove_file(&journal.path);
+                if let Some(parent) = journal.path.parent() {
+                    let _ = sync_directory(parent);
+                }
+            } else {
+                let _ = journal.write();
+            }
+            let _ = remove_private_directory(&journal.directory);
+        }
+
         for candidate in self.candidates.iter().rev() {
             let _ = fs::remove_file(&candidate.path);
             let _ = fs::remove_dir(&candidate.directory);
@@ -971,6 +1243,14 @@ struct PreparedPlan {
     templates: Vec<Template>,
     receipt_path: PathBuf,
     deployment_output: PathBuf,
+    /// The canonical plan, named in a refusal so an operator can see which two
+    /// plans a journal is between.
+    plan_path: PathBuf,
+    plan_digest: String,
+    journal_path: PathBuf,
+    /// What an earlier interrupted run of this same plan left, if it left
+    /// anything. Its digest has already been held against this plan's.
+    journal: Option<Journal>,
 }
 
 fn validate_output_paths<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
@@ -1090,7 +1370,109 @@ fn prepare_templates(
     Ok(())
 }
 
-fn prepare_plan(plan_path: &Path) -> Result<PreparedPlan> {
+/// The journal's path, derived from the receipt's.
+fn journal_beside(receipt: &Path) -> Result<PathBuf> {
+    let mut name = OsString::from(
+        receipt
+            .file_name()
+            .ok_or_else(|| refused("the migration receipt must name a file"))?,
+    );
+    name.push(JOURNAL_SUFFIX);
+    Ok(receipt.with_file_name(name))
+}
+
+/// The plan's identity: its bytes, and the directory every relative path in it
+/// is resolved against. The same JSON in another directory names other files
+/// and is therefore another plan.
+fn digest_of_plan(bytes: &[u8], directory: &Path) -> String {
+    let mut material = Zeroizing::new(Vec::new());
+    material.extend_from_slice(directory.as_os_str().as_bytes());
+    material.push(0);
+    material.extend_from_slice(bytes);
+    sha256_hex(&material)
+}
+
+/// The journal at a path, when there is one this release can read.
+fn read_journal(path: &Path) -> Result<Option<Journal>> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(refused(
+                "cannot determine whether a migration journal exists",
+            ));
+        }
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+            return Err(refused(format!(
+                "{} is not a regular file; a migration journal cannot be read from it",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+    }
+    let bytes = io_result(fs::read(path), "cannot read the migration journal")?;
+    let journal: Journal = serde_json::from_slice(&bytes).map_err(|_| {
+        refused(format!(
+            "the migration journal at {} is not one this release can read; unknown fields are forbidden",
+            path.display()
+        ))
+    })?;
+    if journal.version != JOURNAL_VERSION {
+        return Err(refused(format!(
+            "the migration journal at {} states version {}; this release writes and reads version {JOURNAL_VERSION}",
+            path.display(),
+            journal.version
+        )));
+    }
+    Ok(Some(journal))
+}
+
+/// What a preparation is for.
+///
+/// The two differ in one place only: an abandonment with no journal beside the
+/// receipt has to be refused for that, and refused before an output reservation
+/// can refuse it for something else.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Intent {
+    Run,
+    Abandon,
+}
+
+/// The journal beside a plan's receipt, held against that plan.
+///
+/// Answered before any output is reserved, because the journal is what decides
+/// which outputs may already exist — and because an abandonment with nothing to
+/// abandon has to be refused for that rather than for the first output a
+/// reservation happens to find.
+fn resume_state(
+    base: &Path,
+    receipt: &Path,
+    canonical_plan: &Path,
+    plan_digest: &str,
+    intent: Intent,
+) -> Result<(PathBuf, Option<Journal>)> {
+    let (_, receipt_canonical) = canonical_output(base, receipt)?;
+    let journal_path = journal_beside(&receipt_canonical)?;
+    let journal = read_journal(&journal_path)?;
+    if let Some(recorded) = &journal
+        && recorded.plan_digest != plan_digest
+    {
+        return Err(refused(format!(
+            "the journal at {} was written for {}, not for {}; resume or abandon that migration before running this one",
+            journal_path.display(),
+            recorded.plan.display(),
+            canonical_plan.display()
+        )));
+    }
+    if intent == Intent::Abandon && journal.is_none() {
+        return Err(refused(format!(
+            "no migration journal at {}; there is no interrupted run to abandon, and a completed migration's outputs are not this command's to remove",
+            journal_path.display()
+        )));
+    }
+    Ok((journal_path, journal))
+}
+
+fn prepare_plan(plan_path: &Path, intent: Intent) -> Result<PreparedPlan> {
     let working_directory = io_result(
         std::env::current_dir(),
         "cannot determine the migration working directory",
@@ -1116,6 +1498,7 @@ fn prepare_plan(plan_path: &Path) -> Result<PreparedPlan> {
             error.column()
         ))
     })?;
+    let plan_digest = digest_of_plan(&plan_bytes, &base);
     drop(plan_bytes);
     if plan.version != 1 {
         return Err(refused(
@@ -1126,7 +1509,17 @@ fn prepare_plan(plan_path: &Path) -> Result<PreparedPlan> {
         return Err(refused("migration plan must contain at least one entry"));
     }
     validate_names(&plan)?;
-    let mut output_names = OutputNames::new();
+    let (journal_path, journal) =
+        resume_state(&base, &plan.receipt, &canonical_plan, &plan_digest, intent)?;
+    // The journal itself and the outputs it records are the only paths a
+    // reservation may find already present, and only while that journal is the
+    // one this plan wrote.
+    let mut resumed: HashSet<PathBuf> = HashSet::new();
+    if let Some(recorded) = &journal {
+        resumed.insert(journal_path.clone());
+        resumed.extend(recorded.outputs.iter().map(|output| output.path.clone()));
+    }
+    let mut output_names = OutputNames::new(resumed);
     output_names.protect(&requested_plan, &canonical_plan)?;
     let source_identities = prepare_identities(plan.source_identities, &base, &mut output_names)?;
     let target_identities = prepare_identities(plan.target_identities, &base, &mut output_names)?;
@@ -1138,6 +1531,7 @@ fn prepare_plan(plan_path: &Path) -> Result<PreparedPlan> {
     )?;
     let receipt_path = output_names.reserve(&base, &plan.receipt)?;
     let deployment_output = output_names.reserve(&base, &plan.deployment_output)?;
+    output_names.reserve(&base, &journal_path)?;
     for identities in [&source_identities, &target_identities] {
         if let Some(home) = &identities.gnupg_home
             && output_names
@@ -1170,6 +1564,10 @@ fn prepare_plan(plan_path: &Path) -> Result<PreparedPlan> {
         deployment_target: plan.deployment_target,
         receipt_path,
         deployment_output,
+        plan_path: canonical_plan,
+        plan_digest,
+        journal_path,
+        journal,
     })
 }
 
@@ -1178,7 +1576,7 @@ fn verify_entry(
     entry: &PreparedEntry,
     plan: &PreparedPlan,
 ) -> Result<()> {
-    let index = transaction.stage(&entry.destination.path)?;
+    let index = transaction.stage(&entry.destination.path, OutputKind::Ciphertext)?;
     let candidate = Source {
         path: transaction.candidate(index)?.path.clone(),
         format: entry.destination.format,
@@ -1212,13 +1610,189 @@ fn verify_entry(
     validate_candidate(transaction.candidate(index)?)
 }
 
+/// What a path that no longer answers for its record is refused with.
+///
+/// The path is named and nothing is touched: a file that does not match the
+/// journal is not the tool's to remove, whichever of the two is wrong about it.
+fn mismatched(path: &Path) -> Error {
+    refused(format!(
+        "{} no longer matches the migration journal's record of it; nothing was published or removed",
+        path.display()
+    ))
+}
+
+/// What a recorded output is now.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Recorded {
+    /// The file is there and answers for its record.
+    Published,
+    /// Nothing is at the path. The record was written and the link never
+    /// happened, or the file has since been removed; either way there is
+    /// nothing to keep and nothing to remove, and the path is free to publish.
+    Absent,
+}
+
+/// Hold a recorded output to its record: a regular file, that identity, those
+/// bytes.
+fn inspect_recorded(record: &JournalOutput) -> Result<Recorded> {
+    let metadata = match fs::symlink_metadata(&record.path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Recorded::Absent);
+        }
+        Err(_) => return Err(mismatched(&record.path)),
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.dev() != record.device
+        || metadata.ino() != record.inode
+        || published_digest(&record.path)? != record.sha256
+    {
+        return Err(mismatched(&record.path));
+    }
+    Ok(Recorded::Published)
+}
+
+/// Re-read a kept ciphertext output through the target identities and hold it
+/// against its source, exactly as a fresh candidate is held.
+fn reverify_published(entry: &PreparedEntry, plan: &PreparedPlan) -> Result<()> {
+    let source_value = ciphertext::read(&entry.source, &plan.source_identities)
+        .map_err(|_| refused("migration source decryption failed; no outputs were published"))?;
+    let target_value =
+        ciphertext::read(&entry.destination, &plan.target_identities).map_err(|_| {
+            refused(format!(
+                "independent target decryption of the kept output {} failed; nothing was published",
+                entry.destination.path.display()
+            ))
+        })?;
+    if !source_value.equals(&target_value) {
+        return Err(refused(format!(
+            "the kept migration output {} does not hold its source's bytes; nothing was published",
+            entry.destination.path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// A kept public artifact is the one this plan would write, or the run refuses.
+fn require_recomputed(record: &JournalOutput, expected: &Path, bytes: &[u8]) -> Result<()> {
+    if record.path != expected {
+        return Err(refused(format!(
+            "the migration journal records {} as an output this plan does not write",
+            record.path.display()
+        )));
+    }
+    if sha256_hex(bytes) != record.sha256 {
+        return Err(refused(format!(
+            "{} differs from what this plan would write; nothing was published",
+            record.path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Everything the journal claims, checked before anything is staged.
+///
+/// A claim is never trusted for being written down: the identity and the bytes
+/// are read back, and a kept ciphertext is decrypted through the target
+/// identities the way a fresh candidate is. What comes back is the set of
+/// outputs the run may keep; a record whose path is absent is not among them
+/// and is published afresh.
+fn verify_resumed(
+    plan: &PreparedPlan,
+    module_bytes: &[u8],
+    receipt_bytes: &[u8],
+) -> Result<HashSet<PathBuf>> {
+    let mut kept = HashSet::new();
+    let Some(journal) = &plan.journal else {
+        return Ok(kept);
+    };
+    let mut seen: HashSet<&Path> = HashSet::new();
+    for record in &journal.outputs {
+        if !seen.insert(record.path.as_path()) {
+            return Err(refused(format!(
+                "the migration journal records {} twice",
+                record.path.display()
+            )));
+        }
+        if inspect_recorded(record)? == Recorded::Absent {
+            continue;
+        }
+        match record.kind {
+            OutputKind::Ciphertext => {
+                let entry = plan
+                    .entries
+                    .iter()
+                    .find(|entry| entry.destination.path == record.path)
+                    .ok_or_else(|| {
+                        refused(format!(
+                            "the migration journal records {}, which this plan does not name as a destination",
+                            record.path.display()
+                        ))
+                    })?;
+                reverify_published(entry, plan)?;
+            }
+            OutputKind::Declarations => {
+                require_recomputed(record, &plan.deployment_output, module_bytes)?;
+            }
+            OutputKind::Receipt => {
+                require_recomputed(record, &plan.receipt_path, receipt_bytes)?;
+            }
+        }
+        kept.insert(record.path.clone());
+    }
+    Ok(kept)
+}
+
+/// The journal this run will keep, carrying forward what an interrupted run of
+/// the same plan already published and every staging directory either run made.
+fn open_journal(
+    plan: &PreparedPlan,
+    previous: Option<Journal>,
+    staged: &[PathBuf],
+) -> Result<JournalWriter> {
+    let parent = plan
+        .journal_path
+        .parent()
+        .ok_or_else(|| refused("the migration journal has no parent"))?;
+    let directory = private_directory(parent)?;
+    let (mut staging, outputs) = match previous {
+        Some(journal) => (journal.staging, journal.outputs),
+        None => (Vec::new(), Vec::new()),
+    };
+    let resumed_staging = staging.len();
+    let resumed_outputs = outputs.len();
+    staging.extend(staged.iter().cloned());
+    staging.push(directory.clone());
+    Ok(JournalWriter {
+        path: plan.journal_path.clone(),
+        directory,
+        record: Journal {
+            version: JOURNAL_VERSION,
+            plan_digest: plan.plan_digest.clone(),
+            plan: plan.plan_path.clone(),
+            staging,
+            outputs,
+        },
+        resumed_outputs,
+        resumed_staging,
+    })
+}
+
 /// Execute a versioned migration plan and publish its verified deployment artifacts.
+///
+/// A rerun of a plan whose journal is still beside its receipt resumes that
+/// run: the outputs the journal proves are its own are re-verified and kept,
+/// the rest are published, and the journal is removed last. The status is the
+/// one the run is to exit with — zero, or the interruption's own.
 ///
 /// # Errors
 ///
-/// Refuses aliases, existing outputs, unsupported deployment semantics and any verification failure.
-pub fn run(plan_path: &Path, progress: &dyn Progress) -> Result<()> {
-    let plan = prepare_plan(plan_path)?;
+/// Refuses aliases, existing outputs, unsupported deployment semantics, any
+/// verification failure, a journal written for another plan and a recorded
+/// output that no longer matches its record.
+pub fn run(plan_path: &Path, progress: &dyn Progress) -> Result<i32> {
+    let mut plan = prepare_plan(plan_path, Intent::Run)?;
     let module_bytes = declarations(plan.deployment_target, &plan.entries, &plan.templates)?;
     let receipt = Receipt {
         version: 1,
@@ -1245,22 +1819,267 @@ pub fn run(plan_path: &Path, progress: &dyn Progress) -> Result<()> {
     let mut receipt_bytes = serde_json::to_vec_pretty(&receipt)
         .map_err(|_| refused("cannot serialize migration receipt metadata"))?;
     receipt_bytes.push(b'\n');
+    let kept = verify_resumed(&plan, &module_bytes, &receipt_bytes)?;
+    if plan.journal.is_some() {
+        progress.write(&format!(
+            "Resuming an interrupted migration: {} output(s) it published were re-verified and kept.\n",
+            kept.len()
+        ));
+    }
     let capacity = plan
         .entries
         .len()
         .checked_add(2)
         .ok_or_else(|| refused("migration plan contains too many entries"))?;
+    // Held for the whole publication, so an interruption is acted on between
+    // two steps rather than inside one: the handler's own sweep and exit wait
+    // on this, and the checks below are where the run stops. Declared before
+    // the transaction so it outlives the rollback its drop performs.
+    let _quiet = scratch::quiet();
     let mut transaction = Transaction::new(capacity);
     progress.write("Preparing private migration candidates; sources will be retained.\n");
     for entry in &plan.entries {
+        if kept.contains(&entry.destination.path) {
+            continue;
+        }
+        if let Some(status) = scratch::interrupted() {
+            return Ok(status);
+        }
         verify_entry(&mut transaction, entry, &plan)?;
     }
-    let module_index = transaction.stage(&plan.deployment_output)?;
-    transaction.write_public_bytes(module_index, &module_bytes)?;
-    let receipt_index = transaction.stage(&plan.receipt_path)?;
-    transaction.write_public_bytes(receipt_index, &receipt_bytes)?;
+    if let Some(status) = scratch::interrupted() {
+        return Ok(status);
+    }
+    if !kept.contains(&plan.deployment_output) {
+        let module_index = transaction.stage(&plan.deployment_output, OutputKind::Declarations)?;
+        transaction.write_public_bytes(module_index, &module_bytes)?;
+    }
+    if !kept.contains(&plan.receipt_path) {
+        let receipt_index = transaction.stage(&plan.receipt_path, OutputKind::Receipt)?;
+        transaction.write_public_bytes(receipt_index, &receipt_bytes)?;
+    }
+    if let Some(status) = scratch::interrupted() {
+        return Ok(status);
+    }
+    let staged: Vec<PathBuf> = transaction
+        .candidates
+        .iter()
+        .map(|candidate| candidate.directory.clone())
+        .collect();
+    let previous = plan.journal.take().map(|mut journal| {
+        // A record whose output is absent described a link that never
+        // happened; this run is publishing that output afresh and will record
+        // it again.
+        journal.outputs.retain(|output| kept.contains(&output.path));
+        journal
+    });
+    transaction.journal = Some(open_journal(&plan, previous, &staged)?);
     progress.write("All candidates verified; publishing ciphertext, declarations, and receipt.\n");
-    transaction.publish_all()?;
+    if let Some(status) = transaction.publish_all()? {
+        return Ok(status);
+    }
     progress.write("Migration complete; original source files were retained.\n");
-    Ok(())
+    Ok(0)
+}
+
+/// Discard an interrupted migration: remove what its journal records, and
+/// nothing else.
+///
+/// # Errors
+///
+/// Refuses when no journal exists beside the plan's receipt, when the journal
+/// was written for another plan, and when any recorded output no longer matches
+/// its record. Sources are never touched on any path.
+pub fn abandon(plan_path: &Path, progress: &dyn Progress) -> Result<i32> {
+    let plan = prepare_plan(plan_path, Intent::Abandon)?;
+    let Some(journal) = &plan.journal else {
+        return Err(refused(
+            "the preparation admitted an abandonment with no journal",
+        ));
+    };
+    for record in &journal.outputs {
+        inspect_recorded(record)?;
+    }
+    if let Some(status) = scratch::interrupted() {
+        return Ok(status);
+    }
+    // An abandonment that stopped half way would leave a journal claiming files
+    // it had already removed, which neither a rerun nor a second abandonment
+    // could then act on. Held, the signal is acted on when this returns.
+    let _quiet = scratch::quiet();
+    let mut removed = 0_usize;
+    for record in &journal.outputs {
+        // Re-checked immediately before the unlink rather than trusting the
+        // pass above: what is removed is what still answers for its record.
+        if inspect_recorded(record)? == Recorded::Absent {
+            continue;
+        }
+        io_result(
+            fs::remove_file(&record.path),
+            "cannot remove an abandoned migration output",
+        )?;
+        sync_directory(
+            record
+                .path
+                .parent()
+                .ok_or_else(|| refused("an abandoned migration output has no parent"))?,
+        )?;
+        removed = removed.saturating_add(1);
+    }
+    for directory in &journal.staging {
+        remove_private_directory(directory)?;
+    }
+    remove_journal(&plan.journal_path)?;
+    progress.write(&format!(
+        "Abandoned the interrupted migration: {removed} output(s) removed, every source retained.\n"
+    ));
+    Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Journal, JournalOutput, JournalWriter, OutputKind, Transaction, private_directory,
+    };
+    use std::os::unix::fs::MetadataExt as _;
+    use std::path::PathBuf;
+
+    /// A directory of this test's own, removed by the test that made it.
+    fn scratch(label: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "safix-migrate-journal-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        directory
+    }
+
+    fn record() -> Journal {
+        Journal {
+            version: 1,
+            plan_digest: "0".repeat(64),
+            plan: PathBuf::from("/plans/move.json"),
+            staging: vec![PathBuf::from("/out/.safix-migrate-7-0")],
+            outputs: vec![JournalOutput {
+                path: PathBuf::from("/out/api-token.age"),
+                kind: OutputKind::Ciphertext,
+                device: 64_513,
+                inode: 12_345,
+                sha256: "a".repeat(64),
+            }],
+        }
+    }
+
+    /// The journal is the record a later run reads, so its JSON has to survive
+    /// the round trip and refuse anything it does not know.
+    #[test]
+    fn the_journal_round_trips_and_refuses_unknown_fields() {
+        let written = serde_json::to_string(&record()).expect("the journal serializes");
+        let read: Journal = serde_json::from_str(&written).expect("the journal parses");
+        assert_eq!(read, record());
+        assert!(
+            written.contains("\"planDigest\""),
+            "the journal's fields are camelCase: {written}"
+        );
+        assert!(
+            written.contains("\"kind\":\"ciphertext\""),
+            "an output names its kind: {written}"
+        );
+
+        let widened = written.replace("{\"version\":1", "{\"version\":1,\"notes\":\"extra\"");
+        assert!(
+            serde_json::from_str::<Journal>(&widened).is_err(),
+            "a journal carrying an unknown field was accepted"
+        );
+        let unknown_output = written.replace("\"sha256\"", "\"plaintextSha256\"");
+        assert!(
+            serde_json::from_str::<Journal>(&unknown_output).is_err(),
+            "an output record carrying an unknown field was accepted"
+        );
+    }
+
+    /// What the journal says while a publication is under way, and what is
+    /// left once the transaction it belongs to rolls back.
+    ///
+    /// The second candidate is aimed at the first's destination, which no plan
+    /// can produce and a hand-built transaction can: the first link lands, the
+    /// second cannot, and the journal is read in between — which is the only
+    /// moment its intermediate state is observable without a hook in the
+    /// runtime.
+    #[test]
+    fn the_journal_records_each_output_as_it_lands_and_goes_with_a_rollback() {
+        let directory = scratch("mid-run");
+        let destination = directory.join("api-token.age");
+        let journal_path = directory.join("receipt.json.journal");
+
+        let mut transaction = Transaction::new(2);
+        for _ in 0..2 {
+            let index = transaction
+                .stage(&destination, OutputKind::Ciphertext)
+                .expect("a staged candidate");
+            transaction
+                .write_public_bytes(index, b"abc")
+                .expect("a written candidate");
+        }
+        let journal_directory = private_directory(&directory).expect("a journal directory");
+        let staging: Vec<PathBuf> = transaction
+            .candidates
+            .iter()
+            .map(|candidate| candidate.directory.clone())
+            .collect();
+        transaction.journal = Some(JournalWriter {
+            path: journal_path.clone(),
+            directory: journal_directory.clone(),
+            record: Journal {
+                version: 1,
+                plan_digest: "0".repeat(64),
+                plan: directory.join("plan.json"),
+                staging,
+                outputs: Vec::new(),
+            },
+            resumed_outputs: 0,
+            resumed_staging: 0,
+        });
+
+        assert!(
+            transaction.publish_all().is_err(),
+            "two candidates cannot both take one destination"
+        );
+
+        let mid_run: Journal =
+            serde_json::from_slice(&std::fs::read(&journal_path).expect("a journal mid-run"))
+                .expect("the journal parses");
+        assert_eq!(mid_run.outputs.len(), 1, "the journal recorded {mid_run:?}");
+        let recorded = mid_run.outputs.first().expect("one recorded output");
+        assert_eq!(recorded.path, destination);
+        // FIPS 180-4's own digest of "abc", not one this module computed.
+        assert_eq!(
+            recorded.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let published = std::fs::metadata(&destination).expect("the first output landed");
+        assert_eq!(recorded.device, published.dev());
+        assert_eq!(recorded.inode, published.ino());
+
+        drop(transaction);
+        assert!(
+            !destination.exists(),
+            "the rollback left the output it published"
+        );
+        assert!(!journal_path.exists(), "the rollback left its journal");
+        assert!(
+            !journal_directory.exists(),
+            "the rollback left the journal's staging directory"
+        );
+        assert_eq!(
+            std::fs::read_dir(&directory)
+                .expect("the scratch directory")
+                .count(),
+            0,
+            "the rollback left something in {}",
+            directory.display()
+        );
+        std::fs::remove_dir_all(&directory).expect("the scratch directory is removable");
+    }
 }

@@ -1830,7 +1830,11 @@
             resolvedByTheOwner.token = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
             sopsKeys."nginx/token" = "token";
             systemPlacement."nginx/token" = {
+              format = "yaml";
               mode = "0400";
+              neededForUsers = false;
+              reloadUnits = [ ];
+              restartUnits = [ ];
               sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
               owner = "nginx";
@@ -1886,12 +1890,20 @@
           serviceOwnershipAtUserScope = {
             refused = true;
             ownerlessResolves."nginx/token" = {
+              format = "yaml";
               mode = "0400";
+              neededForUsers = false;
+              reloadUnits = [ ];
+              restartUnits = [ ];
               sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
             };
             ownerlessAtSystemScope."nginx/token" = {
+              format = "yaml";
               mode = "0400";
+              neededForUsers = false;
+              reloadUnits = [ ];
+              restartUnits = [ ];
               sopsFile = "/secrets/safix/shared/%nginx,alice/secrets.yaml";
               key = "token";
             };

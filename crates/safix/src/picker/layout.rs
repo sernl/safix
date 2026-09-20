@@ -3,10 +3,17 @@
 //! The frame is built from the bottom of the terminal upwards, because the
 //! bottom is where the operator's attention and the shell's own prompt already
 //! are: the key help is the last line, the query is above it, the value pane
-//! above that, and the table above that with its first row just under the
-//! header. The rows are drawn in reverse alphabetical order, so the
-//! alphabetically first entry is the bottom row of the table — the row closest
-//! to the query being typed, and the row the cursor starts on.
+//! above that under a full-width rule, and the table above that with its column
+//! titles as its last line. The rows are drawn in reverse alphabetical order,
+//! so the alphabetically first entry is the bottom row of the table — the row
+//! closest to its own titles and to the query being typed, and the row the
+//! cursor starts on.
+//!
+//! # Why the titles are under the rows
+//!
+//! The list reads upwards, so its headings belong at the end a reader arrives
+//! at. Titles above the rows are titles at the far end of a table read from the
+//! bottom: the column a cell belongs to is then eight rows away from the cell.
 //!
 //! # Why the query and the help are positioned absolutely
 //!
@@ -24,34 +31,54 @@
 //! A line longer than the terminal wraps, and a wrapped line is one more line
 //! than the geometry accounted for: everything below it moves, and the bottom
 //! line scrolls off. The table is as wide as its widest cell, so this is the
-//! ordinary case on a narrow terminal rather than an edge one.
+//! ordinary case on a narrow terminal rather than an edge one. The cut counts
+//! visible characters, because a line carries the sequences that emphasise what
+//! a query matched and those occupy no column.
 
 use std::fmt::Write as _;
+use std::ops::Range;
 
 use crate::table;
 
 /// The keys, in the order they are worth knowing.
 pub(crate) const HELP: &str = "Enter choose \u{b7} Esc/^C cancel \u{b7} \u{2191}\u{2193} move \
-                               \u{b7} \u{2190}\u{2192} scroll \u{b7} Tab columns \u{b7} ^P preview";
+                               \u{b7} \u{2190}\u{2192}/Home/End/Del edit \u{b7} \
+                               ^\u{2190}\u{2192} scroll \u{b7} Tab columns \u{b7} ^P preview";
 
-/// The value pane's own title.
+/// The value pane's own title, which the rule under the list carries.
 pub(crate) const PANE_TITLE: &str = "\u{2500}\u{2500} Decrypted Value \u{2500}\u{2500}";
 
 /// How many lines of the value the pane shows.
 pub(crate) const VALUE_LINES: usize = 8;
 
+/// What the rule is drawn out of, after the title it carries.
+const RULE: char = '\u{2500}';
+
 /// Reverse video, which is the cursor.
 const CURSOR: &str = "\u{1b}[7m";
 
-/// Bold, which is the header.
+/// Bold, which is the titles line.
 const HEADER: &str = "\u{1b}[1m";
 
-/// Dim, which is a cell with nothing in it and the pane's title.
+/// Dim, which is a cell with nothing in it and the rule.
 const DIM: &str = "\u{1b}[2m";
+
+/// Red, which is a value past its rotation deadline.
+const RED: &str = "\u{1b}[31m";
 
 /// Back to normal intensity, which ends a [`DIM`] run without ending the
 /// colour or the reverse video around it.
 const UNDIM: &str = "\u{1b}[22m";
+
+/// Bold and underlined, which is a run of characters a query term matched.
+///
+/// Attributes rather than a colour, so a match reads the same on a plain row,
+/// on a tinted one and under the cursor's reverse video.
+const EMPHASIS: &str = "\u{1b}[1;4m";
+
+/// Normal intensity and no underline, which ends an [`EMPHASIS`] run without
+/// ending the colour or the reverse video around it.
+const UNEMPHASIS: &str = "\u{1b}[22;24m";
 
 /// Yellow, which is the entry this user chose last.
 const YELLOW: &str = "\u{1b}[33m";
@@ -71,9 +98,13 @@ const ABSENT: &str = "-";
 /// Which lines of the terminal each piece of the frame occupies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Geometry {
-    /// How many candidate rows there is room for under the header.
+    /// How many candidate rows there is room for above the titles.
     pub rows: usize,
-    /// The line the value pane's title is on, when there is room for a pane.
+    /// The line the column titles are on, which is the list's last.
+    pub titles: usize,
+    /// The line the rule is on, when there is room for a pane.
+    pub rule: Option<usize>,
+    /// The first line of the decrypted value, when there is room for a pane.
     pub pane: Option<usize>,
     /// The line the query is typed on.
     pub query: usize,
@@ -81,34 +112,31 @@ pub(crate) struct Geometry {
     pub help: usize,
 }
 
-impl Geometry {
-    /// The first line of the value, which is under the pane's title.
-    pub(crate) fn value(self) -> Option<usize> {
-        self.pane.map(|pane| pane.saturating_add(1))
-    }
-}
-
 /// How this frame's lines fall on a terminal of this height.
 ///
-/// A terminal too short for the pane gets no pane and a table instead: the
-/// preview is what a short terminal loses, because the list is what the verb is
-/// for. That the value is still decrypted in that state is deliberate — the
-/// pane is one line of a resize away, and a picker whose decryption depended on
-/// the window height would decrypt on a resize.
+/// From the bottom: the help, the query, a blank line, [`VALUE_LINES`] of
+/// value, the rule, a blank line, the titles, and the rows above them.
+///
+/// A terminal too short for that block gets no pane and a longer list instead:
+/// the preview is what a short terminal loses, because the list is what the
+/// verb is for, and the titles stay under the rows because a list without them
+/// does not say which column a cell is in. That the value is still decrypted in
+/// that state is deliberate — the pane is one line of a resize away, and a
+/// picker whose decryption depended on the window height would decrypt on a
+/// resize.
 pub(crate) fn geometry(lines: usize, preview: bool) -> Geometry {
     let help = lines.max(1);
     let query = help.saturating_sub(1).max(1);
-    // Above the query: the pane's title, the value, the header, and at least
-    // one row.
+    // Above the query: the blank line, the value, the rule and the blank line
+    // over it, then the titles and at least one row.
     let room = query.saturating_sub(1);
-    let pane = if preview && room >= VALUE_LINES.saturating_add(3) {
-        Some(query.saturating_sub(VALUE_LINES).saturating_sub(1))
-    } else {
-        None
-    };
-    let table = pane.unwrap_or(query).saturating_sub(1);
+    let pane = (preview && room >= VALUE_LINES.saturating_add(5))
+        .then(|| query.saturating_sub(VALUE_LINES).saturating_sub(1));
+    let titles = pane.map_or_else(|| room.max(1), |pane| pane.saturating_sub(3));
     Geometry {
-        rows: table.saturating_sub(1),
+        rows: titles.saturating_sub(1),
+        titles,
+        rule: pane.map(|pane| pane.saturating_sub(1)),
         pane,
         query,
         help,
@@ -124,6 +152,8 @@ pub(crate) enum Tint {
     LastChosen,
     /// The entry created most recently.
     Newest,
+    /// The entry whose rotation deadline has passed.
+    Due,
 }
 
 impl Tint {
@@ -133,14 +163,28 @@ impl Tint {
             Self::Plain => "",
             Self::LastChosen => YELLOW,
             Self::Newest => CYAN,
+            Self::Due => RED,
         }
     }
+}
+
+/// One cell on its way to the screen.
+///
+/// The text and the matches are carried separately all the way to the write,
+/// because the padding has to count the text alone: a cell whose width included
+/// its emphasis sequences would shift every column to its right.
+pub(crate) struct Cell {
+    /// What the cell says.
+    pub text: String,
+    /// Which of its characters a query term matched, as sorted, disjoint
+    /// character ranges.
+    pub spans: Vec<Range<usize>>,
 }
 
 /// One candidate row on its way to the screen.
 pub(crate) struct Line {
     /// Its cells, already narrowed to the columns being shown.
-    pub cells: Vec<String>,
+    pub cells: Vec<Cell>,
     /// What colour it is.
     pub tint: Tint,
     /// Whether the cursor is on it.
@@ -153,58 +197,57 @@ pub(crate) struct View<'a> {
     pub geometry: Geometry,
     /// How wide the terminal is.
     pub columns: usize,
-    /// The header, narrowed to the columns being shown.
-    pub header: Vec<String>,
+    /// The column titles, narrowed to the columns being shown, with the ones
+    /// the query searches emphasised.
+    pub titles: Vec<Cell>,
     /// The rows being shown, in alphabetical order: the first of them is the
     /// bottom row of the table.
     pub lines: Vec<Line>,
     /// What has been typed.
     pub query: &'a str,
+    /// Where the caret is in the query, counted in characters.
+    pub caret: usize,
 }
 
 /// One frame, less the decrypted value the caller writes into the pane.
 ///
-/// Ends with the cursor at the end of the query, so a terminal drawing its own
-/// block cursor puts it where the typing is going.
+/// Ends with the cursor at the caret, so a terminal drawing its own block
+/// cursor puts it where the next character will go.
 pub(crate) fn frame(view: &View) -> String {
     let mut out = String::from("\u{1b}[H\u{1b}[2J");
 
-    let mut rows = vec![view.header.clone()];
-    // Reversed here rather than by the caller: which end of the table the
-    // alphabetically first row is at is this module's decision, and a caller
-    // that reversed its own rows would be making it twice.
-    rows.extend(view.lines.iter().rev().map(|line| line.cells.clone()));
-    let aligned = table::aligned(&rows);
+    // Every row and the titles, as plain text, which is what the columns are
+    // measured from.
+    let mut measured = vec![texts(&view.titles)];
+    measured.extend(view.lines.iter().map(|line| texts(&line.cells)));
+    let widths = table::widths(&measured);
 
-    let height = view.lines.len().saturating_add(1);
-    let bottom = view.geometry.pane.unwrap_or(view.geometry.query);
-    let top = bottom.saturating_sub(height);
-    for _ in 0..top.saturating_sub(1) {
+    let first = view.geometry.titles.saturating_sub(view.lines.len());
+    for _ in 0..first.saturating_sub(1) {
         out.push('\n');
     }
 
-    for (offset, line) in aligned.lines().enumerate() {
-        let cut = cut(line, view.columns);
-        match offset.checked_sub(1) {
-            // The header, above the rows.
-            None => {
-                let _ = writeln!(out, "{HEADER}{cut}{RESET}");
-            }
-            // The rows, drawn from the alphabetically last down to the first,
-            // which is why the line at this offset is counted from the end.
-            Some(index) => {
-                let line = view
-                    .lines
-                    .len()
-                    .checked_sub(index.saturating_add(1))
-                    .and_then(|from_start| view.lines.get(from_start));
-                let _ = writeln!(out, "{}", painted(line, &cut));
-            }
-        }
+    // Reversed here rather than by the caller: which end of the table the
+    // alphabetically first row is at is this module's decision, and a caller
+    // that reversed its own rows would be making it twice.
+    for line in view.lines.iter().rev() {
+        let text = cut(&row(&line.cells, &widths, ""), view.columns);
+        let _ = writeln!(out, "{}", painted(line, &text));
     }
+    // The titles put the bold back after each emphasised run, because ending an
+    // underline ends the bold with it.
+    let _ = writeln!(
+        out,
+        "{HEADER}{}{RESET}",
+        cut(&row(&view.titles, &widths, HEADER), view.columns)
+    );
 
-    if view.geometry.pane.is_some() {
-        let _ = writeln!(out, "{DIM}{}{RESET}", cut(PANE_TITLE, view.columns));
+    if let Some(rule) = view.geometry.rule {
+        let _ = write!(
+            out,
+            "\u{1b}[{rule};1H{DIM}{}{RESET}",
+            cut(&ruled(view.columns), view.columns)
+        );
     }
 
     let query = cut(&format!("> {}", view.query), view.columns);
@@ -215,28 +258,92 @@ pub(crate) fn frame(view: &View) -> String {
         view.geometry.help,
         cut(HELP, view.columns)
     );
-    out.push_str(&cursor(view.geometry, view.query));
+    out.push_str(&cursor(view.geometry, view.caret));
     out
 }
 
-/// The sequence that leaves the terminal's cursor after the query.
+/// The sequence that leaves the terminal's cursor on the caret.
 ///
 /// Written again after the value pane is filled in, because filling it in moves
 /// the cursor: a block cursor resting in the middle of a decrypted value would
 /// read as part of it.
-pub(crate) fn cursor(geometry: Geometry, query: &str) -> String {
-    format!(
-        "\u{1b}[{};{}H",
-        geometry.query,
-        query.chars().count().saturating_add(3)
-    )
+pub(crate) fn cursor(geometry: Geometry, caret: usize) -> String {
+    format!("\u{1b}[{};{}H", geometry.query, caret.saturating_add(3))
+}
+
+/// The rule that separates the list from the value, carrying the pane's title.
+fn ruled(columns: usize) -> String {
+    let mut rule = String::from(PANE_TITLE);
+    for _ in PANE_TITLE.chars().count()..columns {
+        rule.push(RULE);
+    }
+    rule
+}
+
+/// Each cell's text, which is what a column's width is measured from.
+fn texts(cells: &[Cell]) -> Vec<String> {
+    cells.iter().map(|cell| cell.text.clone()).collect()
+}
+
+/// One row's cells, padded to these widths, with every match emphasised.
+///
+/// The padding is [`table::aligned`]'s: the widest cell of the column plus
+/// [`table::GAP`], and the row's last cell is not padded at all. Counted in
+/// characters of the text, so a cell carrying emphasis is exactly as wide as
+/// the same cell without it.
+fn row(cells: &[Cell], widths: &[usize], resume: &str) -> String {
+    let mut out = String::new();
+    let last = cells.len().saturating_sub(1);
+    for (index, cell) in cells.iter().enumerate() {
+        out.push_str(&emphasised(cell, resume));
+        if index == last {
+            continue;
+        }
+        let width = widths.get(index).copied().unwrap_or(0);
+        let padding = width
+            .saturating_sub(cell.text.chars().count())
+            .saturating_add(table::GAP);
+        for _ in 0..padding {
+            out.push(' ');
+        }
+    }
+    out
+}
+
+/// One cell's text with every matched run bold and underlined.
+///
+/// `resume` is written after each run, because ending an underline and a bold
+/// together ends whatever bold the line itself opened; the titles line puts its
+/// own back and a row has none to put back.
+fn emphasised(cell: &Cell, resume: &str) -> String {
+    if cell.spans.is_empty() {
+        return cell.text.clone();
+    }
+    let mut out = String::new();
+    let mut at = 0;
+    for span in &cell.spans {
+        let start = span.start.max(at);
+        if span.end <= start {
+            continue;
+        }
+        out.extend(cell.text.chars().skip(at).take(start.saturating_sub(at)));
+        out.push_str(EMPHASIS);
+        out.extend(
+            cell.text
+                .chars()
+                .skip(start)
+                .take(span.end.saturating_sub(start)),
+        );
+        out.push_str(UNEMPHASIS);
+        out.push_str(resume);
+        at = span.end;
+    }
+    out.extend(cell.text.chars().skip(at));
+    out
 }
 
 /// One row's line, with its tint, its cursor and its empty cells.
-fn painted(line: Option<&Line>, text: &str) -> String {
-    let Some(line) = line else {
-        return format!("{text}{RESET}");
-    };
+fn painted(line: &Line, text: &str) -> String {
     let cursor = if line.cursor { CURSOR } else { "" };
     format!("{cursor}{}{}{RESET}", line.tint.sequence(), dimmed(text))
 }
@@ -244,7 +351,9 @@ fn painted(line: Option<&Line>, text: &str) -> String {
 /// The same line with every empty cell dimmed.
 ///
 /// Dimmed and then undimmed rather than reset, so a row that is yellow or under
-/// the cursor stays yellow and under the cursor across the cell.
+/// the cursor stays yellow and under the cursor across the cell. A cell a term
+/// matched carries its emphasis sequences and is therefore not the bare `-`
+/// this dims, which is right: a match is worth more than the absence it is in.
 fn dimmed(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -267,21 +376,58 @@ fn dimmed(text: &str) -> String {
     out
 }
 
-/// The first `columns` characters of a line.
+/// The first `columns` visible characters of a line.
+///
+/// Escape sequences pass through uncounted, because they occupy no column. A
+/// line that is cut ends with every attribute off, which is what closes an
+/// emphasised run the cut fell inside: every sequence this module opens is
+/// closed by a plain [`RESET`] as well as by its own ending.
 fn cut(text: &str, columns: usize) -> String {
-    text.chars().take(columns).collect()
+    let mut out = String::new();
+    let mut visible = 0_usize;
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' {
+            out.push(character);
+            for inside in characters.by_ref() {
+                out.push(inside);
+                if inside.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        if visible >= columns {
+            out.push_str(RESET);
+            return out;
+        }
+        out.push(character);
+        visible = visible.saturating_add(1);
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CURSOR, CYAN, DIM, Geometry, HEADER, HELP, Line, PANE_TITLE, RESET, Tint, View, frame,
-        geometry,
+        CURSOR, CYAN, Cell, DIM, EMPHASIS, Geometry, HEADER, HELP, Line, PANE_TITLE, RESET, Range,
+        Tint, UNEMPHASIS, VALUE_LINES, View, frame, geometry,
     };
 
-    /// A row of cells.
-    fn cells(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| (*value).to_owned()).collect()
+    /// One span, as the list a cell carries.
+    fn only(span: Range<usize>) -> Vec<Range<usize>> {
+        std::iter::once(span).collect()
+    }
+
+    /// A row of cells nothing matched.
+    fn cells(values: &[&str]) -> Vec<Cell> {
+        values
+            .iter()
+            .map(|value| Cell {
+                text: (*value).to_owned(),
+                spans: Vec::new(),
+            })
+            .collect()
     }
 
     /// One candidate row.
@@ -298,18 +444,19 @@ mod tests {
         View {
             geometry: geometry(24, preview),
             columns: 80,
-            header: cells(&["NAME", "ORIGIN"]),
+            titles: cells(&["NAME", "ORIGIN"]),
             lines,
             query,
+            caret: query.chars().count(),
         }
     }
 
     /// The frame's lines, undecorated.
     ///
     /// A sequence that moves the cursor starts a line of its own, because that
-    /// is what it does on the terminal: the query and the help are written at
-    /// absolute line numbers rather than after a newline, so a reader that
-    /// dropped the sequence would read them as one line.
+    /// is what it does on the terminal: the rule, the query and the help are
+    /// written at absolute line numbers rather than after a newline, so a
+    /// reader that dropped the sequence would read them as one line.
     fn drawn(frame: &str) -> Vec<String> {
         let mut plain = String::new();
         let mut rest = frame;
@@ -331,28 +478,100 @@ mod tests {
         plain.lines().map(str::to_owned).collect()
     }
 
+    /// Every line of a drawn frame that carries something.
+    fn written(frame: &str) -> Vec<String> {
+        drawn(frame)
+            .into_iter()
+            .filter(|line| !line.trim().is_empty())
+            .collect()
+    }
+
+    /// The frame reads in one direction: rows, their titles, the rule, the
+    /// value, the query, the help — each piece where the one below it leaves
+    /// room for it.
     #[test]
-    fn the_help_is_the_last_line_and_the_query_is_the_one_above_it() {
+    fn each_piece_of_the_frame_sits_under_the_one_it_titles() {
         let geometry = geometry(24, true);
-        assert_eq!(geometry.help, 24);
-        assert_eq!(geometry.query, 23);
-        assert_eq!(geometry.pane, Some(14));
-        assert_eq!(geometry.value(), Some(15));
-        let rendered = frame(&view(vec![line("api", Tint::Plain, true)], "", true));
-        assert!(
-            rendered.contains(&format!("\u{1b}[24;1H{DIM}{HELP}")),
-            "the help was not written at the last line\n{rendered:?}"
+        assert_eq!(geometry.help, 24, "the help is not the last line");
+        assert_eq!(
+            geometry.query,
+            geometry.help.saturating_sub(1),
+            "the query is not the line above the help"
         );
-        assert!(
-            rendered.contains("\u{1b}[23;1H> "),
-            "the query was not written above it\n{rendered:?}"
+        let pane = geometry.pane.expect("no pane on a terminal with room");
+        let rule = geometry.rule.expect("a pane was drawn with no rule");
+        assert_eq!(
+            pane.saturating_add(VALUE_LINES),
+            geometry.query.saturating_sub(1),
+            "the blank line between the value and the query is missing"
+        );
+        assert_eq!(
+            rule.saturating_add(1),
+            pane,
+            "the value does not follow the rule"
+        );
+        assert_eq!(
+            geometry.titles.saturating_add(2),
+            rule,
+            "the rule is not one blank line under the titles"
+        );
+        assert_eq!(
+            geometry.rows,
+            geometry.titles.saturating_sub(1),
+            "the rows do not fill everything above the titles"
         );
     }
 
-    /// The table is drawn bottom-up: the header above the rows, and the
-    /// alphabetically first row at the bottom, against the query.
+    /// A terminal too short for the pane keeps the titles and drops the pane,
+    /// the rule and both blank lines together.
     #[test]
-    fn the_bottom_row_is_the_alphabetically_first_entry() {
+    fn a_short_terminal_loses_the_pane_and_keeps_the_titles() {
+        let short = geometry(6, true);
+        assert_eq!(short.pane, None);
+        assert_eq!(short.rule, None);
+        assert_eq!(short.help, 6);
+        assert_eq!(short.query, 5);
+        assert_eq!(
+            short.titles,
+            short.query.saturating_sub(1),
+            "the titles are not directly above the query"
+        );
+        assert!(short.rows >= 1, "no room was left for a candidate");
+        assert_eq!(
+            geometry(1, true),
+            Geometry {
+                rows: 0,
+                titles: 1,
+                rule: None,
+                pane: None,
+                query: 1,
+                help: 1
+            }
+        );
+        let rendered = frame(&View {
+            geometry: short,
+            columns: 80,
+            titles: cells(&["NAME", "ORIGIN"]),
+            lines: vec![line("api", Tint::Plain, true)],
+            query: "",
+            caret: 0,
+        });
+        assert!(
+            !rendered.contains(PANE_TITLE),
+            "a short terminal drew the rule anyway\n{rendered:?}"
+        );
+        assert!(
+            written(&rendered)
+                .iter()
+                .any(|drawn| drawn.starts_with("NAME")),
+            "a short terminal dropped the titles\n{rendered:?}"
+        );
+    }
+
+    /// The table is drawn bottom-up: the alphabetically first row at the
+    /// bottom, and its titles under it.
+    #[test]
+    fn the_bottom_row_is_the_alphabetically_first_entry_and_the_titles_are_under_it() {
         let rendered = frame(&view(
             vec![
                 line("aliased-secret", Tint::Plain, true),
@@ -362,10 +581,7 @@ mod tests {
             "",
             true,
         ));
-        let lines: Vec<String> = drawn(&rendered)
-            .into_iter()
-            .filter(|line| !line.trim().is_empty())
-            .collect();
+        let lines = written(&rendered);
         let names: Vec<&str> = lines
             .iter()
             .filter_map(|line| line.split_whitespace().next())
@@ -373,34 +589,40 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["NAME", "mail-password", "api-token", "aliased-secret"],
-            "the table was not drawn bottom-up\n{lines:?}"
+            vec!["mail-password", "api-token", "aliased-secret", "NAME"],
+            "the frame is not the rows in reverse order with their titles under them\n{lines:?}"
         );
-        // And the pane is under the bottom row rather than over the header.
         assert!(
             lines
                 .get(4)
                 .is_some_and(|line| line.starts_with(PANE_TITLE)),
-            "the value pane is not under the table\n{lines:?}"
+            "the rule is not under the titles\n{lines:?}"
         );
     }
 
-    /// The pane's title sits between the rows and the query, and only when the
-    /// preview is on.
+    /// The rule is drawn only when the pane is, and it spans the terminal.
     #[test]
-    fn the_pane_is_drawn_only_when_the_preview_is_on() {
+    fn the_rule_is_as_wide_as_the_terminal_and_only_drawn_with_the_pane() {
         let with = frame(&view(vec![line("api", Tint::Plain, true)], "", true));
-        assert!(with.contains(PANE_TITLE));
+        let rule = written(&with)
+            .into_iter()
+            .find(|line| line.starts_with(PANE_TITLE))
+            .expect("no rule was drawn");
+        assert_eq!(
+            rule.chars().count(),
+            80,
+            "the rule does not span the terminal: {rule:?}"
+        );
         let without = frame(&view(vec![line("api", Tint::Plain, true)], "", false));
         assert!(
             !without.contains(PANE_TITLE),
-            "a suppressed preview drew its pane anyway"
+            "a suppressed preview drew its rule anyway"
         );
         assert_eq!(geometry(24, false).pane, None);
     }
 
     #[test]
-    fn the_header_is_bold_and_every_drawn_line_ends_reset() {
+    fn the_titles_are_bold_and_every_drawn_line_ends_reset() {
         let rendered = frame(&view(vec![line("api", Tint::Plain, false)], "", true));
         assert!(rendered.contains(&format!("{HEADER}NAME")));
         for line in rendered.lines() {
@@ -443,13 +665,14 @@ mod tests {
         let rendered = frame(&View {
             geometry: geometry(24, true),
             columns: 80,
-            header: cells(&["NAME", "SHARED"]),
+            titles: cells(&["NAME", "SHARED"]),
             lines: vec![Line {
                 cells: cells(&["api-token", "-"]),
                 tint: Tint::LastChosen,
                 cursor: false,
             }],
             query: "",
+            caret: 0,
         });
         assert!(
             rendered.contains(&format!("{DIM}-\u{1b}[22m")),
@@ -457,20 +680,99 @@ mod tests {
         );
     }
 
-    /// A line longer than the terminal is cut rather than wrapped, because a
-    /// wrapped line scrolls the bottom line off the screen.
+    /// Emphasis is inside the cell, does not disturb the column the next cell
+    /// starts at, and composes with the cursor and the tint.
     #[test]
-    fn a_line_wider_than_the_terminal_is_cut() {
+    fn a_match_is_emphasised_inside_its_own_cell() {
+        let rendered = frame(&View {
+            geometry: geometry(24, true),
+            columns: 80,
+            titles: cells(&["NAME", "ORIGIN"]),
+            lines: vec![Line {
+                cells: vec![
+                    Cell {
+                        text: "api-token".to_owned(),
+                        spans: only(4..7),
+                    },
+                    Cell {
+                        text: "private".to_owned(),
+                        spans: Vec::new(),
+                    },
+                ],
+                tint: Tint::LastChosen,
+                cursor: true,
+            }],
+            query: "tok",
+            caret: 3,
+        });
+        assert!(
+            rendered.contains(&format!("api-{EMPHASIS}tok{UNEMPHASIS}en")),
+            "the matched characters are not emphasised\n{rendered:?}"
+        );
+        assert!(
+            rendered.contains(&format!("{CURSOR}\u{1b}[33mapi-")),
+            "the emphasis displaced the cursor or the tint\n{rendered:?}"
+        );
+        // The padding counts the text alone, so the second cell starts where it
+        // would with nothing emphasised: the widest of `api-token` and `NAME`
+        // plus the table's gap.
+        let row = written(&rendered)
+            .into_iter()
+            .find(|line| line.starts_with("api-token"))
+            .expect("no row was drawn");
+        assert_eq!(
+            row.find("private"),
+            Some("api-token".len() + super::table::GAP),
+            "emphasis moved the next column: {row:?}"
+        );
+    }
+
+    /// A searched column's title is emphasised, and the rest of the titles stay
+    /// bold behind it.
+    #[test]
+    fn a_searched_title_is_emphasised_without_unbolding_the_rest() {
+        let rendered = frame(&View {
+            geometry: geometry(24, true),
+            columns: 80,
+            titles: vec![
+                Cell {
+                    text: "NAME".to_owned(),
+                    spans: only(0..4),
+                },
+                Cell {
+                    text: "ORIGIN".to_owned(),
+                    spans: Vec::new(),
+                },
+            ],
+            lines: vec![line("api", Tint::Plain, true)],
+            query: "name:api",
+            caret: 8,
+        });
+        assert!(
+            rendered.contains(&format!("{HEADER}{EMPHASIS}NAME{UNEMPHASIS}{HEADER}")),
+            "the searched title is not emphasised over the bold\n{rendered:?}"
+        );
+    }
+
+    /// A line longer than the terminal is cut rather than wrapped, because a
+    /// wrapped line scrolls the bottom line off the screen. The cut counts
+    /// visible characters and closes what the line opened.
+    #[test]
+    fn a_line_wider_than_the_terminal_is_cut_by_visible_width_and_closed() {
         let rendered = frame(&View {
             geometry: geometry(24, true),
             columns: 20,
-            header: cells(&["NAME"]),
+            titles: cells(&["NAME"]),
             lines: vec![Line {
-                cells: cells(&["a-name-far-longer-than-twenty-columns"]),
+                cells: vec![Cell {
+                    text: "a-name-far-longer-than-twenty-columns".to_owned(),
+                    spans: only(2..30),
+                }],
                 tint: Tint::Plain,
                 cursor: true,
             }],
             query: "",
+            caret: 0,
         });
         for line in drawn(&rendered) {
             assert!(
@@ -478,35 +780,56 @@ mod tests {
                 "a line was left wider than the terminal: {line:?}"
             );
         }
+        let row = rendered
+            .lines()
+            .find(|line| line.contains("name-far"))
+            .expect("no row was drawn");
+        assert!(
+            row.contains(EMPHASIS),
+            "the cut dropped the emphasis it was meant to open: {row:?}"
+        );
+        assert!(
+            !row.contains(UNEMPHASIS),
+            "this line is meant to be cut inside its emphasised run: {row:?}"
+        );
+        assert!(
+            row.ends_with(RESET),
+            "a cut line left its emphasis open: {row:?}"
+        );
     }
 
-    /// The query line carries what was typed, and the cursor lands after it.
+    /// The query line carries what was typed, and the terminal's cursor lands
+    /// on the caret rather than at the end.
     #[test]
-    fn the_query_is_drawn_with_the_cursor_after_it() {
-        let rendered = frame(&view(vec![line("api", Tint::Plain, true)], "mail", true));
+    fn the_cursor_lands_on_the_caret_inside_the_query() {
+        let rendered = frame(&View {
+            geometry: geometry(24, true),
+            columns: 80,
+            titles: cells(&["NAME"]),
+            lines: vec![line("api", Tint::Plain, true)],
+            query: "mail",
+            caret: 2,
+        });
         assert!(rendered.contains("\u{1b}[23;1H> mail"));
         assert!(
-            rendered.ends_with("\u{1b}[23;7H"),
-            "the cursor was not left after the query\n{rendered:?}"
+            rendered.ends_with("\u{1b}[23;5H"),
+            "the cursor was not left on the caret\n{rendered:?}"
         );
     }
 
-    /// A terminal too short for the pane draws the list instead of refusing.
+    /// The help names every key that does something.
     #[test]
-    fn a_short_terminal_loses_the_pane_and_keeps_a_row() {
-        let short = geometry(6, true);
-        assert_eq!(short.pane, None);
-        assert_eq!(short.query, 5);
-        assert_eq!(short.help, 6);
-        assert!(short.rows >= 1, "no room was left for a candidate");
-        assert_eq!(
-            geometry(1, true),
-            Geometry {
-                rows: 0,
-                pane: None,
-                query: 1,
-                help: 1
-            }
-        );
+    fn the_help_names_the_editing_keys_and_the_column_scroll() {
+        for key in [
+            "Enter choose",
+            "Esc/^C cancel",
+            "\u{2191}\u{2193} move",
+            "\u{2190}\u{2192}/Home/End/Del edit",
+            "^\u{2190}\u{2192} scroll",
+            "Tab columns",
+            "^P preview",
+        ] {
+            assert!(HELP.contains(key), "the help does not name {key}: {HELP:?}");
+        }
     }
 }
