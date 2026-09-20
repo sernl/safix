@@ -337,8 +337,8 @@ let
 
           It exists because a bridge to clan compares a generator's `share`
           against clan's own, and it has a second effect worth having on its own:
-          a generator's outputs then always land in one audience, so one file, so
-          a multi-output write is one rename.
+          a generator's outputs then agree on shared custody. Ordinary keyed
+          YAML can share a document; other formats use separate files.
         '';
       };
       validation = lib.mkOption {
@@ -374,6 +374,33 @@ let
 
   entry = lib.types.submodule {
     options = {
+      format = lib.mkOption {
+        type = lib.types.enum [
+          "yaml"
+          "json"
+          "dotenv"
+          "ini"
+          "binary"
+          "age"
+        ];
+        default = "yaml";
+        description = "Ciphertext format. Raw age is handled by safix, not SOPS. Binary and age always store a whole document.";
+      };
+      neededForUsers = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Install before user creation at system scope.";
+      };
+      restartUnits = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Units to restart when the installed value changes.";
+      };
+      reloadUnits = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Units to reload when the installed value changes.";
+      };
       mode = lib.mkOption {
         type = lib.types.str;
         default = "0400";
@@ -449,7 +476,7 @@ let
       sopsKey = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Key to read inside the encrypted file. null uses the entry's own name.";
+        description = "Key to read inside the encrypted file. null uses the entry's own name for structured formats; an empty string selects the whole document. Binary and age require an empty key and derive it automatically.";
       };
       generator = lib.mkOption {
         type = lib.types.nullOr generator;

@@ -1,7 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::stanza_unreadable
-
-  × a sops age stanza names no recipient

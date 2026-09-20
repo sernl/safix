@@ -87,38 +87,33 @@ impl Sops {
     /// and refuses is not an error here: its status comes back in
     /// [`Decrypted::status`] for the caller to exit with.
     pub fn decrypt_key(&self, file: &Path, key: &str) -> Result<Decrypted> {
-        let index = serde_json::to_string(&[key]).map_err(|cause| Error::SopsKeyIndex {
+        let source = crate::ciphertext::Source {
+            path: file.to_path_buf(),
+            format: crate::ciphertext::Format::from_path(file)?,
             key: key.to_owned(),
-            cause: cause.to_string(),
-        })?;
-
-        let mut child = Command::new(&self.program)
-            .arg("decrypt")
-            .arg("--extract")
-            .arg(&index)
-            .arg(file)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|cause| Error::SopsUnavailable {
-                program: self.program.display().to_string(),
-                cause,
-            })?;
-
-        let value = {
-            let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
-            Secret::read_from(&mut stdout)?
         };
-
-        let status = child.wait().map_err(|cause| Error::SopsUnavailable {
-            program: self.program.display().to_string(),
-            cause,
-        })?;
-
+        let identities = crate::ciphertext::Identities::from_environment();
+        if source.format != crate::ciphertext::Format::Yaml
+            || key.is_empty()
+            || !identities.age_ssh_key_paths.is_empty()
+        {
+            return Ok(Decrypted {
+                value: crate::ciphertext::read(&source, &identities)?,
+                status: 0,
+            });
+        }
+        let decrypted = self.decrypt_document_json(file, None)?;
+        if decrypted.status != 0 {
+            return Ok(decrypted);
+        }
+        let mut buffer = zeroize::Zeroizing::new(Vec::new());
+        decrypted
+            .value
+            .write_to(&mut *buffer)
+            .map_err(|cause| Error::SecretRead { cause })?;
         Ok(Decrypted {
-            value,
-            status: status.code().unwrap_or(1),
+            value: crate::ciphertext::extract_json(&buffer, &source)?,
+            status: 0,
         })
     }
 
@@ -144,7 +139,7 @@ impl Sops {
     /// and refuses comes back in [`Decrypted::status`], as it does for
     /// [`Sops::decrypt_key`].
     pub fn decrypt_document_json(&self, file: &Path, identity: Option<&Path>) -> Result<Decrypted> {
-        let mut command = Command::new(&self.program);
+        let mut command = self.command();
         command
             .arg("decrypt")
             .arg("--output-type")
@@ -172,43 +167,14 @@ impl Sops {
         })
     }
 
-    /// Decrypt one key of one file into a pipe, without waiting for it.
-    ///
-    /// What a generator's dependency travels down: the value goes from sops
-    /// straight into the descriptor the script reads, so it is never a file and
-    /// never this process's to hold. The caller owns the child and is what reaps
-    /// it — see [`crate::inputs`] for the ordering that keeps a generator which
-    /// ignores its input from blocking the sops feeding it.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::SopsUnavailable`] when the binary cannot be run.
-    pub fn decrypt_key_streaming(&self, file: &Path, key: &str) -> Result<std::process::Child> {
-        let index = serde_json::to_string(&[key]).map_err(|cause| Error::SopsKeyIndex {
-            key: key.to_owned(),
-            cause: cause.to_string(),
-        })?;
-
-        Command::new(&self.program)
-            .arg("decrypt")
-            .arg("--extract")
-            .arg(&index)
-            .arg(file)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|cause| self.unavailable(cause))
-    }
-
     /// Create a document at `destination` holding one empty key, encrypted as
     /// the creation rule for `relative` says.
     ///
     /// The bytes are produced somewhere else and `--filename-override` is what
     /// applies the rule for the path the file will occupy, so a failure — most
     /// often a rule that has not been regenerated — leaves no half-made file
-    /// beside the others. The document holds the target key with an empty value
-    /// and no secret at all; the value arrives through [`Sops::set_key`].
+    /// beside the others. The document holds a missing-value placeholder;
+    /// format-aware candidate writing replaces it with the secret.
     ///
     /// `config` names a rendering to read creation rules from in place of the
     /// upward search from `root` — design V10's disposable rules for a
@@ -249,7 +215,7 @@ impl Sops {
             cause,
         })?;
 
-        let mut command = Command::new(&self.program);
+        let mut command = self.command();
         if let Some(config) = config {
             command.arg("--config").arg(config);
         }
@@ -269,13 +235,21 @@ impl Sops {
             .spawn()
             .map_err(|cause| self.unavailable(cause))?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&document);
-        }
-
+        let written = child
+            .stdin
+            .take()
+            .ok_or(Error::SopsPipeMissing)
+            .and_then(|mut stdin| {
+                stdin
+                    .write_all(&document)
+                    .map_err(|cause| Error::SecretRead { cause })
+            });
         let finished = child
             .wait_with_output()
             .map_err(|cause| self.unavailable(cause))?;
+        if finished.status.success() {
+            written?;
+        }
         if finished.status.success() {
             return Ok(());
         }
@@ -293,52 +267,6 @@ impl Sops {
                 .unwrap_or(&complaint)
                 .to_owned(),
         })
-    }
-
-    /// Write one value into one key of one document.
-    ///
-    /// The value reaches sops down a pipe and the key name reaches it in argv,
-    /// which is the split the whole design rests on: a key name is public and a
-    /// process listing may hold it, a value is not and must not.
-    ///
-    /// `--idempotent` is what makes re-setting an unchanged value a no-op that
-    /// does not churn the message authentication code or `lastmodified`; without
-    /// it a re-run one second later stages a diff that says nothing.
-    ///
-    /// The status comes back rather than being turned into a refusal, because
-    /// sops's standard error is inherited and it has already said why.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::SopsUnavailable`] when the binary cannot be run or waited on.
-    pub fn set_key(&self, file: &Path, key: &str, value: &Secret) -> Result<i32> {
-        let index = serde_json::to_string(&[key]).map_err(|cause| Error::SopsKeyIndex {
-            key: key.to_owned(),
-            cause: cause.to_string(),
-        })?;
-
-        let mut child = Command::new(&self.program)
-            .arg("set")
-            .arg("--value-stdin")
-            .arg("--idempotent")
-            .arg("--input-type")
-            .arg("yaml")
-            .arg("--output-type")
-            .arg("yaml")
-            .arg(file)
-            .arg(&index)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|cause| self.unavailable(cause))?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = value.write_json_to(&mut stdin);
-        }
-
-        let status = child.wait().map_err(|cause| self.unavailable(cause))?;
-        Ok(status.code().unwrap_or(1))
     }
 
     /// The command that re-wraps one file's data key to the recipients its
@@ -360,23 +288,48 @@ impl Sops {
     /// document, whose vault working tree carries no committed policy to
     /// discover — design V10's disposable rendering names the scratch rules
     /// there instead of relying on that upward search.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Refuses unrecognized ciphertext extensions before starting SOPS.
     pub fn update_keys_command(
         &self,
         root: &Path,
         relative: &str,
         assume_yes: bool,
         config: Option<&Path>,
-    ) -> Command {
-        let mut command = Command::new(&self.program);
+    ) -> Result<Command> {
+        let mut command = self.command();
         if let Some(config) = config {
             command.arg("--config").arg(config);
         }
-        command.arg("updatekeys");
+        command
+            .arg("updatekeys")
+            .arg("--input-type")
+            .arg(crate::ciphertext::Format::from_path(Path::new(relative))?.as_str());
         if assume_yes {
             command.arg("--yes");
         }
         command.arg(relative).current_dir(root);
+        Ok(command)
+    }
+
+    /// Construct every SOPS child with the same managed GPG home.
+    pub(crate) fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        crate::identity::configure_pinentry(&mut command);
+        if std::env::var_os("SOPS_GPG_EXEC").is_none_or(|value| value.is_empty())
+            && let Some(program) = std::env::var_os("SAFIX_GPG").filter(|value| !value.is_empty())
+        {
+            command.env("SOPS_GPG_EXEC", program);
+        }
+        let identities = crate::ciphertext::Identities::from_environment();
+        if let Some(home) = identities.gnupg_home {
+            command.env("GNUPGHOME", home);
+        }
+        if let Some(path) = identities.age_key_file {
+            command.env("SOPS_AGE_KEY_FILE", path);
+        }
         command
     }
 

@@ -147,6 +147,9 @@ impl Generator {
 pub struct Placement {
     /// The repository-relative path of the file holding the value.
     pub file: String,
+    /// The explicitly declared ciphertext format.
+    #[serde(default)]
+    pub format: crate::ciphertext::Format,
     /// The key the value is read under inside that file.
     pub key: String,
     /// Which of the three declaration sources placed it.
@@ -493,12 +496,18 @@ impl UserPlan {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Audience {
+    /// Whether recipient policy covers the directory's shared keyed YAML files.
+    #[serde(default)]
+    pub legacy: bool,
     /// The declared users the file serves, in name order.
     pub audience: Vec<String>,
     /// The directory the file sits in, which is what a creation rule covers.
     pub dir: String,
     /// Every age public key the file's data key should be wrapped for.
     pub recipients: Vec<String>,
+    /// The container whose recipient metadata is inspected.
+    #[serde(default)]
+    pub format: crate::ciphertext::Format,
 }
 
 /// `file -> audience`, over every file a declaration places a secret in.

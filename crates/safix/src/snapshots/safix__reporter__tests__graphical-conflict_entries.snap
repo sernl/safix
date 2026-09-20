@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::conflict_entries
-
-  × secrets/safix/users/alice/secrets.yaml has unmerged conflict entries.
-  │ Resolve them before setting a secret.

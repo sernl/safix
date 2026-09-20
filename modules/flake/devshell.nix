@@ -8,6 +8,7 @@
           pkgs.age
           pkgs.jq
           pkgs.sops
+          pkgs.gnupg
 
           # The installer's identity assembly converts each configured ssh key
           # through this, as a subprocess behind `SAFIX_SSH_TO_AGE`, so a local

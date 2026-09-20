@@ -1,5 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_plain(&refusal)
----
-safix: the validation for 'unvalidated' rejected the candidate value for 'unvalidated'; nothing was written

@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::identity_key_file_unreadable
-
-  × could not read the age key file at /var/lib/safix/keys.txt
-  ╰─▶ permission denied

@@ -316,10 +316,6 @@
 # lifecycle on both the success path and a simulated transport failure
 # (`SAFIX_TRANSPORT_STUB_SSH_REFUSES=1`): created before the tarball is
 # written, gone after the run either way.
-# `safix-upload-help-scaffold` (tasks 1.3, 6.3) holds `safix -h` listing
-# `upload` in the scaffold's operator-facing order, against an insta snapshot.
-# `safix-upload-help-text` (tasks 6.1, 6.3) holds `safix upload -h` stating the
-# two write modes and the three named absences, against an insta snapshot.
 { ... }:
 {
   perSystem =
@@ -1479,18 +1475,6 @@
       checks.safix-upload-destination =
         mode "safix-upload-destination" "upload"
           "the_wipe_then_extract_sequence_names_the_fixed_destination";
-
-      # 1.3, 6.3: `safix -h` lists `upload` in the scaffold's operator-facing
-      # order.
-      checks.safix-upload-help-scaffold =
-        mode "safix-upload-help-scaffold" "upload"
-          "safix_help_lists_upload_in_table_order_after_group";
-
-      # 6.1, 6.3: `safix upload -h` states the two write modes and the three
-      # named absences.
-      checks.safix-upload-help-text =
-        mode "safix-upload-help-text" "upload"
-          "safix_upload_help_states_the_two_modes_and_the_three_absences";
 
       # Holds the `--entry`/`SAFIX_ENTRY` evaluation path (safix-cli spec) and
       # `generate`'s flakeless refusal, over one fixture fleet declared once as

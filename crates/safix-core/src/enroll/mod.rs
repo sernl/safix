@@ -65,6 +65,8 @@ pub struct Options {
     /// Whether a disk-backed filesystem is acceptable for the proof's identity
     /// source.
     pub allow_disk_staging: bool,
+    /// Authorize replacing an opaque raw-age roster with the declared recipients.
+    pub trust_declared_recipients: bool,
     /// How long the generator may say nothing before the run gives up.
     pub idle_limit: Duration,
 }
@@ -79,6 +81,7 @@ impl Default for Options {
             store_pin: true,
             mirror: custody::Wish::default(),
             allow_disk_staging: false,
+            trust_declared_recipients: false,
             idle_limit: pty::DEFAULT_IDLE_LIMIT,
         }
     }
@@ -155,6 +158,13 @@ pub fn run(
     workspace.require_user(user)?;
     let scope = delegation::over_person(workspace, user)?;
     scope.announce(progress);
+    let before = recipients_before(workspace, options.trust_declared_recipients)?;
+    if options.trust_declared_recipients {
+        note(
+            progress,
+            "Raw-age custody is checked against declarations, not an inspectable ciphertext roster.",
+        );
+    }
 
     let ykman = card::Ykman::from_environment();
     let mut ceremony = Ceremony {
@@ -169,7 +179,7 @@ pub fn run(
     let access = ceremony.provision(&ykman, operator)?;
     let captured = ceremony.generate(&access.pin)?;
     ceremony.append_identity(&captured)?;
-    let stored = ceremony.wire(&captured)?;
+    let stored = ceremony.wire(&captured, &before)?;
 
     // Every read past the edit goes through a workspace of its own. The one built
     // above cached the placements, audiences and governed set from before the
@@ -310,7 +320,11 @@ impl Ceremony<'_> {
     /// Edit the declaration, regenerate the policy, re-wrap, commit the lot.
     ///
     /// Returns the name the credentials will be set under, when one was declared.
-    fn wire(&mut self, captured: &identity::Captured) -> Result<Option<String>> {
+    fn wire(
+        &mut self,
+        captured: &identity::Captured,
+        before: &[(String, Vec<String>)],
+    ) -> Result<Option<String>> {
         let relative = crate::adduser::scaffold_path(self.user);
 
         // The mid-operation check runs against both roots unconditionally,
@@ -359,12 +373,6 @@ impl Ceremony<'_> {
             None
         };
 
-        // Recipients present before the re-wrap, per governed file, so the claim
-        // that nothing lost the ability to open what it could open is made against
-        // the state before rather than against the declarations — which is the
-        // direction that catches a re-wrap dropping a stanza.
-        let before = recipients_before(&self.workspace)?;
-
         if edited != original {
             std::fs::write(&absolute, &edited).map_err(|cause| Error::FileUnwritable {
                 path: absolute.display().to_string(),
@@ -395,7 +403,7 @@ impl Ceremony<'_> {
                 cause: format!("a governed file's re-wrap exited {status}; nothing was committed"),
             });
         }
-        refuse_lost_recipients(&self.workspace, &before)?;
+        refuse_lost_recipients(&self.workspace, before)?;
 
         // The governed files that exist, because a governed file is a path a
         // declaration implies rather than a file anybody has written yet, and
@@ -647,22 +655,78 @@ impl Ceremony<'_> {
 }
 
 /// Every governed file's recipients as they stand now.
-fn recipients_before(workspace: &Workspace) -> Result<Vec<(String, Vec<String>)>> {
+fn recipients_before(
+    workspace: &Workspace,
+    trust_declared: bool,
+) -> Result<Vec<(String, Vec<String>)>> {
     let mut found = Vec::new();
     for relative in &workspace.governed_files()?.managed {
         let path = workspace.vault_absolute(relative);
         if !path.exists() {
             continue;
         }
-        let text = std::fs::read_to_string(&path).map_err(|cause| Error::FileUnreadable {
+        let recipients = recipient_roster(workspace, relative, trust_declared)?;
+        let audiences = workspace.audiences()?;
+        let declared = audiences
+            .for_file(relative)
+            .or_else(|| {
+                Path::new(relative)
+                    .parent()
+                    .and_then(Path::to_str)
+                    .and_then(|dir| audiences.covering_dir(dir))
+            })
+            .ok_or_else(|| Error::NoAudienceForFile {
+                file: relative.clone(),
+            })?;
+        let lost = sops::document::drift(&recipients, &declared.recipients).extra;
+        if !lost.is_empty() {
+            return Err(Error::RecipientsLost {
+                file: relative.clone(),
+                lost,
+            });
+        }
+        found.push((relative.clone(), recipients));
+    }
+    Ok(found)
+}
+
+fn recipient_roster(
+    workspace: &Workspace,
+    relative: &str,
+    trust_declared: bool,
+) -> Result<Vec<String>> {
+    let path = workspace.vault_absolute(relative);
+    if crate::ciphertext::Format::from_path(&path)? == crate::ciphertext::Format::Age {
+        if !trust_declared {
+            return Err(Error::RewrapUnschedulable {
+                cause: format!(
+                    "{relative} has an opaque raw-age recipient roster; pass --trust-declared-recipients to authorize the declared audience before enrolling a card"
+                ),
+            });
+        }
+        std::fs::metadata(&path).map_err(|cause| Error::FileUnreadable {
             path: path.display().to_string(),
             cause,
         })?;
-        if let Ok(recipients) = sops::document::recipients_of(&text) {
-            found.push((relative.clone(), recipients));
-        }
+        let audiences = workspace.audiences()?;
+        return audiences
+            .for_file(relative)
+            .or_else(|| {
+                Path::new(relative)
+                    .parent()
+                    .and_then(Path::to_str)
+                    .and_then(|directory| audiences.covering_dir(directory))
+            })
+            .map(|audience| audience.recipients.clone())
+            .ok_or_else(|| Error::NoAudienceForFile {
+                file: relative.into(),
+            });
     }
-    Ok(found)
+    let text = std::fs::read_to_string(&path).map_err(|cause| Error::FileUnreadable {
+        path: path.display().to_string(),
+        cause,
+    })?;
+    sops::document::recipients_of(&text)
 }
 
 /// Refuse a re-wrap that dropped a recipient a file had before it.
@@ -673,13 +737,7 @@ fn recipients_before(workspace: &Workspace) -> Result<Vec<(String, Vec<String>)>
 /// distinguish that from a narrowing the declarations asked for.
 fn refuse_lost_recipients(workspace: &Workspace, before: &[(String, Vec<String>)]) -> Result<()> {
     for (relative, had) in before {
-        let path = workspace.vault_absolute(relative);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(now) = sops::document::recipients_of(&text) else {
-            continue;
-        };
+        let now = recipient_roster(workspace, relative, true)?;
         let lost: Vec<String> = had
             .iter()
             .filter(|recipient| !now.contains(recipient))

@@ -79,6 +79,11 @@ fn a_forced_declaration_commit_failure_reports_the_half_landed_state_and_a_retry
     // stanza in a creation rule.
     let widened = fixture.new_recipient();
     fixture.set_vault_rules(harness::ALICE_FILE, &[&fixture.alice.clone(), &widened]);
+    fixture.set_audience(
+        harness::ALICE_FILE,
+        &["alice"],
+        &[&fixture.alice.clone(), &widened],
+    );
     let vault_head_before = fixture.vault_git(&["rev-parse", "--short", "HEAD"]);
     let declaration_head_before = fixture.head();
 
@@ -112,7 +117,17 @@ fn a_forced_declaration_commit_failure_reports_the_half_landed_state_and_a_retry
     // is made, and the declaration-root commit that never landed proceeds.
     let retry_environment = enroll_env(&fixture, &vault);
     let extra = as_pairs(&retry_environment);
-    fixture.run_on_terminal(&["enroll", "alice", "--no-store-pin"], "", &extra);
+    let retry = fixture.run_on_terminal(&["enroll", "alice", "--no-store-pin"], "", &extra);
+    assert_eq!(
+        retry.code,
+        Some(1),
+        "the fixture card cannot pass the independent cryptographic proof"
+    );
+    assert_eq!(
+        fixture.status(),
+        "",
+        "the retry left declaration changes uncommitted"
+    );
 
     let vault_head_after_retry = fixture.vault_git(&["rev-parse", "--short", "HEAD"]);
     assert_eq!(

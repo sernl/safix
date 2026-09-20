@@ -91,7 +91,7 @@ impl Store {
             "sopsFile": self.fixture.repo.join(DOCUMENT).display().to_string(),
             "format": "yaml",
             "mode": mode,
-            "restartUnits": ["nginx.service"],
+            "restartUnits": [],
             "reloadUnits": []
         })
     }
@@ -137,6 +137,132 @@ fn mode_of(path: &Path) -> u32 {
 /// is stated without reading the mount table.
 fn device_of(path: &Path) -> u64 {
     std::fs::metadata(path).unwrap().dev()
+}
+
+#[test]
+fn stored_binary_and_intentional_empty_values_install_exactly() {
+    let store = Store::new("binary");
+    let recipient = recipient_of(&store.identity);
+    store.fixture.encrypt_to(
+        DOCUMENT,
+        &[&recipient],
+        "binary:\n  __safix_bytes_v1: [0, 255, 254, 65, 10]\nempty:\n  __safix_bytes_v1: []\n",
+    );
+    let mut manifest = store.manifest();
+    manifest["secrets"] = json!([
+        store.entry("binary", "binary", "%r/safix/binary", "0400"),
+        store.entry("empty", "empty", "%r/safix/empty", "0400"),
+    ]);
+    let path = store.write("binary", &manifest);
+    store
+        .install(&["install", "--check-mode=document", path.to_str().unwrap()])
+        .expect_success("binary storage is a value, not a nested selection");
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_success("install exact binary and empty values");
+    assert_eq!(
+        std::fs::read(store.store_root().join("binary")).unwrap(),
+        b"\0\xff\xfeA\n"
+    );
+    assert_eq!(
+        std::fs::read(store.store_root().join("empty")).unwrap(),
+        b""
+    );
+    assert_eq!(mode_of(&store.store_root().join("binary")), 0o400);
+}
+
+#[test]
+fn native_rsa_identity_installs_without_leaking_failed_conversion_input() {
+    let store = Store::new("native-rsa");
+    let private = store.fixture.tmpdir().join("native-rsa");
+    let generated = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "rsa", "-b", "2048", "-N", "", "-f"])
+        .arg(&private)
+        .output()
+        .unwrap();
+    assert!(generated.status.success());
+    let public = std::fs::read_to_string(private.with_extension("pub")).unwrap();
+    let ciphertext = store.fixture.tmpdir().join("native-rsa.age");
+    let mut encrypt = std::process::Command::new("age")
+        .arg("-r")
+        .arg(public.trim())
+        .arg("-o")
+        .arg(&ciphertext)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut encrypt.stdin.take().unwrap(), b"\0\xff\xfeA\n").unwrap();
+    assert!(encrypt.wait_with_output().unwrap().status.success());
+    let mut manifest = store.manifest();
+    manifest["ageKeyFile"] = serde_json::Value::Null;
+    manifest["ageSshKeyPaths"] = json!([private]);
+    let mut entry = store.entry("rsa", "", "%r/safix/rsa", "0400");
+    entry["format"] = json!("age");
+    entry["sopsFile"] = json!(ciphertext);
+    manifest["secrets"] = json!([entry]);
+    let path = store.write("native-rsa", &manifest);
+    let installed = store.install(&["install", path.to_str().unwrap()]);
+    assert!(!installed.combined().contains("BEGIN OPENSSH PRIVATE KEY"));
+    installed.expect_success("native SSH identities do not require a converted age identity");
+    assert_eq!(
+        std::fs::read(store.store_root().join("rsa")).unwrap(),
+        b"\0\xff\xfeA\n"
+    );
+}
+
+#[test]
+fn publication_refuses_store_ancestor_destinations_without_deleting_data() {
+    let store = Store::new("ancestor");
+    let sentinel = store.runtime.join("unrelated-data");
+    std::fs::write(&sentinel, b"must survive").unwrap();
+    let mut manifest = store.manifest();
+    manifest["secrets"] = json!([store.entry(
+        "token",
+        "alice-alone",
+        store.runtime.to_str().unwrap(),
+        "0400",
+    )]);
+    let path = store.write("ancestor", &manifest);
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_refusal("an output cannot replace an ancestor of either store root");
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"must survive");
+    assert!(!store.store_root().exists());
+}
+
+#[test]
+fn publication_failure_preserves_the_previous_generation() {
+    let store = Store::new("publication");
+    let path = store.write("first", &store.manifest());
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_success("initial generation");
+    let original = std::fs::read_link(store.store_root()).unwrap();
+    let blocker = store.runtime.join("not-a-directory");
+    std::fs::write(&blocker, b"must survive").unwrap();
+    let recipient = recipient_of(&store.identity);
+    store
+        .fixture
+        .encrypt_to(DOCUMENT, &[&recipient], "alice-alone: replacement\n");
+    let mut manifest = store.manifest();
+    manifest["secrets"] = json!([store.entry(
+        "alice-alone",
+        "alice-alone",
+        blocker.join("token").to_str().unwrap(),
+        "0400",
+    )]);
+    let path = store.write("blocked", &manifest);
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_refusal("an unpublishable external path must not promote new values");
+    assert_eq!(std::fs::read_link(store.store_root()).unwrap(), original);
+    assert_eq!(
+        std::fs::read(store.store_root().join("alice-alone")).unwrap(),
+        b"a value"
+    );
+    assert_eq!(std::fs::read(&blocker).unwrap(), b"must survive");
 }
 
 #[test]
@@ -279,13 +405,13 @@ fn a_version_this_binary_does_not_know_is_refused_naming_both() {
 fn an_unknown_field_is_refused_rather_than_ignored() {
     let store = Store::new("unknown");
     let mut manifest = store.manifest();
-    manifest["templates"] = json!([]);
+    manifest["template"] = json!([]);
     let path = store.write("unknown", &manifest);
 
     store
         .install(&["install", "--check-mode=manifest", path.to_str().unwrap()])
         .expect_refusal("a field this runtime does not declare is a diagnosis")
-        .says("templates");
+        .says("template");
 }
 
 #[test]
@@ -456,7 +582,7 @@ fn a_user_mode_install_mounts_nothing_chowns_nothing_and_restarts_nothing() {
 }
 
 #[test]
-fn a_dry_run_performs_everything_but_the_swap() {
+fn dry_run_preserves_the_live_generation() {
     let store = Store::new("dry");
     let path = store.write("dry", &store.manifest());
 
@@ -473,10 +599,6 @@ fn a_dry_run_performs_everything_but_the_swap() {
         std::fs::read_link(store.store_root()).unwrap(),
         before,
         "the symlink did not move"
-    );
-    assert!(
-        store.runtime.join("safix.d").join("2").exists(),
-        "and everything before the swap was performed"
     );
     // The defect a booted host found: with keepGenerations = 1, a dry run
     // that went on to prune deleted generation 1 — the one the symlink still
@@ -563,26 +685,22 @@ fn two_entries_of_one_document_cost_one_sops_invocation() {
 }
 
 #[test]
-fn something_that_is_not_a_symlink_at_the_store_root_is_removed() {
+fn publication_preserves_existing_non_symlink_destinations() {
     let store = Store::new("coexistence");
     let path = store.write("coexistence", &store.manifest());
 
-    // The destructive branch, which is real and is what the coexistence claim
-    // is about: a directory sitting where the store's symlink goes is removed
-    // rather than refused, so a store this installer does not own must not be
-    // at that path.
     let root = store.store_root();
-    std::fs::create_dir_all(root.join("left-behind")).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("left-behind"), b"retained").unwrap();
 
     store
         .install(&["install", path.to_str().unwrap()])
-        .expect_success("the install");
-
+        .expect_refusal("publication cannot replace a directory the installer does not own");
     assert_eq!(
-        std::fs::read_link(&root).unwrap(),
-        store.runtime.join("safix.d").join("1"),
-        "what was there is gone and a symlink is in its place"
+        std::fs::read(root.join("left-behind")).unwrap(),
+        b"retained"
     );
+    assert!(std::fs::symlink_metadata(&root).unwrap().is_dir());
 }
 
 /// The committed manifest fixture, carried inside the compiled suite rather
@@ -611,4 +729,41 @@ fn the_hand_written_fixture_manifest_is_accepted_and_a_mutation_of_it_is_not() {
         .install(&["install", "--check-mode=manifest", path.to_str().unwrap()])
         .expect_refusal("a mode that is not octal is refused naming the entry")
         .says("alice-alone");
+}
+
+#[test]
+fn store_refuses_a_symlinked_mount_without_weakening_its_target() {
+    let store = Store::new("linked-mount");
+    let protected = store.runtime.join("protected");
+    std::fs::create_dir(&protected).unwrap();
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(protected.join("keep"), b"retained").unwrap();
+    std::os::unix::fs::symlink(&protected, store.runtime.join("safix.d")).unwrap();
+    let path = store.write("linked-mount", &store.manifest());
+
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_refusal("a mount path must not redirect into another directory");
+    assert_eq!(mode_of(&protected), 0o700);
+    assert_eq!(std::fs::read(protected.join("keep")).unwrap(), b"retained");
+    assert!(!store.store_root().exists());
+}
+
+#[test]
+fn store_refuses_an_exhausted_counter_without_replacing_live_data() {
+    let store = Store::new("exhausted-counter");
+    let generation = store.runtime.join("safix.d").join(u64::MAX.to_string());
+    std::fs::create_dir_all(&generation).unwrap();
+    std::fs::write(generation.join("alice-alone"), b"retained").unwrap();
+    std::os::unix::fs::symlink(&generation, store.store_root()).unwrap();
+    let path = store.write("exhausted-counter", &store.manifest());
+
+    store
+        .install(&["install", path.to_str().unwrap()])
+        .expect_refusal("generation exhaustion must not reuse the live directory");
+    assert_eq!(std::fs::read_link(store.store_root()).unwrap(), generation);
+    assert_eq!(
+        std::fs::read(store.store_root().join("alice-alone")).unwrap(),
+        b"retained"
+    );
 }

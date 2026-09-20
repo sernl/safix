@@ -1,5 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_plain(&refusal)
----
-safix: /etc/ssh/ssh_host_rsa_key did not convert to an age identity: ssh-to-age exited 1

@@ -1,7 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::manifest_mode_unparsable
-
-  × alice-alone's mode '0o400' is not an octal file mode

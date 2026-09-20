@@ -37,6 +37,31 @@ use prose::{
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// A ciphertext format or cryptographic subprocess operation failed.
+    #[error("{operation} failed for {path}: {cause}")]
+    DocumentOperation {
+        /// The operation, never secret content.
+        operation: &'static str,
+        /// The affected ciphertext path.
+        path: String,
+        /// A diagnostic that contains no plaintext.
+        cause: String,
+    },
+
+    /// A migration cannot preserve its source or destination guarantees.
+    #[error("migration refused: {reason}")]
+    MigrationRefused {
+        /// The violated migration precondition.
+        reason: String,
+    },
+
+    /// A key operation cannot preserve private-key custody.
+    #[error("key operation refused: {reason}")]
+    KeyManagement {
+        /// The violated custody precondition.
+        reason: String,
+    },
+
     /// A value could not be read from the stream it was being read from.
     ///
     /// Whatever had been read when the failure happened was zeroed before this

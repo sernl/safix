@@ -1,7 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::upload_tool_failed
-
-  × ssh exited refusing: Permission denied (publickey).

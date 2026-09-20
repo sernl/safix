@@ -152,8 +152,8 @@ pub fn run_committing(
                 "{relative} does not exist yet; creating it through sops so the creation rules apply."
             ),
         );
-        let config = workspace.stage_vault_rules()?;
-        {
+        if matches!(placement.format, crate::ciphertext::Format::Yaml) && !key.is_empty() {
+            let config = workspace.stage_vault_rules()?;
             let _quiet = scratch::quiet();
             workspace.sops().create_empty_document(
                 workspace.vault_root(),
@@ -175,7 +175,7 @@ pub fn run_committing(
 
     let status = {
         let _quiet = scratch::quiet();
-        workspace.sops().set_key(&candidate, &key, &value)?
+        write_candidate(workspace, &relative, &candidate, &key, &value)?
     };
     if status != 0 {
         return Ok(status);
@@ -188,7 +188,9 @@ pub fn run_committing(
         return Ok(status);
     }
 
-    refuse_recipient_drift(workspace, &relative, &candidate)?;
+    if !matches!(placement.format, crate::ciphertext::Format::Age) {
+        refuse_recipient_drift(workspace, &relative, &candidate)?;
+    }
 
     std::fs::rename(&candidate, &absolute).map_err(|cause| Error::FileUnwritable {
         path: absolute.display().to_string(),
@@ -231,14 +233,63 @@ pub fn run_committing(
     Ok(0)
 }
 
-/// Beside the target, so the move into place is an atomic rename rather than a
-/// cross-filesystem copy that can be interrupted half-written, and keeping the
-/// `.yaml` suffix, because sops reads a document's format off the extension and
-/// would parse a `*.tmp.1234` YAML file as JSON.
+/// Keep the candidate beside its target for an atomic final rename, retaining
+/// the extension for upstream tools that infer a format from the filename.
 pub(crate) fn candidate_path(absolute: &Path) -> PathBuf {
     let mut name = absolute.as_os_str().to_owned();
-    name.push(format!(".safix-tmp.{}.yaml", std::process::id()));
+    name.push(format!(".safix-tmp.{}", std::process::id()));
+    if let Some(extension) = absolute.extension() {
+        name.push(".");
+        name.push(extension);
+    }
     PathBuf::from(name)
+}
+
+/// Write a staged document using its declared format and audience.
+/// Native age has no inspectable recipient roster: its recipient guarantee is
+/// the explicit encryption call, followed by a plaintext equality check.
+pub(crate) fn write_candidate(
+    workspace: &Workspace,
+    relative: &str,
+    candidate: &Path,
+    key: &str,
+    value: &Secret,
+) -> Result<i32> {
+    let audience =
+        workspace
+            .audiences()?
+            .for_file(relative)
+            .ok_or_else(|| Error::NoAudienceForFile {
+                file: relative.to_owned(),
+            })?;
+    let format = audience.format;
+    if format != crate::ciphertext::Format::Age && candidate.exists() {
+        refuse_recipient_drift(workspace, relative, candidate)?;
+    }
+    let identities = crate::ciphertext::Identities::from_environment();
+    let destination = crate::ciphertext::Source {
+        path: candidate.to_path_buf(),
+        format,
+        key: key.to_owned(),
+    };
+    if candidate.exists() && !key.is_empty() {
+        if !crate::ciphertext::set_value(&destination, value, &identities)? {
+            crate::ciphertext::write(&destination, value, &audience.recipients, &identities)?;
+        }
+    } else if !candidate.exists()
+        || !crate::ciphertext::read(&destination, &identities)?.equals(value)
+    {
+        crate::ciphertext::write(&destination, value, &audience.recipients, &identities)?;
+    }
+    let verified = crate::ciphertext::read(&destination, &identities)?;
+    if !verified.equals(value) {
+        return Err(Error::DocumentOperation {
+            operation: "verify ciphertext candidate",
+            path: candidate.display().to_string(),
+            cause: "candidate does not preserve the supplied value".into(),
+        });
+    }
+    Ok(0)
 }
 
 /// The states in which a commit would mean something other than what its

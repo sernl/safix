@@ -217,39 +217,57 @@ let
   ruleShapeMessagesOf =
     { plan, audiences }:
     let
-      named = a: lib.concatStringsSep ", " a.audience;
-
-      perAudience =
-        _file: a:
+      perFile =
+        file: a:
         let
-          rules = rulesFor plan a.audience;
-          rule = builtins.head rules;
-          probe = suffix: matches rule.pathRegex "${a.dir}/${suffix}";
-        in
-        if rules == [ ] then
-          [ "the audience ${named a} has a file at ${a.dir} and no rule, so every value in it fails closed" ]
-        else if builtins.length rules > 1 then
-          [
-            "the audience ${named a} has ${toString (builtins.length rules)} rules, and sops applies the first that matches"
+          format = a.format or "yaml";
+          legacy = a.legacy or (format == "yaml");
+          rules = lib.filter (r: (r.file or file) == file && r.audience == a.audience) plan.rules;
+          expected =
+            if legacy then "^${lib.escapeRegex a.dir}/[^/]*\\.yaml$" else "^${lib.escapeRegex file}$";
+          badPaths = [
+            "nested/${file}"
+            "${file}.bak"
+            "${a.dir}/nested/${builtins.baseNameOf file}"
+            "${a.dir}/x.txt"
+            "${a.dir}-other/${builtins.baseNameOf file}"
           ]
-        else
+          ++ map (ext: "${a.dir}/${lib.removeSuffix ".${format}" (builtins.baseNameOf file)}.${ext}") (
+            lib.filter (ext: ext != format) resolve.formats
+          )
+          ++ lib.optional (!legacy) "${a.dir}/beside.${format}";
+        in
+        lib.optional (rules == [ ]) "${file} has no rule for its audience"
+        ++ lib.optional (builtins.length rules > 1) "${file} has duplicate rules for its audience"
+        ++ lib.concatMap (
+          rule:
           lib.optional (
-            !(lib.hasPrefix "^" rule.pathRegex)
-          ) "${rule.pathRegex} is not start-anchored, so it also matches its own suffix under any prefix"
-          ++
-            lib.optional (!(lib.hasSuffix "\\.yaml$" rule.pathRegex))
-              "${rule.pathRegex} does not terminate on the extension, so it reaches encrypted material safix did not place"
-          ++
-            lib.optional (!(probe "secrets.yaml"))
-              "${rule.pathRegex} does not match ${a.dir}/secrets.yaml, which is the file that audience's secrets are placed in"
-          ++
-            lib.optional (!(probe "beside.yaml"))
-              "${rule.pathRegex} does not match a second file in ${a.dir}, so a file placed beside that audience's secrets is stranded with no rule"
-          ++ lib.optional (probe "nested/x.yaml") "${rule.pathRegex} matches a subdirectory of ${a.dir}, so a file dropped one level down silently inherits that audience's recipients"
-          ++ lib.optional (probe "x.txt") "${rule.pathRegex} matches a path that is not a .yaml under ${a.dir}"
-          ++ lib.optional (matches rule.pathRegex "nested/${a.dir}/x.yaml") "${rule.pathRegex} matches ${a.dir} under a prefix, so material outside the tree safix places into acquires that audience";
+            rule.pathRegex != expected
+          ) "${rule.pathRegex} is not the anchored, scoped ${format} rule for ${file}"
+          ++ lib.optional (!(matches rule.pathRegex file)) "${rule.pathRegex} does not match ${file}"
+          ++ lib.optional (
+            legacy && !(matches rule.pathRegex "${a.dir}/beside.yaml")
+          ) "${rule.pathRegex} strands a legacy adjacent YAML file"
+          ++ map (path: "${rule.pathRegex} reaches outside its scope at ${path}") (
+            lib.filter (matches rule.pathRegex) badPaths
+          )
+        ) rules
+        ++ lib.concatMap (
+          rule:
+          lib.optional (
+            rule.audience != a.audience && matches rule.pathRegex file
+          ) "${rule.pathRegex} gives ${file} a conflicting audience"
+        ) plan.rules;
+      orphanRules = lib.concatMap (
+        rule:
+        lib.optional (
+          !(lib.any (file: audiences.${file}.audience == rule.audience && (rule.file or file) == file) (
+            builtins.attrNames audiences
+          ))
+        ) "${rule.pathRegex} has no derived document in its audience"
+      ) plan.rules;
     in
-    lib.concatLists (lib.mapAttrsToList perAudience audiences);
+    lib.concatLists (lib.mapAttrsToList perFile audiences) ++ orphanRules;
 
   ruleShapeMessages =
     registry:
@@ -340,7 +358,7 @@ let
   # a point anyone was watching.
   #
   # The rules are anchored under `flake.safix.storage.encrypted` and terminate
-  # on `\.yaml$`, so a `value` file under the plaintext-output root cannot match
+  # on a supported format extension, so a public `value` file cannot match
   # either clause — but relying on that is relying on two independent accidents
   # staying true. Asserted by
   # matching each rule against each real public path rather than by reading a
@@ -396,19 +414,17 @@ let
       shared = lib.filterAttrs (_file: a: builtins.length a.audience > 1) audiences;
 
       inert =
-        _file: a:
+        file: a:
         let
-          rules = rulesFor plan a.audience;
-          elided = lib.replaceStrings [ sep ] [ "" ] a.dir;
+          rules = lib.filter (r: (r.file or file) == file) (rulesFor plan a.audience);
+          elided = "${lib.replaceStrings [ sep ] [ "" ] a.dir}/${builtins.baseNameOf file}";
         in
-        lib.optionals (rules != [ ]) (
-          let
-            rule = builtins.head rules;
-          in
-          lib.optional (!(matches rule.pathRegex "${a.dir}/secrets.yaml"))
-            "${rule.pathRegex} does not match its own directory ${a.dir}, so the separator is not inert in a regex and every file there fails closed"
-          ++ lib.optional (matches rule.pathRegex "${elided}/secrets.yaml") "${rule.pathRegex} matches ${elided}, which is ${a.dir} with the separator elided, so the separator is a regex metacharacter rather than a literal"
-        );
+        lib.concatMap (
+          rule:
+          lib.optional (!(matches rule.pathRegex file))
+            "${rule.pathRegex} does not match its own file ${file}, so the separator does not preserve its scope"
+          ++ lib.optional (matches rule.pathRegex elided) "${rule.pathRegex} matches ${elided}, with the audience separator elided"
+        ) rules;
     in
     alphabet ++ lib.concatLists (lib.mapAttrsToList inert shared);
 

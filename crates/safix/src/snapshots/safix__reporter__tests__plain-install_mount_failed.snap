@@ -1,5 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_plain(&refusal)
----
-safix: could not mount a ramfs at /run/safix.d

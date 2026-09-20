@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::install_runtime_dir_unknown
-
-  × XDG_RUNTIME_DIR names no runtime directory, so %r in a user-mode manifest
-  │ has nothing to expand to

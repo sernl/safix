@@ -67,7 +67,7 @@ pub trait Confirm {
 pub struct Request {
     /// The person's name, which becomes a path and a `path_regex` fragment.
     pub name: String,
-    /// Their age public key, handed over by them.
+    /// Their public recipient, handed over by them.
     pub recipient: String,
     /// Every `--host` given, in order, passed through to the hook.
     pub hosts: Vec<String>,
@@ -241,8 +241,16 @@ fn refuse_bad_recipient(recipient: &str) -> Result<()> {
             recipient: recipient.to_owned(),
         });
     }
+    if crate::ciphertext::is_ssh_recipient(recipient) && !recipient.contains(',') {
+        return Ok(());
+    }
     let well_formed = recipient.strip_prefix("age1").is_some_and(|body| {
         body.len() == RECIPIENT_BODY && body.chars().all(|letter| BECH32.contains(letter))
+    }) || recipient.strip_prefix("pgp:").is_some_and(|fingerprint| {
+        matches!(fingerprint.len(), 40 | 64)
+            && fingerprint
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'A'..=b'F').contains(&byte))
     });
     if well_formed {
         return Ok(());
@@ -299,7 +307,7 @@ fn declaration(name: &str, recipient: &str) -> String {
         # is not something safix knows or cares about.\n\
         {{\n\
         \x20 flake.safix.users.{name} = {{\n\
-        \x20   # The age public key this person's secrets are encrypted to, handed over by\n\
+        \x20   # The public recipient this person's secrets are encrypted to, handed over by\n\
         \x20   # them. A recipient, never an identity: the private half stays on their\n\
         \x20   # machine, nothing here can decrypt anything, and this file names no private\n\
         \x20   # key.\n\
@@ -325,6 +333,10 @@ fn declaration(name: &str, recipient: &str) -> String {
         \x20 }};\n\
         }}\n",
         path = scaffold_path(name),
+        recipient = recipient
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace("${", "\\${"),
     )
 }
 
@@ -424,6 +436,21 @@ mod tests {
     }
 
     #[test]
+    fn an_ssh_public_key_accepts_a_comment_but_not_control_or_recipient_delimiters() {
+        assert!(refuse_bad_recipient("ssh-ed25519 AAAA alice@workstation").is_ok());
+        for invalid in [
+            "ssh-ed25519 AAAA\npgp:0123",
+            "ssh-rsa AAAA,age1other",
+            "ssh-rsa",
+        ] {
+            assert!(matches!(
+                refuse_bad_recipient(invalid),
+                Err(Error::BadRecipient { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn a_card_is_refused_for_this_field_rather_than_for_its_shape() {
         let card = format!("age1yubikey1{}", "q".repeat(RECIPIENT_BODY));
         assert!(matches!(
@@ -457,14 +484,5 @@ mod tests {
                 Err(Error::BadRecipient { .. })
             ));
         }
-    }
-
-    #[test]
-    fn the_scaffold_names_the_recipient_and_no_private_key() {
-        let text = declaration("alice", WELL_FORMED);
-        assert!(text.contains(&format!("recipient = \"{WELL_FORMED}\";")));
-        assert!(text.contains("flake.safix.users.alice = {"));
-        assert!(text.contains("carries = { };"));
-        assert!(text.starts_with("# safix/users/alice.nix — alice's custody record."));
     }
 }

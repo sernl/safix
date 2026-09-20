@@ -402,7 +402,9 @@ impl Workspace {
         // literal `\.yaml$` every generated `path_regex` ends in: a `.YAML`
         // path is one no creation rule covers, so treating it as equivalent
         // would admit exactly the file that fails closed at encryption time.
-        if !placement.file.as_bytes().ends_with(b".yaml") {
+        if matches!(placement.format, crate::ciphertext::Format::Yaml)
+            && !placement.file.as_bytes().ends_with(b".yaml")
+        {
             return Err(Error::NotAYamlPath {
                 name: name.to_owned(),
                 file: placement.file.clone(),

@@ -134,7 +134,7 @@ const BLOCK: usize = 64;
 #[must_use]
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let mut state = INITIAL;
-    for block in padded(bytes).chunks_exact(BLOCK) {
+    for block in padded(bytes).as_chunks::<BLOCK>().0 {
         compress(&mut state, block);
     }
     state.iter().fold(String::new(), |mut out, word| {
@@ -166,15 +166,11 @@ fn padded(bytes: &[u8]) -> Vec<u8> {
 
 /// One block folded into the state.
 ///
-/// `block` is a `chunks_exact(64)` chunk, so it is sixteen four-byte words; a
-/// shorter one would leave the window's tail zeroed rather than be rejected,
-/// which is unreachable from the one caller and is why nothing here is fallible.
-fn compress(state: &mut [u32; 8], block: &[u8]) {
+/// Each block is exactly sixteen big-endian words.
+fn compress(state: &mut [u32; 8], block: &[u8; BLOCK]) {
     let mut window = [0_u32; 16];
-    for (slot, chunk) in window.iter_mut().zip(block.chunks_exact(4)) {
-        *slot = chunk
-            .iter()
-            .fold(0_u32, |word, &byte| word.wrapping_shl(8) | u32::from(byte));
+    for (slot, chunk) in window.iter_mut().zip(block.as_chunks::<4>().0) {
+        *slot = u32::from_be_bytes(*chunk);
     }
 
     let [

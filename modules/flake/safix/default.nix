@@ -88,9 +88,9 @@ in
         Encrypted files a consumer wants governed that no declaration implies,
         as repository-relative paths.
 
-        A file placed beside a person's secrets already rides that person's rule,
-        because every rule covers one directory level rather than one literal
-        filename. What it does not do is appear in the set `safix fix` re-wraps,
+        A YAML file placed beside an ordinary keyed YAML document already rides
+        that audience's directory rule. Other formats and whole documents have
+        exact file rules. An adjacent YAML file is not in the set `safix fix` re-wraps,
         so a change of audience would reach every file safix placed and leave
         this one behind, encrypted to whoever it was encrypted to when it was
         written. Naming it here puts it in that set.
@@ -412,8 +412,27 @@ in
     # never the same set in either direction.
     governedFiles =
       let
-        extra = sortNames (lib.unique cfg.extraGovernedFiles);
-        required = sortNames (builtins.attrNames audiences);
+        declaredExtra = sortNames (lib.unique cfg.extraGovernedFiles);
+        plan = policy.plan registry;
+        mappedFile =
+          rule:
+          if cfg.vault == null then
+            rule.file
+          else
+            resolve.vaultFile cfg.storage cfg.vault.namingKey rule.file rule.format;
+        inScope =
+          file:
+          resolve.wellFormedStorageRoot file
+          && lib.any (
+            rule:
+            if cfg.vault == null then builtins.match rule.pathRegex file != null else file == mappedFile rule
+          ) plan.rules;
+        extra =
+          if lib.all inScope declaredExtra then
+            declaredExtra
+          else
+            throw "safix extraGovernedFiles: every path must be repository-relative and covered by an existing audience rule; vault paths must name mapped opaque files";
+        required = sortNames (lib.unique (map mappedFile plan.rules));
       in
       {
         inherit extra required;

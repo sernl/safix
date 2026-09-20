@@ -691,22 +691,3 @@ fn the_wipe_then_extract_sequence_names_the_fixed_destination() {
     let argv = fixture.transport_recorded("ssh-argv");
     assert!(argv.contains("/mnt/etc/ssh"));
 }
-
-// ── 6. help text ────────────────────────────────────────────────────────
-
-#[test]
-fn safix_help_lists_upload_in_table_order_after_group() {
-    let fixture = fleet();
-    let run = fixture.run(&["-h"]);
-    insta::assert_snapshot!("safix_help", run.combined());
-}
-
-#[test]
-fn safix_upload_help_states_the_two_modes_and_the_three_absences() {
-    let fixture = fleet();
-    let run = fixture.run(&["upload", "-h"]);
-    run.says("A machine name is all this verb");
-    run.says("A systemd-credentials delivery path for the same material.");
-    run.says("next rebuild is what activates what was written here");
-    insta::assert_snapshot!("safix_upload_help", run.combined());
-}

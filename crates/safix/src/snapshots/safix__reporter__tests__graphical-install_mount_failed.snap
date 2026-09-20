@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::install_mount_failed
-
-  × could not mount a ramfs at /run/safix.d
-  ╰─▶ permission denied

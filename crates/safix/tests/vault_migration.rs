@@ -154,6 +154,8 @@ fn populated_readable_fixture() -> (Fixture, std::path::PathBuf) {
     declare_vault_placements(&mut fixture);
 
     let (alice, bob) = (fixture.alice.clone(), fixture.bob.clone());
+    fixture.set_audience(OPAQUE_PRIVATE_FILE, &["alice"], &[&alice]);
+    fixture.set_audience(OPAQUE_SHARED_FILE, &["alice", "bob"], &[&alice, &bob]);
     fixture.encrypt_to(
         LOGICAL_PRIVATE_FILE,
         &[&alice],
@@ -303,6 +305,12 @@ fn a_vault_rollback_restores_the_readable_layout() {
     fixture
         .run_env(&["fix", "--yes"], None, &extra)
         .expect_success("migrating the readable layout into the vault");
+    fixture.vault_git(&["add", "--all"]);
+    fixture.vault_git(&[
+        "commit",
+        "-qm",
+        "Keep the verified migration before rollback",
+    ]);
 
     fixture
         .run_env(&["fix", "--vault-rollback"], None, &extra)
@@ -388,6 +396,7 @@ fn an_interrupted_relocation_leaves_the_destination_absent_and_a_re_run_complete
         &format!("api-token: {PRIVATE_VALUE}\n"),
     );
     fixture.set_vault_rules(OPAQUE_PRIVATE_FILE, &[&alice]);
+    fixture.set_audience(OPAQUE_PRIVATE_FILE, &["alice"], &[&alice]);
 
     let sops = real_sops();
     let run = fixture.run_env(

@@ -59,29 +59,16 @@
 //!
 //! # Why the wrapper waits for quiet before answering
 //!
-//! A prompt's own text is written *after* the echo goes off — `getpass` and
-//! `console` both set the terminal first and print second — so an echo that has
-//! just gone off is not yet a prompt that is waiting. Answering it immediately
-//! would sometimes put a second copy of the value in the queue behind the first.
-//! So the wrapper answers only once the terminal has been quiet for a polling
-//! interval and its own last answer is at least that old. Inside a prompt the
-//! tool already holds, quiet never lasts that long: it has the line and moves on
-//! in microseconds. Waiting for genuine silence is therefore the difference
-//! between a prompt that is waiting and one that is still being written.
+//! A prompt's text can arrive after echo is disabled, with an arbitrary
+//! scheduling delay between the two. The wrapper requires non-whitespace
+//! output before the first answer and fresh non-whitespace output after each
+//! answer. Merely disabling echo cannot spend an answer, and the newline
+//! closing a hidden read cannot be mistaken for another prompt.
 //!
-//! Two more conditions separate a prompt from a tool that is merely slow. The
-//! wrapper judges the terminal only when the master has nothing queued: a tool
-//! that prints the newline closing one hidden read, restores the terminal
-//! through a subprocess, and only then writes its next prompt hands the wrapper
-//! those bytes in separate reads under load, and a judgement made between them
-//! would take the newline, the dark terminal, and the gap for a prompt. And a
-//! starved tool, or one that restores the terminal slowly, can hold the echo
-//! off for longer than a polling interval after the answer has been written,
-//! during which quiet plus a dark terminal looks exactly like a second prompt.
-//! A second prompt, though, is always *written*: the refusal and the prompt
-//! text arrive before it waits. So after an answer the wrapper also requires
-//! that the child has written something since, and a tool that is only slow to
-//! read is left alone rather than judged to have asked again.
+//! The master must also be drained and quiet for a polling interval. Answering
+//! while prompt bytes are still arriving can queue a duplicate behind the
+//! first answer. A tool that is slow to restore echo is left alone until it
+//! writes fresh prompt text.
 //!
 //! # Which stream gets the terminal
 //!
@@ -223,7 +210,7 @@ fn drain(
     let mut text = String::new();
     let mut answered: usize = 0;
     let mut last_byte = Instant::now();
-    let mut last_answer: Option<Instant> = None;
+    let mut has_prompt_text = false;
     let mut last_movement = Instant::now();
     let mut buffer = [0_u8; 4096];
 
@@ -233,6 +220,7 @@ fn drain(
                 last_byte = Instant::now();
                 last_movement = last_byte;
                 if let Some(bytes) = buffer.get(..read) {
+                    has_prompt_text |= bytes.iter().any(|byte| !byte.is_ascii_whitespace());
                     let shown = String::from_utf8_lossy(bytes);
                     progress.write(&shown);
                     text.push_str(&shown);
@@ -245,15 +233,10 @@ fn drain(
             // A signal arrived mid-read; the next turn reads again.
             Err(rustix::io::Errno::INTR) => (),
             Err(rustix::io::Errno::AGAIN) => {
-                // A prompt that is waiting, rather than one still being written:
-                // nothing is queued on the master, the echo is off, nothing has
-                // arrived for a polling interval, this wrapper's own last answer
-                // is at least that old, and the child has written something since
-                // that answer. The module documentation states why each of the
-                // five is load-bearing.
-                let waiting = echo_is_off(master)
-                    && last_byte.elapsed() >= POLL_INTERVAL
-                    && last_answer.is_none_or(|at| at.elapsed() >= POLL_INTERVAL && last_byte > at);
+                // Echo alone does not distinguish a pending prompt from a
+                // tool that has not printed it or has not restored echo yet.
+                let waiting =
+                    has_prompt_text && echo_is_off(master) && last_byte.elapsed() >= POLL_INTERVAL;
                 if waiting {
                     if answered >= limit {
                         // Not answered, and that is the whole of the protection: a
@@ -267,7 +250,7 @@ fn drain(
                     }
                     write_answer(master, answer)?;
                     answered = answered.saturating_add(1);
-                    last_answer = Some(Instant::now());
+                    has_prompt_text = false;
                     last_movement = Instant::now();
                     continue;
                 }
@@ -435,6 +418,44 @@ mod tests {
             recorded.written().contains("PIN: "),
             "the prompt did not reach the operator"
         );
+    }
+
+    #[test]
+    fn echo_disabled_before_the_prompt_is_printed_does_not_spend_an_answer() {
+        let session = answering(
+            &mut asking(
+                "stty -echo; sleep 0.2; printf 'PIN: ' >&2; read -r answer; \
+                 sleep 0.2; stty echo; printf 'got=%s\\n' \"$answer\"",
+            ),
+            &secret("87654321"),
+            1,
+            "12345678",
+            &Recorded::default(),
+            Duration::from_secs(20),
+        )
+        .expect("a delayed first prompt is not a retry");
+
+        assert_eq!(session.status, 0);
+        assert_eq!(session.stdout, b"got=87654321\n");
+    }
+
+    #[test]
+    fn a_closing_newline_with_echo_still_disabled_is_not_another_prompt() {
+        let session = answering(
+            &mut asking(
+                "stty -echo; printf 'PIN: ' >&2; read -r answer; \
+                 printf '\\n' >&2; sleep 0.2; stty echo; printf 'got=%s\\n' \"$answer\"",
+            ),
+            &secret("87654321"),
+            1,
+            "12345678",
+            &Recorded::default(),
+            Duration::from_secs(20),
+        )
+        .expect("closing a prompt does not open another one");
+
+        assert_eq!(session.status, 0);
+        assert_eq!(session.stdout, b"got=87654321\n");
     }
 
     /// A value and its confirmation, which is the shape `change-pin` asks in.

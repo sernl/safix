@@ -1,13 +1,7 @@
 //! What `-h` prints, for the subcommands this binary implements.
 //!
-//! One text per subcommand, word for word from the retired shell runtime,
-//! because the help was part of what the differential harness compared while
-//! both existed and is a contract an operator's habits are built on. It goes to
-//! standard error and the process exits zero, which was that runtime's shape
-//! too.
-//!
-//! [`SCAFFOLD`] is that runtime's general usage, unabridged, because this binary
-//! implements every subcommand it lists.
+//! Help goes to standard error and exits successfully. Diagnostic prose may
+//! evolve; stable refusal codes, not exact terminal wording, are the contract.
 
 /// `safix set -h`.
 pub const SET: &str = "\
@@ -43,6 +37,9 @@ safix fix [--yes] [--vault-rollback]
 
 Regenerate .sops.yaml from the declarations, then re-wrap each governed file's
 data key to the audience that policy declares. --yes answers sops' confirmation.
+Raw age has no inspectable recipient roster. For those files, --yes explicitly
+authorizes replacement with the declared audience; decryption verifies bytes,
+not the previous roster.
 
 The order is not interchangeable: re-wrapping first re-wraps to a policy that is
 about to change.
@@ -810,6 +807,8 @@ neither is a value.
 pub const KEYGEN: &str = "\
 safix keygen [--for-someone-else] [<user>]
 safix keygen --show
+safix keygen --kind age
+safix keygen --kind pgp --uid <identity> [--expires 2y]
 
 Mint an age identity and append it to ${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt,
 then print the public half and what to do with it. The private half is never
@@ -824,7 +823,18 @@ means you hold their private key, which is the opposite of the independent
 custody this package rests on, so it takes an explicit --for-someone-else.
 
 An existing ssh key works instead: `ssh-to-age < ~/.ssh/id_ed25519.pub` prints
-the age recipient for it, and sops.age.sshKeyPaths names the private half.
+the age recipient for it, and safix.identity.sshKeyPaths names the private half.
+
+The standalone --kind forms need no repository. Native age is the default key
+profile. The GnuPG profile uses an expiring Ed25519 certification primary and
+cv25519 encryption subkey; pinentry handles the passphrase. Its protected
+keyring is SAFIX_GNUPGHOME or $XDG_DATA_HOME/safix/gnupg (defaulting to
+$HOME/.local/share/safix/gnupg). Existing compatible keys are not weakened or
+replaced. Use identity backup with an independent recovery identity before
+relying on a new key.
+SAFIX_AGE_KEY_FILE overrides the managed age file. Key files use mode 0600;
+private directories use 0700. Symlinked paths, repository paths and Nix-store
+paths are refused.
 
 \u{2500}\u{2500} --show \u{2500}\u{2500}
 Prints the public recipient derived from the identity already minted on this
@@ -833,9 +843,50 @@ write of any kind. Refused, naming plain keygen as the remedy, when no
 identity has been minted here yet.
 ";
 
+/// `safix migrate -h`.
+pub const MIGRATE: &str = "\
+safix migrate <plan.json>
+
+Execute a version-1 migration plan. Paths are relative to the plan's directory.
+Each entry names source and destination {path, format, key}, public recipients,
+and deployment metadata. Supported formats: yaml, json, dotenv, ini, binary,
+and age. An empty key selects the whole document.
+
+The plan names sourceIdentities, targetIdentities, receipt, deploymentOutput,
+and deploymentTarget (safix, sops-nix or agenix). Identities are explicit:
+ageKeyFile, ageSshKeyPaths and gnupgHome. Ambient keys cannot satisfy target
+verification. Every candidate must decrypt byte-identically before any output
+is published. Existing outputs are refused. Sources are always retained.
+Unsupported target deployment semantics are refused rather than dropped.
+Templates use <safix:secret-name> references. Agenix cannot retain templates,
+service hooks or early-user metadata. Native sops-nix needs whole binary files
+for binary or intentional empty values, not Safix's keyed byte envelope.
+Recoverable errors roll back new outputs; a process crash may leave a subset
+of verified artifacts. Sources remain the recovery path.
+";
+
+/// `safix identity -h`.
+pub const IDENTITY: &str = "\
+safix identity backup <age|pgp> <destination> --recipient <public-key>... [--age-key-file <recovery-key>] [--gnupg-home <recovery-keyring>]
+safix identity restore <backup> [--age-key-file <recovery-key>] [--gnupg-home <recovery-keyring>]
+
+Back up the local managed identity to an encrypted SOPS binary package, then
+verify it with explicitly selected independent recovery identities. Public
+GnuPG recipients use pgp:FULL_UPPERCASE_FINGERPRINT. A self-only backup is
+refused: a key cannot be its own recovery path. No private key is printed or
+passed as a command argument. Destinations must not already exist.
+
+Restore validates every private primary and subkey before importing. Existing
+age files and colliding GnuPG fingerprints or private keygrips are refused,
+including private files absent from the public keyring. Backup refuses shared
+recovery keygrips, unaccounted-for private files, hardware stubs and incomplete
+primary-key exports.
+Protect the recovery identity separately; safix does not escrow it for you.
+";
+
 /// `safix adduser -h`.
 pub const ADDUSER: &str = "\
-safix adduser <name> <age-recipient> [--host <hostname>]... [--yes]
+safix adduser <name> <recipient> [--host <hostname>]... [--yes]
 
 Declare a person who holds nothing yet: write safix/users/<name>.nix,
 regenerate .sops.yaml from the policy that declaration implies, commit the two,
@@ -846,15 +897,17 @@ and then hand the name and the recipient to flake.safix.onboardingHook.
               of a consumer's module tree and safix has none.
   --yes       skip the confirmation.
 
-<age-recipient> is theirs, minted by them, and only its SHAPE is checked here \u{2014}
-whether anyone holds the private half is not knowable from this machine. A
-recipient that needs a physical interaction to decrypt is refused for this field:
+<recipient> is theirs: a native age recipient, an SSH public key, or
+pgp:FULL_UPPERCASE_FINGERPRINT. Only its shape is checked here; whether anyone
+holds the private half is not knowable from this machine. An SSH key with a
+comment must be passed as one quoted argument.
+A recipient that needs physical interaction is refused for this field:
 activation decrypts non-interactively and a card needs a touch, so it belongs in
 that person's recoveryRecipients instead, where it is additive.
 
 \u{2500}\u{2500} what this does not do \u{2500}\u{2500}
-Mint anything. No age key (that is `keygen`, run by them on their machine), no
-password material, and no secret value.
+Mint anything. Key creation is `keygen`, run by them on their own machine.
+This command creates no password material and no secret value.
 
 Give them anything to hold. The scaffold declares no secret, so no audience is
 computed for them and the regenerated .sops.yaml carries their key as an anchor
@@ -878,12 +931,16 @@ pub const ENROLL: &str = "\
 safix enroll [<user>] [--serial <n>] [--slot <n>] [--no-store-pin]
              [--mirror-to-store] [--store-database <path>]
              [--pin-policy <p>] [--touch-policy <p>] [--allow-disk-staging]
+             [--trust-declared-recipients]
 
 Take one hardware key from a blank card to a proven recovery identity for
 <user>, in one verb. A touch is the only thing you do.
 
-What it does, in order:
+Before selecting a card, inspect every governed file and refuse undeclared
+recipients. Raw-age files require --trust-declared-recipients: their encrypted
+roster is opaque, so this explicitly authorizes the declared roster instead.
 
+What it does, in order:
   1. select the card. One connected is taken; two are refused naming both
      serials and --serial.
   2. provision PIV access when the card is factory-fresh: a generated PIN, a
@@ -918,6 +975,9 @@ What it does, in order:
   --touch-policy <p>    default cached; never is refused
   --allow-disk-staging  accept a disk-backed filesystem for the proof's
                         identity source, where no memory-backed one is found
+  --trust-declared-recipients
+                        authorize declared audiences for raw-age files; this
+                        does not verify their previous recipient rosters
 
 \u{2500}\u{2500} everything here is additive \u{2500}\u{2500}
 A recipient is appended, an identity block is appended, a name is declared.
@@ -1119,9 +1179,9 @@ pub const INSTALL: &str = "\
 safix install <manifest> [--check-mode=off|manifest|document] [--ignore-passwd]
                          [--dry-run]
 
-Install the entries one manifest names: mount the store, assemble the identity,
-decrypt each document once, write this activation's generation, restart what
-changed, and move the store's symlink onto it.
+Install a manifest using raw age or SOPS YAML, JSON, dotenv, INI or binary.
+Decrypt with configured age, SSH or GnuPG identities, render templates in a
+private generation, publish it, then run changed-value service hooks.
 
 This is the verb an activation runs, not one an operator types. A NixOS
 activation script and a home-manager activation entry each invoke it against a
@@ -1137,13 +1197,10 @@ user-scope install, which is a field of the manifest rather than a flag here.
              document and verify that every declared key is in it
 
 Neither check mode decrypts anything, and neither needs a key. The document
-mode reads the document's cleartext structure: sops enciphers leaf values and
-leaves the mapping keys in the clear, so whether a declared key is in its
-document is answerable from the bytes. That is what lets the build-time check
-of the manifest derivation run in the document mode inside a sandbox holding
-no identity, so a manifest naming a key no document holds fails the build
-rather than the activation. It is the mode that check uses unless the consumer
-turned validation off.
+mode inspects public ciphertext structure. SOPS keeps mapping keys in the
+clear; raw age supports only a whole document, whose header is inspected.
+This build-time validation needs no identity. It does not prove that runtime
+identities can decrypt the document.
 
 \u{2500}\u{2500} --ignore-passwd \u{2500}\u{2500}
 Skip every user, group and keys-group lookup and set ownership to 0. What a
@@ -1151,14 +1208,13 @@ check inside a nix build needs, where none of those users exist, and what a
 dry activation gets too.
 
 \u{2500}\u{2500} --dry-run \u{2500}\u{2500}
-Perform every step except the atomic swap of the store's symlink, so a dry
-activation is informative rather than a no-op. NIXOS_ACTION=dry-activate in the
-environment implies it, which is what makes the module's supportsDryActivation
-a claim about this program rather than about the script invoking it.
+Validate, decrypt and render into private staging without publishing live or
+external links, pruning generations or invoking service hooks. The candidate
+is removed afterwards. NIXOS_ACTION=dry-activate implies this mode.
 ";
 
 pub const SCAFFOLD: &str = "\
-safix \u{2014} the whole lifecycle of one secret, by name and never by file.
+safix \u{2014} secrets by declaration name, with explicit migration and key custody.
 
   safix set      [<user>] <name>                    write a value you type
   safix edit     [<user>] [<name>]                  author a value in your editor
@@ -1172,9 +1228,10 @@ safix \u{2014} the whole lifecycle of one secret, by name and never by file.
   safix audit    [<target>] [<mapping>...]          report bridge or mirror drift
   safix sync     [<target>] [<mapping>...]          converge declared relationships
                  <target> is clan, keepassxc, pass, bitwarden or 1password
-  safix keygen   [--for-someone-else] [<user>] | --show
-                                                    an age identity for a person
-  safix adduser  <name> <age-recipient> [...]       declare a person who holds none
+  safix keygen   [--kind age|pgp] [...]             create a protected local identity
+  safix migrate <plan.json>                        convert and verify before publishing
+  safix identity backup|restore [...]              verified independent recovery
+  safix adduser  <name> <recipient> [...]           declare a person who holds none
   safix enroll   [<user>] [--serial <n>] [...]      a hardware key, proven
   safix group    add|remove <group> <subject>       edit a group's membership
   safix upload   <machine> --directory DIR | --to ADDRESS

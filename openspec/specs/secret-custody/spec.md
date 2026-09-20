@@ -25,8 +25,12 @@ It SHALL NOT carry account, profile, or host-membership information of any kind.
 
 ### Requirement: The audience picks the file, and one audience gets one file
 
-A secret's audience SHALL be its owner together with every user the owner grants it to, or for a shared entry every user who carries it.
-Each distinct audience SHALL resolve to exactly one encrypted file, and every secret with that audience SHALL live in it.
+Every encrypted file SHALL belong to exactly one audience. Ordinary keyed YAML entries of one audience SHALL share their existing file; other formats and whole-document entries SHALL use separately derived files within that same audience. Vault filenames SHALL remain opaque and preserve the format needed to interpret them.
+
+#### Scenario: Separating containers does not widen custody
+- **WHEN** two entries of one audience use different formats
+- **THEN** their files name exactly the same declared recipients
+- **AND** an entry of another audience cannot inherit their rules
 
 #### Scenario: A sole-owner audience
 
@@ -73,7 +77,8 @@ An entry marked shared SHALL resolve to one value in one file whose audience is 
 
 - **WHEN** a user stops carrying a shared entry
 - **THEN** the arrangement records that the value needs minting anew rather than merely re-wrapping
-- **AND** that finding is derived from the file's own recipient stanzas rather than from any stored record of the former audience
+- **AND** for inspectable SOPS files that finding is derived from recipient stanzas rather than a stored record of the former audience
+- **AND** raw age checks report that the old audience cannot be verified instead of declaring custody unchanged
 
 ### Requirement: Placement scopes adjust where a secret lands, never who owns it
 

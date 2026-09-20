@@ -36,15 +36,11 @@
 //!
 //! # What a run leaves when it stops
 //!
-//! Nothing, up to the generator it stopped in. Each generator's outputs are
-//! staged into candidates beside their targets and renamed into place together,
-//! so a run that refuses partway through one generator leaves that generator's
-//! files as it found them. A generator's outputs resolve to one audience, so a
-//! multi-output write is one staged document and one rename, and the window a
-//! crash between two renames used to open for a keypair is closed. It is not
-//! closed in general: a `--regenerate` cascade still commits per generator, so
-//! generators that already committed stay committed, which is what the cascade
-//! confirmation warns about before it starts rather than after.
+//! Outputs are prepared in candidates before publication. YAML outputs sharing
+//! a document use one candidate and one rename. Other formats may require
+//! several files: publication is not crash-atomic across those files.
+//! A regeneration cascade commits per generator; earlier commits remain when
+//! a later generator fails.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -477,6 +473,9 @@ fn run_one(
 fn holds_a_value(workspace: &Workspace, target: &Target) -> Result<bool> {
     match target {
         Target::Secret { file, key } => {
+            if key.is_empty() {
+                return Ok(public::holds_a_value(&workspace.vault_absolute(file)));
+            }
             let Some(text) = workspace.read_vault_relative(file)? else {
                 return Ok(false);
             };
@@ -722,9 +721,12 @@ fn validate(
     };
 
     let mut child = command.spawn().map_err(|_| rejected())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = value.write_to(&mut stdin);
-    }
+    let written = match child.stdin.take() {
+        Some(mut stdin) => value.write_to(&mut stdin),
+        None => Err(std::io::Error::other(
+            "validation input pipe is unavailable",
+        )),
+    };
 
     let finished = {
         let _quiet = scratch::quiet();
@@ -737,6 +739,7 @@ fn validate(
     if let Some(status) = stopped(finished) {
         return Ok(Step::Stopped(status));
     }
+    written.map_err(|_| rejected())?;
 
     if finished.success() {
         Ok(Step::Done(()))
@@ -837,13 +840,22 @@ fn write(
                 ),
             );
             let _quiet = scratch::quiet();
-            workspace.sops().create_empty_document(
-                workspace.vault_root(),
-                relative,
-                &first,
-                &candidate,
-                config.as_deref(),
-            )?;
+            let placement = records
+                .stamps
+                .iter()
+                .find(|placement| placement.file == *relative)
+                .ok_or_else(|| Error::NoAudienceForFile {
+                    file: relative.clone(),
+                })?;
+            if matches!(placement.format, crate::ciphertext::Format::Yaml) && !first.is_empty() {
+                workspace.sops().create_empty_document(
+                    workspace.vault_root(),
+                    relative,
+                    &first,
+                    &candidate,
+                    config.as_deref(),
+                )?;
+            }
         }
 
         for (target, value) in written {
@@ -852,7 +864,7 @@ fn write(
             };
             let status = {
                 let _quiet = scratch::quiet();
-                workspace.sops().set_key(&candidate, key, value)?
+                set::write_candidate(workspace, relative, &candidate, key, value)?
             };
             if status != 0 {
                 return Ok(Outcome::Refused(status));
@@ -865,7 +877,16 @@ fn write(
         // Once per file rather than once per key: recipients are a property of
         // the file, and the document judged is the one holding every key this run
         // writes, so the assertion covers the bytes that are about to land.
-        set::refuse_recipient_drift(workspace, relative, &candidate)?;
+        let placement = records
+            .stamps
+            .iter()
+            .find(|placement| placement.file == *relative)
+            .ok_or_else(|| Error::NoAudienceForFile {
+                file: relative.clone(),
+            })?;
+        if !matches!(placement.format, crate::ciphertext::Format::Age) {
+            set::refuse_recipient_drift(workspace, relative, &candidate)?;
+        }
         candidates.push(candidate);
     }
 

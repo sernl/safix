@@ -1,22 +1,10 @@
 //! What a sops document says about itself without being decrypted.
 //!
-//! Two questions, both answerable from the bytes: which age keys a file's
-//! ciphertext is wrapped for, and which keys the document holds with which of
-//! them hold nothing. sops leaves the document's shape in the clear — only leaf
-//! values are enciphered — so the key names, the stanza list, and the fact that
-//! a key's ciphertext encrypts the empty string are all readable.
-//!
-//! Nothing here decrypts, holds an identity, or produces plaintext. Every
-//! string on every path through this module is either a key name or an age
-//! public key, and both are public data. That is what lets `check` judge files
-//! belonging to people whose identities the machine running it does not hold.
-//!
-//! This began as a port of two python readers, `sops_recipients.py` and
-//! `sops_keys.py`, which the differential harness held it to agreeing with on
-//! every fixture before either was retired. All three are gone from the tree and
-//! reachable at 8409f15; this reads the same two fields they read and nothing
-//! else about the format, and the format itself stays sops's, per
-//! `openspec/changes/rewrite-runtime-in-rust` design decision D6.
+//! Recipient metadata and encrypted value shapes are public. Readers support
+//! SOPS YAML, JSON, dotenv and INI, including age and `GnuPG` recipients.
+//! Unsupported recipient providers and threshold groups remain explicit
+//! findings rather than being flattened into an ordinary recipient union.
+//! Nothing here decrypts or holds a private identity.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,49 +13,176 @@ use serde_norway::Value;
 use crate::error::{Error, Result};
 
 /// What is reported in place of a recipient list when a governed path holds a
-/// document with no sops age metadata at all.
+/// document with no recognized SOPS recipient metadata.
 ///
 /// A sentinel rather than a failure: such a path is either plaintext someone
 /// committed by mistake or ciphertext from a store with a different metadata
 /// shape, and both have to be reported against the declared audience rather
 /// than crash the reader that was asked to inspect them.
-pub const NO_METADATA: &str = "<file carries no sops age metadata>";
+pub const NO_METADATA: &str = "<file carries no sops recipient metadata>";
 
-/// The age recipients a document's ciphertext actually names, in key order.
+pub(crate) const THRESHOLD_GROUPS: &str = "<unsupported sops threshold key groups>";
+
+/// The public recipients a document names, with unsupported semantics marked.
 ///
 /// # Errors
 ///
-/// [`Error::SopsDocumentUnreadable`] when the bytes are not YAML, and
-/// [`Error::SopsStanzaUnreadable`] when the `sops.age` list holds something
-/// that is not a mapping carrying a string `recipient`.
+/// [`Error::SopsDocumentUnreadable`] for malformed public document structure,
+/// or [`Error::SopsStanzaUnreadable`] for malformed recipient metadata.
 pub fn recipients_of(text: &str) -> Result<Vec<String>> {
-    let document: Value =
-        serde_norway::from_str(text).map_err(|cause| Error::SopsDocumentUnreadable {
-            cause: cause.to_string(),
-        })?;
-
-    let stanzas = document
+    let document = parse_public_document(text)?;
+    let Some(metadata) = document
         .as_mapping()
         .and_then(|mapping| mapping.get(Value::String("sops".into())))
         .and_then(Value::as_mapping)
-        .and_then(|metadata| metadata.get(Value::String("age".into())))
-        .and_then(Value::as_sequence);
-
-    let Some(stanzas) = stanzas else {
+    else {
         return Ok(vec![NO_METADATA.to_owned()]);
     };
-
-    let mut recipients = Vec::with_capacity(stanzas.len());
-    for stanza in stanzas {
-        let recipient = stanza
-            .as_mapping()
-            .and_then(|fields| fields.get(Value::String("recipient".into())))
-            .and_then(Value::as_str)
-            .ok_or(Error::SopsStanzaUnreadable)?;
-        recipients.push(recipient.to_owned());
+    let mut recipients = Vec::new();
+    collect_recipients(metadata, &mut recipients)?;
+    if recipients.is_empty() {
+        recipients.push(NO_METADATA.into());
     }
     recipients.sort();
+    recipients.dedup();
     Ok(recipients)
+}
+
+fn parse_public_document(text: &str) -> Result<Value> {
+    let ini = text.lines().any(|line| line.trim() == "[sops]");
+    let dotenv = text
+        .lines()
+        .any(|line| line.starts_with("sops_") && line.contains('='));
+    if !ini && !dotenv {
+        return serde_norway::from_str(text).map_err(|cause| Error::SopsDocumentUnreadable {
+            cause: cause.to_string(),
+        });
+    }
+    let mut document = serde_norway::Mapping::new();
+    let mut metadata = serde_norway::Mapping::new();
+    let mut section = "DEFAULT";
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if ini
+            && let Some(name) = line
+                .strip_prefix('[')
+                .and_then(|line| line.strip_suffix(']'))
+        {
+            section = name;
+            continue;
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| Error::SopsDocumentUnreadable {
+                cause: "invalid encrypted INI or dotenv assignment".into(),
+            })?;
+        let key = key.trim();
+        let value = Value::String(value.trim().to_owned());
+        let metadata_key = if ini {
+            (section == "sops").then_some(key)
+        } else {
+            key.strip_prefix("sops_")
+        };
+        if let Some(key) = metadata_key {
+            if metadata.insert(Value::String(key.into()), value).is_some() {
+                return Err(Error::SopsStanzaUnreadable);
+            }
+        } else if ini {
+            let fields = document
+                .entry(Value::String(section.into()))
+                .or_insert_with(|| Value::Mapping(serde_norway::Mapping::new()));
+            let fields = fields.as_mapping_mut().ok_or(Error::SopsStanzaUnreadable)?;
+            if fields.insert(Value::String(key.into()), value).is_some() {
+                return Err(Error::SopsStanzaUnreadable);
+            }
+        } else if document.insert(Value::String(key.into()), value).is_some() {
+            return Err(Error::SopsStanzaUnreadable);
+        }
+    }
+    document.insert(Value::String("sops".into()), Value::Mapping(metadata));
+    Ok(Value::Mapping(document))
+}
+
+fn collect_recipients(
+    metadata: &serde_norway::Mapping,
+    recipients: &mut Vec<String>,
+) -> Result<()> {
+    for (kind, field, prefix) in [("age", "recipient", ""), ("pgp", "fp", "pgp:")] {
+        if let Some(stanzas) = metadata.get(Value::String(kind.into())) {
+            for stanza in stanzas.as_sequence().ok_or(Error::SopsStanzaUnreadable)? {
+                let recipient = stanza
+                    .as_mapping()
+                    .and_then(|fields| fields.get(Value::String(field.into())))
+                    .and_then(Value::as_str)
+                    .ok_or(Error::SopsStanzaUnreadable)?;
+                recipients.push(format!("{prefix}{recipient}"));
+            }
+        }
+    }
+    if let Some(groups) = metadata.get(Value::String("key_groups".into())) {
+        let groups = groups.as_sequence().ok_or(Error::SopsStanzaUnreadable)?;
+        if groups.len() > 1 {
+            recipients.push(THRESHOLD_GROUPS.into());
+        }
+        for group in groups {
+            collect_recipients(
+                group.as_mapping().ok_or(Error::SopsStanzaUnreadable)?,
+                recipients,
+            )?;
+        }
+    }
+    let mut flattened = BTreeMap::new();
+    let mut flattened_groups = BTreeSet::new();
+    for (key, value) in metadata {
+        let Some(key) = key.as_str() else {
+            return Err(Error::SopsStanzaUnreadable);
+        };
+        if let Some(group) = key.strip_prefix("key_groups__list_") {
+            flattened_groups.insert(
+                group
+                    .split("__map_")
+                    .next()
+                    .ok_or(Error::SopsStanzaUnreadable)?,
+            );
+        }
+        for provider in ["kms", "gcp_kms", "hckms", "azure_kv", "hc_vault"] {
+            if (key == provider && value.as_sequence().is_none_or(|rows| !rows.is_empty()))
+                || key.starts_with(&format!("{provider}__list_"))
+                || key.contains(&format!("__map_{provider}__list_"))
+            {
+                recipients.push(format!("<unsupported sops {provider} recipients>"));
+            }
+        }
+        let Some((stem, field)) = key.rsplit_once("__map_") else {
+            continue;
+        };
+        let kind = if stem.starts_with("age__list_") || stem.contains("__map_age__list_") {
+            "age"
+        } else if stem.starts_with("pgp__list_") || stem.contains("__map_pgp__list_") {
+            "pgp"
+        } else {
+            continue;
+        };
+        let found = flattened.entry(stem).or_insert(None);
+        if (kind == "age" && field == "recipient") || (kind == "pgp" && field == "fp") {
+            let recipient = value.as_str().ok_or(Error::SopsStanzaUnreadable)?;
+            *found = Some(if kind == "pgp" {
+                format!("pgp:{recipient}")
+            } else {
+                recipient.to_owned()
+            });
+        }
+    }
+    if flattened_groups.len() > 1 {
+        recipients.push(THRESHOLD_GROUPS.into());
+    }
+    for recipient in flattened.into_values() {
+        recipients.push(recipient.ok_or(Error::SopsStanzaUnreadable)?);
+    }
+    Ok(())
 }
 
 /// Which recipients each side holds that the other does not.
@@ -152,24 +267,108 @@ pub struct KeyState {
 ///
 /// [`Error::SopsDocumentUnreadable`] when the bytes are not YAML.
 pub fn keys_of(text: &str) -> Result<BTreeMap<String, KeyState>> {
-    let document: Value =
-        serde_norway::from_str(text).map_err(|cause| Error::SopsDocumentUnreadable {
-            cause: cause.to_string(),
-        })?;
+    fn visit(value: &Value, path: String, keys: &mut BTreeMap<String, KeyState>) {
+        if let Some(mapping) = value.as_mapping() {
+            if mapping.len() == 1
+                && mapping
+                    .get(Value::String("__safix_bytes_v1".into()))
+                    .is_some_and(Value::is_sequence)
+            {
+                keys.insert(path, KeyState { empty: false });
+                return;
+            }
+            for (key, value) in mapping {
+                if let Some(key) = key.as_str() {
+                    visit(value, format!("{path}/{key}"), keys);
+                }
+            }
+        } else if let Some(values) = value.as_sequence() {
+            for (index, value) in values.iter().enumerate() {
+                visit(value, format!("{path}/{index}"), keys);
+            }
+        } else {
+            keys.insert(
+                path,
+                KeyState {
+                    empty: value.as_str().is_some_and(is_empty_ciphertext),
+                },
+            );
+        }
+    }
+    let document = parse_public_document(text)?;
+    let mut keys = BTreeMap::new();
+    if let Some(mapping) = document.as_mapping() {
+        for (key, value) in mapping {
+            if let Some(key) = key.as_str()
+                && key != "sops"
+            {
+                visit(value, key.to_owned(), &mut keys);
+            }
+        }
+    }
+    Ok(keys)
+}
 
-    let Some(mapping) = document.as_mapping() else {
-        return Ok(BTreeMap::new());
+/// Return a native update index only when existing metadata guarantees that
+/// the selected value stays encrypted. Other policies require fresh encryption.
+pub(crate) fn encrypted_update_index(text: &str, key: &str) -> Result<Option<String>> {
+    let document = parse_public_document(text)?;
+    let Some(metadata) = document.get("sops").and_then(Value::as_mapping) else {
+        return Ok(None);
     };
+    let field = |name: &str| {
+        metadata
+            .get(Value::String(name.into()))
+            .and_then(Value::as_str)
+    };
+    if [
+        "unencrypted_regex",
+        "encrypted_suffix",
+        "unencrypted_comment_regex",
+        "encrypted_comment_regex",
+    ]
+    .iter()
+    .any(|name| field(name).is_some_and(|value| !value.is_empty()))
+    {
+        return Ok(None);
+    }
+    let all_encrypted = field("encrypted_regex") == Some(".*");
+    let default_policy = field("encrypted_regex").is_none_or(str::is_empty)
+        && field("unencrypted_suffix") == Some("_unencrypted")
+        && key.split('/').all(|part| !part.ends_with("_unencrypted"));
+    if !all_encrypted && !default_policy {
+        return Ok(None);
+    }
+    if all_encrypted && field("unencrypted_suffix").is_some_and(|value| !value.is_empty()) {
+        return Ok(None);
+    }
 
-    Ok(mapping
-        .iter()
-        .filter_map(|(key, value)| key.as_str().map(|key| (key, value)))
-        .filter(|(key, _)| *key != "sops")
-        .map(|(key, value)| {
-            let empty = value.as_str().is_some_and(is_empty_ciphertext);
-            (key.to_owned(), KeyState { empty })
-        })
-        .collect())
+    let invalid = || Error::SopsKeyIndex {
+        key: key.into(),
+        cause: "the key crosses an incompatible document value".into(),
+    };
+    let mut here = Some(&document);
+    let mut index = String::new();
+    for component in key.split('/') {
+        index.push('[');
+        match here {
+            Some(Value::Sequence(values)) => {
+                let number = component.parse::<usize>().map_err(|_| invalid())?;
+                here = Some(values.get(number).ok_or_else(invalid)?);
+                index.push_str(&number.to_string());
+            }
+            Some(Value::Mapping(values)) => {
+                here = values.get(Value::String(component.into()));
+                index.push_str(&serde_json::to_string(component).map_err(|_| invalid())?);
+            }
+            None => {
+                index.push_str(&serde_json::to_string(component).map_err(|_| invalid())?);
+            }
+            Some(_) => return Err(invalid()),
+        }
+        index.push(']');
+    }
+    Ok(Some(index))
 }
 
 /// Whether the document holds a value at this `/`-nested key path.
@@ -188,22 +387,33 @@ pub fn keys_of(text: &str) -> Result<BTreeMap<String, KeyState>> {
 ///
 /// [`Error::SopsDocumentUnreadable`] when the bytes are not YAML.
 pub fn holds_key(text: &str, key: &str) -> Result<bool> {
-    let document: Value =
-        serde_norway::from_str(text).map_err(|cause| Error::SopsDocumentUnreadable {
-            cause: cause.to_string(),
-        })?;
+    let document = parse_public_document(text)?;
 
+    if key.is_empty() {
+        return Ok(true);
+    }
     let mut here = &document;
     for segment in key.split('/') {
-        let Some(next) = here
-            .as_mapping()
-            .and_then(|mapping| mapping.get(Value::String(segment.to_owned())))
-        else {
+        let next = match here {
+            Value::Mapping(mapping) => mapping.get(Value::String(segment.to_owned())),
+            Value::Sequence(values) => segment
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| values.get(index)),
+            _ => None,
+        };
+        let Some(next) = next else {
             return Ok(false);
         };
         here = next;
     }
-    Ok(!here.is_mapping() && !here.is_sequence())
+    Ok((!here.is_mapping() && !here.is_sequence())
+        || here.as_mapping().is_some_and(|fields| {
+            fields.len() == 1
+                && fields
+                    .get(Value::String("__safix_bytes_v1".into()))
+                    .is_some_and(Value::is_sequence)
+        }))
 }
 
 #[cfg(test)]
@@ -227,6 +437,18 @@ sops:
     #[test]
     fn recipients_come_back_sorted_and_without_the_metadata_block() {
         assert_eq!(recipients_of(WRAPPED).unwrap(), ["age1aaa", "age1bbb"]);
+    }
+
+    #[test]
+    fn threshold_groups_are_not_reported_as_an_any_recipient_audience() {
+        let documents = [
+            "sops:\n  shamir_threshold: 2\n  key_groups:\n    - age: [{recipient: age1aaa}]\n    - age: [{recipient: age1bbb}]\n",
+            "sops_shamir_threshold=2\nsops_key_groups__list_0__map_age__list_0__map_recipient=age1aaa\nsops_key_groups__list_1__map_age__list_0__map_recipient=age1bbb\n",
+        ];
+        for document in documents {
+            let recipients = recipients_of(document).unwrap();
+            assert!(!drift(&recipients, &["age1aaa".into(), "age1bbb".into()]).is_empty());
+        }
     }
 
     #[test]

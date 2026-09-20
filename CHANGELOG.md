@@ -10,14 +10,27 @@ Two surfaces are versioned, and they are not versioned by the same thing.
 The `safix-core` library's public interface is what [semantic versioning](https://semver.org/spec/v2.0.0.html) governs.
 While the major version is `0`, a breaking change to that interface moves the minor version.
 
-The `safix` command's behaviour — its subcommands, its exit codes, and the wording of its refusals — is governed by `crates/safix/tests/` and the refusal snapshots rather than by the version number.
-It was governed by the differential harness while a second runtime existed; that harness is described in `openspec/changes/rewrite-runtime-in-rust/design.md` and its retirement in `openspec/changes/rust-only-runtime/`.
-A refusal's prose is a tested string, so it changes when a test changes, and the changelog records it either way.
+The `safix` command's subcommands, exit behavior and stable refusal codes are governed by its behavioral tests, not by exact diagnostic wording.
+The retired differential harness established the original behavior; diagnostic prose and rendering may evolve without preserving wording-only snapshots.
 
 The nix half — `flake.safix.*`, the flake module, and the consumption modules — is the option surface consumers write against.
 A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
+
+### Byte-preserving formats, deployment and key custody
+
+- Preserve non-UTF-8 and intentional empty values through Safix storage, reads, generators and installation. Keyed YAML/JSON uses an explicit byte envelope; text-only formats and destinations refuse unrepresentable values before mutation.
+- Support raw age and SOPS YAML, JSON, dotenv, INI and binary, with explicit age, SSH and GnuPG identities. Generated policy keeps recipient kinds in one audience rather than introducing a threshold. Raw-age rosters remain explicitly unverifiable.
+- Add runtime templates, whole-document installation, protected early-user stores and checked user-service hooks. Early installation precedes legacy users, systemd-sysusers and userborn; hooks run only after publication and never during a dry run.
+- Add `migrate <plan.json>` with independent target decryption, exact-byte verification, non-overwriting output, retained sources, consumer declarations and value-free receipts. Safix, sops-nix and agenix targets reject metadata they cannot express. Multi-file publication is not crash-atomic.
+- Add standalone age and modern GnuPG key creation, upstream pinentry, independently encrypted backup and non-overwriting restore. GnuPG recovery verifies every private primary/subkey and rejects fingerprint or keygrip collisions and incomplete hardware-stub exports.
+- Preserve native SOPS identity environment precedence for ordinary operations; isolate identities during installation, migration, enrollment proof and recovery verification.
+- Keep unchanged SOPS writes idempotent and preserve unrelated encrypted leaves during keyed updates.
+- Wait for printed PIN prompts before answering; delayed echo restoration and closing newlines no longer masquerade as retries.
+- Refuse opaque raw-age enrollment before touching a card unless `--trust-declared-recipients` explicitly authorizes the declared audience. Extra governed age files use the same covering-directory audience as drift checks.
+- Refuse GnuPG backups that omit orphaned private components or share private encryption material with the recovery identity.
+- Remove wording-only reporter/help snapshots and the unused `insta` dependency. Behavioral regressions and real-tool/VM checks remain the compatibility evidence.
 
 ### Fields on the far side of a mapping, one judge, and one reserved-word list
 

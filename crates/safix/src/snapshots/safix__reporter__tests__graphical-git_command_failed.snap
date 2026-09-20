@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::git_command_failed
-
-  × git commit -q -m chore(safix): set alice-alone for alice -- secrets/safix/
-  │ users/alice/secrets.yaml failed

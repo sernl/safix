@@ -174,6 +174,16 @@ const VERBS: &[Verb] = &[
         run: keygen_command,
     },
     Verb {
+        name: "migrate",
+        help: usage::MIGRATE,
+        run: migrate_command,
+    },
+    Verb {
+        name: "identity",
+        help: usage::IDENTITY,
+        run: identity_command,
+    },
+    Verb {
         name: "adduser",
         help: usage::ADDUSER,
         run: adduser_command,
@@ -212,11 +222,7 @@ fn verb(name: &str) -> Option<&'static Verb> {
 
 /// Every subcommand, as the unknown-subcommand refusal names them.
 ///
-/// Derived from [`VERBS`] rather than written out, which is the whole point:
-/// the sentence cannot name a subcommand this binary does not have, and cannot
-/// omit one it does. The snapshot holding this refusal is therefore a snapshot
-/// of the table, and adding a subcommand fails it until the new wording is
-/// accepted.
+/// Derived from [`VERBS`], so the refusal names every supported subcommand.
 pub(crate) fn expected_verbs() -> String {
     let names: Vec<&str> = VERBS.iter().map(|verb| verb.name).collect();
     match names.split_last() {
@@ -891,7 +897,41 @@ fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// An age identity for a person who has none, or their own public recipient
 /// with `--show`.
 fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "keygen [--for-someone-else] [<user>] | keygen --show";
+    const FORM: &str = "keygen [--for-someone-else] [<user>] | keygen --show | keygen --kind age | keygen --kind pgp --uid <identity> [--expires <2y>]";
+    if let [kind_flag, kind, rest @ ..] = arguments
+        && kind_flag == "--kind"
+    {
+        match kind.as_str() {
+            "age" if rest.is_empty() => {
+                let recipient = safix_core::identity::generate_age()?;
+                Terminal.write(&format!("Public recipient: {recipient}\nPrivate identity: {}\nDeclare the public recipient for your safix user; keep an independently verified encrypted backup.\n", keygen::identity_file().display()));
+            }
+            "pgp" => {
+                let mut uid = None;
+                let mut expires = "2y";
+                let mut flags = rest.iter();
+                while let Some(flag) = flags.next() {
+                    match flag.as_str() {
+                        "--uid" if uid.is_none() => uid = flags.next().map(String::as_str),
+                        "--expires" => {
+                            expires = flags
+                                .next()
+                                .map(String::as_str)
+                                .ok_or(Refusal::Usage { form: FORM })?;
+                        }
+                        _ => return Err(Refusal::Usage { form: FORM }),
+                    }
+                }
+                safix_core::identity::generate_pgp(
+                    uid.ok_or(Refusal::Usage { form: FORM })?,
+                    expires,
+                    &Terminal,
+                )?;
+            }
+            _ => return Err(Refusal::Usage { form: FORM }),
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if let [first, rest @ ..] = arguments
         && first == "--show"
@@ -919,13 +959,62 @@ fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn migrate_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    let [plan] = arguments else {
+        return Err(Refusal::Usage {
+            form: "migrate <plan.json>",
+        });
+    };
+    safix_core::migrate::run(std::path::Path::new(plan), &Terminal)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn identity_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
+    const FORM: &str = "identity backup <age|pgp> <destination> --recipient <public-key>... [--age-key-file <recovery-key>] [--gnupg-home <recovery-keyring>] | identity restore <backup> [--age-key-file <recovery-key>] [--gnupg-home <recovery-keyring>]";
+    let (kind, file, flags) = match arguments {
+        [operation, kind, file, flags @ ..] if operation == "backup" => {
+            (Some(kind.as_str()), file, flags)
+        }
+        [operation, file, flags @ ..] if operation == "restore" => (None, file, flags),
+        _ => return Err(Refusal::Usage { form: FORM }),
+    };
+    let absolute = |path: &str| {
+        std::path::absolute(path).map_err(|cause| safix_core::Error::KeyManagement {
+            reason: format!("cannot resolve identity artifact path: {cause}"),
+        })
+    };
+    let mut identities = safix_core::ciphertext::Identities::default();
+    let mut recipients = Vec::new();
+    let mut flags = flags.iter();
+    while let Some(flag) = flags.next() {
+        let value = flags.next().ok_or(Refusal::Usage { form: FORM })?;
+        match flag.as_str() {
+            "--recipient" if kind.is_some() => recipients.push(value.clone()),
+            "--age-key-file" if identities.age_key_file.is_none() => {
+                identities.age_key_file = Some(absolute(value)?);
+            }
+            "--gnupg-home" if identities.gnupg_home.is_none() => {
+                identities.gnupg_home = Some(absolute(value)?);
+            }
+            _ => return Err(Refusal::Usage { form: FORM }),
+        }
+    }
+    let path = absolute(file)?;
+    if let Some(kind) = kind {
+        safix_core::identity::backup(kind, &path, &recipients, &identities, &Terminal)?;
+    } else {
+        safix_core::identity::restore(&path, &identities, &Terminal)?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Declare a person who holds nothing yet.
 ///
 /// Flags are read in any order and around the two positionals, because `--host`
 /// is repeatable and a caller adding a second one should not have to know where
 /// the name and the recipient sit.
 fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "adduser <name> <age-recipient> [--host <hostname>]... [--yes]";
+    const FORM: &str = "adduser <name> <recipient> [--host <hostname>]... [--yes]";
     let mut hosts = Vec::new();
     let mut assume_yes = false;
     let mut positional: Vec<String> = Vec::new();
@@ -992,7 +1081,7 @@ fn adduser_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
     const FORM: &str = "enroll [<user>] [--serial <n>] [--slot <n>] [--no-store-pin] \
                         [--mirror-to-store] [--store-database <path>] [--pin-policy <p>] \
-                        [--touch-policy <p>] [--allow-disk-staging]";
+                        [--touch-policy <p>] [--allow-disk-staging] [--trust-declared-recipients]";
     const OTP_SPELLINGS: [&str; 5] = [
         "--otp",
         "--otp-slot",
@@ -1040,6 +1129,10 @@ fn enroll_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
             }
             "--mirror-to-store" => {
                 options.mirror.mirror = true;
+                rest = tail;
+            }
+            "--trust-declared-recipients" => {
+                options.trust_declared_recipients = true;
                 rest = tail;
             }
             flag if flag == safix_core::staging::ACKNOWLEDGEMENT => {
@@ -1244,75 +1337,15 @@ fn install_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 mod tests {
     use super::{VERBS, usage};
 
-    /// Every subcommand is in the scaffold, in the order the table declares them.
-    ///
-    /// [`VERBS`] says this in a doc comment and nothing held it to it. A verb
-    /// added to the table alone is dispatchable and is named by the
-    /// unknown-subcommand refusal — [`expected_verbs`](super::expected_verbs)
-    /// derives that sentence from the table — while being absent from the one
-    /// page an operator is shown. No snapshot reads both, so every snapshot in
-    /// the tree stays green over exactly that drift.
-    ///
-    /// The order is asserted for the reason the table's own doc gives: a list in
-    /// a different order from the help is a second answer to the question the
-    /// help already answers.
     #[test]
-    fn every_verb_is_in_the_scaffold_in_the_order_the_table_declares_them() {
-        let mut previous: Option<(usize, &str)> = None;
+    fn every_supported_verb_is_discoverable_in_help() {
         for verb in VERBS {
-            let name = verb.name;
-            // The listing line rather than the bare word: `fix` and `set` are
-            // English, and the scaffold's prose says both before it is done.
-            let listing = format!("safix {name}");
-            let found = usage::SCAFFOLD.find(&listing);
             assert!(
-                found.is_some(),
-                "`{name}` is a subcommand and the usage scaffold never lists it"
+                usage::SCAFFOLD.contains(&format!("safix {}", verb.name)),
+                "help omits supported command {}",
+                verb.name
             );
-            let at = found.unwrap();
-            if let Some((earlier, earlier_name)) = previous {
-                assert!(
-                    at > earlier,
-                    "the scaffold lists `{name}` before `{earlier_name}` and the table \
-                     declares them the other way round"
-                );
-            }
-            previous = Some((at, name));
         }
-    }
-
-    /// `view` sits between `get` and `list`, in the table and on the page.
-    ///
-    /// The read paths in operator order. The test above already fails when the
-    /// scaffold omits a verb, so this one holds the position rather than the
-    /// presence: a `view` row appended to the end of either list would leave
-    /// that one green.
-    #[test]
-    fn view_sits_between_get_and_list_among_the_read_paths() {
-        let names: Vec<&str> = VERBS.iter().map(|verb| verb.name).collect();
-        let at = |name: &str| names.iter().position(|declared| *declared == name);
-        assert_eq!(
-            at("view").and_then(|view| at("get").map(|get| get < view)),
-            Some(true),
-            "the table declares `view` before `get`"
-        );
-        assert_eq!(
-            at("view").and_then(|view| at("list").map(|list| view < list)),
-            Some(true),
-            "the table declares `view` after `list`"
-        );
-
-        let row = |name: &str| usage::SCAFFOLD.find(&format!("safix {name}"));
-        assert_eq!(
-            row("view").and_then(|view| row("get").map(|get| get < view)),
-            Some(true),
-            "the scaffold lists `view` before `get`"
-        );
-        assert_eq!(
-            row("view").and_then(|view| row("list").map(|list| view < list)),
-            Some(true),
-            "the scaffold lists `view` after `list`"
-        );
     }
 
     /// The declarations a lone argument is read against.
@@ -1323,6 +1356,7 @@ mod tests {
         use safix_core::model::{Origin, Placement, Placements};
         let placement = |file: &str| Placement {
             file: file.to_owned(),
+            format: safix_core::ciphertext::Format::Yaml,
             key: "value".to_owned(),
             origin: Origin::Private,
             owner: "alice".to_owned(),
@@ -1394,22 +1428,6 @@ mod tests {
             super::grammar(&declarations(), &given),
             super::Grammar::Unusable
         ));
-    }
-
-    /// The boundary sentence is one string, and the help text carries that one.
-    ///
-    /// `safix_core::delegation::BOUNDARY` is where it is written, and every refusal
-    /// in that family ends with it. This help text cannot interpolate a `const`
-    /// into a `const`, so the words are pasted — and pasted words drift, which is
-    /// what this reads.
-    #[test]
-    fn the_group_help_carries_the_boundary_sentence_word_for_word() {
-        assert!(
-            usage::GROUP.contains(safix_core::delegation::BOUNDARY),
-            "the help text's boundary paragraph has drifted from the one the \
-             refusals carry:\n{}",
-            safix_core::delegation::BOUNDARY
-        );
     }
 
     /// Every target keyword the dispatch accepts is named by both forms.

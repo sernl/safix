@@ -390,6 +390,19 @@ impl<'a> OnePassword<'a> {
     /// standard input could read an operator's terminal, which is not a channel
     /// safix hands to a child.
     fn run(&self, arguments: &[String], payload: Option<&Payload<'_>>) -> Result<Output> {
+        let encoded = payload
+            .map(|payload| {
+                let mut bytes = Zeroizing::new(Vec::new());
+                payload
+                    .write_to(&mut *bytes)
+                    .map_err(|cause| Error::DocumentOperation {
+                        operation: "encode 1Password value",
+                        path: "1Password item".into(),
+                        cause: cause.to_string(),
+                    })?;
+                Ok::<_, Error>(bytes)
+            })
+            .transpose()?;
         let mut child = Command::new(&self.program)
             .args(arguments)
             .stdin(if payload.is_some() {
@@ -405,20 +418,23 @@ impl<'a> OnePassword<'a> {
                 cause,
             })?;
 
-        if let Some(payload) = payload {
-            let mut stdin = child.stdin.take().ok_or(Error::NoValueRead)?;
-            payload
-                .write_to(&mut stdin)
-                .and_then(|()| stdin.flush())
-                .map_err(|cause| Error::SecretRead { cause })?;
-        }
+        let written = if let Some(encoded) = &encoded {
+            match child.stdin.take() {
+                Some(mut stdin) => stdin.write_all(encoded).and_then(|()| stdin.flush()),
+                None => Err(io::Error::other("1Password input pipe is unavailable")),
+            }
+        } else {
+            Ok(())
+        };
 
-        child
+        let output = child
             .wait_with_output()
             .map_err(|cause| Error::OnePasswordUnavailable {
                 program: self.program.display().to_string(),
                 cause,
-            })
+            })?;
+        written.map_err(|cause| Error::SecretRead { cause })?;
+        Ok(output)
     }
 }
 

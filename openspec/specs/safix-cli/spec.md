@@ -2,16 +2,18 @@
 
 ## Purpose
 
-The command that is the whole lifecycle of a secret: its subcommand contract, the fact that a value is always addressed by name and never by file, the pipe-only path a value travels in and out, the separation between the half that writes content and the half that writes policy, and the absences that are recorded rather than left mysterious.
+The secret lifecycle command: by-name value operations, explicit migration and identity artifacts, byte-preserving transport, recipient-policy boundaries and stable refusal codes.
 
 ## Requirements
 
 ### Requirement: One command covers the lifecycle, by name and never by file
 
-The package SHALL provide a single command named `safix` with the subcommands `set`, `edit`, `get`, `view`, `list`, `generate`, `check`, `fix`, `audit`, `sync`, `keygen`, `adduser`, `enroll`, `group`, `upload`, and `install`.
-Every subcommand that addresses a secret SHALL address it by name, and SHALL NOT require the operator to name a file.
-Where a subcommand offers the operator a choice among the entries a user holds, that choice SHALL be among names, and choosing SHALL be equivalent to having named the chosen entry.
-`install` is the one exception and SHALL name a file, because a manifest is its whole input and no declaration names it.
+The safix command SHALL retain its existing lifecycle verbs and add migrate and identity custody operations. Ordinary secret operations SHALL continue to address declaration names. Installation, explicit migration plans and identity backup/restore SHALL address their input artifacts rather than inventing declaration names for them.
+
+#### Scenario: The explicit migration boundary
+- **WHEN** an operator invokes migration with a versioned plan
+- **THEN** that plan names the source, destination, recipient and deployment contracts to verify
+- **AND** ordinary set and get operations continue resolving files from names
 
 #### Scenario: Addressing a secret
 
@@ -29,15 +31,15 @@ Where a subcommand offers the operator a choice among the entries a user holds, 
 
 - **WHEN** an unrecognised subcommand is given
 - **THEN** the command fails naming the subcommands it accepts
-- **AND** the list it names is derived from the verb table rather than restated, so a verb added without the refusal's own accepted output moving is a failing test
+- **AND** that list includes every supported verb, including identity and migrate
 
 #### Scenario: Runtime dependencies are pinned into the command
 
 - **WHEN** the command runs
-- **THEN** the tools it invokes come from its own closure
-- **AND** none of them is inherited from the caller's environment
+- **THEN** its default tool paths come from its own closure
+- **AND** explicit upstream identity and GnuPG executable settings retain their documented precedence
 
-#### Scenario: The one verb that names a file, and why
+#### Scenario: Installation names its manifest rather than a secret
 
 - **WHEN** the help for `install` is read
 - **THEN** it states that the manifest path is its argument because a manifest is a build product, not a declaration, and nothing in the declarations names it
@@ -45,7 +47,7 @@ Where a subcommand offers the operator a choice among the entries a user holds, 
 
 ### Requirement: Values move through pipes wherever a pipe remains possible
 
-Every leg of a value's journey SHALL be a pipe except those inside the private staging root, and no value SHALL reach an argument vector or an environment variable on any leg.
+Secret and private-key payloads SHALL cross cryptographic subprocess boundaries through pipes, never command arguments or environment variables. Plaintext files SHALL be confined to protected generator/editor staging, private runtime installation state and explicitly selected owner-protected identity custody locations outside repositories and the Nix store.
 
 #### Scenario: The stream-writing and reading verbs are unchanged
 
@@ -61,24 +63,24 @@ Every leg of a value's journey SHALL be a pipe except those inside the private s
 #### Scenario: The exception is bounded and named
 
 - **WHEN** the exception to this requirement is read
-- **THEN** it names the generator staging root and the editor buffer
-- **AND** it names no other location
+- **THEN** it names generator and editor staging, runtime installation and protected local identity custody
+- **AND** migration staging and published recovery artifacts contain ciphertext, not plaintext
 
 #### Scenario: The change from the earlier absolute is stated
 
 - **WHEN** this requirement is compared against the one it replaces
 - **THEN** the difference is stated rather than presented as a clarification
-- **AND** the reason is recorded: the interoperable generator contract is a filesystem contract, and emulating it with pipes would break tools that seek or reopen their inputs, with a truncated secret as the failure mode
+- **AND** the reason is recorded: generators and editors need seekable files, installed services consume runtime paths, and cryptographic tools retain identities in protected local custody
 
 ### Requirement: The content half cannot alter the policy
 
-Subcommands that write values SHALL be structurally unable to grant anyone the ability to read one.
+Ordinary value-writing commands SHALL use only the declared audience and SHALL refuse inspectable SOPS recipient drift before mutation. They SHALL NOT add recipients to declarations. Raw age writes SHALL use the declared audience without claiming to verify the inaccessible previous recipient roster; explicit migration MAY name a different target audience and SHALL independently verify it.
 
 #### Scenario: Setting a value grants nothing
 
 - **WHEN** a value is written
 - **THEN** the recipients used are those the file's own metadata or the committed policy already declares
-- **AND** no run of a value-writing subcommand adds a recipient
+- **AND** no run adds a recipient to the declared audience
 
 #### Scenario: Policy changes go through one subcommand
 
@@ -502,3 +504,15 @@ Both verbs' forms, help text and reports SHALL name this target in the same shap
 - **WHEN** either verb is run with no target named
 - **THEN** pass mappings are acted on or compared alongside every other target's
 - **AND** a run over a consumer declaring no pass mapping reports nothing for this target rather than refusing
+
+### Requirement: Every value path preserves bytes or refuses before mutation
+
+Safix SHALL preserve arbitrary bytes on its own secret storage, generator and installation paths. Intentional empty values SHALL remain distinguishable from missing values and placeholders. Text-only external destinations SHALL refuse values they cannot represent before changing the destination.
+
+#### Scenario: A non-UTF-8 piped value
+- **WHEN** set receives bytes 00 ff fe 41 0a
+- **THEN** get and installation return exactly those bytes
+
+#### Scenario: A text-only destination
+- **WHEN** synchronization sends a non-UTF-8 value to a text-only API
+- **THEN** it refuses before modifying the destination

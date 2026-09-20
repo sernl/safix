@@ -21,11 +21,7 @@
 //! reads only the second, so the private half is never a string this process
 //! formats.
 
-use std::fs::OpenOptions;
-use std::io::Read as _;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
 use crate::progress::{Progress, log, note};
@@ -53,12 +49,7 @@ pub fn keygen_binary() -> PathBuf {
         .map_or_else(|| PathBuf::from("age-keygen"), PathBuf::from)
 }
 
-/// The line `age-keygen` writes its public half on.
-const PUBLIC_KEY_PREFIX: &str = "Public key: ";
-
-/// The prefix `age-keygen` writes on the comment line preceding each identity
-/// it appends to the file, distinct from [`PUBLIC_KEY_PREFIX`], which is what
-/// it writes to standard error instead.
+/// The public-key comment `age-keygen` stores alongside each private identity.
 const PUBLIC_KEY_COMMENT_PREFIX: &str = "# public key: ";
 
 /// Mint an identity for this user and append it to their identity file.
@@ -94,14 +85,7 @@ pub fn run(
     }
 
     let keyfile = identity_file();
-    prepare_identity_file(&keyfile, progress)?;
-
-    let public = append_identity(&keyfile)?;
-    let _ = std::fs::set_permissions(&keyfile, std::fs::Permissions::from_mode(0o600));
-
-    let public = public.ok_or_else(|| Error::KeygenNoPublicKey {
-        file: keyfile.display().to_string(),
-    })?;
+    let public = crate::identity::generate_age()?;
 
     progress.write(&epilogue(user, &keyfile.display().to_string(), &public));
     Ok(())
@@ -124,7 +108,8 @@ pub fn show(progress: &dyn Progress) -> Result<()> {
     let no_identity_yet = || Error::KeygenNoIdentityYet {
         file: keyfile.display().to_string(),
     };
-    let text = std::fs::read_to_string(&keyfile).map_err(|_| no_identity_yet())?;
+    let text =
+        zeroize::Zeroizing::new(std::fs::read_to_string(&keyfile).map_err(|_| no_identity_yet())?);
     let public = text
         .lines()
         .rev()
@@ -171,13 +156,7 @@ pub fn identity_file() -> PathBuf {
 ///
 /// [`Error::FileUnwritable`] when the directory cannot be made.
 pub fn prepare_identity_file(keyfile: &std::path::Path, progress: &dyn Progress) -> Result<()> {
-    if let Some(directory) = keyfile.parent() {
-        std::fs::create_dir_all(directory).map_err(|cause| Error::FileUnwritable {
-            path: directory.display().to_string(),
-            cause,
-        })?;
-        let _ = std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700));
-    }
+    crate::identity::validate_age_location(keyfile)?;
     if keyfile.exists() {
         note(
             progress,
@@ -191,76 +170,13 @@ pub fn prepare_identity_file(keyfile: &std::path::Path, progress: &dyn Progress)
     Ok(())
 }
 
-/// Append text to the identity file, creating it at mode `0600`.
-///
-/// The whole of the file discipline this package has: opened for appending and
-/// never for writing, so nothing already in it is rewritten, and created with
-/// the mode rather than chmodded into it afterwards. `age-keygen -o <file>`
-/// refuses an existing file outright, which is the right refusal for the wrong
-/// shape here — sops tries every identity in the file, so a second identity
-/// beside a first is a working state and truncating is how someone loses the key
-/// to everything they hold.
+/// Append an identity atomically, retaining existing bytes at mode `0600`.
 ///
 /// # Errors
 ///
-/// [`Error::FileUnwritable`] when the file cannot be opened or written.
+/// Refuses unsafe custody paths, concurrent publication failures and failed writes.
 pub fn append_to_identity_file(keyfile: &std::path::Path, text: &str) -> Result<()> {
-    use std::io::Write as _;
-
-    let mut sink = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(keyfile)
-        .map_err(|cause| Error::FileUnwritable {
-            path: keyfile.display().to_string(),
-            cause,
-        })?;
-    sink.write_all(text.as_bytes())
-        .and_then(|()| sink.flush())
-        .map_err(|cause| Error::FileUnwritable {
-            path: keyfile.display().to_string(),
-            cause,
-        })?;
-    let _ = std::fs::set_permissions(keyfile, std::fs::Permissions::from_mode(0o600));
-    Ok(())
-}
-
-/// Run `age-keygen`, appending the identity and returning the public half.
-///
-/// Standard output is the identity and goes straight into the file; the public
-/// half is the only thing `age-keygen` puts on standard error, and the only thing
-/// this reads.
-fn append_identity(keyfile: &std::path::Path) -> Result<Option<String>> {
-    let sink = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(keyfile)
-        .map_err(|cause| Error::FileUnwritable {
-            path: keyfile.display().to_string(),
-            cause,
-        })?;
-
-    let mut child = Command::new(keygen_binary())
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(sink))
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| Error::KeygenFailed)?;
-
-    let mut announced = String::new();
-    if let Some(mut stderr) = child.stderr.take() {
-        let _ = stderr.read_to_string(&mut announced);
-    }
-    if !child.wait().map_err(|_| Error::KeygenFailed)?.success() {
-        return Err(Error::KeygenFailed);
-    }
-
-    Ok(announced
-        .lines()
-        .find_map(|line| line.strip_prefix(PUBLIC_KEY_PREFIX))
-        .map(str::to_owned))
+    crate::identity::append_age_identity(keyfile, text.as_bytes())
 }
 
 /// What to do with the half that just left this process.
@@ -284,23 +200,6 @@ fn epilogue(user: &str, keyfile: &str, public: &str) -> String {
         \n\
         An existing ssh key can be a recipient instead of a fresh identity:\n\
         ssh-to-age reads an ed25519 public key and prints the age recipient for\n\
-        it, and sops.age.sshKeyPaths names the private half.\n"
+        it, and safix.identity.sshKeyPaths names the private half.\n"
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_epilogue_names_the_public_half_and_never_a_file_of_private_ones() {
-        let rendered = epilogue(
-            "alice",
-            "/home/alice/.config/sops/age/keys.txt",
-            "age1fixture",
-        );
-        assert!(rendered.contains("flake.safix.users.alice.recipient = \"age1fixture\";"));
-        assert!(rendered.contains("The private half stays in that file and is not printed."));
-        assert!(rendered.ends_with("names the private half.\n"));
-    }
 }

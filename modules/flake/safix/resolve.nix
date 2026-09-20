@@ -58,7 +58,7 @@
 # `private` entry. Mode, key and path are the owner's, and a recipient-side
 # adjustment belongs in the recipient's own perHost/perTag.
 #
-# ── one file per audience ──
+# ── files partitioned by audience and format ──
 # An encrypted file has a single data key, wrapped once per recipient, so anyone
 # who can open the file opens every value in it. Recipients are therefore a
 # property of the file and never of a key inside it, and sharing two of ten
@@ -69,7 +69,7 @@
 # mechanisms declares one. An unshared secret's audience is its owner plus
 # everyone the owner grants it to through `sharedWith`; a catalogue entry marked
 # `shared` has no owner to start from, so its audience is every user whose
-# `carries` selects it. `audienceFileOf` maps each distinct audience to one file:
+# `carries` selects it. `audienceFileOf` names the legacy keyed YAML document:
 # a singleton audience keeps the person's own directory, a wider audience gets a
 # directory named for its members, so that a reader can tell from the path alone
 # who can open it.
@@ -594,7 +594,8 @@ let
     else
       sortNames (lib.unique ([ owner ] ++ map (elementOf r) (grantRefsOf r owner name)));
 
-  # One file per distinct audience. A lone unmarked element keeps that subject's
+  # The keyed YAML document per audience. Other documents share its directory.
+  # A lone unmarked element keeps that subject's
   # own directory; anything wider is named for its elements in sorted order, so
   # the path states who can open it.
   #
@@ -617,23 +618,85 @@ let
   # contradiction this cannot report — `builtins.listToAttrs` keeps the first
   # binding and drops the second silently — so it is ruled out upstream by
   # `audienceFileOf` being injective, not detected here.
+  formats = [
+    "yaml"
+    "json"
+    "dotenv"
+    "ini"
+    "binary"
+    "age"
+  ];
+
+  isPgp = key: lib.hasPrefix "pgp:" key;
+  validRecipient =
+    key:
+    if isPgp key then
+      builtins.match "pgp:([0-9A-F]{40}|[0-9A-F]{64})" key != null
+    else
+      key != "" && builtins.match "[A-Za-z0-9+/= ._:@-]+" key != null;
+
+  entryKey =
+    entry: name:
+    let
+      format = entry.format or "yaml";
+      authored = entry.sopsKey or null;
+    in
+    if
+      builtins.elem format [
+        "binary"
+        "age"
+      ]
+    then
+      if authored == null || authored == "" then
+        ""
+      else
+        throw "safix placement: '${name}' uses ${format}, which requires an empty sopsKey"
+    else if authored == null then
+      name
+    else
+      authored;
+
+  entryFile =
+    storage: audience: name: entry:
+    let
+      format = entry.format or "yaml";
+      legacy = audienceFileOf storage audience;
+    in
+    if format == "yaml" && entryKey entry name != "" then
+      legacy
+    else
+      "${builtins.dirOf legacy}/${name}.${format}";
+
+  vaultFile =
+    storage: namingKey: file: format:
+    "secrets/${opaqueOf namingKey "secrets" (relativeTo storage.encrypted file)}.${format}";
+
+  audienceRows =
+    r:
+    lib.concatMap (
+      owner:
+      map (
+        name:
+        let
+          entry = ownEntry r owner name;
+          audience = audienceOf r owner name;
+          format = entry.format or "yaml";
+          file = entryFile r.storage audience name entry;
+        in
+        {
+          inherit file audience format;
+          dir = builtins.dirOf file;
+          legacy = format == "yaml" && entryKey entry name != "";
+          recipients = audienceRecipients r audience;
+        }
+      ) (ownedNames r.users.${owner})
+    ) (builtins.attrNames r.users);
+
   audiencesIn =
     r:
-    let
-      owned = lib.concatMap (owner: map (name: audienceOf r owner name) (ownedNames r.users.${owner})) (
-        builtins.attrNames r.users
-      );
-    in
     guard r (
       lib.listToAttrs (
-        map (
-          audience:
-          lib.nameValuePair (audienceFileOf r.storage audience) {
-            inherit audience;
-            dir = builtins.dirOf (audienceFileOf r.storage audience);
-            recipients = audienceRecipients r audience;
-          }
-        ) (lib.unique owned)
+        map (row: lib.nameValuePair row.file (removeAttrs row [ "file" ])) (audienceRows r)
       )
     );
 
@@ -789,8 +852,9 @@ let
           # root, and each opaque name below hashes the same value stripped of
           # that root by `relativeTo`, so a root rename leaves every vault name
           # untouched (design S5).
-          logicalFile = audienceFileOf r.storage audience;
-          logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
+          format = entry.format or "yaml";
+          logicalFile = entryFile r.storage audience name entry;
+          logicalKey = entryKey entry name;
           logicalPublic = if isPublic then publicFileOf r.storage audience name else null;
           logicalRecord =
             if shared then
@@ -810,10 +874,14 @@ let
         in
         {
           inherit (src) origin owner;
-          file = if r.namingKey != null then secretsFileOf r.storage r.namingKey audience else logicalFile;
-          inherit shared;
+          file =
+            if r.namingKey != null then vaultFile r.storage r.namingKey logicalFile format else logicalFile;
+          inherit shared format;
+          neededForUsers = entry.neededForUsers or false;
+          restartUnits = entry.restartUnits or [ ];
+          reloadUnits = entry.reloadUnits or [ ];
           key =
-            if r.namingKey != null then
+            if r.namingKey != null && logicalKey != "" then
               opaqueKeyOf r.namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey
             else
               logicalKey;
@@ -1168,9 +1236,9 @@ let
                 ) (lib.groupBy (c: c.f) claims)
               );
 
-            # A generator's outputs land in one file, which is what makes a
-            # multi-output write one rename, and they land in one file only if
-            # they land in one audience. Refused rather than split, and the
+            # A generator's outputs must agree on shared custody, even when
+            # their formats require separate documents. Refused rather than
+            # silently changing the custody semantics, and the
             # refusal names both sides because the remedy is a choice: make them
             # agree, or write two generators and have the second depend on the
             # first.
@@ -1195,7 +1263,7 @@ let
                   if builtins.length yes == 1 then "is" else "are"
                 } shared and ${say no} ${
                   if builtins.length no == 1 then "is" else "are"
-                } not. A generator's outputs resolve to one audience, so one file, so one write. "
+                } not. A generator's outputs must agree on shared custody. "
                 + "Make them agree, or split this into two generators and have the second depend on the first."
               )
             ) gens;
@@ -1530,6 +1598,100 @@ let
     let
       names = builtins.attrNames r.users;
       grants = allGrants r;
+
+      entrySites =
+        lib.mapAttrsToList (name: entry: {
+          inherit name entry;
+          where = "flake.safix.catalogue.${name}";
+        }) r.catalogue
+        ++ lib.concatMap (
+          user:
+          lib.mapAttrsToList (name: entry: {
+            inherit name entry;
+            where = "flake.safix.users.${user}.private.${name}";
+          }) r.users.${user}.private
+        ) names;
+      entryErrors = lib.concatMap (
+        site:
+        let
+          format = site.entry.format or "yaml";
+          key = site.entry.sopsKey or null;
+        in
+        lib.optional (!(builtins.elem format formats)) "${site.where} declares an unsupported format"
+        ++ lib.optional (
+          builtins.elem format [
+            "binary"
+            "age"
+          ]
+          && key != null
+          && key != ""
+        ) "${site.where} uses ${format}, which requires an empty sopsKey"
+      ) entrySites;
+      recipientErrors =
+        lib.concatMap
+          (
+            field:
+            lib.concatMap (
+              subject:
+              map (
+                _:
+                "flake.safix.${field}.${subject} declares an unsafe recipient or a PGP fingerprint that is not uppercase full-length hexadecimal"
+              ) (lib.filter (key: !(validRecipient key)) (subjectRecipientsOf r subject))
+            ) (builtins.attrNames r.${field})
+          )
+          [
+            "users"
+            "machines"
+            "organizations"
+          ];
+      formatAudienceErrors =
+        if baseErrors != [ ] || entryErrors != [ ] then
+          [ ]
+        else
+          lib.concatMap (
+            owner:
+            lib.concatMap
+              (
+                name:
+                let
+                  entry = ownEntry r owner name;
+                in
+                lib.optional (
+                  (entry.format or "yaml") == "age" && lib.any isPgp (audienceRecipients r (audienceOf r owner name))
+                ) "flake.safix.users.${owner}'s '${name}' uses raw age, which cannot encrypt to PGP recipients"
+              )
+              (
+                lib.filter (name: r.users.${owner}.private ? ${name} || r.catalogue ? ${name}) (
+                  ownedNames r.users.${owner}
+                )
+              )
+          ) names;
+      # Missing catalogue selections are reported when resolving that selection.
+      # They cannot participate in a file-collision check before they resolve.
+      fileCollisions =
+        if
+          baseErrors != [ ]
+          || entryErrors != [ ]
+          || lib.any (
+            owner: lib.any (name: !(r.catalogue ? ${name})) (builtins.attrNames r.users.${owner}.carries)
+          ) names
+        then
+          [ ]
+        else
+          lib.concatLists (
+            lib.mapAttrsToList (
+              file: rows:
+              lib.optional (
+                builtins.length (
+                  lib.unique (
+                    map (row: {
+                      inherit (row) audience format legacy;
+                    }) rows
+                  )
+                ) > 1
+              ) "safix placement: ${file} is claimed by incompatible documents or audiences"
+            ) (lib.groupBy (row: row.file) (audienceRows r))
+          );
 
       # Rules below index into a resolved reference's own record, so a grant
       # naming nobody is reported and then dropped rather than turned into a
@@ -2040,40 +2202,42 @@ let
           )
         ) (ownedNames r.users.${owner})
       ) names;
+      baseErrors =
+        unsafeUserName
+        ++ unsafeSubjectName
+        ++ unsafeAnchorName
+        ++ unsafeCustodyAnchorName
+        ++ unsafeSecretName
+        ++ subjectNameCollision
+        ++ anchorConflict
+        ++ unknownReference
+        ++ machineOwner
+        ++ serviceOwner
+        ++ serviceMachine
+        ++ unknownGroupMember
+        ++ organizationInGroup
+        ++ groupCycle
+        ++ unknownSiloGroup
+        ++ groupInTwoSilos
+        ++ carriedAndPrivate
+        ++ notHeld
+        ++ emptyServiceGrant
+        ++ emptyReach
+        ++ undeclaredEscrow
+        ++ escrowToEmptyCustody
+        ++ emptyCustodyReach
+        ++ undeclaredManager
+        ++ undeclaredManagedBy
+        ++ noRecipientKey
+        ++ ownerWithoutRecipient
+        ++ keylessCarrier
+        ++ ownAndShared
+        ++ sharedTwice
+        ++ sharedAndGranted
+        ++ sharedPrivateEntry
+        ++ crossSiloAudience;
     in
-    unsafeUserName
-    ++ unsafeSubjectName
-    ++ unsafeAnchorName
-    ++ unsafeCustodyAnchorName
-    ++ unsafeSecretName
-    ++ subjectNameCollision
-    ++ anchorConflict
-    ++ unknownReference
-    ++ machineOwner
-    ++ serviceOwner
-    ++ serviceMachine
-    ++ unknownGroupMember
-    ++ organizationInGroup
-    ++ groupCycle
-    ++ unknownSiloGroup
-    ++ groupInTwoSilos
-    ++ carriedAndPrivate
-    ++ notHeld
-    ++ emptyServiceGrant
-    ++ emptyReach
-    ++ undeclaredEscrow
-    ++ escrowToEmptyCustody
-    ++ emptyCustodyReach
-    ++ undeclaredManager
-    ++ undeclaredManagedBy
-    ++ noRecipientKey
-    ++ ownerWithoutRecipient
-    ++ keylessCarrier
-    ++ ownAndShared
-    ++ sharedTwice
-    ++ sharedAndGranted
-    ++ sharedPrivateEntry
-    ++ crossSiloAudience;
+    baseErrors ++ entryErrors ++ recipientErrors ++ formatAudienceErrors ++ fileCollisions;
 
   guard =
     r: value:
@@ -2292,25 +2456,28 @@ let
           else
             let
               audience = audienceOf r src.owner src.name;
-              logicalFile = audienceFileOf r.storage audience;
+              format = entry.format or "yaml";
+              logicalFile = entryFile r.storage audience src.name entry;
 
               # The key inside the encrypted file is the entry's own name, which
               # parts company with the name the file is parked under as soon as a
               # service prefixes it. Left null the provisioner would read the
               # prefixed name as the key and find nothing there.
-              logicalKey = if entry.sopsKey != null then entry.sopsKey else src.name;
+              logicalKey = entryKey entry src.name;
             in
             entry
             // {
+              inherit format;
               sopsFile =
-                root + "/${if namingKey != null then secretsFileOf r.storage namingKey audience else logicalFile}";
+                root
+                + "/${if namingKey != null then vaultFile r.storage namingKey logicalFile format else logicalFile}";
 
               # Recomputed here rather than read off `placementsIn`, which the
               # owner resolved separately: both close over the same `audience`
               # and `logicalKey`, so a key derived at one site and a key
               # derived at the other agree bit for bit (design V9).
               sopsKey =
-                if namingKey != null then
+                if namingKey != null && logicalKey != "" then
                   opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey
                 else
                   logicalKey;
@@ -2381,22 +2548,26 @@ let
           else
             let
               audience = audienceOf r owner name;
-              logicalFile = audienceFileOf r.storage audience;
-              logicalKey = if entry.sopsKey != null then entry.sopsKey else name;
+              format = entry.format or "yaml";
+              logicalFile = entryFile r.storage audience name entry;
+              logicalKey = entryKey entry name;
             in
+            assert lib.assertMsg (
+              !(format == "age" && lib.any isPgp (audienceRecipients r audience))
+            ) "safix placement: raw age cannot encrypt to PGP recipients";
             entry
             // {
+              inherit format;
               sopsFile =
-                root + "/${if namingKey != null then secretsFileOf r.storage namingKey audience else logicalFile}";
+                root
+                + "/${if namingKey != null then vaultFile r.storage namingKey logicalFile format else logicalFile}";
             }
-            // lib.optionalAttrs (namingKey != null) {
-              # Set unconditionally on whether the entry declares its own
-              # `sopsKey`, because `placementsIn` writes the identical opaque
-              # value into the document regardless — leaving this unset in
-              # vault mode would have the installer default to the *readable*
-              # attribute name, defeating key opacity for every entry that
-              # does not carry a custom key (design V9's "in-document key").
-              sopsKey = opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey;
+            // lib.optionalAttrs (namingKey != null || logicalKey == "") {
+              sopsKey =
+                if namingKey != null && logicalKey != "" then
+                  opaqueKeyOf namingKey (relativeTo r.storage.encrypted logicalFile) logicalKey
+                else
+                  logicalKey;
             }
         ) selected;
     in
@@ -2551,6 +2722,10 @@ let
           _n: secret:
           {
             inherit (secret) mode sopsFile;
+            format = secret.format or "yaml";
+            neededForUsers = secret.neededForUsers or false;
+            restartUnits = secret.restartUnits or [ ];
+            reloadUnits = secret.reloadUnits or [ ];
           }
           // lib.optionalAttrs (secret.path != null) { path = secret.path cfg; }
           // lib.optionalAttrs (args.namingKey or null != null || secret.sopsKey != null) {
@@ -2585,6 +2760,9 @@ in
     unknownMachineMessage
     opaqueOf
     secretsFileOf
+    vaultFile
+    isPgp
+    formats
     opaqueKeyOf
     publicFileOfVault
     wellFormedNamingKey

@@ -178,18 +178,19 @@ impl Tree {
             });
         }
 
-        let mut child = sops.decrypt_key_streaming(absolute, key)?;
-        let value = {
-            let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
-            Secret::read_from(&mut stdout)?
-        };
-        // A sops that failed has already said why on its own standard error, and
-        // the empty value it leaves is what the script will fail on — naming the
-        // script, which is the failure worth reporting.
-        let _ = child.wait();
+        let decrypted = sops.decrypt_key(absolute, key)?;
+        if decrypted.status != 0 {
+            return Err(Error::DocumentOperation {
+                operation: "decrypt generator dependency",
+                path: relative.to_owned(),
+                cause: format!("SOPS exited with status {}", decrypted.status),
+            });
+        }
 
-        self.staging
-            .write(&Path::new(INPUT).join(producer).join(name), &value)?;
+        self.staging.write(
+            &Path::new(INPUT).join(producer).join(name),
+            &decrypted.value,
+        )?;
         Ok(())
     }
 

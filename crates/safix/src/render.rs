@@ -93,6 +93,17 @@ fn push_finding(out: &mut String, finding: &Finding) {
             push_policy(out, finding);
         }
         Finding::RecipientDrift { .. } => push_recipients(out, finding),
+        Finding::RecipientRosterUnverifiable { file } => {
+            headline(out, &format!("Recipient roster cannot be audited: {file}"));
+            detail(
+                out,
+                "Raw age files do not expose their recipient roster. Successful decryption proves access, not the absence of other recipients.",
+            );
+            remedy(
+                out,
+                "Use a SOPS container when inspectable recipient metadata is required.",
+            );
+        }
         Finding::SharedStrayMigration { .. } | Finding::SharedStrayRevocation { .. } => {
             push_shared(out, finding);
         }

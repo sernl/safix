@@ -380,6 +380,13 @@ impl Database {
         fields: &ResolvedFields,
         existing: bool,
     ) -> Result<()> {
+        if !value.is_utf8() {
+            return Err(Error::DocumentOperation {
+                operation: "write KeePassXC value",
+                path: entry.to_owned(),
+                cause: "destination requires UTF-8 text".into(),
+            });
+        }
         if !self.capabilities().multiline && value.spans_lines() {
             return Err(Error::ValueSpansLines {
                 entry: entry.to_owned(),

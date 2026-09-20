@@ -224,6 +224,9 @@ fn read_existing(workspace: &Workspace, relative: &str, key: &str) -> Result<Sec
     if !absolute.exists() {
         return Ok(Secret::empty());
     }
+    if key.is_empty() {
+        return decrypt_existing(workspace, &absolute, key);
+    }
     let Some(text) = workspace.read_vault_relative(relative)? else {
         return Ok(Secret::empty());
     };
@@ -233,7 +236,19 @@ fn read_existing(workspace: &Workspace, relative: &str, key: &str) -> Result<Sec
     {
         return Ok(Secret::empty());
     }
-    Ok(workspace.sops().decrypt_key(&absolute, key)?.value)
+    decrypt_existing(workspace, &absolute, key)
+}
+
+fn decrypt_existing(workspace: &Workspace, absolute: &Path, key: &str) -> Result<Secret> {
+    let decrypted = workspace.sops().decrypt_key(absolute, key)?;
+    if decrypted.status != 0 {
+        return Err(Error::DocumentOperation {
+            operation: "read value for editing",
+            path: absolute.display().to_string(),
+            cause: format!("decryption exited {}", decrypted.status),
+        });
+    }
+    Ok(decrypted.value)
 }
 
 #[cfg(test)]

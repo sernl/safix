@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::git_unavailable
-
-  × could not run git
-  ╰─▶ entity not found

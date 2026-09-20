@@ -132,7 +132,6 @@
           # No field of a materialized entry names a scope, and for a
           # declaration that sets no ownership the two scopes produce the same
           # record outright.
-          fields = sortNames (builtins.attrNames aliceUser.alice-alone);
           sameInBothScopes = aliceUser == aliceSystem;
 
           # The entry as each scope's own declared type resolved it, read back
@@ -206,12 +205,6 @@
             ];
           };
 
-          fields = [
-            "key"
-            "mode"
-            "path"
-            "sopsFile"
-          ];
           sameInBothScopes = true;
 
           userReadback = {

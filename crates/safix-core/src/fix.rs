@@ -143,6 +143,17 @@ pub fn run(
 
     progress.write(NOT_REVOCATION);
 
+    let mut sops_files = Vec::new();
+    for relative in &managed {
+        if crate::ciphertext::Format::from_path(Path::new(relative))?
+            == crate::ciphertext::Format::Age
+        {
+            rewrap_age(workspace, progress, relative, assume_yes)?;
+        } else {
+            sops_files.push(relative.clone());
+        }
+    }
+    let managed = sops_files;
     let permits = concurrency();
     let config = workspace.stage_vault_rules()?;
 
@@ -151,6 +162,72 @@ pub fn run(
     } else {
         rewrap_one_at_a_time(workspace, progress, &managed, assume_yes, config.as_deref())
     }
+}
+
+fn rewrap_age(
+    workspace: &Workspace,
+    progress: &dyn Progress,
+    relative: &str,
+    assume_yes: bool,
+) -> Result<()> {
+    let path = workspace.vault_absolute(relative);
+    if !path.exists() {
+        return Ok(());
+    }
+    if !assume_yes {
+        return Err(Error::DocumentOperation { operation: "rewrap age", path: relative.into(), cause: "raw age cannot show its old roster; pass --yes to replace its recipients with the declared audience".into() });
+    }
+    let audiences = workspace.audiences()?;
+    let audience = audiences
+        .for_file(relative)
+        .or_else(|| {
+            std::path::Path::new(relative)
+                .parent()
+                .and_then(std::path::Path::to_str)
+                .and_then(|directory| audiences.covering_dir(directory))
+        })
+        .ok_or_else(|| Error::NoAudienceForFile {
+            file: relative.into(),
+        })?;
+    let identities = crate::ciphertext::Identities::from_environment();
+    let source = crate::ciphertext::Source {
+        path: path.clone(),
+        format: crate::ciphertext::Format::Age,
+        key: String::new(),
+    };
+    let value = crate::ciphertext::read(&source, &identities)?;
+    let candidate = set::candidate_path(&path);
+    scratch::register_file(&candidate);
+    let target = crate::ciphertext::Source {
+        path: candidate.clone(),
+        ..source
+    };
+    crate::ciphertext::write(&target, &value, &audience.recipients, &identities)?;
+    if !value.equals(&crate::ciphertext::read(&target, &identities)?) {
+        return Err(Error::DocumentOperation {
+            operation: "rewrap age",
+            path: relative.into(),
+            cause: "candidate failed byte verification".into(),
+        });
+    }
+    if scratch::interrupted().is_some() {
+        return Err(Error::DocumentOperation {
+            operation: "rewrap age",
+            path: relative.into(),
+            cause: "interrupted before publication".into(),
+        });
+    }
+    std::fs::rename(&candidate, &path).map_err(|cause| Error::FileUnwritable {
+        path: path.display().to_string(),
+        cause,
+    })?;
+    log(
+        progress,
+        &format!(
+            "safix: re-encrypted {relative} to the declared audience; raw age still has no inspectable recipient roster"
+        ),
+    );
+    Ok(())
 }
 
 /// Evaluate the policy into a file beside the one it replaces, then rename it
@@ -365,7 +442,8 @@ fn relocate_document(
     } else {
         first_opaque_key
     };
-    {
+    let format = crate::ciphertext::Format::from_path(&dest_absolute)?;
+    if format == crate::ciphertext::Format::Yaml && !first_dest_key.is_empty() {
         let _quiet = scratch::quiet();
         workspace.sops().create_empty_document(
             dest_root,
@@ -400,9 +478,13 @@ fn relocate_document(
         }
         let status = {
             let _quiet = scratch::quiet();
-            workspace
-                .sops()
-                .set_key(&candidate, dest_key, &decrypted.value)?
+            set::write_candidate(
+                workspace,
+                &document.opaque_file,
+                &candidate,
+                dest_key,
+                &decrypted.value,
+            )?
         };
         if status != 0 {
             return Ok(Some(status));
@@ -536,7 +618,7 @@ fn rewrap_one_at_a_time(
         }
         let status = workspace
             .sops()
-            .update_keys_command(workspace.vault_root(), relative, assume_yes, config)
+            .update_keys_command(workspace.vault_root(), relative, assume_yes, config)?
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -588,7 +670,7 @@ fn rewrap_together(
                 &relative,
                 true,
                 config,
-            ));
+            )?);
             command
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -606,8 +688,8 @@ fn rewrap_together(
         for handle in running {
             outcomes.push(handle.await);
         }
-        outcomes
-    });
+        Ok::<_, Error>(outcomes)
+    })?;
 
     let mut by_file: BTreeMap<String, std::process::Output> = BTreeMap::new();
     for outcome in produced {

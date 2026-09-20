@@ -18,6 +18,7 @@
 //! paragraph.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 
 use crate::definition;
 use crate::error::{Error, Result};
@@ -51,6 +52,12 @@ pub enum Finding {
     /// covers, so nothing declares who should be able to open it.
     UngovernableExtra {
         /// The repository-relative path.
+        file: String,
+    },
+
+    /// Raw age does not expose an auditable recipient roster.
+    RecipientRosterUnverifiable {
+        /// The repository-relative path of the native age file.
         file: String,
     },
 
@@ -295,6 +302,13 @@ fn recipients(
     let holders = workspace.recipients()?;
     let placements = workspace.placements()?;
     for file in &workspace.governed_files()?.managed {
+        if crate::ciphertext::Format::from_path(Path::new(file))? == crate::ciphertext::Format::Age
+        {
+            if workspace.vault_absolute(file).exists() {
+                findings.push(Finding::RecipientRosterUnverifiable { file: file.clone() });
+            }
+            continue;
+        }
         let Some(text) = documents.text(workspace, file)? else {
             continue;
         };
@@ -398,12 +412,18 @@ fn shared(
         let Some((audience_file, key)) = shared_files.get(name) else {
             continue;
         };
+        if key.is_empty() {
+            continue;
+        }
         let declared = audiences
             .for_file(audience_file)
             .map_or(&[] as &[String], |audience| audience.recipients.as_slice());
 
         for file in managed {
-            if file == audience_file {
+            if file == audience_file
+                || crate::ciphertext::Format::from_path(Path::new(file))?
+                    == crate::ciphertext::Format::Age
+            {
                 continue;
             }
             if !documents.has_value(workspace, file, key)? {
@@ -492,6 +512,9 @@ fn values(
         .collect();
 
     for file in &workspace.governed_files()?.required {
+        if claimed.contains(&(file.as_str(), "")) {
+            continue;
+        }
         for key in documents.keys(workspace, file)?.keys() {
             if claimed.contains(&(file.as_str(), key.as_str())) {
                 continue;
@@ -598,7 +621,7 @@ impl Documents {
     fn keys(&mut self, workspace: &Workspace, file: &str) -> Result<&BTreeMap<String, KeyState>> {
         if !self.keys.contains_key(file) {
             let keys = match self.text(workspace, file)? {
-                Some(text) => document::keys_of(text).unwrap_or_default(),
+                Some(text) => document::keys_of(text)?,
                 None => BTreeMap::new(),
             };
             self.keys.insert(file.to_owned(), keys);
@@ -607,6 +630,11 @@ impl Documents {
     }
 
     fn has_value(&mut self, workspace: &Workspace, file: &str, key: &str) -> Result<bool> {
+        if key.is_empty() {
+            return Ok(crate::public::holds_a_value(
+                &workspace.vault_absolute(file),
+            ));
+        }
         Ok(self
             .keys(workspace, file)?
             .get(key)

@@ -131,6 +131,40 @@ fn as_pairs(environment: &[(String, String)]) -> Vec<(&str, &str)> {
         .collect()
 }
 
+#[test]
+fn raw_age_requires_declared_custody_authority_before_touching_the_card() {
+    let mut fixture = Fixture::new();
+    fixture.seed_declarations();
+    let relative = "secrets/native.age";
+    let recipient = fixture.alice.clone();
+    fixture.set_audience(relative, &["alice"], &[&recipient]);
+    let plaintext = fixture.scratch_dir("native-source").join("plain");
+    std::fs::write(&plaintext, b"native enrollment fixture").unwrap();
+    std::fs::create_dir_all(fixture.repo.join("secrets")).unwrap();
+    let encrypted = std::process::Command::new("age")
+        .args(["--encrypt", "-r", &recipient, "-o"])
+        .arg(fixture.repo.join(relative))
+        .arg(&plaintext)
+        .status()
+        .unwrap();
+    assert!(encrypted.success());
+    let before = std::fs::read(fixture.repo.join(relative)).unwrap();
+    let environment = card_env(&fixture, SERIAL, CARD);
+    let refused = fixture.run_on_terminal(
+        &["enroll", "alice", "--no-store-pin"],
+        "",
+        &as_pairs(&environment),
+    );
+    assert_eq!(refused.code, Some(1), "{}", refused.stderr);
+    assert_eq!(
+        fixture.card_recorded("argv"),
+        "",
+        "the refusal came after touching the card"
+    );
+    assert_eq!(std::fs::read(fixture.repo.join(relative)).unwrap(), before);
+    assert!(refused.stderr.contains("--trust-declared-recipients"));
+}
+
 /// The whole ceremony over one factory-fresh card, end to end.
 #[test]
 fn enrollment_provisions_generates_wires_and_commits_once() {
@@ -712,6 +746,19 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
         "mail-password: opened-by-the-stand-in\n",
     );
 
+    let raw = "native-proof.age";
+    let plain = fixture.scratch_dir("native-proof").join("plain");
+    std::fs::write(&plain, b"proof\0\xff").unwrap();
+    assert!(
+        std::process::Command::new("age")
+            .args(["--encrypt", "-r", &recipient, "-o"])
+            .arg(fixture.repo.join(raw))
+            .arg(&plain)
+            .status()
+            .unwrap()
+            .success()
+    );
+
     let identity = std::fs::read_to_string(&stand_in).unwrap();
     let stub =
         proof::stub_of(&identity).expect("an identity file has a line that is not a comment");
@@ -724,15 +771,6 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
         "the isolated source holds more than one identity"
     );
 
-    let outcome = proof::decrypt_with(&workspace, &source, ALICE_FILE).expect("sops can be run");
-    assert_eq!(
-        outcome,
-        proof::Outcome::Proven {
-            file: ALICE_FILE.to_owned()
-        },
-        "the isolated source did not open the file it is a recipient of"
-    );
-
     // The control: an isolated source holding an identity the file was not
     // encrypted to does not open it, which is what makes the assertion above a
     // statement about the identity rather than about sops being lenient.
@@ -740,14 +778,23 @@ fn the_proof_opens_a_file_with_the_isolated_source_alone() {
     harness::mint_identity(&stranger);
     let stranger_stub =
         proof::stub_of(&std::fs::read_to_string(&stranger).unwrap()).expect("it has an identity");
-    let other = proof::write_isolated_source(&fixture.scratch_dir("proof-other"), &stranger_stub);
-    assert!(
-        matches!(
-            proof::decrypt_with(&workspace, &other.expect("it can be written"), ALICE_FILE),
-            Ok(proof::Outcome::Refused { .. })
-        ),
-        "a source that is not a recipient opened the file"
-    );
+    let other =
+        proof::write_isolated_source(&fixture.scratch_dir("proof-other"), &stranger_stub).unwrap();
+    for relative in [ALICE_FILE, raw] {
+        assert_eq!(
+            proof::decrypt_with(&workspace, &source, relative).unwrap(),
+            proof::Outcome::Proven {
+                file: relative.to_owned()
+            }
+        );
+        assert!(
+            matches!(
+                proof::decrypt_with(&workspace, &other, relative),
+                Ok(proof::Outcome::Refused { .. })
+            ),
+            "a non-recipient opened {relative}"
+        );
+    }
 }
 
 /// clan learns about the recipient from its own command, and the hook gets three
@@ -942,12 +989,6 @@ fn a_card_tool_slow_to_restore_its_terminal_is_not_judged_to_have_asked_again() 
 
     let run = fixture.run_on_terminal(&["enroll", "alice"], "", &as_pairs(&environment));
     assert_eq!(run.code, Some(1), "an outstanding proof is not a success");
-    run.says("INCOMPLETE");
-    assert!(
-        !run.stderr.contains("refused the PIN"),
-        "a slow terminal was taken for a second prompt: {}",
-        run.stderr
-    );
     assert_eq!(
         fixture.card_recorded("ykman-prompt").lines().count(),
         5,

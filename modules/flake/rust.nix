@@ -30,25 +30,21 @@
     { config, pkgs, ... }:
     let
       craneLib = inputs.crane.mkLib pkgs;
+      gnupg = pkgs.gnupg.override {
+        guiSupport = true;
+        pinentry = pkgs.pinentry-curses;
+      };
 
       common = {
-        # `filterCargoSources` keeps rust sources and every `.toml`, so
-        # `deny.toml`, `clippy.toml` and `rustfmt.toml` reach the sandbox while
-        # the nix modules, the README and the openspec tree do not. The `.snap`
-        # files are added to it because the refusal snapshots are the test's
-        # expected values: without them `safix-rs-test` runs against no
-        # expectation and passes by writing one, which is a green check over an
-        # assertion nobody made.
-        # `tests/support/*.json` is admitted for the same reason as the `.snap`
-        # files: `crates/safix/tests/install.rs` embeds a hand-written manifest
-        # fixture with `include_str!`, so a source without it does not compile.
+        # Keep Cargo sources and the hand-written installer manifest fixture
+        # embedded by the integration suite. Nix modules and docs stay outside
+        # the Rust build input.
         src = pkgs.lib.cleanSourceWith {
           src = ../..;
           name = "source";
           filter =
             path: type:
-            (builtins.match ".*\\.snap$" path != null)
-            || (builtins.match ".*/tests/support/[^/]*\\.json$" path != null)
+            (builtins.match ".*/tests/support/[^/]*\\.json$" path != null)
             || (craneLib.filterCargoSources path type);
         };
 
@@ -81,8 +77,29 @@
           # The tests are their own check, so the package build does not run
           # them twice.
           doCheck = false;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postFixup = ''
+            wrapProgram "$out/bin/safix" \
+              --prefix PATH : ${
+                pkgs.lib.makeBinPath [
+                  pkgs.age
+                  pkgs.sops
+                  gnupg
+                  pkgs.openssh
+                  pkgs.ssh-to-age
+                  pkgs.gitMinimal
+                  pkgs.nix
+                ]
+              } \
+              --set-default SAFIX_AGE ${pkgs.age}/bin/age \
+              --set-default SAFIX_AGE_KEYGEN ${pkgs.age}/bin/age-keygen \
+              --set-default SAFIX_SOPS ${pkgs.sops}/bin/sops \
+              --set-default SAFIX_GPG ${gnupg}/bin/gpg \
+              --set-default SAFIX_GPGCONF ${gnupg}/bin/gpgconf \
+              --set-default SAFIX_SSH_TO_AGE ${pkgs.ssh-to-age}/bin/ssh-to-age
+          '';
 
-          meta.description = "The whole lifecycle of one secret, by name and never by file (set | edit | get | list | generate | check | fix | audit | sync | keygen | adduser | enroll | group | upload)";
+          meta.description = "Declaration-driven secrets, protected identity custody and verified encrypted migration";
           meta.mainProgram = "safix";
         }
       );

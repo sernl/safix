@@ -1,5 +1,5 @@
 {
-  description = "safix — custody-first secrets management for nix, on sops";
+  description = "safix — custody-first secrets management for nix, with age and SOPS";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";

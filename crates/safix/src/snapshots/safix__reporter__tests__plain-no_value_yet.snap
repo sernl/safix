@@ -1,5 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_plain(&refusal)
----
-safix: secrets/safix/users/bob/secrets.yaml does not exist yet, so 'bob-service' has no value. Set one with: safix set bob bob-service

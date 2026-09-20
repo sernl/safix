@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The installer safix runs at system scope: that it invokes the secret provisioner's binary against a manifest of its own rather than borrowing the provisioner's activation, that the store it writes into is its own and disjoint from any other on the host, how it is ordered against a store it did not create, how the identity it decrypts with is derived and what happens when none is derivable, and what it leaves untouched on a host that already installs secrets by some other means.
+Safix’s own installer at system and user scope: supported encrypted formats and identities, private runtime templates, early-user ordering, generation publication, service hooks and coexistence with other secret stores.
 
 ## Requirements
 
@@ -31,8 +31,8 @@ No entry SHALL be written, symlinked, or removed outside that store except at a 
 
 ### Requirement: The manifest is validated by the binary that will read it
 
-The manifest SHALL be checked at build time by this package's own program, in one of two modes: a schema mode that reads no ciphertext, and a document mode that additionally decrypts each named document and verifies each declared key resolves in it.
-A named option SHALL select between them, and the manifest's structure SHALL be held by an accepted snapshot so that a field added, removed or renamed on either side of the nix-to-program boundary is a failing check.
+The manifest SHALL be checked at build time by this package's own program, in one of two modes: a schema mode that reads no ciphertext, and a document mode that inspects each named ciphertext and verifies declared key paths without private identities or decryption.
+A named option SHALL select between them. The program SHALL accept manifests emitted by the modules and reject unsupported schema versions, unknown fields, invalid modes and absent keyed values.
 
 #### Scenario: A malformed manifest does not reach a machine
 
@@ -43,9 +43,9 @@ A named option SHALL select between them, and the manifest's structure SHALL be 
 
 #### Scenario: The schema is held on both sides of the boundary
 
-- **WHEN** the manifest's structure changes on the nix side without the program's own definition of it changing, or the reverse
-- **THEN** a check comparing the built manifest against an accepted snapshot fails
-- **AND** it fails on the commit that makes the change, not on a host
+- **WHEN** a module emits a manifest the installer cannot interpret
+- **THEN** the build-time invocation of that installer rejects the manifest
+- **AND** activation is not produced for that invalid input
 
 #### Scenario: A mutated manifest is refused by name
 
@@ -121,7 +121,7 @@ Before decrypting, the installer SHALL check each configured identity path for p
 
 - **WHEN** a system configuration resolves entries and no identity is configured or derivable
 - **THEN** evaluation fails naming this package's identity options
-- **AND** the two options it names are a key file and a list of ssh keys, and nothing else counts as an identity
+- **AND** it names the age key file, SSH identity paths and GnuPG home options
 
 #### Scenario: Another framework's key configuration does not count
 
@@ -150,11 +150,11 @@ The installer SHALL NOT remove, replace, mount over, or write into a store it di
 - **THEN** that store's directory, its mount, and its contents are unchanged afterwards
 - **AND** this is held against this package's own installer binary rather than only against an evaluation, because the removal it exists to avoid is a runtime branch
 
-#### Scenario: The destructive branch is real and is what is being avoided
+#### Scenario: A pre-existing regular destination is protected
 
 - **WHEN** the installer binary is pointed at a symlink path that exists and is not a symlink
-- **THEN** it removes what it finds there
-- **AND** a check demonstrates this against the binary this package ships, so the claim that this package's store is disjoint is held against a measured hazard rather than an assumed one
+- **THEN** it refuses without removing or replacing that path
+- **AND** the existing contents and live generation remain unchanged
 
 #### Scenario: What is not claimed
 
@@ -219,11 +219,11 @@ The installer SHALL be a verb of the package's command-line program, taking a ma
 - **THEN** it installs that manifest's entries
 - **AND** its check mode selects between validating the schema alone, validating against each document, and not validating at all
 
-#### Scenario: A dry activation performs everything but the swap
+#### Scenario: A dry activation does not publish or propagate
 
 - **WHEN** the verb runs under the dry-run switch, or under the host's own dry-activation signal
-- **THEN** every step up to the atomic replacement of the store's symlink is performed and that replacement is not
-- **AND** the module's declaration that it supports dry activation is therefore true of the program rather than only of the script
+- **THEN** decryption and rendering may use a private candidate but no live or external link changes
+- **AND** the private candidate is removed without pruning published generations or invoking service hooks
 
 #### Scenario: The verb is machine-facing and says so
 
@@ -233,8 +233,12 @@ The installer SHALL be a verb of the package's command-line program, taking a ma
 
 ### Requirement: The user scope installs rather than delegating
 
-At user scope the package SHALL build a user-mode manifest and invoke its own installer against it, through a user service where the platform has one and through a home-activation entry on every platform.
-The store roots SHALL be runtime-directory-relative, expanded by the installer against the platform's own runtime directory.
+At user scope safix SHALL build its own manifest and install under the session runtime directory without mounting filesystems or changing ownership. Declared restart and reload hooks SHALL use the user service manager, execute only for changed values after publication, and report failures. Dry runs SHALL invoke no hook.
+
+#### Scenario: User hooks are not silently discarded
+- **WHEN** a user secret changes and names a restart hook
+- **THEN** the user manager receives that hook after the new value is available
+- **AND** a nonzero manager status is reported
 
 #### Scenario: The user scope carries an installer of its own
 
@@ -246,13 +250,12 @@ The store roots SHALL be runtime-directory-relative, expanded by the installer a
 
 - **WHEN** the installer expands the store roots at user scope
 - **THEN** it uses the session's runtime directory on linux and the platform's own per-user temporary directory on darwin
-- **AND** both are exercised, because the package supports a darwin platform and a user-scope install that only works on linux is a scope that only half exists
 
 #### Scenario: What user mode does not do
 
 - **WHEN** a user-mode installation runs
-- **THEN** it mounts no filesystem, changes no file's ownership, and restarts or reloads no unit
-- **AND** the reason is recorded: each of the three requires privileges the scope does not have, and each was already absent from the behaviour this installation replaces
+- **THEN** it mounts no filesystem and changes no file's ownership
+- **AND** declared hooks target only the user service manager, never the system manager
 
 #### Scenario: The user-scope path change is recorded
 
@@ -265,22 +268,6 @@ The store roots SHALL be runtime-directory-relative, expanded by the installer a
 - **WHEN** a user profile turns on key generation and the configured key file is absent
 - **THEN** the activation mints one before installing
 - **AND** the switch defaults off, so adopting this capability changes no existing profile's behaviour
-
-### Requirement: Templates, user-relocated secrets, and gnupg identities are unsupported and said to be
-
-The capability SHALL state, rather than imply by omission, that it renders no templates, relocates no secret for early-boot user creation, and accepts no gnupg identity.
-
-#### Scenario: The three absences are named
-
-- **WHEN** the manifest schema and the identity options are documented
-- **THEN** each of the three is named as unsupported
-- **AND** none of them appears as an empty field, an ignored option, or a tolerated configuration
-
-#### Scenario: What the consumer loses is the workaround, not a feature
-
-- **WHEN** the migration note explains the three
-- **THEN** it states that this package never supported any of them
-- **AND** it states what does change: an entry this package resolved can no longer be reached by another framework's template or relocation, even on a host where that framework is also installed
 
 ### Requirement: A real activation is exercised on a booted host
 
@@ -297,3 +284,27 @@ The capability's central claim — that entries arrive, at their declared modes 
 - **WHEN** the same machine activates again with a changed entry
 - **THEN** a new generation directory is created, the symlink moves to it, and the count of retained generations obeys the configured limit
 - **AND** a unit an entry names for restart is observed restarted
+
+### Requirement: Formats and identity kinds are explicit
+
+The installer SHALL support raw age and SOPS YAML, JSON, dotenv, INI and binary with configured age or GnuPG identities where the format supports them. An empty key SHALL install a whole document. A keyed byte envelope SHALL decode to the original bytes, including intentional empty values.
+
+#### Scenario: Binary value and whole document
+- **WHEN** a manifest selects a binary value or a whole binary document
+- **THEN** the installed bytes equal the encrypted source value without replacement characters or trimming
+
+### Requirement: Templates render only at runtime
+
+Templates SHALL substitute declared secret placeholders only in private runtime state. Undefined references, colliding paths and traversal SHALL fail before live generation promotion. Modes, ownership and hooks SHALL apply to rendered files.
+
+#### Scenario: An undefined template reference
+- **WHEN** a template references an unavailable secret
+- **THEN** installation refuses and the live generation remains unchanged
+
+### Requirement: Early-user secrets precede user creation
+
+Secrets marked neededForUsers SHALL be installed in a separate root-owned store before user creation in either supported activation mechanism. Normal secrets SHALL remain after user creation. User-scope early secrets, non-root early ownership and modes granting group or other access SHALL be refused.
+
+#### Scenario: A user's password file exists before account creation
+- **WHEN** a system creates a user from an early secret
+- **THEN** that secret is readable at its declared path before the user-creation step executes

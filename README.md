@@ -65,7 +65,7 @@ Every `sops <path>` command in this document uses the default spelling of the en
 ## How safix thinks
 
 A secret has three questions: who declares it, who can read it, and where it lands.
-Declaring happens in nix and is the label on the box; reading is decided by the recipients in `.sops.yaml`, which are generated from the declarations and never hand-edited.
+Reading is decided by the declared audience. Safix derives SOPS creation rules and raw-age recipients from that same declaration; neither is a second custody registry.
 Landing means the file a profile establishes at activation.
 
 The distinction that does the work is custody against placement, and both words are used in their narrow sense here.
@@ -90,8 +90,8 @@ flake.safix.users.alice = {
 flake.safix.catalogue.cognee-api-key = { };
 ```
 
-`flake.safix.users.<u>.recipient` is the age public key every file in that person's audience is wrapped to, and `flake.safix.users.<u>.recipientNote` is carried into the generated policy beside it.
-A recipient that needs a touch or a PIN is refused for that field, because activation decrypts with nobody present.
+`flake.safix.users.<u>.recipient` is a public recipient: native age, an SSH public key, or `pgp:` followed by a full uppercase GnuPG fingerprint. `recipientNote` annotates it in generated policy.
+Known interaction-only age recipients belong in recovery custody, not the activation field. A GnuPG fingerprint does not reveal whether its private key needs a passphrase or a card: provision an identity that can decrypt in the activation environment.
 `flake.safix.catalogue` is the set of entries that exist to be carried, and an entry there says the thing exists rather than that anybody holds one.
 Every entry, wherever it is declared, carries the same fields.
 
@@ -100,12 +100,29 @@ Every entry, wherever it is declared, carries the same fields.
 | `mode` | `"0400"` | the on-disk mode of the decrypted value |
 | `path` | `null` | where the value is written, as a function of the configuration materializing it |
 | `sopsKey` | the entry's name | which key inside the encrypted document holds the value |
+| `format` | `"yaml"` | `yaml`, `json`, `dotenv`, `ini`, SOPS `binary`, or raw `age` |
+| `neededForUsers` | `false` | install before user creation, at system scope only |
+| `restartUnits`, `reloadUnits` | `[ ]` | services notified after a changed value is published |
 | `generator` | `null` | how `safix generate` mints the value — see **Generators** |
 | `shared` | `false` | whether the carriers hold one value between them or one each |
 | `owner`, `group` | `null` | the account and group the decrypted file belongs to, at system scope only |
 | `sopsFile` | refused | declared so the refusal has a name; placement is derived, never authored |
 
 `path` is a function because the configuration it is relative to differs per scope: one written as `cfg: "${cfg.home.homeDirectory}/…"` will not materialize into a system configuration.
+
+### Formats and byte fidelity
+
+Ordinary keyed YAML entries keep their existing shared `secrets.yaml` path. Other formats and whole-document entries get a separate file inside the same audience directory; vault filenames remain opaque.
+`sopsKey = ""` selects a whole document. Raw age and SOPS binary derive that empty key automatically.
+JSON and YAML support slash-separated keys; dotenv keys are flat, and INI keys use `section/key`.
+
+Safix preserves arbitrary bytes in raw age, SOPS binary, and keyed YAML/JSON values. For keyed values, non-UTF-8 bytes and intentional empty values use the exact object `{"__safix_bytes_v1":[bytes...]}`; ordinary strings are not interpreted as envelopes.
+An empty pipe to `set`, or an emptied editor buffer, still refuses: those inputs cannot distinguish an intentional empty value from an upstream failure.
+Dotenv, INI and text-only external APIs refuse values they cannot represent rather than replacing bytes. Whole structured documents can be canonicalized by SOPS; migration publishes them only if independent decryption remains byte-identical.
+
+`check` can inspect SOPS age and GnuPG recipients. Threshold key groups and unsupported recipient providers are findings, not an ordinary any-recipient audience.
+Raw-age ciphertext does not disclose its recipient roster, so `check` reports that roster as unverifiable. `fix --yes` explicitly authorizes replacing it with the declared audience and verifies the resulting plaintext bytes.
+Raw-age content writes also use the declared audience; they cannot verify that it matches the opaque file's previous roster.
 
 ### A drawer of your own: `private`
 
@@ -374,10 +391,12 @@ A value written before the record existed has none, and shows as `-` rather than
 | `list` | every name a user holds | the declarations and the stamps | nothing | no |
 | `generate` | mint values from generators | the declarations, the definition records, the answered prompts | ciphertext, public outputs, records, stamps, and a commit | only to prompt |
 | `check` | report drift, change nothing | the declarations, the policy, every governed file's recipient stanzas | nothing | no |
-| `fix` | converge policy and ciphertext | the declarations and every governed file | `.sops.yaml`, re-wrapped files, and a commit | no |
+| `fix` | converge policy and ciphertext | the declarations and every governed file | `.sops.yaml` and re-wrapped files; no commit | no |
 | `audit` | report where a mapping's sides disagree | the declarations, one document per mapping, the target's own store | nothing | whatever the target's unlock needs |
 | `sync` | converge declared relationships | the same as `audit` | the side that has not moved, and a commit for a write on safix's side | whatever the target's unlock needs |
-| `keygen` | mint an age identity for a person | nothing declared | that person's own identity file | no |
+| `keygen` | create an age or modern GnuPG identity | local custody settings | an owner-protected identity file or keyring | for GnuPG pinentry |
+| `identity` | verify encrypted backup or restore | managed keys and explicit recovery identities | an encrypted backup or non-overwriting restore | when GnuPG needs pinentry |
+| `migrate` | convert and independently verify ciphertext | a versioned plan, sources and explicit identities | new ciphertext, consumer declarations and a value-free receipt | when an identity needs interaction |
 | `adduser` | declare a person who holds none | the declarations | one module file, `.sops.yaml`, and a commit | no |
 | `enroll` | put a hardware key in a person's hands, proven | the declarations and the card | an identity block, a recovery recipient, re-wrapped files, and a commit | yes |
 | `group` | edit a group's declared membership | that group's module file | that file, `.sops.yaml`, and a commit | no |
@@ -432,6 +451,34 @@ Everything beyond a custody record is a property of one consumer's module tree, 
 `--host` is passed through to the hook and is refused while no hook is configured; running without a hook is supported, and it succeeds having done less and says so.
 Whether a person's independence from the operator is real is decided by `recoveryRecipients` — see **Declaring what someone holds**.
 
+### Creating and recovering identities
+
+```console
+$ safix keygen --kind age
+$ safix keygen --kind pgp --uid "Alice <alice@example.com>" --expires 2y
+```
+
+These forms need no repository. Age generation appends atomically to `SAFIX_AGE_KEY_FILE`, or `${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt`; it never truncates an existing identity file.
+GnuPG generation uses an expiring Ed25519 certification primary and cv25519 encryption subkey. Upstream pinentry handles the passphrase, including confirmation and any export prompt needed to verify the complete private key.
+The managed keyring is `SAFIX_GNUPGHOME`, or `${XDG_DATA_HOME:-$HOME/.local/share}/safix/gnupg`.
+Private files use `0600`, directories use `0700`, and private custody paths must be outside repositories and the Nix store, without symlinked ancestors. Output contains public recipients and custody instructions, never private key bytes.
+
+Create and retain a separate recovery identity before relying on a new key:
+
+```console
+$ safix identity backup age /secure/offline/age-backup.json \
+    --recipient age1RECOVERY... --age-key-file /secure/recovery/identity.txt
+$ safix identity restore /secure/offline/age-backup.json \
+    --age-key-file /secure/recovery/identity.txt
+```
+
+Use `backup pgp` for the managed GnuPG keyring. `--gnupg-home` selects an explicit recovery keyring instead of an age recovery file.
+Backup encrypts a recovery package, independently decrypts it and verifies every private primary and subkey before publication. Self-only recovery, shared private keygrips, hardware stubs, incomplete exports and private-key files without a corresponding public certificate refuse.
+Restore refuses an existing age file or colliding GnuPG private fingerprints or keygrips, including different certificates sharing a private key and private components absent from the public keyring. Select an empty managed destination for a recovery drill; do not remove the working identity to test a backup.
+
+Ordinary reads honor native `SOPS_AGE_KEY_FILE` and `GNUPGHOME` before managed Safix defaults, plus SOPS's native identity settings. `SAFIX_AGE_SSH_KEY_PATHS` supplies additional SSH identities.
+Migration, installation and recovery verification use their explicitly configured identities instead: ambient keys cannot rescue an incorrect target credential. Isolated SOPS verification refuses cloud-provider recipients it cannot explicitly configure.
+
 ### Enrolling a hardware key
 
 A touch is the only thing you do, and everything else happens in one `safix enroll` run.
@@ -442,6 +489,7 @@ The recipient is registered with clan through clan's own command where a clan is
 Then the step a hand ceremony never had: the card alone opens a governed file in the person's audience, exercising the PIN and the touch.
 An enrollment whose proof has not passed reports itself incomplete and exits non-zero, and nothing is undone, because every step of it was additive.
 A backup key is the same verb run again, and a re-wrap that dropped a recipient a file had before the run is refused rather than committed.
+Raw-age enrollment requires `--trust-declared-recipients` before any card is selected or provisioned. That flag authorizes the declared audience; it cannot prove which recipients the old opaque ciphertext held.
 
 No OTP slot is written under any flag, because a programmed challenge-response slot is what opens a password database, and the database has no record of the secret it was built with.
 Reading that slot to answer a database's own unlock challenge is a different operation, and that is what the sync verb does where a database declares one.
@@ -712,11 +760,11 @@ Adopting or abandoning a vault is `safix fix`'s job: it decrypts each readable-l
 ## Establishing secrets in a profile
 
 Custody is declared once, at flake level, where every user is visible at the same time.
-Arrival is declared per profile, in the module system that profile is written in, through a `safix.*` namespace that can select but never declare.
+Arrival is declared per profile through `safix.*`. Registry selection cannot widen custody; `safix.importedSecrets` can separately deploy explicitly named external ciphertext without making it a governed registry entry.
 
 ### The option surface
 
-Both modules declare the same options, and none of them can add a secret, a recipient, a grant or an audience.
+Both modules share the deployment options. Imported ciphertext needs no registry binding; a name colliding with a resolved registry entry is refused.
 
 | option | default | what it is |
 |---|---|---|
@@ -728,8 +776,12 @@ Both modules declare the same options, and none of them can add a secret, a reci
 | `safix.hostname` | the host's own name | which host to resolve on, since `perHost` and `perTag` select by it |
 | `safix.tags` | the declared tags of `safix.machine`, else `[ ]` | the tags this host carries, against which `perTag` selects |
 | `safix.secrets` | read-only | what resolved, typed by safix's own entry submodule |
+| `safix.importedSecrets` | `{ }` | explicit ciphertext sources, merged with the resolved registry entries |
+| `safix.templates` | `{ }` | public text rendered with secret placeholders only at runtime |
+| `safix.placeholder` | read-only | runtime placeholder token for each resolved secret name |
 | `safix.identity.keyFile` | `null` | an age key file this scope decrypts with |
 | `safix.identity.sshKeyPaths` | `[ ]` | ssh private keys this scope decrypts with |
+| `safix.identity.gnupgHome` | `null` | an absolute private GnuPG home outside the Nix store |
 | `safix.identity.generateKey` | `false` | user scope only: mint `safix.identity.keyFile` at activation when it is absent |
 | `safix.identity.deriveHostKeys` | `true` | system scope only: derive an identity from the host's own ssh keys |
 | `safix.identity.derivedHostKeys` | read-only | which keys that derivation chose |
@@ -742,8 +794,8 @@ Both modules declare the same options, and none of them can add a secret, a reci
 | `safix.installer.secretsMountPoint` | `/run/safix.d`; runtime-relative at user scope | where the generation directories live |
 | `safix.installer.symlinkPath` | `/run/safix`; runtime-relative at user scope | where the current generation appears, and what an entry's default path is under |
 | `safix.installer.useTmpfs` | `false` | system scope only: mount the generation store on a tmpfs |
-| `safix.installer.environment` | `{ }` | system scope only: the unit environment the installer runs under |
-| `safix.installer.agePlugins` | `[ ]` | system scope only: age plugins the installer makes available |
+| `safix.installer.environment` | `{ }` | additional installer environment |
+| `safix.installer.agePlugins` | `[ ]` | age plugins available to the installer |
 | `safix.installer.useSystemdActivation` | follows the host | register as a unit rather than as an activation script |
 | `safix.installer.afterActivation` | `[ ]` | activation steps this install is ordered after, as in `[ "setupSecrets" ]` |
 | `safix.installer.afterUnits` | `[ ]` | units this install is ordered after, as in `[ "age-decrypt-secrets.service" ]` |
@@ -766,8 +818,8 @@ Two entries resolving onto one path are refused for either scope, since whicheve
 
 `safix.identity.keyFile` defaults to null, and that default is not a preference: the installer treats a set-but-unreadable key file as fatal, so a non-null default would abort activation on every machine lacking the path.
 At system scope a named identity wins, and otherwise safix derives the ed25519 entries of the host's declared ssh keys that lie outside its own store.
-A gnupg configuration counts for nothing at either scope, because a key file and a list of ssh keys are the only identities safix can decrypt with.
-At user scope there is no such default to keep, so naming one of the two is not optional.
+An explicit `safix.identity.gnupgHome` is also supported, alone or alongside age and SSH identities.
+At user scope, configure at least one identity source. GnuPG keys needed during unattended activation must already be available and unlockable there; Safix does not bypass their protection.
 At user scope safix also installs an activation guard: it reads the configured identity, checks each path for presence and readability, refuses the switch when none is usable, and decrypts nothing.
 It is ordered before home-manager links any file, which is what makes the refusal atomic: no home file linked, no user package installed, no user unit restarted, no secret written.
 Where home activation runs as a host's own per-user unit, the system generation has already switched, so only that user's home generation is held back.
@@ -782,12 +834,34 @@ The manifest schema is safix's own, written down once in the runtime, versioned,
 The document mode opens each named document and verifies every declared key is in it, while the manifest mode validates the schema, the version, every mode's octal parse and every owner and group resolution.
 Neither mode decrypts, because a sops document carries its mapping keys in the clear.
 With validation on, the manifest also carries one hash over every distinct document it names, so editing a ciphertext file changes the derivation and causes a rebuild.
-The store is safix's own: generations under one root, the current one at a symlink, both movable through their options, and nothing outside it is written, removed or mounted over.
+Generations and their current symlink belong to Safix. Only explicitly declared external paths may receive additional symlinks; existing non-symlink destinations are refused, not removed.
 At system scope the installer registers as an activation script, or as a unit where the host manages users through systemd's own mechanisms, and ordering is yours to name.
 safix reads no option of another secret-management framework to discover its installer — see **Fitting safix to a tree you already have**.
 At user scope the profile installs rather than delegating, with the same manifest shape under a user-mode flag, a user unit on linux, and an activation entry on both platforms.
-A user-mode install mounts no filesystem, changes no file's ownership, and restarts or reloads no unit, because each of the three needs a privilege the scope does not have.
+A user-mode install mounts no filesystem and changes no ownership. On Linux, changed secrets and templates trigger checked `systemctl --user` hooks after publication; restart takes precedence over reload for the same unit. Dry runs invoke neither.
+Hook failures are reported after the new generation is live; they do not undo publication.
 `safix.identity.generateKey` mints the configured key file at activation when it is absent, defaulting off, because a profile that has never been activated has no other way to get one into place.
+
+### Templates and early-user secrets
+
+```nix
+{ config, ... }:
+{
+  safix.templates."service.env" = {
+    content = "TOKEN=${config.safix.placeholder.service-token}\n";
+    mode = "0400";
+    restartUnits = [ "example.service" ];
+  };
+}
+```
+
+Template text is public and enters the Nix store; put only placeholders there, never plaintext secrets. Rendering happens inside a private runtime generation.
+Unknown or early-secret references, traversal and colliding output paths refuse before promotion. Templates support the same modes, ownership and service hooks as normal secrets.
+
+Set an entry's `neededForUsers = true` for a password file or another value needed before account creation.
+Those entries use a separate store and symlink, with `-for-users` appended to the configured roots. They must be root-owned with no group or other permission bits; home-manager cannot request them.
+Legacy activation installs them before `users`; systemd activation orders them before `systemd-sysusers` or `userborn`. Normal secrets remain after user creation.
+Provision decryption identities before that early phase. The normal installer's `afterActivation` and `afterUnits` settings do not postpone the early installer past the users it must precede.
 
 ### Refusals you may hit, and what each one asks for
 
@@ -797,8 +871,51 @@ A profile that imports the module and sets nothing at all is a no-op, and so is 
 Naming a person no declaration declares refuses and lists the declared people, which is likelier than it looks, since the option defaults to the profile's own username.
 Where a resolution is non-empty and no identity is configured or derivable, evaluation fails naming all three identity options.
 Before decrypting, the installer checks each configured identity path for presence and readability and refuses naming each path and the two ordering options.
-Three things are unsupported and refused rather than silently omitted: no template is rendered, no secret is relocated for early-boot user creation, and no gnupg identity is accepted.
+Unsupported combinations refuse explicitly: home-scope ownership or early-user requests, non-root or group-readable early secrets, and templates referencing early secrets.
 The limit of the coexistence is stated too: it covers safix's own installer, and a consumer who writes another framework's secrets option directly still has that framework's own collisions.
+
+## Migrating encrypted files without replacing sources
+
+`safix migrate plan.json` converts explicit sources into new files, independently decrypts every candidate with the target identities, and compares the bytes before publishing anything.
+It needs no Safix registry. Paths are relative to the plan file unless absolute; create destination directories first. Existing output paths, input aliases and unknown plan fields refuse.
+
+```json
+{
+  "version": 1,
+  "sourceIdentities": { "ageKeyFile": "/home/alice/keys/source.txt" },
+  "targetIdentities": { "ageKeyFile": "/home/alice/keys/target.txt" },
+  "entries": [{
+    "name": "service-token",
+    "source": { "path": "old/token.age", "format": "age", "key": "" },
+    "destination": { "path": "new/token.binary", "format": "binary", "key": "" },
+    "recipients": ["age1TARGET..."],
+    "deployment": {
+      "path": "/run/service/token",
+      "mode": "0400",
+      "owner": "service",
+      "group": "service",
+      "restartUnits": ["service.service"]
+    }
+  }],
+  "deploymentTarget": "safix",
+  "deploymentOutput": "new/deployment.nix",
+  "receipt": "new/receipt.json"
+}
+```
+
+Each identity record accepts `ageKeyFile`, `ageSshKeyPaths` and `gnupgHome`. Recipients use native age/SSH strings or `pgp:FULL_UPPERCASE_FINGERPRINT`.
+Source and destination support all six formats. An empty key selects the whole document; binary and age require it.
+Deployment metadata includes `path`, `mode`, `owner`, `group`, `uid`, `gid`, `restartUnits`, `reloadUnits` and `neededForUsers`.
+Optional `templates` contain `name`, public `content` using `<safix:secret-name>` references, and their own `deployment` metadata.
+
+The generated module can target `safix`, `sops-nix` or `agenix`. Import it alongside that consumer's module and configure its private identities separately.
+Encrypted sources are explicitly copied into the Nix store; no plaintext or private identity is copied there.
+Native sops-nix cannot decode Safix's keyed binary/empty envelope: choose a whole SOPS binary destination for those values. Agenix requires whole raw-age files and refuses templates, hooks and early-user metadata it cannot express.
+Migration refuses any unsupported semantic rather than silently dropping it.
+
+The receipt records the mappings, identities' paths, deployment metadata and successful byte verification, never plaintext or a plaintext digest.
+Sources are retained on every path. Verification failures publish nothing; recoverable publication errors remove newly published artifacts.
+Publication spans several files and is not crash-atomic: after a killed process or power loss, inspect partial outputs before retrying. The retained sources remain authoritative; no source deletion or consumer cutover is automatic.
 
 ## Fitting safix to a tree you already have
 
@@ -855,9 +972,9 @@ Those cover the custody refusals, the generator runtime tools, the shape of ever
 `committedPolicy` adds the drift check, which fails while the committed and the generated policy differ, and whose failure names `safix fix`.
 `materializations` adds the path-collision check, and forces the materializations you hand it so that the refusal reaches the hosts nobody has built this week.
 
-A consumer arriving from the sops-nix-backed surface renames options and nothing else.
-safix declares no sops-nix input and reads and defines no option of it, and the `sops` binary is unchanged and still does every encryption and decryption as a subprocess.
-Change nothing about `.sops.yaml`, the file layout, `safix fix` or any custody declaration; rename any option you tuned; and, at user scope, update anything that referenced the old secret path.
+The earlier sops-nix-backed Safix surface can retain its existing keyed YAML files while renaming the options below.
+Safix imports no sops-nix module; upstream SOPS and age remain its cryptographic backends.
+For arbitrary external layouts, use the explicit migration plan above rather than assuming an option rename converts the files or custody.
 
 | was | becomes |
 |---|---|
@@ -872,8 +989,11 @@ Change nothing about `.sops.yaml`, the file layout, `safix fix` or any custody d
 | `sops.age.keyFile` | `safix.identity.keyFile` (already existed; safix stops defining the `sops` one from it) |
 | `sops.age.sshKeyPaths` | `safix.identity.sshKeyPaths` (already existed; likewise) |
 | `sops.age.generateKey` | `safix.identity.generateKey`, home scope only |
-| `sops.gnupg.home`, `sops.gnupg.sshKeyPaths`, `sops.gnupg.qubes-split-gpg.enable` | no equivalent; gnupg is not an identity safix accepts |
-| `sops.defaultSopsFile`, `sops.templates`, `sops.placeholder`, `sops.useSystemdActivation` | never read by safix; a consumer setting them was configuring their own sops-nix, which is unaffected |
+| `sops.gnupg.home` | `safix.identity.gnupgHome` |
+| `sops.templates`, `sops.placeholder` | `safix.templates`, `safix.placeholder`; migrate placeholder references |
+| `sops.useSystemdActivation` | `safix.installer.useSystemdActivation` |
+| `sops.defaultSopsFile` | explicit `safix.importedSecrets.<name>.sopsFile`, or governed registry placement |
+| `sops.gnupg.sshKeyPaths`, `sops.gnupg.qubes-split-gpg.enable` | no automatic adapter; provision an explicit supported identity |
 | `imports = [ safix.nixosModules.default ]` | unchanged; `.default` and `.safix` are now one value |
 | `~/.config/sops-nix/secrets/<name>` | the runtime directory under `safix.installer.symlinkPath` |
 
@@ -881,7 +1001,7 @@ The last row is the one that breaks something: a user-scope secret now arrives i
 
 ## The opinions safix will not bend
 
-Placement is derived from the audience and never authored: an entry carrying a document of its own is refused, because such a file's recipients are outside the computation that produced the policy.
+Governed placement is derived from the audience and format, never authored. Explicit deployment imports are separate: they install existing ciphertext but do not claim to govern its recipient policy.
 
 There is no catch-all rule and the generator emits none, so an unmatched path fails closed with the encryption tool's own "no matching creation rules found" rather than acquiring a default recipient set.
 
@@ -923,7 +1043,7 @@ A recipient that needs a physical interaction to decrypt is refused for a person
 
 | tree | option | default | with a vault declared |
 |---|---|---|---|
-| encrypted values | `flake.safix.storage.encrypted` | `secrets/safix` — `users/<u>/secrets.yaml` and `shared/<audience>/secrets.yaml` below it | `secrets/<opaque-hash>.yaml` at the vault root |
+| encrypted values | `flake.safix.storage.encrypted` | `secrets/safix` — audience-scoped directories; keyed YAML shares `secrets.yaml`, other containers use separate files | opaque filenames retaining the selected format |
 | public outputs | `flake.safix.storage.plaintextOutputs` | `public/safix` — `users/<u>/<name>/value` and `shared/<audience>/<name>/value` below it | `public/<opaque-hash>` at the vault root |
 | the per-value records | `flake.safix.storage.generatorRecords` | `state/safix/definitions` — the definition record and its stamps, one plaintext line per file | `state/<opaque-hash>` at the vault root |
 

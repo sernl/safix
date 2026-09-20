@@ -205,22 +205,81 @@ impl Secret {
         sink.write_all(self.0.expose_secret())
     }
 
-    /// Write the value as a JSON string, which is the shape `sops set
-    /// --value-stdin` takes.
-    ///
-    /// The second egress, and it exists so that the encoding happens here rather
-    /// than in a `jq` subprocess: the shell runtime pipes the value through
-    /// `jq -Rs .` on its way to `sops`, which puts a copy of it in a second
-    /// process. This produces the same bytes `jq -Rs .` produces, including its
-    /// replacement of ill-formed UTF-8 with U+FFFD, and the intermediate is
-    /// zeroed when this returns.
+    /// Whether a text-only backend can represent these bytes.
+    #[must_use]
+    pub(crate) fn is_utf8(&self) -> bool {
+        std::str::from_utf8(self.0.expose_secret()).is_ok()
+    }
+
+    /// Write a JSON string for a text-only destination.
     ///
     /// # Errors
     ///
-    /// Returns the sink's own failure.
+    /// Invalid UTF-8 is refused before the first byte is written.
     pub fn write_json_to<W: Write>(&self, sink: &mut W) -> io::Result<()> {
-        let text = Zeroizing::new(String::from_utf8_lossy(self.0.expose_secret()).into_owned());
-        serde_json::to_writer(sink, text.as_str()).map_err(io::Error::other)
+        let text = std::str::from_utf8(self.0.expose_secret()).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "destination requires UTF-8 text",
+            )
+        })?;
+        serde_json::to_writer(sink, text).map_err(io::Error::other)
+    }
+
+    /// Encode a value without changing bytes or confusing empty with missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the sink's failure.
+    pub fn write_storage_json_to<W: Write>(&self, sink: &mut W) -> io::Result<()> {
+        let bytes = self.0.expose_secret();
+        if !bytes.is_empty()
+            && let Ok(text) = std::str::from_utf8(bytes)
+        {
+            return serde_json::to_writer(sink, text).map_err(io::Error::other);
+        }
+        sink.write_all(b"{\"__safix_bytes_v1\":")?;
+        serde_json::to_writer(&mut *sink, bytes).map_err(io::Error::other)?;
+        sink.write_all(b"}")
+    }
+
+    /// Decode a scalar or the exact versioned binary storage representation.
+    ///
+    /// # Errors
+    ///
+    /// Refuses unsupported shapes and malformed byte sequences.
+    pub fn from_storage_json(value: &serde_json::Value) -> Result<Self> {
+        let invalid = || Error::DocumentOperation {
+            operation: "decode stored value",
+            path: "<memory>".into(),
+            cause: "expected a scalar or a valid safix byte envelope".into(),
+        };
+        match value {
+            serde_json::Value::String(text) => Ok(Self::from_slice(text.as_bytes())),
+            serde_json::Value::Number(number) => {
+                let text = Zeroizing::new(number.to_string());
+                Ok(Self::from_slice(text.as_bytes()))
+            }
+            serde_json::Value::Bool(flag) => {
+                Ok(Self::from_slice(if *flag { b"true" } else { b"false" }))
+            }
+            serde_json::Value::Object(fields) if fields.len() == 1 => {
+                let array = fields
+                    .get("__safix_bytes_v1")
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or_else(invalid)?;
+                let mut bytes = Zeroizing::new(Vec::with_capacity(array.len()));
+                for number in array {
+                    let byte = number
+                        .as_u64()
+                        .and_then(|number| u8::try_from(number).ok())
+                        .ok_or_else(invalid)?;
+                    bytes.push(byte);
+                }
+                Ok(Self::from_slice(&bytes))
+            }
+            _ => Err(invalid()),
+        }
     }
 
     /// Draw the value into a terminal writer, bounded to `lines` lines of
@@ -750,10 +809,8 @@ mod tests {
         String::from_utf8(sink).expect("the encoding is valid utf-8 by construction")
     }
 
-    /// The expected values here are what `printf %s <value> | jq -Rs .` prints,
-    /// which is the pipeline the shell runtime hands `sops set --value-stdin`.
     #[test]
-    fn the_json_encoding_is_the_one_the_shell_runtime_pipes() {
+    fn text_json_preserves_unicode_and_control_characters() {
         assert_eq!(json_of(b"plain"), r#""plain""#);
         assert_eq!(
             json_of(br#"a "quoted" \ back"#),
@@ -762,7 +819,49 @@ mod tests {
         assert_eq!(json_of(b"tab\there"), r#""tab\there""#);
         assert_eq!(json_of(b"bell\x07"), "\"bell\\u0007\"");
         assert_eq!(json_of("caf\u{e9}".as_bytes()), "\"caf\u{e9}\"");
-        assert_eq!(json_of(b"\xff"), "\"\u{fffd}\"");
+    }
+
+    #[test]
+    fn text_json_rejects_invalid_utf8_before_writing() {
+        let value = Secret::read_from(&mut b"\0\xff\xfeA\n".as_slice()).expect("read bytes");
+        let mut output = Vec::new();
+        let error = value
+            .write_json_to(&mut output)
+            .expect_err("text-only boundary");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn storage_preserves_binary_empty_and_literal_envelope_strings() {
+        for input in [
+            b"\0\xff\xfeA\n".as_slice(),
+            b"",
+            br#"{"__safix_bytes_v1":[255]}"#,
+        ] {
+            let original = Secret::read_from(&mut &*input).expect("read input");
+            let mut encoded = Vec::new();
+            original
+                .write_storage_json_to(&mut encoded)
+                .expect("encode");
+            let json = serde_json::from_slice(&encoded).expect("JSON");
+            let decoded = Secret::from_storage_json(&json).expect("decode");
+            let mut output = Vec::new();
+            decoded.write_to(&mut output).expect("write output");
+            assert_eq!(output, input);
+        }
+    }
+
+    #[test]
+    fn malformed_binary_storage_is_refused() {
+        for value in [
+            serde_json::json!({"__safix_bytes_v1": [256]}),
+            serde_json::json!({"__safix_bytes_v1": [-1]}),
+            serde_json::json!({"__safix_bytes_v1": ["255"]}),
+            serde_json::json!({"__safix_bytes_v1": [], "extra": true}),
+        ] {
+            assert!(Secret::from_storage_json(&value).is_err());
+        }
     }
 
     fn until_eof(input: &[u8]) -> Vec<u8> {

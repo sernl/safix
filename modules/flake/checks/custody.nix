@@ -758,7 +758,11 @@
 
           # The same declaration, refused at one scope and carried at the other.
           ownedEntryFiresAtUserScope = fires (materializes ownedEntry "user");
-          ownedEntryAtSystemScope = (materializes ownedEntry "system").service-key;
+          ownedEntryAtSystemScope = lib.getAttrs [
+            "mode"
+            "owner"
+            "sopsFile"
+          ] (materializes ownedEntry "system").service-key;
         };
         expected = {
           validViolations = [ ];

@@ -681,6 +681,44 @@ fn a_set_stamps_the_value_in_the_same_commit_and_a_rotation_moves_updated_alone(
     );
 }
 
+#[test]
+fn raw_age_extras_rewrap_under_their_covering_audience() {
+    let mut fixture = Fixture::new();
+    let extra = "secrets/safix/users/alice/extra.age";
+    fixture.govern_extra(extra);
+    let ciphertext = fixture.repo.join(extra);
+    std::fs::create_dir_all(ciphertext.parent().unwrap()).unwrap();
+    let mut encrypt = std::process::Command::new("age")
+        .args(["--encrypt", "-r", &fixture.alice, "-o"])
+        .arg(&ciphertext)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut encrypt.stdin.take().unwrap(), b"\x00\xff\xfeA\n").unwrap();
+    assert!(encrypt.wait().unwrap().success());
+    fixture.git(&["add", "--", extra]);
+    fixture.git(&["commit", "-qm", "Add governed raw-age ciphertext"]);
+
+    fixture
+        .run(&["fix", "--yes"])
+        .expect_success("rewrapping an extra raw-age file");
+
+    let configured = fixture.command(&[]);
+    let identity = configured
+        .get_envs()
+        .find(|(name, _)| *name == "SOPS_AGE_KEY_FILE")
+        .and_then(|(_, value)| value)
+        .unwrap();
+    let opened = std::process::Command::new("age")
+        .args(["--decrypt", "-i"])
+        .arg(identity)
+        .arg(ciphertext)
+        .output()
+        .unwrap();
+    assert!(opened.status.success());
+    assert_eq!(opened.stdout, b"\x00\xff\xfeA\n");
+}
+
 /// The wall clock in unix seconds, as the record writes it.
 fn seconds_now() -> u64 {
     std::time::SystemTime::now()

@@ -592,13 +592,26 @@ pub(crate) fn held_by_safix(
     let relative = placement.file.clone();
     let absolute = workspace.vault_absolute(&relative);
 
-    let Some(text) = workspace.read_vault_relative(&relative)? else {
-        return Ok(None);
-    };
-    match document::keys_of(&text)?.get(&key) {
-        None => return Ok(None),
-        Some(state) if state.empty => return Ok(None),
-        Some(_) => {}
+    if key.is_empty() {
+        if !absolute
+            .try_exists()
+            .map_err(|cause| Error::FileUnreadable {
+                path: absolute.display().to_string(),
+                cause,
+            })?
+        {
+            return Ok(None);
+        }
+    } else {
+        let Some(text) = workspace.read_vault_relative(&relative)? else {
+            return Ok(None);
+        };
+        if document::keys_of(&text)?
+            .get(&key)
+            .is_none_or(|state| state.empty)
+        {
+            return Ok(None);
+        }
     }
 
     let decrypted = workspace.sops().decrypt_key(&absolute, &key)?;

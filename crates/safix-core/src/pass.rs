@@ -329,10 +329,20 @@ fn field_block_at(body: &[u8]) -> usize {
 /// Whether one line, without its terminator, is a field line.
 fn is_field_line(line: &[u8]) -> bool {
     FIELD_KEYS.into_iter().any(|key| {
-        let mut prefix = key.as_bytes().to_vec();
-        prefix.extend_from_slice(b": ");
-        line.starts_with(&prefix)
+        line.strip_prefix(key.as_bytes())
+            .is_some_and(|rest| rest.starts_with(b": "))
     })
+}
+
+fn split_bytes_once<'a>(bytes: &'a [u8], separator: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
+    if separator.is_empty() {
+        return None;
+    }
+    let index = bytes
+        .windows(separator.len())
+        .position(|part| part == separator)?;
+    let (before, after) = bytes.split_at_checked(index)?;
+    Some((before, after.strip_prefix(separator)?))
 }
 
 /// What one body holds: the value, and the fields the trailing block carries.
@@ -349,24 +359,33 @@ fn record_from(bytes: &[u8]) -> Result<Record> {
             if line.is_empty() {
                 continue;
             }
-            let text = String::from_utf8_lossy(line).into_owned();
-            let Some((key, rest)) = text.split_once(": ") else {
+            let Some((key, rest)) = split_bytes_once(line, b": ") else {
                 continue;
             };
+            let key = std::str::from_utf8(key).map_err(|_| Error::DocumentOperation {
+                operation: "read pass metadata",
+                path: "pass entry".into(),
+                cause: "field name is not UTF-8".into(),
+            })?;
             let Some(field) = field_of(key) else {
                 continue;
             };
-            let carried = |text: &str| -> Result<Field> {
-                Ok(Field::Resolved(Secret::read_from(&mut text.as_bytes())?))
+            let carried = |bytes: &[u8]| -> Result<Field> {
+                Ok(Field::Resolved(Secret::read_from(&mut &*bytes)?))
             };
             match field {
                 FieldName::Username => fields.username = Some(carried(rest)?),
                 FieldName::Url => fields.url = Some(carried(rest)?),
                 FieldName::Notes => fields.notes = Some(carried(rest)?),
                 FieldName::Tags => {
-                    for tag in rest.split(TAG_SEPARATOR) {
+                    let mut remaining = rest;
+                    while let Some((tag, rest)) =
+                        split_bytes_once(remaining, TAG_SEPARATOR.as_bytes())
+                    {
                         fields.tags.push(carried(tag)?);
+                        remaining = rest;
                     }
+                    fields.tags.push(carried(remaining)?);
                 }
             }
         }

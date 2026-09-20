@@ -1,11 +1,7 @@
 //! The stable name of a refusal.
 //!
-//! A refusal's message is prose, fixed to the retired shell runtime's wording
-//! and held there by snapshots, so it is not something a script can branch on.
-//! Its code is: `safix::recipient_drift` names the same refusal whatever the
-//! message
-//! grows into, and it is what the graphical reporter prints, what a snapshot is
-//! keyed by, and what a script greps for.
+//! Scripts branch on codes, not diagnostic prose. `safix::recipient_drift`
+//! names the same refusal when its explanation or terminal rendering changes.
 //!
 //! The table below is the whole of it, and it lives beside [`Error`] rather
 //! than in the command's reporter for one reason: [`Error`] is
@@ -14,11 +10,8 @@
 //! anyone naming it. Inside this crate no wildcard is permitted, so a variant
 //! added to [`Error`] does not compile until it is given a line here.
 //!
-//! [`Code`] is deliberately closed where [`Error`] is open, and that is the
-//! point rather than an oversight: closed is what lets the command drive its
-//! snapshots off [`Code::ALL`] and be told by the compiler when one is missing.
-//! An embedder that wants the open form matches on [`Code::as_str`], which is
-//! the same string under either treatment.
+//! [`Code`] is closed while [`Error`] is extensible. Consumers may enumerate
+//! [`Code::ALL`] or match the stable strings returned by [`Code::as_str`].
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -34,12 +27,9 @@ macro_rules! refusal_codes {
     ($($variant:ident => $code:literal,)+) => {
         /// The stable name of a refusal.
         ///
-        /// Closed where [`Error`] is `#[non_exhaustive]`, and deliberately so:
-        /// closed is what lets a caller drive a table off [`Code::ALL`] and be
-        /// told by the compiler when an entry is missing, which is how the
-        /// command holds a snapshot of every refusal it can print. A caller
-        /// that wants the open form matches on [`Code::as_str`], which is the
-        /// same string under either treatment.
+        /// Closed where [`Error`] is `#[non_exhaustive]`, so callers can cover
+        /// every code exhaustively. Callers that need an open representation
+        /// use [`Code::as_str`].
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum Code {
             $(
@@ -74,6 +64,9 @@ macro_rules! refusal_codes {
 }
 
 refusal_codes! {
+    DocumentOperation => "safix::document_operation",
+    MigrationRefused => "safix::migration_refused",
+    KeyManagement => "safix::key_management",
     SecretRead => "safix::secret_unreadable",
     NotInsideRepository => "safix::not_a_repository",
     NixEvalFailed => "safix::nix_eval_failed",
@@ -245,15 +238,13 @@ refusal_codes! {
     InstallRuntimeDirUnknown => "safix::install_runtime_dir_unknown",
 }
 
-/// The namespace every code is under, and the prefix a snapshot's name is the
-/// rest of.
+/// The namespace shared by every refusal code.
 pub const NAMESPACE: &str = "safix::";
 
 impl Code {
     /// The code without its namespace.
     ///
-    /// What the graphical reporter prints is the whole code; what a snapshot of
-    /// that rendering is filed under is this, so the two cannot be filed apart.
+    /// Useful when a consumer has already supplied the namespace.
     #[must_use]
     pub fn name(self) -> &'static str {
         self.as_str().strip_prefix(NAMESPACE).unwrap_or_else(|| {

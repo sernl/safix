@@ -26,10 +26,8 @@ miette = "7"
 secrecy = "0.10"
 serde = "1"
 serde_json = "1"
-# The YAML reader for sops metadata, and a maintained fork rather than
-# `serde_yaml`, which its author archived. It reads the two things the python
-# readers read — the top-level mapping and the `sops.age` stanza list — and
-# nothing about the format beyond them; see `sops::document`.
+# The maintained YAML reader also accepts JSON. The document inspector uses it
+# for public SOPS metadata and encrypted shapes, never private identities.
 serde_norway = "0.9"
 thiserror = "2"
 # No default features anywhere: the default set pulls a full runtime in, and
@@ -51,7 +49,6 @@ zeroize = "1"
 rustix = { version = "1", default-features = false, features = ["std", "termios", "pipe", "fs", "process", "pty", "mount"] }
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
-insta = "1"
 proptest = "1"
 regex-lite = "0.1"
 

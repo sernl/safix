@@ -18,11 +18,10 @@
 //!
 //! # What is decrypted, and where it goes
 //!
-//! A governed file the person's audience covers, in full, into a pipe this
-//! process drains and drops. Nothing is extracted, nothing is written, and the
-//! value is a [`Secret`] for the length of one statement. A canary
-//! encrypted for the occasion would prove that a fresh file made from a fresh
-//! rule opens, which is not the question; the question is whether the store the
+//! A governed file the person's audience covers, in full, straight into the null
+//! sink. No plaintext is retained by this process. A canary encrypted for the
+//! occasion would prove that a fresh file made from a fresh rule opens, which
+//! is not the question; the question is whether the store the
 //! person already has opens.
 //!
 //! # What a failure means
@@ -32,26 +31,9 @@
 //! nothing is undone: the run reports what is outstanding and exits non-zero.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
-use crate::secret::Secret;
 use crate::workspace::Workspace;
-
-/// The variable sops reads an age identity file from.
-pub const IDENTITY_FILE_VARIABLE: &str = "SOPS_AGE_KEY_FILE";
-
-/// Every other way sops can find an age identity.
-///
-/// Cleared from the proof's child, all of them, because the proof's whole
-/// property is that exactly one identity was reachable. An identity arriving
-/// through any of these would make a passing proof mean nothing, and it would
-/// pass.
-pub const OTHER_IDENTITY_VARIABLES: [&str; 3] = [
-    "SOPS_AGE_KEY",
-    "SOPS_AGE_KEY_CMD",
-    "SOPS_AGE_SSH_PRIVATE_KEY_FILE",
-];
 
 /// The name the isolated identity file is written under.
 const ISOLATED_FILE: &str = "card-identity.txt";
@@ -64,11 +46,11 @@ pub enum Outcome {
         /// The file it opened, repository-relative.
         file: String,
     },
-    /// sops refused, and this is what it exited with.
+    /// The cryptographic tool refused, and this is what it exited with.
     Refused {
         /// The file it was asked for, repository-relative.
         file: String,
-        /// What sops exited with.
+        /// The cryptographic tool's exit status.
         status: i32,
     },
 }
@@ -144,50 +126,20 @@ pub fn stub_of(block: &str) -> Option<String> {
 ///
 /// # Errors
 ///
-/// [`Error::SopsUnavailable`] when sops cannot be run, and
-/// [`Error::SecretRead`] when its output cannot be read. A sops that runs and
-/// refuses is [`Outcome::Refused`] rather than an error: the proof not passing is
-/// an outcome the report carries, not a failure of the machinery.
+/// Refuses unsupported ciphertext formats or unavailable cryptographic tools.
+/// A tool that runs and refuses is [`Outcome::Refused`], rather than a successful
+/// proof backed by some other identity.
 pub fn decrypt_with(
     workspace: &Workspace,
     identity_file: &Path,
     relative: &str,
 ) -> Result<Outcome> {
-    let mut command = Command::new(sops_program());
-    command
-        .arg("decrypt")
-        .arg(workspace.vault_absolute(relative))
-        .current_dir(workspace.vault_root())
-        .env(IDENTITY_FILE_VARIABLE, identity_file)
-        .stdin(Stdio::null())
-        // Piped rather than inherited: the plaintext of a real secret is what
-        // comes out, and it goes into a value that is dropped at the end of this
-        // statement rather than onto the operator's terminal.
-        .stdout(Stdio::piped())
-        // Inherited: sops's own account of a card that is absent, a PIN that was
-        // wrong or a touch that timed out is the useful half of a failed proof.
-        .stderr(Stdio::inherit());
-    for variable in OTHER_IDENTITY_VARIABLES {
-        command.env_remove(variable);
-    }
-
-    let mut child = command
-        .spawn()
-        .map_err(|cause| workspace.sops().unavailable(cause))?;
-
-    {
-        let mut stdout = child.stdout.take().ok_or(Error::SopsPipeMissing)?;
-        // Read into a value that cannot be printed and is zeroed when this block
-        // ends. Nothing looks at it: what is being established is that sops
-        // could produce it.
-        let _opened = Secret::read_from(&mut stdout)?;
-    }
-
-    let status = child
-        .wait()
-        .map_err(|cause| workspace.sops().unavailable(cause))?
-        .code()
-        .unwrap_or(1);
+    let source = crate::ciphertext::Source {
+        path: workspace.vault_absolute(relative),
+        format: crate::ciphertext::Format::from_path(Path::new(relative))?,
+        key: String::new(),
+    };
+    let status = crate::ciphertext::prove_with_age_identity(&source, identity_file)?;
 
     if status == 0 {
         return Ok(Outcome::Proven {
@@ -198,17 +150,6 @@ pub fn decrypt_with(
         file: relative.to_owned(),
         status,
     })
-}
-
-/// The sops binary the rest of the runtime reaches, by the same variable.
-///
-/// Read here rather than taken from [`Workspace`] because the driver hands back
-/// commands with its own stream wiring and this one's wiring is the proof's: a
-/// pipe on standard output that is drained and dropped.
-fn sops_program() -> PathBuf {
-    std::env::var_os("SAFIX_SOPS")
-        .filter(|value| !value.is_empty())
-        .map_or_else(|| PathBuf::from("sops"), PathBuf::from)
 }
 
 #[cfg(test)]
@@ -239,13 +180,6 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
     fn a_block_of_comments_alone_has_no_stub() {
         assert_eq!(stub_of("# only a comment\n"), None);
         assert_eq!(stub_of(""), None);
-    }
-
-    #[test]
-    fn every_other_way_sops_finds_an_identity_is_named_so_it_can_be_cleared() {
-        assert!(OTHER_IDENTITY_VARIABLES.contains(&"SOPS_AGE_KEY"));
-        assert!(OTHER_IDENTITY_VARIABLES.contains(&"SOPS_AGE_KEY_CMD"));
-        assert_eq!(IDENTITY_FILE_VARIABLE, "SOPS_AGE_KEY_FILE");
     }
 
     #[test]

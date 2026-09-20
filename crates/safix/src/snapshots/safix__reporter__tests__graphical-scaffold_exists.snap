@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::scaffold_exists
-
-  × safix/users/dave.nix already exists but declares no user; resolve that by
-  │ hand before scaffolding over it

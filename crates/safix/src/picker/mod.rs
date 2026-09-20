@@ -766,6 +766,7 @@ mod tests {
     fn placement(file: &str, public: Option<&str>) -> Placement {
         Placement {
             file: file.to_owned(),
+            format: safix_core::ciphertext::Format::Yaml,
             key: "value".to_owned(),
             origin: Origin::Private,
             owner: "alice".to_owned(),

@@ -26,6 +26,7 @@ let
     pkgs.age
     pkgs.coreutils
     pkgs.git
+    pkgs.gnupg
     # The envelope every generator fragment runs inside. The runtime resolves it
     # out of nixpkgs at spawn time the way it resolves `runtimeInputs`, and the
     # stubbed `nix` asserts that resolution's shape rather than performing it, so
@@ -82,21 +83,6 @@ let
     SAFIX_TEST_DISK_STAGING = "1";
   };
 
-  # `crates/safix/tests/upload.rs` is the first insta snapshot test under
-  # `crates/safix/tests/` rather than under `crates/safix/src/`, and a check's
-  # sandbox carries no source tree for insta's own workspace-root lookup to
-  # walk: `cargo metadata` fails outright with no cargo on `PATH`, and the
-  # `CARGO_MANIFEST_DIR` compiled in as its fallback names a build sandbox
-  # that no longer exists by check time. `INSTA_WORKSPACE_ROOT`, read at
-  # runtime ahead of both (`insta::env::get_cargo_workspace`), points here
-  # instead — a copy of just the snapshot directory a check might need, kept
-  # minimal rather than the whole repository, at the same path insta joins
-  # its own `file!()` onto: `<root>/crates/safix/tests/snapshots/`.
-  instaWorkspaceRoot = pkgs.runCommand "safix-insta-workspace-root" { } ''
-    mkdir -p $out/crates/safix/tests/snapshots
-    cp ${../../../crates/safix/tests/snapshots}/*.snap $out/crates/safix/tests/snapshots/
-  '';
-
   # One check that runs one test of the compiled suite, with something on `PATH`
   # that the rest of the suite has no reason to carry.
   #
@@ -144,7 +130,6 @@ let
           # authentication path needs the network, so the stand-in is the only
           # `op` any check of this repository runs.
           SAFIX_TEST_OP_STUB = "${suite}/libexec/safix-op-stub";
-          INSTA_WORKSPACE_ROOT = "${instaWorkspaceRoot}";
         }
         // stagingEnv;
       }

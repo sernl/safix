@@ -5,7 +5,7 @@
 #
 # The sops CLI reads `.sops.yaml` from the filesystem, not from a nix evaluation,
 # so the file has to stay committed in the consumer's repository. `plan` is the
-# structured contract — anchors, and one rule per audience — and `renderPlan` is
+# structured contract — anchors and audience-scoped file rules — and `renderPlan` is
 # the text. They are split because a check that asserts the whole rendered file
 # against a literal fails on every prose edit, whereas the plan is exactly what a
 # reader would want held: which key each anchor names, and which anchors each
@@ -212,20 +212,80 @@ let
     {
       inherit anchors;
       rules = lib.sort (a: b: a.pathRegex < b.pathRegex) (
-        lib.mapAttrsToList (_file: a: {
-          pathRegex = "^${a.dir}/[^/]*\\.yaml$";
+        lib.mapAttrsToList (file: a: {
+          inherit file;
+          format = a.format or "yaml";
+          pathRegex =
+            if a.legacy or true then "^${lib.escapeRegex a.dir}/[^/]*\\.yaml$" else "^${lib.escapeRegex file}$";
           inherit (a) audience;
           anchors = lib.sort (x: y: rankOf.${x} < rankOf.${y}) (map (k: anchorOfKey.${k}) a.recipients);
         }) audiences
       );
     };
 
+  recipientScalar =
+    key:
+    if resolve.isPgp key then
+      builtins.toJSON (lib.removePrefix "pgp:" key)
+    else if builtins.match "[A-Za-z0-9_-]+" key != null then
+      key
+    else
+      builtins.toJSON key;
+
+  # Both mechanisms belong to one group: any listed identity can unwrap it.
+  renderGroups =
+    p: r: aliases:
+    let
+      keys = lib.listToAttrs (map (a: lib.nameValuePair a.anchor a.key) p.anchors);
+      pgp = lib.filter (a: resolve.isPgp keys.${a}) r.anchors;
+      age = lib.filter (a: !(resolve.isPgp keys.${a})) r.anchors;
+      item = a: if aliases then "*${a}" else recipientScalar keys.${a};
+      rows = names: lib.concatMapStrings (a: "          - ${item a}\n") names;
+    in
+    "    key_groups:\n"
+    + (if age != [ ] then "      - age:\n" + rows age else "")
+    + (
+      if pgp == [ ] then "" else (if age == [ ] then "      - pgp:\n" else "        pgp:\n") + rows pgp
+    );
+
+  # Keep the historical header byte-identical for historical declarations.
+  # Extended declarations get accurate format and driver guidance instead.
+  headerFor =
+    storage: p:
+    if
+      lib.all (
+        r:
+        (r.format or "yaml") == "yaml"
+        &&
+          r.pathRegex == "^${
+            lib.escapeRegex (builtins.dirOf (r.file or (resolve.audienceFileOf storage r.audience)))
+          }/[^/]*\\.yaml$"
+      ) p.rules
+      && lib.all (a: !(resolve.isPgp a.key)) p.anchors
+    then
+      header storage
+    else
+      lib.replaceStrings
+        [
+          "each distinct audience gets one file"
+          "Every `path_regex` ends in a literal `\\.yaml$`."
+          "It is `[^/]*`\nrather than one literal filename so that a file placed beside a person's\nsecrets rides the same custody instead of being stranded with no rule at\nall."
+        ]
+        [
+          "each document belongs to exactly one audience"
+          "Every `path_regex` ends on its supported format's literal extension."
+          "Only ordinary keyed YAML uses the directory wildcard; other documents\nuse exact file rules. Raw .age rules declare recipients for the safix driver,\nnot SOPS operations. Raw age has no verifiable recipient roster."
+        ]
+        (header storage);
+
   renderPlan =
     storage: p:
-    commentLines "" (header storage)
+    commentLines "" (headerFor storage p)
     + "\nkeys:\n"
     + lib.concatMapStrings (
-      a: lib.optionalString (a.note != null) (commentLines "  " a.note) + "  - &${a.anchor} ${a.key}\n"
+      a:
+      lib.optionalString (a.note != null) (commentLines "  " a.note)
+      + "  - &${a.anchor} ${recipientScalar a.key}\n"
     ) p.anchors
     + "\ncreation_rules:\n"
     + lib.concatStringsSep "\n" (
@@ -233,9 +293,7 @@ let
         r:
         commentLines "  " (audienceNote r.audience)
         + "  - path_regex: ${r.pathRegex}\n"
-        + "    key_groups:\n"
-        + "      - age:\n"
-        + lib.concatMapStrings (a: "          - *${a}\n") r.anchors
+        + renderGroups p r true
       ) p.rules
     );
 
@@ -243,31 +301,30 @@ let
   # already renders — not a derivation from the committed file, and not a
   # second pass over the declarations (design V10). No header, no
   # `Audience:` comments, no `keys:` anchors: each rule's `key_groups` lists
-  # its recipients' raw age public keys inline, because a disposable file
+  # its age recipients and quoted PGP fingerprints inline, because a disposable file
   # with no anchor block has nothing for `*anchor` to reference. Each rule's
   # `path_regex` is the literal opaque ciphertext filename `secretsFileOf`
-  # computes, because vault mode places exactly one flat file per audience
+  # computes, because vault mode places each document in a flat opaque file
   # directly under `secrets/`, with no per-audience subdirectory left to
   # wildcard over (design V9). That `secrets/` is the vault's own bucket and is
   # deliberately not `flake.safix.storage.encrypted`, which is why it stays a
   # literal here while the hashed input below is root-relative (design S6).
   renderVaultRules =
     storage: p: namingKey:
-    let
-      keyOfAnchor = lib.listToAttrs (map (a: lib.nameValuePair a.anchor a.key) p.anchors);
-    in
     "creation_rules:\n"
     + lib.concatStringsSep "\n" (
       map (
         r:
-        "  - path_regex: ^secrets/${
-            resolve.opaqueOf namingKey "secrets" (
-              resolve.relativeTo storage.encrypted (resolve.audienceFileOf storage r.audience)
-            )
-          }\\.yaml$\n"
-        + "    key_groups:\n"
-        + "      - age:\n"
-        + lib.concatMapStrings (a: "          - ${keyOfAnchor.${a}}\n") r.anchors
+        let
+          file = r.file or (resolve.audienceFileOf storage r.audience);
+          format = r.format or "yaml";
+          opaque = resolve.vaultFile storage namingKey file format;
+        in
+        lib.optionalString (
+          format == "age"
+        ) "  # Raw age recipient declaration for safix; not a SOPS operation or verified roster.\n"
+        + "  - path_regex: ^${lib.escapeRegex opaque}$\n"
+        + renderGroups p r false
       ) p.rules
     );
 

@@ -884,7 +884,7 @@
       };
 
       missingFileFixture = refusalFixtureWith {
-        missing.sopsFile = "${builtins.storeDir}/safix-fixture-absent/nope.yaml";
+        missing.sopsFile = "${builtins.storeDir}/00000000000000000000000000000000-safix-fixture-absent/nope.yaml";
       };
 
       # A configuration that resolves entries and can decrypt none of them:
@@ -1147,7 +1147,7 @@
                     [
                       (systemCommon.sopsFileMissingMessage {
                         name = "missing";
-                        file = "${builtins.storeDir}/safix-fixture-absent/nope.yaml";
+                        file = "${builtins.storeDir}/00000000000000000000000000000000-safix-fixture-absent/nope.yaml";
                       })
                     ];
               };
@@ -1548,10 +1548,6 @@
 
               grep -q "ssh-to-age-was-called" "$SAFIX_OVERRIDE_MARKERS" || {
                 echo "safix-installer-overrides: SAFIX_SSH_TO_AGE was declared and not read"
-                exit 1
-              }
-              grep -q "not an ed25519 key" install.log || {
-                echo "safix-installer-overrides: an unconvertible ssh key was not reported and skipped"
                 exit 1
               }
               [ "$(cat "$XDG_RUNTIME_DIR/safix/token")" = safix-override-fixture ] || {

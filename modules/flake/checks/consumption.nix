@@ -309,7 +309,17 @@ in
       # `config.assertions` left. The evaluated profile carries the other half of
       # the claim — that it refuses at all — through `fires`.
       failedMessages =
-        common: args: map (a: a.message) (lib.filter (a: !a.assertion) (common.assertionsFor args));
+        common: args:
+        map (a: a.message) (
+          lib.filter (a: !a.assertion) (
+            common.assertionsFor (
+              args
+              // {
+                cfg = unwiredProfile.config.safix // args.cfg;
+              }
+            )
+          )
+        );
 
       # The module's own view of a projection that reports violations. The list
       # is substituted rather than produced by breaking the fleet, because the
@@ -841,6 +851,7 @@ in
                     [
                       "safix.identity.keyFile"
                       "safix.identity.sshKeyPaths"
+                      "safix.identity.gnupgHome"
                     ]
                     [
                       (homeCommon.noIdentityMessage {

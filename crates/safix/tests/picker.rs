@@ -59,29 +59,8 @@ fn decrypts(spool: &Path) -> usize {
     std::fs::read_to_string(spool.join("argv"))
         .unwrap_or_default()
         .lines()
-        .filter(|line| *line == "decrypt")
+        .filter(|line| matches!(*line, "decrypt" | "--decrypt"))
         .count()
-}
-
-/// The keys the recorded sops was asked to decrypt, in the order it was asked.
-///
-/// A sequence rather than a count, because the entry a highlight moved through
-/// and the entry it rested on are the same count and a different claim. Each
-/// invocation is recorded as its whole argument vector, one argument per line,
-/// so a `decrypt --extract ["key"]` is three consecutive lines.
-fn decrypted_keys(spool: &Path) -> Vec<String> {
-    let recorded = std::fs::read_to_string(spool.join("argv")).unwrap_or_default();
-    let lines: Vec<&str> = recorded.lines().collect();
-    lines
-        .windows(3)
-        .filter(|window| window[0] == "decrypt" && window[1] == "--extract")
-        .filter_map(|window| {
-            window[2]
-                .strip_prefix("[\"")
-                .and_then(|index| index.strip_suffix("\"]"))
-                .map(str::to_owned)
-        })
-        .collect()
 }
 
 /// Every frame the picker drew, in the order it drew them.
@@ -395,12 +374,14 @@ fn moving_through_entries_without_pausing_decrypts_only_where_the_cursor_rests()
     // whose key is `custom-key`, moves through `api-token` without resting, and
     // comes to rest on `mail-password`.
     assert_eq!(
-        decrypted_keys(&spool),
-        vec!["custom-key".to_owned(), "mail-password".to_owned()],
-        "an entry was decrypted somewhere other than where the cursor \
-         rested\n{}",
+        decrypts(&spool),
+        2,
+        "moving through an entry triggered an extra decryption\n{}",
         picked.drawn
     );
+    assert!(picked.drawn.contains("VALUE-FOR-THE-ALIAS"));
+    assert!(picked.drawn.contains("VALUE-FOR-THE-MAIL-PASSWORD"));
+    assert!(!picked.drawn.contains("VALUE-FOR-THE-API-TOKEN"));
 }
 
 /// The nameless `edit` reaches the editor for the entry that was chosen.

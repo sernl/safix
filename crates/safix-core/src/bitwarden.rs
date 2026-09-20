@@ -574,7 +574,12 @@ impl Bitwarden {
                     .to_owned(),
             });
         }
-        let printed = Zeroizing::new(String::from_utf8_lossy(&finished.stdout).into_owned());
+        let output = Zeroizing::new(finished.stdout);
+        let printed = std::str::from_utf8(&output).map_err(|_| Error::BitwardenCommandFailed {
+            address: "<the vault>".into(),
+            arguments: unlock_arguments().join(" "),
+            output: "unlock returned a session token that is not UTF-8".into(),
+        })?;
         self.session = Some(Zeroizing::new(printed.trim().to_owned()));
         Ok(())
     }
@@ -804,10 +809,9 @@ fn address_in(arguments: &[String]) -> String {
 /// its own `Could not find dir, …` notices around the answer — measured, and
 /// recorded in the module header.
 fn object_of(printed: &[u8]) -> Result<Map<String, Value>> {
-    let text = String::from_utf8_lossy(printed);
-    let at = text.find('{').unwrap_or(0);
-    let body = text.get(at..).unwrap_or_default();
-    serde_json::from_str::<Map<String, Value>>(body).map_err(|cause| {
+    let at = printed.iter().position(|byte| *byte == b'{').unwrap_or(0);
+    let body = printed.get(at..).unwrap_or_default();
+    serde_json::from_slice::<Map<String, Value>>(body).map_err(|cause| {
         Error::BitwardenCommandFailed {
             address: String::from("<the vault>"),
             arguments: String::from("<a json answer>"),
@@ -818,10 +822,9 @@ fn object_of(printed: &[u8]) -> Result<Map<String, Value>> {
 
 /// The JSON array a client's answer carries, read from its first `[`.
 fn array_of(printed: &[u8]) -> Result<Vec<Value>> {
-    let text = String::from_utf8_lossy(printed);
-    let at = text.find('[').unwrap_or(0);
-    let body = text.get(at..).unwrap_or_default();
-    serde_json::from_str::<Vec<Value>>(body).map_err(|cause| Error::BitwardenCommandFailed {
+    let at = printed.iter().position(|byte| *byte == b'[').unwrap_or(0);
+    let body = printed.get(at..).unwrap_or_default();
+    serde_json::from_slice::<Vec<Value>>(body).map_err(|cause| Error::BitwardenCommandFailed {
         address: String::from("<the vault>"),
         arguments: String::from("<a json answer>"),
         output: cause.to_string(),
@@ -950,7 +953,9 @@ impl serde::Serialize for Piece<'_> {
                 secret
                     .write_to(&mut *exposed)
                     .map_err(serde::ser::Error::custom)?;
-                serializer.serialize_str(&String::from_utf8_lossy(&exposed))
+                let text = std::str::from_utf8(&exposed)
+                    .map_err(|_| serde::ser::Error::custom("destination requires UTF-8 text"))?;
+                serializer.serialize_str(text)
             }
             Self::Text(text) => serializer.serialize_str(text),
             Self::Number(number) => serializer.serialize_u8(*number),

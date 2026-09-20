@@ -1,6 +1,6 @@
 [package]
 name = "safix"
-description = "The whole lifecycle of one secret, by name and never by file"
+description = "Declarative secret management, verified migration, and independent key recovery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -136,9 +136,6 @@ regex-lite.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-# The graphical rendering of every refusal is held by a snapshot, pinned against
-# itself.
-insta.workspace = true
 proptest.workspace = true
 
 [lints]

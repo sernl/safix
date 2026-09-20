@@ -1,8 +1,0 @@
----
-source: crates/safix/src/reporter.rs
-expression: render_graphical(&refusal)
----
-safix::install_ssh_key_unconvertible
-
-  × /etc/ssh/ssh_host_rsa_key did not convert to an age identity: ssh-to-age
-  │ exited 1

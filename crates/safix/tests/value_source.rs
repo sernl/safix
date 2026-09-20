@@ -94,6 +94,38 @@ fn a_piped_value_is_stored_as_its_own_bytes_and_nothing_is_asked() {
     assert_eq!(read.stdout, b"CANARY-no-newline");
 }
 
+#[test]
+fn binary_pipe_is_read_back_without_replacement_characters() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let fixture = Fixture::new();
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
+    let mut child = fixture
+        .command(&["set", "alice", "api-token"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start set");
+    child
+        .stdin
+        .take()
+        .expect("input pipe")
+        .write_all(b"\0\xff\xfeA\n")
+        .expect("write binary value");
+    let output = child.wait_with_output().expect("wait for set");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let read = fixture
+        .run(&["get", "alice", "api-token"])
+        .expect_success("reading binary value");
+    assert_eq!(read.stdout, b"\0\xff\xfeA\n");
+}
+
 /// An empty pipe is refused, and it is refused as an empty value.
 ///
 /// The state a failed upstream command leaves behind — `set NAME < /dev/null`, or
