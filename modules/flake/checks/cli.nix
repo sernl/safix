@@ -364,1465 +364,1465 @@
           pkgs.gnupg
         ] config.checks.safix-integration name target test;
     in
-    {
-      # A file the declarations place a secret in but that nobody has run sops
-      # on yet is created through sops, so it acquires the creation rule's
-      # recipients; the value round-trips under the resolved key; and the file
-      # is committed on its own under a message naming the secret and never the
-      # value.
-      checks.safix-set-new =
-        mode "safix-set-new" "write_path"
-          "set_new_creates_the_file_through_the_creation_rules";
-
-      # One key moves and the rest of the file comes through byte-identical,
-      # compared by digest rather than by value. A re-run of the same value is
-      # byte-identical and commits nothing; a different value rotates that key
-      # alone; an entry whose `sopsKey` differs from its name lands under the key.
-      checks.safix-set-existing =
-        mode "safix-set-existing" "write_path"
-          "set_existing_moves_one_key_and_leaves_the_others_byte_identical";
-
-      # Every refusal, and each one for its own reason: an undeclared name, a
-      # path with no creation rule, an undeclared user, a placement outside
-      # `*.yaml`, an empty value, a dirty target file, a repository mid-rebase
-      # or mid-merge, and an unrecognised subcommand. None may resolve itself by
-      # choosing a destination, and none may name an option path outside safix's
-      # namespace.
-      checks.safix-refusals =
-        mode "safix-refusals" "write_path"
-          "refusals_each_have_their_own_code_and_leave_the_tree_alone";
-
-      # A file whose recipients have drifted from the audience declared for it
-      # is refused before the rename, in both directions — an identity the
-      # audience does not name, and an audience member the file cannot be opened
-      # by — and the refusal leaves HEAD, the ciphertext and the tree exactly as
-      # it found them. Once `sops updatekeys` repairs the drift the same set goes
-      # through and commits.
-      checks.safix-recipient-drift =
-        mode "safix-recipient-drift" "write_path"
-          "recipient_drift_is_refused_before_anything_is_written";
-
-      # Another path's staged change survives the run staged and uncommitted, and
-      # does not make an idempotent re-run commit.
-      checks.safix-staged-bystander =
-        mode "safix-staged-bystander" "write_path"
-          "a_staged_bystander_survives_the_run_and_does_not_make_it_commit";
-
-      # A SIGINT at the prompt and a backend that fails after the value was read.
-      # Neither may leave a partial file, a scratch file, a created directory, or
-      # the value anywhere on disk including $TMPDIR.
-      checks.safix-abort =
-        mode "safix-abort" "write_path"
-          "an_aborted_run_leaves_no_file_no_scratch_and_no_value";
-
-      # Where `set` reads its value from. A pipe is stored as its own bytes,
-      # trailing newline included, with nothing prompted and nothing confirmed; an
-      # empty pipe takes the empty-value refusal; and a real pseudoterminal on
-      # standard input still gets the hidden double prompt, with the second read
-      # shown to happen by a run given one line and refused for want of a
-      # confirmation. Three tests rather than one, because the fork is what is
-      # under test and each side has to be reachable on its own.
-      checks.safix-value-source = mode "safix-value-source" "value_source" "";
-
-      # `get` round-trips a value by digest, for a secret of the user's own and
-      # for one shared from another owner, and resolves the same file for both
-      # parties. A value set and read back is byte-identical, trailing newline
-      # included, and nothing but the value reaches standard output. `list`
-      # reports each name against the file serving it and the key it is read
-      # under, and renders no value.
-      checks.safix-get-list =
-        mode "safix-get-list" "read_path"
-          "get_round_trips_a_value_and_list_reports_where_it_lives";
-
-      # The sentence the consumption module's identity preflight makes about what
-      # it did not check: an identity present, readable and not a recipient of
-      # these files does not open them. `safix-consumption-ordering` holds the
-      # ordering that guard rests on against a real profile evaluation, and
-      # everything else on that path was an evaluation too, so this is the half of
-      # the guard's own message that needed ciphertext to be held at all. The
-      # stranger's identity is shown to open a document it is a recipient of
-      # first, or the claim would hold over a key file that was simply broken.
-      checks.safix-identity-recipiency =
-        mode "safix-identity-recipiency" "read_path"
-          "an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt";
-
-      # A generator with no inputs mints and commits; one with a prompt reads it
-      # from $prompts twice, which the descriptor interface this replaced could
-      # not do; one with a dependency runs after the generator that writes what
-      # it reads and finds it at $in/<producer>/<name>; one with several outputs
-      # writes both, in different files, in one commit. A second bulk run mints
-      # nothing, and --regenerate rotates its target while a neighbouring key's
-      # ciphertext comes through byte-identical.
-      checks.safix-generate =
-        mode "safix-generate" "generators"
-          "generate_mints_in_dependency_order_and_commits_each_generator";
-
-      # Every way a run is refused: a name with no generator, empty output, a
-      # script that exits non-zero, a candidate the validation rejects, a
-      # multi-output script that wrote only one of its outputs, and a staging
-      # location that is not memory-backed. None leaves a value, a commit, or a
-      # scratch file, and a partial keypair is never written.
-      checks.safix-generate-refusals =
-        mode "safix-generate-refusals" "generators"
-          "generate_refusals_each_have_their_own_code_and_write_nothing";
-
-      # A run order carrying a cycle, refused before the first generator rather
-      # than at the one whose input never arrives. The plan is one the resolver
-      # does not emit — it refuses a cycle at evaluation and leaves the
-      # generators inside one out of the order — so the subject here is the
-      # runtime's own reading of a plan it did not get from that refusal, which
-      # is what a stand-in for nix and an embedder of the library both hand it.
-      checks.safix-generate-cycle =
-        mode "safix-generate-cycle" "generators"
-          "a_run_order_carrying_a_cycle_is_refused_before_anything_runs";
-
-      # What one generator's process may see of another's. A script that reads
-      # standard input to end of input does not eat the answer to a later
-      # generator's prompt — now true because answers are files rather than a
-      # shared stream, which is a different reason and so is re-asserted rather
-      # than assumed to carry over — and a generator running last sees exactly
-      # the descriptors one running first sees.
-      checks.safix-generate-isolation =
-        mode "safix-generate-isolation" "generators"
-          "one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another";
-
-      # `--regenerate` of a named generator carries everything downstream of it.
-      # The set is listed in dependency order and confirmed first; declining
-      # writes nothing; accepting leaves every downstream value a function of
-      # the value that was just minted rather than of the one it replaced; a
-      # generator that reads none of it is not re-run; and --yes answers the
-      # confirmation in advance.
-      checks.safix-generate-cascade =
-        mode "safix-generate-cascade" "generators"
-          "a_rotation_carries_its_downstream_set_and_nothing_else";
-
-      # clan's wireguard keypair, ported. One generator, an encrypted private
-      # half and a public half stored in the clear and readable with no
-      # identity, both from one execution, both in one commit. A re-run mints
-      # nothing, a rotation moves both halves together, and editing the public
-      # half is refused.
-      checks.safix-generate-public =
-        mode "safix-generate-public" "generators"
-          "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
-
-      # The definition record, and the drift `check` reports over it. A mint
-      # leaves one line under `flake.safix.storage.generatorRecords` carrying a
-      # digest and none of the value; an edit to the declaration afterwards is
-      # reported naming the entry and both remedies and no value; regenerating
-      # clears it, with the refreshed record riding that commit; and a hand-set
-      # entry, a record in a format this version does not write, and an absent
-      # record each produce nothing.
-      checks.safix-generate-definition-drift =
-        mode "safix-generate-definition-drift" "generators"
-          "a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it";
-
-      # The one field of that record whose coverage is a claim about the envelope
-      # rather than about the script: a generator that gains `network` describes a
-      # mint that may do something the recorded one could not, so the flip alone —
-      # same script, same tools, same outputs — has to read as drift. A digest that
-      # left the grant out would report nothing here, which is what makes this a
-      # drill on the coverage rather than on the report.
-      checks.safix-generate-network-drift =
-        mode "safix-generate-network-drift" "generators"
-          "a_generator_that_gains_the_network_reads_as_definition_drift";
-
-      # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
-      # nothing, an unchanged buffer commits nothing, and a changed one goes
-      # through the same path `set` writes through. No staging root outlives any
-      # of them.
-      checks.safix-edit =
-        mode "safix-edit" "editor"
-          "the_four_outcomes_of_an_edit_write_what_each_is_supposed_to";
-
-      # Neither editor variable set is a refusal naming both, the visual one
-      # wins over the other, and an entry holding nothing opens on an empty
-      # buffer so that editing is an authoring verb too.
-      checks.safix-edit-selection =
-        mode "safix-edit-selection" "editor"
-          "the_editor_is_the_one_the_operator_named_or_the_run_refuses";
-
-      # The staged path reaches the editor's argument vector and the value does
-      # not, read out of the editor's own /proc entry rather than out of a
-      # process listing.
-      checks.safix-edit-argv =
-        mode "safix-edit-argv" "editor"
-          "the_editor_receives_the_path_and_never_the_value";
-
-      # The five picker entries below that drive a terminal need `setsid
-      # --ctty`, which is why `./integration.nix` carries `util-linux` on linux
-      # alone: a picker opens `/dev/tty`, so the run has to claim the test's
-      # pseudoterminal as its controlling terminal, and darwin has no `setsid`
-      # to do it with. There the harness refuses by name rather than skipping,
-      # because a check that stops asserting without failing is the failure this
-      # page's conventions exist to prevent.
-      # `safix-view-no-terminal` is the exception: it needs no terminal at all.
-
-      # A selection asked for where no terminal can be opened is refused before
-      # anything is decrypted, naming both remedies: name the entry, or list
-      # what the user holds. This case needs no pseudoterminal — pipes on all
-      # three streams is what a sandbox provides anyway — and pointing the
-      # refusal at enrollment's own no-terminal prose turns the reporter
-      # snapshot red rather than this.
-      checks.safix-view-no-terminal =
-        mode "safix-view-no-terminal" "picker"
-          "a_run_with_no_terminal_is_refused_naming_both_remedies";
-
-      # A user who holds nothing is refused naming them rather than offered an
-      # empty list: holding nothing is a state of the declarations where no
-      # terminal is a state of the session, so the two are distinct refusals.
-      # Reusing either code for the other turns this red.
-      checks.safix-view-nothing-to-pick =
-        mode "safix-view-nothing-to-pick" "picker"
-          "a_user_holding_nothing_is_refused_rather_than_offered_an_empty_list";
-
-      # Typing a query that narrows to one entry and pressing enter reads that
-      # one and no other: choosing is a way of naming.
-      # Dropping `--ctty` from the run the test spawns — drill 7.17 — turns
-      # this red, because the picker draws on the controlling terminal and a
-      # run without one has nothing to draw on.
-      # Standard output is a pipe in every picker run, which is what drill
-      # 7.17 established the old draw-on-stdout branch was holding: nothing.
-      checks.safix-view-selection =
-        mode "safix-view-selection" "picker"
-          "a_typed_query_and_enter_prints_the_chosen_value";
-
-      # Leaving the selection writes no value, commits nothing, stages nothing,
-      # exits non-zero, and puts the terminal's attributes back. Dropping the
-      # restore-on-drop guard turns this red on the attributes alone.
-      checks.safix-view-cancelled =
-        mode "safix-view-cancelled" "picker"
-          "cancelling_writes_nothing_and_restores_the_terminal";
-
-      # Nothing the selection drew reaches standard output or standard error:
-      # the rows and the preview go to `/dev/tty` and nowhere else, which is
-      # what keeps `view <name> | cat` honest. Drawing on standard error
-      # instead turns this red.
-      checks.safix-view-preview-streams =
-        mode "safix-view-preview-streams" "picker"
-          "the_preview_never_reaches_stdout_or_stderr";
-
-      # `edit` with no name offers the same selection and opens the editor on
-      # the entry chosen, with the staged path reaching the editor and the
-      # edited value landing. Passing `Scope::Everything` from `edit` — drill
-      # 6.9 — turns the sibling public-output test red instead, and moving the
-      # editor probe after the selection — drill 6.8 — turns the no-editor test
-      # red; both of those run under `safix-picker`.
-      checks.safix-edit-nameless =
-        mode "safix-edit-nameless" "picker"
-          "edit_with_no_name_reaches_the_editor_for_the_chosen_entry";
-
-      # The union `fix` acts on, from both sides. A consumer-named file in step
-      # with the rule that covers it is not a finding of any kind; the same file
-      # drifted from that rule is reported and re-wrapped; and a named path no
-      # rule's directory covers is reported as such, because naming a file
-      # creates no rule for it.
-      checks.safix-governed-extras =
-        mode "safix-governed-extras" "read_path"
-          "a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations";
-
-      # Declaring a person writes one custody record and commits exactly that
-      # and the regenerated policy — not a bystander staged alongside it. The
-      # policy carries the person just declared, which is only true if the
-      # scaffold was staged before it was regenerated: a flake evaluation reads
-      # what git tracks, so regenerating first writes the policy of the
-      # declarations as they stood without them. They hold nothing, so their key
-      # is an anchor with no rule. Nothing is minted, the output says as much,
-      # and redeclaring is refused.
-      checks.safix-adduser =
-        mode "safix-adduser" "custody"
-          "adduser_commits_the_scaffold_and_the_policy_that_saw_it";
-
-      # Every refusal, each for its own reason: a name outside the alphabet, a
-      # name carrying a path separator, a malformed recipient, an over-long one,
-      # and an existing person. Each leaves no scaffold, no commit and no dirt. A
-      # recipient that needs a physical interaction is refused separately from
-      # the malformed ones, because it is well-formed and still cannot be an
-      # activation identity, and its refusal has to name recoveryRecipients —
-      # where a card does belong — or the operator is told only that their key is
-      # unwelcome.
-      checks.safix-adduser-refusals =
-        mode "safix-adduser-refusals" "custody"
-          "adduser_refusals_leave_the_tree_as_they_found_it";
-
-      # Host attachment reaches a consumer through the hook or not at all.
-      # `--host` with no hook configured is refused naming the hook and saying
-      # that onboarding without one succeeds; a configured hook receives the
-      # name, the recipient and every host, and runs after safix's commit has
-      # landed, so what it writes is left uncommitted and safix's message names
-      # only what safix did.
-      checks.safix-adduser-hook =
-        mode "safix-adduser-hook" "custody"
-          "host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit";
-
-      # The enrollment ceremony over one factory-fresh card: a generated PIN and
-      # a distinct generated PUK reach ykman as flags, a random management key is
-      # put on the card and named nowhere, the generator is answered once on a
-      # terminal, the identity block lands where keygen appends, the recipient
-      # lands in recoveryRecipients, the credentials are stored through the
-      # ordinary write path, and no argument vector anywhere names the OTP
-      # applet. The proof does not pass, because no card is present and the
-      # isolation is what decides that — see the head of
-      # `crates/safix/tests/enrollment.rs`.
-      checks.safix-enroll =
-        mode "safix-enroll" "enrollment"
-          "enrollment_provisions_generates_wires_and_commits_once";
-
-      # A card already provisioned keeps its access: the three drives that would
-      # change a PIN, a PUK or a management key record nothing at all, and the PIN
-      # comes from the operator instead — asked once, unechoed, and used to answer
-      # the generator. The state probe is what decides between the two paths, and
-      # it costs no PIN retry.
-      checks.safix-enroll-provisioned =
-        mode "safix-enroll-provisioned" "enrollment"
-          "a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once";
-
-      # A backup card is the same verb run again: its own identity, its own
-      # recipient beside the first, and neither run knowing about the other.
-      checks.safix-enroll-backup =
-        mode "safix-enroll-backup" "enrollment"
-          "a_backup_card_sits_beside_the_first_and_changes_nothing_about_it";
-
-      # Every refusal the card surface produces, each for its own reason: two
-      # cards with no serial named, no smartcard service, no card, a touch policy
-      # of never, and an OTP slot asked for under any of the spellings somebody
-      # would reach for. The OTP one is refused with the database-lockout hazard
-      # named rather than as an unknown option, which is the whole point of it
-      # being a refusal.
-      checks.safix-enroll-refusals =
-        mode "safix-enroll-refusals" "enrollment"
-          "the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone";
-
-      # A PIN the card refuses costs one retry and not three. The claim is the
-      # count: a run that answered every prompt would walk a card's counter to
-      # zero and block it, which is a card nobody can use again without the PUK.
-      checks.safix-enroll-one-attempt =
-        mode "safix-enroll-one-attempt" "enrollment"
-          "a_rejected_pin_aborts_after_one_attempt";
-
-      # The same bounded-answer discipline at the card's own boundary, where the
-      # credentials travel a prompt rather than an argument vector: a drive that
-      # asks past its bound is not answered further, and the run stops with
-      # nothing wired and nothing committed.
-      checks.safix-enroll-one-attempt-ykman =
-        mode "safix-enroll-one-attempt-ykman" "enrollment"
-          "a_ykman_drive_that_asks_past_its_bound_stops_the_run";
-
-      # The proof's isolation, which is what makes the proof about the card. An
-      # ambient software identity opens the file the proof names, and the run is
-      # handed an identity source holding one line — the card's stub — so a proof
-      # that passed with no card would mean the isolation had failed.
-      checks.safix-enroll-proof-isolation =
-        mode "safix-enroll-proof-isolation" "enrollment"
-          "the_proof_is_isolated_from_every_ambient_identity";
-
-      # The proof machinery's passing path, hardware-free: the isolated source
-      # opens a file it is a recipient of, and one that is not a recipient does
-      # not. A separate check from the isolation because wrapping a data key to a
-      # card's recipient runs the plugin, and the plugin runs the card.
-      checks.safix-enroll-proof =
-        mode "safix-enroll-proof" "enrollment"
-          "the_proof_opens_a_file_with_the_isolated_source_alone";
-
-      # Registration reaches clan through clan's own command and the consumer
-      # through flake.safix.enrollHook, which receives the person, the serial and
-      # the recipient, and runs after safix's commit has landed — so what it
-      # writes is left uncommitted and safix's message names only what safix did.
-      checks.safix-enroll-hook =
-        mode "safix-enroll-hook" "enrollment"
-          "clan_and_the_hook_receive_the_enrollment_after_it_is_committed";
-
-      # The credentials' second home: they reach the store on standard input,
-      # round-trip through the same transport, and neither store's argument vector
-      # ever carries one.
-      checks.safix-enroll-custody =
-        mode "safix-enroll-custody" "enrollment"
-          "the_mirrored_credentials_travel_standard_input_and_round_trip";
-
-      # A manager scaffolding for somebody who consented to that: the run proceeds
-      # and its commit records the organization it was performed for, in the same
-      # words the run announced before it edited anything.
-      checks.safix-delegation =
-        mode "safix-delegation" "delegation"
-          "a_manager_scaffolds_for_a_managed_person_and_the_commit_records_the_organization";
-
-      # The two refusals, before the card is selected and before any file is
-      # written: a declared person outside the delegation, and an identity no
-      # declaration corresponds to. Neither reaches the card, neither commits, and
-      # neither leaves the record it was refused over changed.
-      checks.safix-delegation-refusals =
-        mode "safix-delegation-refusals" "delegation"
-          "an_out_of_scope_actor_is_refused_before_the_card_and_before_any_file";
-
-      # A person no delegation covers, scaffolded by an identity the declarations do
-      # not name at all. It proceeds, which is the sharpest form the compatibility
-      # promise takes: a verb that consulted delegation there would refuse.
-      checks.safix-delegation-unmanaged =
-        mode "safix-delegation-unmanaged" "delegation"
-          "an_unmanaged_person_never_consults_delegation";
-
-      # A group gains a member: one inserted line, every name and comment that was
-      # there kept, the recipient policy regenerated from the declarations that
-      # edit implies and committed beside it, and the delegation recorded in the
-      # commit. A second run writes nothing and commits nothing.
-      checks.safix-group-add =
-        mode "safix-group-add" "group"
-          "an_addition_is_one_line_and_the_policy_is_re_derived_beside_it";
-
-      # A group loses one: one removed line, the not-retroactive disclosure made,
-      # and the next `check` reporting the shrink as the revocation the verb said it
-      # was.
-      checks.safix-group-remove =
-        mode "safix-group-remove" "group"
-          "a_removal_says_what_it_does_not_undo_and_the_next_check_reports_the_shrink";
-
-      # The delegation over groups, which is silo coverage: a covered group is its
-      # organization's managers' to edit, and a group no silo set names is editable
-      # by whoever can commit with nothing consulted and nothing mentioned.
-      checks.safix-group-delegation =
-        mode "safix-group-delegation" "group"
-          "a_covered_group_is_its_organizations_and_an_uncovered_one_is_anybodys";
-
-      # Every refusal the verb has, each for its own reason: an undeclared group, an
-      # undeclared subject, a declaration this cannot edit, a `members` value it
-      # cannot read, and an act that is neither add nor remove. None leaves the
-      # declaration or HEAD moved.
-      checks.safix-group-refusals =
-        mode "safix-group-refusals" "group"
-          "refusals_each_have_their_own_code_and_leave_the_declaration_alone";
-
-      # One mapping of each mode over one run: the database converges to safix,
-      # safix converges to the database through the ordinary write path, a two-way
-      # mapping with an empty database side bootstraps and records its agreement
-      # beside the entry, and a backup mapping writes into absence. The username a
-      # mapping declares reaches the entry, no value reaches standard output, and
-      # no digest of one reaches the repository.
-      checks.safix-sync = mode "safix-sync" "sync_path" "each_mode_converges_exactly_as_its_name_says";
-
-      # Convergence, which is load-bearing rather than an optimisation here: a kdbx
-      # save rewrites the whole file. A second run over the same tree reports every
-      # mapping unchanged, commits nothing, moves no ciphertext, and issues no
-      # write of any kind against the database — asserted from the store's own
-      # invocation log rather than from the report.
-      checks.safix-sync-converges =
-        mode "safix-sync-converges" "sync_path"
-          "a_second_run_writes_nothing_anywhere";
-
-      # A pulled value lands as a commit indistinguishable in shape from a
-      # hand-set write — the same paths, a subject naming the mapping, and no value
-      # in the message.
-      checks.safix-sync-pull =
-        mode "safix-sync-pull" "sync_path"
-          "a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write";
-
-      # The three-way decision, over the agreement the companion entry remembers:
-      # one side moved converges toward it in each direction, and both sides moved
-      # writes nothing and names the two one-way modes that each resolve it.
-      checks.safix-sync-two-way =
-        mode "safix-sync-two-way" "sync_path"
-          "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
-
-      # backup's whole content: a database value that differs is reported and never
-      # overwritten.
-      checks.safix-sync-backup =
-        mode "safix-sync-backup" "sync_path"
-          "a_backup_mapping_never_overwrites_and_reports_the_divergence";
-
-      # Every refusal, each for its own reason: a mapping nothing declares, a safix
-      # side holding nothing, a database side holding no entry, a value carrying a
-      # newline the store's command cannot carry, a database that will not open, a
-      # run with no terminal to ask the password on, and mappings declared with no
-      # database. None leaves a commit, a dirty tree, or a partial write.
-      checks.safix-sync-refusals =
-        mode "safix-sync-refusals" "sync_path"
-          "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
-
-      # A mapping whose safix side does not decrypt for whoever is running is
-      # reported as one that could not be judged rather than skipped, and the
-      # mappings beside it are still judged.
-      checks.safix-sync-unjudgeable =
-        mode "safix-sync-unjudgeable" "sync_path"
-          "a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped";
-
-      # The burst discipline the 292 MB rewrite is bounded by: every database write
-      # of a run is issued consecutively, with no read between two of them.
-      checks.safix-sync-burst =
-        mode "safix-sync-burst" "sync_path"
-          "the_database_writes_of_a_run_are_one_burst";
-
-      # Entries no mapping declares, including the companion of a mapping that is
-      # gone, are reported as information and left where they are. No mode deletes.
-      checks.safix-sync-leftovers =
-        mode "safix-sync-leftovers" "sync_path"
-          "an_entry_no_mapping_declares_is_reported_and_never_removed";
-
-      # A field drift on an otherwise-agreeing entry is repaired under a pushing
-      # mode, in exactly one write carrying the value the entry already held, and
-      # the report says `fields updated` naming the field. Reddened by dropping
-      # the field half of the stub's own record, which leaves the notes assertion
-      # false while every value assertion stays true.
-      checks.safix-sync-fields-push =
-        mode "safix-sync-fields-push" "sync_path"
-          "a_field_drift_on_an_agreeing_entry_is_repaired_under_a_pushing_mode";
-
-      # `backup` never overwrites an existing entry's field either: the entry
-      # keeps what the person typed, the run fails, and the report says `fields
-      # diverged` naming the field. Reddened by letting the backup-with-an-
-      # existing-entry case push its fields.
-      checks.safix-sync-fields-backup =
-        mode "safix-sync-fields-backup" "sync_path"
-          "a_backup_mapping_never_overwrites_a_field_either";
-
-      # A field sourced from another entry is refused for this target before
-      # either side is read, naming the field and the entry, and nothing about
-      # that mapping's entry is issued at all. Reddened by resolving an
-      # entry-sourced field on an argv channel instead of refusing it.
-      checks.safix-sync-fields-refused =
-        mode "safix-sync-fields-refused" "sync_path"
-          "a_field_read_out_of_another_entry_is_refused_for_this_target";
-
-      # A declared tag is refused naming the target and the field rather than
-      # silently dropped — the runtime half of the refusal
-      # `checks.safix-keepassxc` holds at evaluation. Reddened by giving
-      # `tags` any channel other than `unsupported` on this target.
-      checks.safix-sync-fields-tag-refused =
-        mode "safix-sync-fields-tag-refused" "sync_path"
-          "a_declared_tag_is_refused_at_evaluation_rather_than_dropped";
-
-      # A mapping declaring no field issues exactly one `show` — its value read,
-      # with the same arguments it issued before fields existed. Reddened by
-      # making the fields read spawn unconditionally.
-      checks.safix-sync-fields-one-read =
-        mode "safix-sync-fields-one-read" "sync_path"
-          "a_mapping_declaring_no_field_issues_no_second_read";
-
-      # A field divergence names the field and never its content, on either
-      # side: both distinctive literals are searched for in both streams.
-      # Reddened by making the stub answer `show --attributes` with the
-      # password, or by interpolating a field's value into the report.
-      checks.safix-audit-fields =
-        mode "safix-audit-fields" "audit"
-          "no_field_reaches_the_report_only_its_name_does";
-
-      # ── the pass target ──
-      #
-      # Every one of these drives the stub `tests/support/pass-stub.rs`, which
-      # answers the vectors safix sends because it was written to.
-      # `safix-pass-cli` below is what keeps that from being the whole story:
-      # it drives the real `pass`, and it is the one place the argument vectors
-      # meet the tool.
-
-      # The value and every declared field cross in one record body, in the
-      # layout design D2 fixes: the value's bytes, a blank line, then the four
-      # field lines in order. Reddened by dropping the blank separator from
-      # `body_of`, which moves the asserted literal.
-      checks.safix-pass-push =
-        mode "safix-pass-push" "pass_path"
-          "a_push_writes_the_value_and_the_declared_fields_in_one_record";
-
-      # A pull writes the value alone into safix: a safix entry is a placement
-      # with no slot for a field, so the record's field block does not cross.
-      # Reddened by writing a read field into safix's side.
-      checks.safix-pass-pull =
-        mode "safix-pass-pull" "pass_path"
-          "a_pull_writes_only_the_value_into_safix";
-
-      # `backup` never overwrites an existing entry holding a different value,
-      # and writes no field either. Reddened by letting the
-      # backup-with-an-existing-entry case push.
-      checks.safix-pass-backup =
-        mode "safix-pass-backup" "pass_path"
-          "a_backup_never_overwrites_a_differing_entry";
-
-      # A two-way mapping bootstraps into an empty store side and then
-      # converges toward whichever side moved. Reddened by taking the verdict
-      # from anything but the recorded agreement.
-      checks.safix-pass-two-way =
-        mode "safix-pass-two-way" "pass_path"
-          "a_two_way_mapping_converges_toward_the_changed_side";
-
-      # Both sides moved is a conflict that writes nothing and names the two
-      # one-way modes that each resolve it. Reddened by picking a winner.
-      checks.safix-pass-conflict =
-        mode "safix-pass-conflict" "pass_path"
-          "both_sides_changed_is_a_conflict_naming_two_remedies";
-
-      # A mapping accounts for its own companion, so its memory is never
-      # reported as an entry nothing declares. Reddened by dropping the
-      # companion from `lingering`'s claimed list.
-      checks.safix-pass-memory =
-        mode "safix-pass-memory" "pass_path"
-          "a_two_way_mappings_memory_is_not_lingering";
-
-      # The memory is written after the value, so an interrupted run leaves the
-      # older memory and the next run reports a conflict rather than
-      # overwriting the newer value. Reddened by writing the memory first.
-      checks.safix-pass-interrupted =
-        mode "safix-pass-interrupted" "pass_path"
-          "an_interrupted_two_way_run_leaves_the_older_memory";
-
-      # A value spanning lines round-trips byte for byte, a trailing newline
-      # included, and a second run over it writes nothing. Reddened by applying
-      # the trailing-newline trim, or by dropping `--multiline`.
-      checks.safix-pass-multiline =
-        mode "safix-pass-multiline" "pass_path"
-          "a_multi_line_value_round_trips_byte_for_byte";
-
-      # A decrypt the operator's agent declined is its own refusal carrying
-      # gpg's words, told apart from an absent entry, so a backup mapping never
-      # writes over an entry it merely could not read. Reddened by mapping a
-      # declined decrypt to `Ok(None)`.
-      checks.safix-pass-locked =
-        mode "safix-pass-locked" "pass_path"
-          "a_locked_agent_is_not_an_absent_entry";
-
-      # A declared store that is not one refuses before any mapping is read and
-      # before the store's own command is invoked at all. Reddened by moving
-      # the check after the first read.
-      checks.safix-pass-no-store =
-        mode "safix-pass-no-store" "pass_path"
-          "an_absent_store_refuses_before_any_mapping_is_read";
-
-      # No value and no field reaches an argument vector or an environment
-      # variable; the store's location reaches the child's environment and
-      # nothing else does. Reddened by putting any field in argv.
-      checks.safix-pass-pipes =
-        mode "safix-pass-pipes" "pass_path"
-          "no_value_and_no_field_reaches_an_argument_vector_or_the_environment";
-
-      # An `{ entry = …; }` field source is admissible on this target, resolved
-      # at run time, written into the body, and never printed. Reddened by
-      # refusing it, or by letting the resolved value reach argv or a report.
-      checks.safix-pass-field-source =
-        mode "safix-pass-field-source" "pass_path"
-          "a_field_sourced_from_another_entry_is_resolved_and_never_printed";
-
-      # A field-only divergence is its own word, naming the field and never
-      # either side's content. Reddened by interpolating a field's value into
-      # the report.
-      checks.safix-pass-fields-diverged =
-        mode "safix-pass-fields-diverged" "pass_path"
-          "a_field_only_divergence_is_reported_as_its_own_word";
-
-      # ── the 1password target ──
-      #
-      # None of these uses `runOneWith`: this target contributes no package to
-      # any check's closure, and never will. `_1password-cli` is unfree, there
-      # is no self-hostable server to point a sandboxed node at, and every
-      # authentication path needs the network — so the stand-in
-      # `tests/support/op-stub.rs` is the only `op` these checks have, and the
-      # absence of a real-binary row here is a decision rather than an omission.
-
-      # One mapping of each mode over one run: the item converges to safix,
-      # safix converges to the item through the ordinary write path, a two-way
-      # mapping with an absent far side bootstraps and records its agreement in
-      # the item's own concealed field, and a backup mapping writes into
-      # absence. Every declared field reaches its documented home, no value
-      # reaches standard output, and no digest of one reaches the repository.
-      checks.safix-onepassword-sync =
-        mode "safix-onepassword-sync" "onepassword_path"
-          "each_mode_converges_exactly_as_its_name_says";
-
-      # No value and no field is in an argument vector or in the child's
-      # environment, including an `{ entry = … }`-sourced field, and the
-      # stand-in was never given a word carrying an assignment. Reddened by
-      # dropping the stand-in's own `=` refusal, which turns the argv assertion
-      # green when it should refuse.
-      checks.safix-onepassword-argv =
-        mode "safix-onepassword-argv" "onepassword_path"
-          "no_value_and_no_field_ever_travels_an_argument_vector";
-
-      # A value carrying newlines is written and read back byte-identically,
-      # with no refusal anywhere: the positive statement that this target has no
-      # value-shape refusal, because the transport that would have needed one is
-      # not the transport in use.
-      checks.safix-onepassword-multiline =
-        mode "safix-onepassword-multiline" "onepassword_path"
-          "a_multi_line_value_crosses_whole";
-
-      # A passkey, a one-time-password field and a section no declaration names
-      # are byte-identical after a push rewrote the value. Reddened by
-      # assembling the edit's payload from a template instead of from the item's
-      # own JSON, which is the published danger the round trip removes.
-      checks.safix-onepassword-round-trip =
-        mode "safix-onepassword-round-trip" "onepassword_path"
-          "an_edit_preserves_what_the_declaration_does_not_name";
-
-      # A signed-out run refuses before any side is read: one invocation, and it
-      # was the preflight, with no sops decrypt of any mapping's safix side.
-      # Reddened by moving the preflight after the first read.
-      checks.safix-onepassword-signed-out =
-        mode "safix-onepassword-signed-out" "onepassword_path"
-          "a_signed_out_run_refuses_before_reading_any_side";
-
-      # Each refusal has its own sentence and its own remedy — an unknown
-      # mapping name, a safix side holding nothing, a far side holding no item
-      # under a pulling mode, a vault the session cannot see, the program
-      # refusing over one item, and the program absent — and none leaves a
-      # commit, a dirty tree or a partial write.
-      checks.safix-onepassword-run-refusals =
-        mode "safix-onepassword-run-refusals" "onepassword_path"
-          "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
-
-      # A failure against the service on one mapping refuses that mapping and
-      # does not end the run: all three appear in the report, the first and
-      # third converged, and the run exits non-zero.
-      checks.safix-onepassword-partial =
-        mode "safix-onepassword-partial" "onepassword_path"
-          "a_failure_on_one_mapping_does_not_end_the_run";
-
-      # The three-way decision over the item's own recorded state, including
-      # that a state a person corrupted is treated as absent and bootstraps
-      # rather than refusing.
-      checks.safix-onepassword-two-way =
-        mode "safix-onepassword-two-way" "onepassword_path"
-          "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
-
-      # An item in a declared vault that no mapping declares is reported as
-      # information, is still there afterwards, and does not move audit's exit
-      # status — and every read is scoped to the mapped item rather than to the
-      # vault. Reddened by making the read ask for the whole vault's items.
-      checks.safix-onepassword-leftovers =
-        mode "safix-onepassword-leftovers" "onepassword_path"
-          "an_item_no_mapping_declares_is_reported_and_never_removed";
-
-      # audit compares and writes nothing — no create and no edit in the
-      # stand-in's own record — and names a diverged field without printing
-      # either side's content, with a value divergence taking precedence over a
-      # field one.
-      checks.safix-onepassword-audit =
-        mode "safix-onepassword-audit" "onepassword_path"
-          "audit_compares_without_writing_and_names_a_field_without_printing_it";
-
-      # ── the bitwarden target ──
-      #
-      # None of these uses `runOneWith`, and this is the one target where that
-      # is a recorded absence rather than a passing remark: `bw` cannot
-      # authenticate without a network — `login` registers a device against an
-      # account, and every path to a session goes through it — and a `nix build`
-      # has none. So the stand-in `tests/support/bw-stub.rs` is the only `bw`
-      # any check of this repository runs, `../checks/bitwarden.nix`'s header
-      # states that absence where the structural checks live, and the deferred
-      # alternative — a NixOS VM node against `services.vaultwarden` — names its
-      # own precondition there rather than being minted half-measured.
-
-      # A locked client with no terminal refuses before either side of any
-      # mapping is read: one invocation in the stand-in's spool, and it was the
-      # client's own state. Reddened by moving the terminal test after the first
-      # mapping's read, which leaves the sentence intact and the spool carrying
-      # a `get`.
-      checks.safix-bitwarden-locked =
-        mode "safix-bitwarden-locked" "bitwarden"
-          "a_locked_client_with_no_terminal_refuses_before_any_read";
-
-      # An unauthenticated client is told apart from a locked one, and the run
-      # never tries to unlock it. Reddened by task 3.8's drill: making
-      # `prose::bitwarden_locked` ignore its `state` and print one sentence for
-      # both collapses the two states and turns this red while the locked check
-      # above stays green.
-      checks.safix-bitwarden-unauthenticated =
-        mode "safix-bitwarden-unauthenticated" "bitwarden"
-          "an_unauthenticated_client_names_logging_in";
-
-      # A declared server that is not the one the client reports refuses before
-      # any side is read, naming both URLs. Reddened by comparing the declared
-      # server after the first read, which would have decrypted safix's side of
-      # every mapping into a run that then refused.
-      checks.safix-bitwarden-server =
-        mode "safix-bitwarden-server" "bitwarden"
-          "a_declared_server_that_is_not_reached_refuses_before_any_read";
-
-      # A failed refresh refuses every mapping, and nothing is read or written.
-      # Reddened by task 8.24's drill: making the pre-read `sync` non-fatal
-      # turns this red while `safix-bitwarden-suite`'s refresh-ordering test
-      # stays green, which is what separates "the refresh happens" from "a
-      # failed refresh refuses".
-      checks.safix-bitwarden-stale =
-        mode "safix-bitwarden-stale" "bitwarden"
-          "a_failed_refresh_refuses_every_mapping";
-
-      # An address two items answer to is refused rather than resolved, naming
-      # the count, with no create and no edit. Reddened by picking the first
-      # match — which is the failure the refusal exists to prevent, because a
-      # vault legitimately holds two items with one name.
-      checks.safix-bitwarden-ambiguous =
-        mode "safix-bitwarden-ambiguous" "bitwarden"
-          "an_ambiguous_address_is_refused_rather_than_resolved";
-
-      # An absent item is created by a pushing mode and refused by a pulling
-      # one, which is B8's asymmetry: safix authors what safix mints and does
-      # not author what a person types. Reddened by creating the item for the
-      # pulling mode too, which turns the refusal into an empty item.
-      checks.safix-bitwarden-absent =
-        mode "safix-bitwarden-absent" "bitwarden"
-          "an_absent_item_is_created_by_a_pushing_mode_and_refused_by_a_pulling_one";
-
-      # No payload is ever a positional argument, on a create or on an edit:
-      # every write's payload is on standard input and no argument is base64 of
-      # a JSON object. Reddened by task 7.11's drill — making the stand-in
-      # accept a positional payload — and by using the documented
-      # `<encodedJson>` form, either of which turns this red.
-      checks.safix-bitwarden-argv =
-        mode "safix-bitwarden-argv" "bitwarden"
-          "no_payload_is_ever_a_positional_argument";
-
-      # The session key travels `BW_SESSION` and nothing else: in the
-      # environment of every invocation after the unlock, in no argument vector,
-      # on no output stream, and in no file safix writes. This is the one
-      # invariant this change narrows rather than inherits, and it is the check
-      # that holds the narrowing. Reddened by task 4.13's drill, moving the key
-      # into `--session <key>`.
-      checks.safix-bitwarden-session =
-        mode "safix-bitwarden-session" "bitwarden"
-          "the_session_key_is_in_the_environment_and_nowhere_else";
-
-      # An edit preserves every member of the item the declaration does not
-      # govern — a totp, a second URI, somebody's own custom field — and the
-      # three declared fields still reach their documented homes. Reddened by
-      # task 4.12's drill: constructing a fresh payload instead of mutating the
-      # fetched item, which deletes all three.
-      checks.safix-bitwarden-edit =
-        mode "safix-bitwarden-edit" "bitwarden"
-          "an_edit_preserves_every_field_the_declaration_does_not_govern";
-
-      # A two-way mapping records its agreement in a hidden custom field of the
-      # item itself, in the same write as the value, with no companion object
-      # and nothing in the repository. Reddened by task 8.25's drill: writing
-      # the memory in a second `edit` after the value's own leaves the field
-      # assertion green and adds a second write to the spool, which the count
-      # assertion catches.
-      checks.safix-bitwarden-two-way =
-        mode "safix-bitwarden-two-way" "bitwarden"
-          "two_way_records_the_agreement_in_a_hidden_field_of_the_item";
-
-      # Both sides moved since the agreement is a conflict that writes nothing
-      # and names the two one-way remedies. Reddened by picking a side by fiat,
-      # which overwrites whichever half the tiebreak decided against.
-      checks.safix-bitwarden-conflict =
-        mode "safix-bitwarden-conflict" "bitwarden"
-          "two_way_both_changed_is_a_conflict_and_writes_nothing";
-
-      # A value carrying newlines crosses whole, with no refusal anywhere: the
-      # positive statement that the keepassxc target's `ValueSpansLines` is a
-      # property of that transport's one-line entry password and not one this
-      # target inherits.
-      checks.safix-bitwarden-multiline =
-        mode "safix-bitwarden-multiline" "bitwarden"
-          "a_multi_line_value_crosses_whole";
-
-      # A declared `tags` is refused, and no item is read, created or edited.
-      # The refusal this repository leans on is evaluation's, which
-      # `safix-bitwarden`'s own `tagsMessages` holds against its literal
-      # sentence; this is the runtime's second refusal, reddened by reporting
-      # `tags` as carried in `bitwarden::CAPABILITIES`.
-      checks.safix-bitwarden-tags =
-        mode "safix-bitwarden-tags" "bitwarden"
-          "tags_are_refused_at_evaluation";
-
-      # audit compares and writes nothing — no create and no edit in the
-      # stand-in's own record — and reports the agreeing mappings as well as the
-      # diverged one. Reddened by having audit reuse the converging pass, which
-      # writes.
-      checks.safix-bitwarden-audit =
-        mode "safix-bitwarden-audit" "bitwarden"
-          "audit_bitwarden_writes_nothing";
-
-      # An item under a declared folder that no mapping names is reported as
-      # information, and the run still exits zero: no mode deletes an item, so a
-      # mapping that was removed leaves its last value behind on purpose.
-      # Reddened by counting a lingering item as a finding, which turns a clean
-      # run into a failure.
-      checks.safix-bitwarden-lingering =
-        mode "safix-bitwarden-lingering" "bitwarden"
-          "a_lingering_item_is_information_and_does_not_move_the_exit_status";
-
-      # A field-only divergence names the field and never either side's
-      # content. Reddened by interpolating a field's value into the report,
-      # which is the same drill `safix-pass-fields-diverged` carries and for the
-      # same reason: a note is itself a secret.
-      checks.safix-bitwarden-fields =
-        mode "safix-bitwarden-fields" "bitwarden"
-          "the_report_names_a_diverged_field_and_never_its_content";
-
-      # Neither side holding a value writes nothing anywhere: no clan write,
-      # no companion write, no commit.
-      checks.safix-bridge-sync-unchanged =
-        mode "safix-bridge-sync-unchanged" "bridge_sync"
-          "neither_side_holding_anything_is_unchanged_and_writes_nothing";
-
-      # A bootstrap push into clan lands the value through clan's own command
-      # and the companion afterward as this repository's own, single new
-      # commit — the companion holding a digest tagged `safix-bridge-sync-v1`
-      # rather than the plaintext value.
-      checks.safix-bridge-sync-push =
-        mode "safix-bridge-sync-push" "bridge_sync"
-          "safix_only_bootstraps_toward_clan_and_records_the_agreement_as_a_second_commit";
-
-      # A bootstrap pull lands the value as its own commit, and the agreement
-      # as a second, separate one afterward — the load-bearing order D8
-      # states, held against the repository's own commit history rather than
-      # against a reading of the code.
-      checks.safix-bridge-sync-pull =
-        mode "safix-bridge-sync-pull" "bridge_sync"
-          "clan_only_bootstraps_toward_safix_and_records_the_agreement_as_a_second_commit";
-
-      # Both sides moved with no agreement recorded is a conflict rather than
-      # a guess: nothing written on either side, and the finding names the
-      # mapping and the two one-way remedies.
-      checks.safix-bridge-sync-conflict =
-        mode "safix-bridge-sync-conflict" "bridge_sync"
-          "both_sides_holding_different_values_with_no_agreement_is_a_conflict";
-
-      # A later divergence converges using the agreement a prior bootstrap
-      # recorded, proving the companion's own write is read back by a later
-      # run rather than only ever written.
-      checks.safix-bridge-sync-remembered =
-        mode "safix-bridge-sync-remembered" "bridge_sync"
-          "a_later_divergence_converges_using_the_recorded_agreement";
-
-      # A two-way push into clan carries the identical stale-generator refusal
-      # a safix-to-clan write already has, under the identical condition.
-      checks.safix-bridge-sync-stale-generator =
-        mode "safix-bridge-sync-stale-generator" "bridge_sync"
-          "a_stale_generator_refuses_a_two_way_push_toward_clan";
-
-      # A shared placement's clan side is reached by a machine discovered
-      # from clan's own `machines list`, never one the mapping declares — its
-      # fixture carries no machine for a declared one to have come from.
-      checks.safix-bridge-sync-shared-address =
-        mode "safix-bridge-sync-shared-address" "bridge_sync"
-          "a_shared_placements_machine_is_discovered_from_clan";
-
-      # The store's own command, driven for real against a database the check
-      # creates. Every other sync check drives the model, which answers the vectors
-      # safix sends because it was written to; this one establishes that those
-      # vectors mean to keepassxc-cli what the runtime thinks they mean. It found
-      # one thing no model would have: `ls` prints `[empty]` rather than nothing for
-      # a database holding no entry, which the runtime has to skip.
-      checks.safix-store-cli = withStore "safix-store-cli" "store_cli" "";
-
-      # The store's own command, driven for real against a store the check
-      # creates in its own directory with its own `GNUPGHOME` and a key minted
-      # inside it. Every other pass check drives the stub, which answers the
-      # vectors safix sends because it was written to; this one establishes that
-      # those vectors mean to `pass` what the runtime thinks they mean, and it
-      # is where the byte-exactness of `--multiline` was measured.
-      #
-      # Linux only, and the guard is a claim rather than a convenience: the
-      # nixpkgs derivation for `pass` disables its own insert, show, edit and
-      # reencryption tests on darwin, so a check that built there would be
-      # stating something the tool's own suite does not.
-      #
-      # `lib.mkIf` on the one attribute rather than a guarded attribute set:
-      # `checks` is an `attrsOf package` option, so the module system drops the
-      # entry on a platform the condition excludes, and the rest of this page is
-      # untouched by the platform question.
-      checks.safix-pass-cli = lib.mkIf pkgs.stdenv.hostPlatform.isLinux (
-        withPass "safix-pass-cli" "pass_cli" ""
-      );
-
-      # A shared entry is one value: both carriers' placements name one file and
-      # one key, one of them mints, the other reads back what was minted, and
-      # exactly one file in the repository holds the key.
-      checks.safix-shared-placement =
-        mode "safix-shared-placement" "shared_entries"
-          "both_carriers_resolve_one_file_and_read_one_value";
-
-      # A carrier dropped from a shared entry is a revocation, and `check` says
-      # so: it names the file still holding the value, names the person who can
-      # open it, offers a new value as the remedy, and states that `fix` will not
-      # revoke. The finding arrives once, not also as an unclaimed value.
-      checks.safix-shared-shrink =
-        mode "safix-shared-shrink" "shared_entries"
-          "a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person";
-
-      # Flipping an entry to shared over values already present is reported as a
-      # migration rather than a disclosure, because every reader of the copy left
-      # behind is still in the audience — and the choice of which per-carrier
-      # value survives is left to the operator.
-      checks.safix-shared-flip =
-        mode "safix-shared-flip" "shared_entries"
-          "a_flip_to_shared_over_existing_values_is_reported_as_a_migration";
-
-      # A narrowed audience — a member left a group, a grant was dropped, a
-      # machine changed hands, all one state by the time a report reads it — is
-      # reported as the revocation it is: the key's holder named rather than
-      # printed, `fix` offered as the alignment, and a new value as the only thing
-      # that revokes.
-      checks.safix-audience-narrowed =
-        mode "safix-audience-narrowed" "subjects"
-          "a_narrowed_audience_is_reported_as_the_revocation_it_is";
-
-      # A key on the narrowed file answering to no declared subject is the more
-      # alarming half of the same finding, and is reported apart from the subjects
-      # that did match rather than swallowed by them.
-      checks.safix-audience-orphan =
-        mode "safix-audience-orphan" "subjects"
-          "a_key_answering_to_nobody_is_reported_apart_from_the_named_subjects";
-
-      # The other direction of the same fact: a widened audience — a member joining
-      # a group — leaves the file where it is, so `fix` converges it with a real
-      # `sops updatekeys` that adds the recipient and leaves the value readable.
-      checks.safix-audience-widened =
-        mode "safix-audience-widened" "subjects"
-          "a_widened_audience_is_re_wrapped_by_fix";
-
-      # An undeclared machine name is refused before any subprocess runs, with
-      # no output directory created (tasks 1.1, 1.4).
-      checks.safix-upload-unknown-machine =
-        mode "safix-upload-unknown-machine" "upload"
-          "an_undeclared_machine_is_refused_before_anything_else_runs";
-
-      # A declared machine with no recipient is refused distinctly, before any
-      # identity is read (task 1.4).
-      checks.safix-upload-no-recipient =
-        mode "safix-upload-no-recipient" "upload"
-          "a_declared_machine_with_no_recipient_is_refused_distinctly";
-
-      # A person's declared name is refused with the same message an
-      # undeclared machine gets, per D6 (task 1.4).
-      checks.safix-upload-not-a-machine =
-        mode "safix-upload-not-a-machine" "upload"
-          "a_persons_name_is_refused_the_same_way_as_an_undeclared_machine";
-
-      # `--directory` writes exactly the two host-identity files, at the
-      # declared paths and modes, and touches no network tool (tasks 2.1-2.3,
-      # 2.5).
-      checks.safix-upload-directory =
-        mode "safix-upload-directory" "upload"
-          "directory_mode_writes_the_matching_identity_at_the_declared_paths_and_modes";
-
-      # `--directory` without `--identity` refuses before touching the
-      # filesystem (task 2.4).
-      checks.safix-upload-directory-needs-identity =
-        mode "safix-upload-directory-needs-identity" "upload"
-          "directory_without_identity_is_refused_before_touching_the_filesystem";
-
-      # A supplied identity that derives to the wrong recipient is refused
-      # before DIR is created, naming both recipients (task 2.2).
-      checks.safix-upload-directory-mismatch =
-        mode "safix-upload-directory-mismatch" "upload"
-          "a_mismatched_identity_is_refused_before_directory_is_created_naming_both_recipients";
-
-      # 2.6, first drill: a recipient one character off the declared one still
-      # refuses.
-      checks.safix-upload-directory-drift-drill =
-        mode "safix-upload-directory-drift-drill" "upload"
-          "a_recipient_one_character_different_still_refuses";
-
-      # 2.6, second drill: a null-recipient machine refuses before any identity
-      # is read, even one that would otherwise derive to something plausible.
-      checks.safix-upload-directory-null-recipient-drill =
-        mode "safix-upload-directory-null-recipient-drill" "upload"
-          "a_null_recipient_machine_refuses_before_reading_any_identity";
-
-      # 3.6: a matching probe is an honest no-op that opens no write-capable
-      # session, asserted against the recorded invocation list rather than
-      # against file state alone — the claim this whole change exists for.
-      checks.safix-upload-remote-match =
-        mode "safix-upload-remote-match" "upload"
-          "a_matching_presented_key_is_an_honest_no_op_and_opens_no_session";
-
-      # 3.4: `--force` is inert on the match branch.
-      checks.safix-upload-remote-match-force =
-        mode "safix-upload-remote-match-force" "upload"
-          "force_is_inert_on_a_match";
-
-      # 3.3, second branch: no key presented writes the given identity, with
-      # the recorded invocation order and the `ssh` argv both asserted.
-      checks.safix-upload-remote-write =
-        mode "safix-upload-remote-write" "upload"
-          "no_key_presented_writes_given_identity";
-
-      # 3.3, second branch without `--identity`: refuses before opening a
-      # write-capable session.
-      checks.safix-upload-remote-needs-identity =
-        mode "safix-upload-remote-needs-identity" "upload"
-          "no_key_presented_without_identity_refuses_before_opening_a_session";
-
-      # 3.3, third branch without `--force`: refused by default, naming both
-      # recipients.
-      checks.safix-upload-remote-mismatch =
-        mode "safix-upload-remote-mismatch" "upload"
-          "a_different_presented_key_is_refused_by_default";
-
-      # 3.3, third branch with `--force` and `--identity`: the override reaches
-      # the transport.
-      checks.safix-upload-remote-force =
-        mode "safix-upload-remote-force" "upload"
-          "a_mismatched_presented_key_is_overridden_with_force_and_identity";
-
-      # 3.7: flipping one byte of the declared recipient turns 3.6's match into
-      # a mismatch, proving the branch follows the comparison.
-      checks.safix-upload-remote-flip-drill =
-        mode "safix-upload-remote-flip-drill" "upload"
-          "flipping_the_declared_recipient_turns_a_match_into_a_mismatch";
-
-      # 4.1-4.2, 4.7: the tarball's own contents — both files at mode 0400,
-      # root-owned — read back from the real archive.
-      checks.safix-upload-tarball-modes =
-        mode "safix-upload-tarball-modes" "upload"
-          "the_tarball_carries_the_declared_modes_and_root_ownership";
-
-      # 4.5: the staging root is created before the tarball is written and gone
-      # after both a success and a simulated transport failure.
-      checks.safix-upload-staging-cleanup =
-        mode "safix-upload-staging-cleanup" "upload"
-          "the_staging_root_is_gone_after_a_success_and_after_a_simulated_failure";
-
-      # 4.3-4.4, 4.6: the wipe-then-extract sequence names the fixed
-      # destination; the depth-safety constant it depends on is drilled at the
-      # unit level in `upload.rs` itself.
-      checks.safix-upload-destination =
-        mode "safix-upload-destination" "upload"
-          "the_wipe_then_extract_sequence_names_the_fixed_destination";
-
-      # Holds the `--entry`/`SAFIX_ENTRY` evaluation path (safix-cli spec) and
-      # `generate`'s flakeless refusal, over one fixture fleet declared once as
-      # nix source text and evaluated two ways: `nix eval --file <entry>`
-      # against a plain expression outside any repository, the same mechanism
-      # D1's `mkVault` wraps, and `nix eval <flakeref>#<attr>` against a
-      # from-scratch zero-input flake — no flake-parts, no network either way,
-      # because neither evaluation resolves a flake input.
-      #
-      # ── what this holds ──
-      # All thirteen `Attribute` spellings evaluate under `--file` exactly as
-      # they do under a flake target — the same strings, only how the target
-      # is built differs (D4). `generatorPlan`, `bridge` and `keepassxc`
-      # deserialize against the real `Generator`, `GeneratorFile`, `Mapping`,
-      # `SyncMapping` and `PlanInput` structs with no `deny_unknown_fields`
-      # rejection — reached through the real `safix` binary's own `generate`,
-      # `sync clan` and `sync`, which is the residual measurement gap the
-      # proposal names. The same three attributes are byte-identical between
-      # the two evaluation paths. `--entry` overrides a conflicting
-      # `SAFIX_ENTRY`. The workspace root a write stages and commits into is
-      # still the one git discovers, even with `--entry` pointed at a file
-      # outside that repository. `generate` refuses under `--entry` with no
-      # `--nixpkgs`/`SAFIX_NIXPKGS` declared and a non-empty generator order,
-      # names both remedies, is unaffected for a user with an empty order —
-      # the ordering drill — and is unaffected in flake mode regardless of
-      # `--nixpkgs`.
-      #
-      # ── what this cannot check ──
-      # That a generator actually runs to completion under `--nixpkgs`: the
-      # declared reference resolves inside a nested, network-disabled build
-      # sandbox only as far as `nix shell` itself gets, which is enough to
-      # prove the refusal lifted and not enough to prove a tool resolves. The
-      # assertions below hold the refusal's presence and absence, not the
-      # generator's own run — `safix-generate*` already holds that under a
-      # flake.
-      checks.safix-cli =
-        pkgs.runCommand "safix-cli"
-          {
-            nativeBuildInputs = [
-              pkgs.git
-              pkgs.nix
-            ];
-            # The real `safix` binary's own `nix` subprocess calls carry no
-            # `--extra-experimental-features` of their own — the same as at an
-            # operator's terminal, where the ambient nix.conf already enables
-            # them for a flake-based project. The sandbox's nix.conf does not,
-            # so this is what the sandbox stands in for that ambient config.
-            env.NIX_CONFIG = "experimental-features = nix-command flakes";
-          }
-          ''
-                    set -eu
-                    export HOME="$PWD"
-                    export GIT_AUTHOR_NAME="safix-cli fixture"
-                    export GIT_AUTHOR_EMAIL="fixture@example.invalid"
-                    export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
-                    export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-
-                    nix_eval() {
-                      nix --extra-experimental-features "nix-command flakes" eval "$@"
-                    }
-
-                    safix="${config.packages.safix}/bin/safix"
-
-                    # The one fleet both evaluation paths declare: alice holds a hand-set
-                    # entry and a generated one, and bob holds nothing generated — bob is
-                    # the empty-order user the ordering drill (4.7) needs. The bridge and
-                    # keepassxc mappings are synthetic: no machine, database or clan named
-                    # here exists, matching every other fixture in this directory.
-                    fleetText=$(cat <<'FLEET'
-                    {
-                      users.alice = {
-                        recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
-                        private.tok = { };
-                        private.api-token.generator = {
-                          script = "printf '%s' fixture > \"$out/api-token\"";
-                          runtimeInputs = [ "coreutils" ];
-                        };
-                      };
-                      users.bob.recipient = "age1fixturebbb00000000000000000000000000000000000000000000000";
-                      bridge = {
-                        clanFlake = null;
-                        mappings.a = {
-                          direction = "clan-to-safix";
-                          clan = {
-                            machine = "nonexistent";
-                            generator = "ntfy";
-                            file = "token";
-                          };
-                          safix = {
-                            user = "alice";
-                            name = "tok";
+    lib.mkMerge [
+      {
+        # A file the declarations place a secret in but that nobody has run sops
+        # on yet is created through sops, so it acquires the creation rule's
+        # recipients; the value round-trips under the resolved key; and the file
+        # is committed on its own under a message naming the secret and never the
+        # value.
+        checks.safix-set-new =
+          mode "safix-set-new" "write_path"
+            "set_new_creates_the_file_through_the_creation_rules";
+
+        # One key moves and the rest of the file comes through byte-identical,
+        # compared by digest rather than by value. A re-run of the same value is
+        # byte-identical and commits nothing; a different value rotates that key
+        # alone; an entry whose `sopsKey` differs from its name lands under the key.
+        checks.safix-set-existing =
+          mode "safix-set-existing" "write_path"
+            "set_existing_moves_one_key_and_leaves_the_others_byte_identical";
+
+        # Every refusal, and each one for its own reason: an undeclared name, a
+        # path with no creation rule, an undeclared user, a placement outside
+        # `*.yaml`, an empty value, a dirty target file, a repository mid-rebase
+        # or mid-merge, and an unrecognised subcommand. None may resolve itself by
+        # choosing a destination, and none may name an option path outside safix's
+        # namespace.
+        checks.safix-refusals =
+          mode "safix-refusals" "write_path"
+            "refusals_each_have_their_own_code_and_leave_the_tree_alone";
+
+        # A file whose recipients have drifted from the audience declared for it
+        # is refused before the rename, in both directions — an identity the
+        # audience does not name, and an audience member the file cannot be opened
+        # by — and the refusal leaves HEAD, the ciphertext and the tree exactly as
+        # it found them. Once `sops updatekeys` repairs the drift the same set goes
+        # through and commits.
+        checks.safix-recipient-drift =
+          mode "safix-recipient-drift" "write_path"
+            "recipient_drift_is_refused_before_anything_is_written";
+
+        # Another path's staged change survives the run staged and uncommitted, and
+        # does not make an idempotent re-run commit.
+        checks.safix-staged-bystander =
+          mode "safix-staged-bystander" "write_path"
+            "a_staged_bystander_survives_the_run_and_does_not_make_it_commit";
+
+        # A SIGINT at the prompt and a backend that fails after the value was read.
+        # Neither may leave a partial file, a scratch file, a created directory, or
+        # the value anywhere on disk including $TMPDIR.
+        checks.safix-abort =
+          mode "safix-abort" "write_path"
+            "an_aborted_run_leaves_no_file_no_scratch_and_no_value";
+
+        # Where `set` reads its value from. A pipe is stored as its own bytes,
+        # trailing newline included, with nothing prompted and nothing confirmed; an
+        # empty pipe takes the empty-value refusal; and a real pseudoterminal on
+        # standard input still gets the hidden double prompt, with the second read
+        # shown to happen by a run given one line and refused for want of a
+        # confirmation. Three tests rather than one, because the fork is what is
+        # under test and each side has to be reachable on its own.
+        checks.safix-value-source = mode "safix-value-source" "value_source" "";
+
+        # `get` round-trips a value by digest, for a secret of the user's own and
+        # for one shared from another owner, and resolves the same file for both
+        # parties. A value set and read back is byte-identical, trailing newline
+        # included, and nothing but the value reaches standard output. `list`
+        # reports each name against the file serving it and the key it is read
+        # under, and renders no value.
+        checks.safix-get-list =
+          mode "safix-get-list" "read_path"
+            "get_round_trips_a_value_and_list_reports_where_it_lives";
+
+        # The sentence the consumption module's identity preflight makes about what
+        # it did not check: an identity present, readable and not a recipient of
+        # these files does not open them. `safix-consumption-ordering` holds the
+        # ordering that guard rests on against a real profile evaluation, and
+        # everything else on that path was an evaluation too, so this is the half of
+        # the guard's own message that needed ciphertext to be held at all. The
+        # stranger's identity is shown to open a document it is a recipient of
+        # first, or the claim would hold over a key file that was simply broken.
+        checks.safix-identity-recipiency =
+          mode "safix-identity-recipiency" "read_path"
+            "an_identity_present_and_readable_and_not_a_recipient_does_not_decrypt";
+
+        # A generator with no inputs mints and commits; one with a prompt reads it
+        # from $prompts twice, which the descriptor interface this replaced could
+        # not do; one with a dependency runs after the generator that writes what
+        # it reads and finds it at $in/<producer>/<name>; one with several outputs
+        # writes both, in different files, in one commit. A second bulk run mints
+        # nothing, and --regenerate rotates its target while a neighbouring key's
+        # ciphertext comes through byte-identical.
+        checks.safix-generate =
+          mode "safix-generate" "generators"
+            "generate_mints_in_dependency_order_and_commits_each_generator";
+
+        # Every way a run is refused: a name with no generator, empty output, a
+        # script that exits non-zero, a candidate the validation rejects, a
+        # multi-output script that wrote only one of its outputs, and a staging
+        # location that is not memory-backed. None leaves a value, a commit, or a
+        # scratch file, and a partial keypair is never written.
+        checks.safix-generate-refusals =
+          mode "safix-generate-refusals" "generators"
+            "generate_refusals_each_have_their_own_code_and_write_nothing";
+
+        # A run order carrying a cycle, refused before the first generator rather
+        # than at the one whose input never arrives. The plan is one the resolver
+        # does not emit — it refuses a cycle at evaluation and leaves the
+        # generators inside one out of the order — so the subject here is the
+        # runtime's own reading of a plan it did not get from that refusal, which
+        # is what a stand-in for nix and an embedder of the library both hand it.
+        checks.safix-generate-cycle =
+          mode "safix-generate-cycle" "generators"
+            "a_run_order_carrying_a_cycle_is_refused_before_anything_runs";
+
+        # What one generator's process may see of another's. A script that reads
+        # standard input to end of input does not eat the answer to a later
+        # generator's prompt — now true because answers are files rather than a
+        # shared stream, which is a different reason and so is re-asserted rather
+        # than assumed to carry over — and a generator running last sees exactly
+        # the descriptors one running first sees.
+        checks.safix-generate-isolation =
+          mode "safix-generate-isolation" "generators"
+            "one_generator_sees_neither_the_stdin_nor_the_descriptors_of_another";
+
+        # `--regenerate` of a named generator carries everything downstream of it.
+        # The set is listed in dependency order and confirmed first; declining
+        # writes nothing; accepting leaves every downstream value a function of
+        # the value that was just minted rather than of the one it replaced; a
+        # generator that reads none of it is not re-run; and --yes answers the
+        # confirmation in advance.
+        checks.safix-generate-cascade =
+          mode "safix-generate-cascade" "generators"
+            "a_rotation_carries_its_downstream_set_and_nothing_else";
+
+        # clan's wireguard keypair, ported. One generator, an encrypted private
+        # half and a public half stored in the clear and readable with no
+        # identity, both from one execution, both in one commit. A re-run mints
+        # nothing, a rotation moves both halves together, and editing the public
+        # half is refused.
+        checks.safix-generate-public =
+          mode "safix-generate-public" "generators"
+            "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
+
+        # The definition record, and the drift `check` reports over it. A mint
+        # leaves one line under `flake.safix.storage.generatorRecords` carrying a
+        # digest and none of the value; an edit to the declaration afterwards is
+        # reported naming the entry and both remedies and no value; regenerating
+        # clears it, with the refreshed record riding that commit; and a hand-set
+        # entry, a record in a format this version does not write, and an absent
+        # record each produce nothing.
+        checks.safix-generate-definition-drift =
+          mode "safix-generate-definition-drift" "generators"
+            "a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it";
+
+        # The one field of that record whose coverage is a claim about the envelope
+        # rather than about the script: a generator that gains `network` describes a
+        # mint that may do something the recorded one could not, so the flip alone —
+        # same script, same tools, same outputs — has to read as drift. A digest that
+        # left the grant out would report nothing here, which is what makes this a
+        # drill on the coverage rather than on the report.
+        checks.safix-generate-network-drift =
+          mode "safix-generate-network-drift" "generators"
+            "a_generator_that_gains_the_network_reads_as_definition_drift";
+
+        # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
+        # nothing, an unchanged buffer commits nothing, and a changed one goes
+        # through the same path `set` writes through. No staging root outlives any
+        # of them.
+        checks.safix-edit =
+          mode "safix-edit" "editor"
+            "the_four_outcomes_of_an_edit_write_what_each_is_supposed_to";
+
+        # Neither editor variable set is a refusal naming both, the visual one
+        # wins over the other, and an entry holding nothing opens on an empty
+        # buffer so that editing is an authoring verb too.
+        checks.safix-edit-selection =
+          mode "safix-edit-selection" "editor"
+            "the_editor_is_the_one_the_operator_named_or_the_run_refuses";
+
+        # The staged path reaches the editor's argument vector and the value does
+        # not, read out of the editor's own /proc entry rather than out of a
+        # process listing.
+        checks.safix-edit-argv =
+          mode "safix-edit-argv" "editor"
+            "the_editor_receives_the_path_and_never_the_value";
+
+        # The five picker entries below that drive a terminal need `setsid
+        # --ctty`, which is why `./integration.nix` carries `util-linux` on linux
+        # alone: a picker opens `/dev/tty`, so the run has to claim the test's
+        # pseudoterminal as its controlling terminal, and darwin has no `setsid`
+        # to do it with. There the harness refuses by name rather than skipping,
+        # because a check that stops asserting without failing is the failure this
+        # page's conventions exist to prevent.
+        # `safix-view-no-terminal` is the exception: it needs no terminal at all.
+
+        # A selection asked for where no terminal can be opened is refused before
+        # anything is decrypted, naming both remedies: name the entry, or list
+        # what the user holds. This case needs no pseudoterminal — pipes on all
+        # three streams is what a sandbox provides anyway — and pointing the
+        # refusal at enrollment's own no-terminal prose turns the reporter
+        # snapshot red rather than this.
+        checks.safix-view-no-terminal =
+          mode "safix-view-no-terminal" "picker"
+            "a_run_with_no_terminal_is_refused_naming_both_remedies";
+
+        # A user who holds nothing is refused naming them rather than offered an
+        # empty list: holding nothing is a state of the declarations where no
+        # terminal is a state of the session, so the two are distinct refusals.
+        # Reusing either code for the other turns this red.
+        checks.safix-view-nothing-to-pick =
+          mode "safix-view-nothing-to-pick" "picker"
+            "a_user_holding_nothing_is_refused_rather_than_offered_an_empty_list";
+
+        # Typing a query that narrows to one entry and pressing enter reads that
+        # one and no other: choosing is a way of naming.
+        # Dropping `--ctty` from the run the test spawns — drill 7.17 — turns
+        # this red, because the picker draws on the controlling terminal and a
+        # run without one has nothing to draw on.
+        # Standard output is a pipe in every picker run, which is what drill
+        # 7.17 established the old draw-on-stdout branch was holding: nothing.
+        checks.safix-view-selection =
+          mode "safix-view-selection" "picker"
+            "a_typed_query_and_enter_prints_the_chosen_value";
+
+        # Leaving the selection writes no value, commits nothing, stages nothing,
+        # exits non-zero, and puts the terminal's attributes back. Dropping the
+        # restore-on-drop guard turns this red on the attributes alone.
+        checks.safix-view-cancelled =
+          mode "safix-view-cancelled" "picker"
+            "cancelling_writes_nothing_and_restores_the_terminal";
+
+        # Nothing the selection drew reaches standard output or standard error:
+        # the rows and the preview go to `/dev/tty` and nowhere else, which is
+        # what keeps `view <name> | cat` honest. Drawing on standard error
+        # instead turns this red.
+        checks.safix-view-preview-streams =
+          mode "safix-view-preview-streams" "picker"
+            "the_preview_never_reaches_stdout_or_stderr";
+
+        # `edit` with no name offers the same selection and opens the editor on
+        # the entry chosen, with the staged path reaching the editor and the
+        # edited value landing. Passing `Scope::Everything` from `edit` — drill
+        # 6.9 — turns the sibling public-output test red instead, and moving the
+        # editor probe after the selection — drill 6.8 — turns the no-editor test
+        # red; both of those run under `safix-picker`.
+        checks.safix-edit-nameless =
+          mode "safix-edit-nameless" "picker"
+            "edit_with_no_name_reaches_the_editor_for_the_chosen_entry";
+
+        # The union `fix` acts on, from both sides. A consumer-named file in step
+        # with the rule that covers it is not a finding of any kind; the same file
+        # drifted from that rule is reported and re-wrapped; and a named path no
+        # rule's directory covers is reported as such, because naming a file
+        # creates no rule for it.
+        checks.safix-governed-extras =
+          mode "safix-governed-extras" "read_path"
+            "a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations";
+
+        # Declaring a person writes one custody record and commits exactly that
+        # and the regenerated policy — not a bystander staged alongside it. The
+        # policy carries the person just declared, which is only true if the
+        # scaffold was staged before it was regenerated: a flake evaluation reads
+        # what git tracks, so regenerating first writes the policy of the
+        # declarations as they stood without them. They hold nothing, so their key
+        # is an anchor with no rule. Nothing is minted, the output says as much,
+        # and redeclaring is refused.
+        checks.safix-adduser =
+          mode "safix-adduser" "custody"
+            "adduser_commits_the_scaffold_and_the_policy_that_saw_it";
+
+        # Every refusal, each for its own reason: a name outside the alphabet, a
+        # name carrying a path separator, a malformed recipient, an over-long one,
+        # and an existing person. Each leaves no scaffold, no commit and no dirt. A
+        # recipient that needs a physical interaction is refused separately from
+        # the malformed ones, because it is well-formed and still cannot be an
+        # activation identity, and its refusal has to name recoveryRecipients —
+        # where a card does belong — or the operator is told only that their key is
+        # unwelcome.
+        checks.safix-adduser-refusals =
+          mode "safix-adduser-refusals" "custody"
+            "adduser_refusals_leave_the_tree_as_they_found_it";
+
+        # Host attachment reaches a consumer through the hook or not at all.
+        # `--host` with no hook configured is refused naming the hook and saying
+        # that onboarding without one succeeds; a configured hook receives the
+        # name, the recipient and every host, and runs after safix's commit has
+        # landed, so what it writes is left uncommitted and safix's message names
+        # only what safix did.
+        checks.safix-adduser-hook =
+          mode "safix-adduser-hook" "custody"
+            "host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit";
+
+        # The enrollment ceremony over one factory-fresh card: a generated PIN and
+        # a distinct generated PUK reach ykman as flags, a random management key is
+        # put on the card and named nowhere, the generator is answered once on a
+        # terminal, the identity block lands where keygen appends, the recipient
+        # lands in recoveryRecipients, the credentials are stored through the
+        # ordinary write path, and no argument vector anywhere names the OTP
+        # applet. The proof does not pass, because no card is present and the
+        # isolation is what decides that — see the head of
+        # `crates/safix/tests/enrollment.rs`.
+        checks.safix-enroll =
+          mode "safix-enroll" "enrollment"
+            "enrollment_provisions_generates_wires_and_commits_once";
+
+        # A card already provisioned keeps its access: the three drives that would
+        # change a PIN, a PUK or a management key record nothing at all, and the PIN
+        # comes from the operator instead — asked once, unechoed, and used to answer
+        # the generator. The state probe is what decides between the two paths, and
+        # it costs no PIN retry.
+        checks.safix-enroll-provisioned =
+          mode "safix-enroll-provisioned" "enrollment"
+            "a_provisioned_card_keeps_its_access_and_the_pin_is_asked_for_once";
+
+        # A backup card is the same verb run again: its own identity, its own
+        # recipient beside the first, and neither run knowing about the other.
+        checks.safix-enroll-backup =
+          mode "safix-enroll-backup" "enrollment"
+            "a_backup_card_sits_beside_the_first_and_changes_nothing_about_it";
+
+        # Every refusal the card surface produces, each for its own reason: two
+        # cards with no serial named, no smartcard service, no card, a touch policy
+        # of never, and an OTP slot asked for under any of the spellings somebody
+        # would reach for. The OTP one is refused with the database-lockout hazard
+        # named rather than as an unknown option, which is the whole point of it
+        # being a refusal.
+        checks.safix-enroll-refusals =
+          mode "safix-enroll-refusals" "enrollment"
+            "the_card_refusals_each_have_their_own_code_and_leave_the_tree_alone";
+
+        # A PIN the card refuses costs one retry and not three. The claim is the
+        # count: a run that answered every prompt would walk a card's counter to
+        # zero and block it, which is a card nobody can use again without the PUK.
+        checks.safix-enroll-one-attempt =
+          mode "safix-enroll-one-attempt" "enrollment"
+            "a_rejected_pin_aborts_after_one_attempt";
+
+        # The same bounded-answer discipline at the card's own boundary, where the
+        # credentials travel a prompt rather than an argument vector: a drive that
+        # asks past its bound is not answered further, and the run stops with
+        # nothing wired and nothing committed.
+        checks.safix-enroll-one-attempt-ykman =
+          mode "safix-enroll-one-attempt-ykman" "enrollment"
+            "a_ykman_drive_that_asks_past_its_bound_stops_the_run";
+
+        # The proof's isolation, which is what makes the proof about the card. An
+        # ambient software identity opens the file the proof names, and the run is
+        # handed an identity source holding one line — the card's stub — so a proof
+        # that passed with no card would mean the isolation had failed.
+        checks.safix-enroll-proof-isolation =
+          mode "safix-enroll-proof-isolation" "enrollment"
+            "the_proof_is_isolated_from_every_ambient_identity";
+
+        # The proof machinery's passing path, hardware-free: the isolated source
+        # opens a file it is a recipient of, and one that is not a recipient does
+        # not. A separate check from the isolation because wrapping a data key to a
+        # card's recipient runs the plugin, and the plugin runs the card.
+        checks.safix-enroll-proof =
+          mode "safix-enroll-proof" "enrollment"
+            "the_proof_opens_a_file_with_the_isolated_source_alone";
+
+        # Registration reaches clan through clan's own command and the consumer
+        # through flake.safix.enrollHook, which receives the person, the serial and
+        # the recipient, and runs after safix's commit has landed — so what it
+        # writes is left uncommitted and safix's message names only what safix did.
+        checks.safix-enroll-hook =
+          mode "safix-enroll-hook" "enrollment"
+            "clan_and_the_hook_receive_the_enrollment_after_it_is_committed";
+
+        # The credentials' second home: they reach the store on standard input,
+        # round-trip through the same transport, and neither store's argument vector
+        # ever carries one.
+        checks.safix-enroll-custody =
+          mode "safix-enroll-custody" "enrollment"
+            "the_mirrored_credentials_travel_standard_input_and_round_trip";
+
+        # A manager scaffolding for somebody who consented to that: the run proceeds
+        # and its commit records the organization it was performed for, in the same
+        # words the run announced before it edited anything.
+        checks.safix-delegation =
+          mode "safix-delegation" "delegation"
+            "a_manager_scaffolds_for_a_managed_person_and_the_commit_records_the_organization";
+
+        # The two refusals, before the card is selected and before any file is
+        # written: a declared person outside the delegation, and an identity no
+        # declaration corresponds to. Neither reaches the card, neither commits, and
+        # neither leaves the record it was refused over changed.
+        checks.safix-delegation-refusals =
+          mode "safix-delegation-refusals" "delegation"
+            "an_out_of_scope_actor_is_refused_before_the_card_and_before_any_file";
+
+        # A person no delegation covers, scaffolded by an identity the declarations do
+        # not name at all. It proceeds, which is the sharpest form the compatibility
+        # promise takes: a verb that consulted delegation there would refuse.
+        checks.safix-delegation-unmanaged =
+          mode "safix-delegation-unmanaged" "delegation"
+            "an_unmanaged_person_never_consults_delegation";
+
+        # A group gains a member: one inserted line, every name and comment that was
+        # there kept, the recipient policy regenerated from the declarations that
+        # edit implies and committed beside it, and the delegation recorded in the
+        # commit. A second run writes nothing and commits nothing.
+        checks.safix-group-add =
+          mode "safix-group-add" "group"
+            "an_addition_is_one_line_and_the_policy_is_re_derived_beside_it";
+
+        # A group loses one: one removed line, the not-retroactive disclosure made,
+        # and the next `check` reporting the shrink as the revocation the verb said it
+        # was.
+        checks.safix-group-remove =
+          mode "safix-group-remove" "group"
+            "a_removal_says_what_it_does_not_undo_and_the_next_check_reports_the_shrink";
+
+        # The delegation over groups, which is silo coverage: a covered group is its
+        # organization's managers' to edit, and a group no silo set names is editable
+        # by whoever can commit with nothing consulted and nothing mentioned.
+        checks.safix-group-delegation =
+          mode "safix-group-delegation" "group"
+            "a_covered_group_is_its_organizations_and_an_uncovered_one_is_anybodys";
+
+        # Every refusal the verb has, each for its own reason: an undeclared group, an
+        # undeclared subject, a declaration this cannot edit, a `members` value it
+        # cannot read, and an act that is neither add nor remove. None leaves the
+        # declaration or HEAD moved.
+        checks.safix-group-refusals =
+          mode "safix-group-refusals" "group"
+            "refusals_each_have_their_own_code_and_leave_the_declaration_alone";
+
+        # One mapping of each mode over one run: the database converges to safix,
+        # safix converges to the database through the ordinary write path, a two-way
+        # mapping with an empty database side bootstraps and records its agreement
+        # beside the entry, and a backup mapping writes into absence. The username a
+        # mapping declares reaches the entry, no value reaches standard output, and
+        # no digest of one reaches the repository.
+        checks.safix-sync = mode "safix-sync" "sync_path" "each_mode_converges_exactly_as_its_name_says";
+
+        # Convergence, which is load-bearing rather than an optimisation here: a kdbx
+        # save rewrites the whole file. A second run over the same tree reports every
+        # mapping unchanged, commits nothing, moves no ciphertext, and issues no
+        # write of any kind against the database — asserted from the store's own
+        # invocation log rather than from the report.
+        checks.safix-sync-converges =
+          mode "safix-sync-converges" "sync_path"
+            "a_second_run_writes_nothing_anywhere";
+
+        # A pulled value lands as a commit indistinguishable in shape from a
+        # hand-set write — the same paths, a subject naming the mapping, and no value
+        # in the message.
+        checks.safix-sync-pull =
+          mode "safix-sync-pull" "sync_path"
+            "a_pulled_value_lands_as_a_commit_shaped_like_a_hand_set_write";
+
+        # The three-way decision, over the agreement the companion entry remembers:
+        # one side moved converges toward it in each direction, and both sides moved
+        # writes nothing and names the two one-way modes that each resolve it.
+        checks.safix-sync-two-way =
+          mode "safix-sync-two-way" "sync_path"
+            "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
+
+        # backup's whole content: a database value that differs is reported and never
+        # overwritten.
+        checks.safix-sync-backup =
+          mode "safix-sync-backup" "sync_path"
+            "a_backup_mapping_never_overwrites_and_reports_the_divergence";
+
+        # Every refusal, each for its own reason: a mapping nothing declares, a safix
+        # side holding nothing, a database side holding no entry, a value carrying a
+        # newline the store's command cannot carry, a database that will not open, a
+        # run with no terminal to ask the password on, and mappings declared with no
+        # database. None leaves a commit, a dirty tree, or a partial write.
+        checks.safix-sync-refusals =
+          mode "safix-sync-refusals" "sync_path"
+            "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
+
+        # A mapping whose safix side does not decrypt for whoever is running is
+        # reported as one that could not be judged rather than skipped, and the
+        # mappings beside it are still judged.
+        checks.safix-sync-unjudgeable =
+          mode "safix-sync-unjudgeable" "sync_path"
+            "a_mapping_that_cannot_be_judged_is_reported_rather_than_skipped";
+
+        # The burst discipline the 292 MB rewrite is bounded by: every database write
+        # of a run is issued consecutively, with no read between two of them.
+        checks.safix-sync-burst =
+          mode "safix-sync-burst" "sync_path"
+            "the_database_writes_of_a_run_are_one_burst";
+
+        # Entries no mapping declares, including the companion of a mapping that is
+        # gone, are reported as information and left where they are. No mode deletes.
+        checks.safix-sync-leftovers =
+          mode "safix-sync-leftovers" "sync_path"
+            "an_entry_no_mapping_declares_is_reported_and_never_removed";
+
+        # A field drift on an otherwise-agreeing entry is repaired under a pushing
+        # mode, in exactly one write carrying the value the entry already held, and
+        # the report says `fields updated` naming the field. Reddened by dropping
+        # the field half of the stub's own record, which leaves the notes assertion
+        # false while every value assertion stays true.
+        checks.safix-sync-fields-push =
+          mode "safix-sync-fields-push" "sync_path"
+            "a_field_drift_on_an_agreeing_entry_is_repaired_under_a_pushing_mode";
+
+        # `backup` never overwrites an existing entry's field either: the entry
+        # keeps what the person typed, the run fails, and the report says `fields
+        # diverged` naming the field. Reddened by letting the backup-with-an-
+        # existing-entry case push its fields.
+        checks.safix-sync-fields-backup =
+          mode "safix-sync-fields-backup" "sync_path"
+            "a_backup_mapping_never_overwrites_a_field_either";
+
+        # A field sourced from another entry is refused for this target before
+        # either side is read, naming the field and the entry, and nothing about
+        # that mapping's entry is issued at all. Reddened by resolving an
+        # entry-sourced field on an argv channel instead of refusing it.
+        checks.safix-sync-fields-refused =
+          mode "safix-sync-fields-refused" "sync_path"
+            "a_field_read_out_of_another_entry_is_refused_for_this_target";
+
+        # A declared tag is refused naming the target and the field rather than
+        # silently dropped — the runtime half of the refusal
+        # `checks.safix-keepassxc` holds at evaluation. Reddened by giving
+        # `tags` any channel other than `unsupported` on this target.
+        checks.safix-sync-fields-tag-refused =
+          mode "safix-sync-fields-tag-refused" "sync_path"
+            "a_declared_tag_is_refused_at_evaluation_rather_than_dropped";
+
+        # A mapping declaring no field issues exactly one `show` — its value read,
+        # with the same arguments it issued before fields existed. Reddened by
+        # making the fields read spawn unconditionally.
+        checks.safix-sync-fields-one-read =
+          mode "safix-sync-fields-one-read" "sync_path"
+            "a_mapping_declaring_no_field_issues_no_second_read";
+
+        # A field divergence names the field and never its content, on either
+        # side: both distinctive literals are searched for in both streams.
+        # Reddened by making the stub answer `show --attributes` with the
+        # password, or by interpolating a field's value into the report.
+        checks.safix-audit-fields =
+          mode "safix-audit-fields" "audit"
+            "no_field_reaches_the_report_only_its_name_does";
+
+        # ── the pass target ──
+        #
+        # Every one of these drives the stub `tests/support/pass-stub.rs`, which
+        # answers the vectors safix sends because it was written to.
+        # `safix-pass-cli` below is what keeps that from being the whole story:
+        # it drives the real `pass`, and it is the one place the argument vectors
+        # meet the tool.
+
+        # The value and every declared field cross in one record body, in the
+        # layout design D2 fixes: the value's bytes, a blank line, then the four
+        # field lines in order. Reddened by dropping the blank separator from
+        # `body_of`, which moves the asserted literal.
+        checks.safix-pass-push =
+          mode "safix-pass-push" "pass_path"
+            "a_push_writes_the_value_and_the_declared_fields_in_one_record";
+
+        # A pull writes the value alone into safix: a safix entry is a placement
+        # with no slot for a field, so the record's field block does not cross.
+        # Reddened by writing a read field into safix's side.
+        checks.safix-pass-pull =
+          mode "safix-pass-pull" "pass_path"
+            "a_pull_writes_only_the_value_into_safix";
+
+        # `backup` never overwrites an existing entry holding a different value,
+        # and writes no field either. Reddened by letting the
+        # backup-with-an-existing-entry case push.
+        checks.safix-pass-backup =
+          mode "safix-pass-backup" "pass_path"
+            "a_backup_never_overwrites_a_differing_entry";
+
+        # A two-way mapping bootstraps into an empty store side and then
+        # converges toward whichever side moved. Reddened by taking the verdict
+        # from anything but the recorded agreement.
+        checks.safix-pass-two-way =
+          mode "safix-pass-two-way" "pass_path"
+            "a_two_way_mapping_converges_toward_the_changed_side";
+
+        # Both sides moved is a conflict that writes nothing and names the two
+        # one-way modes that each resolve it. Reddened by picking a winner.
+        checks.safix-pass-conflict =
+          mode "safix-pass-conflict" "pass_path"
+            "both_sides_changed_is_a_conflict_naming_two_remedies";
+
+        # A mapping accounts for its own companion, so its memory is never
+        # reported as an entry nothing declares. Reddened by dropping the
+        # companion from `lingering`'s claimed list.
+        checks.safix-pass-memory =
+          mode "safix-pass-memory" "pass_path"
+            "a_two_way_mappings_memory_is_not_lingering";
+
+        # The memory is written after the value, so an interrupted run leaves the
+        # older memory and the next run reports a conflict rather than
+        # overwriting the newer value. Reddened by writing the memory first.
+        checks.safix-pass-interrupted =
+          mode "safix-pass-interrupted" "pass_path"
+            "an_interrupted_two_way_run_leaves_the_older_memory";
+
+        # A value spanning lines round-trips byte for byte, a trailing newline
+        # included, and a second run over it writes nothing. Reddened by applying
+        # the trailing-newline trim, or by dropping `--multiline`.
+        checks.safix-pass-multiline =
+          mode "safix-pass-multiline" "pass_path"
+            "a_multi_line_value_round_trips_byte_for_byte";
+
+        # A decrypt the operator's agent declined is its own refusal carrying
+        # gpg's words, told apart from an absent entry, so a backup mapping never
+        # writes over an entry it merely could not read. Reddened by mapping a
+        # declined decrypt to `Ok(None)`.
+        checks.safix-pass-locked =
+          mode "safix-pass-locked" "pass_path"
+            "a_locked_agent_is_not_an_absent_entry";
+
+        # A declared store that is not one refuses before any mapping is read and
+        # before the store's own command is invoked at all. Reddened by moving
+        # the check after the first read.
+        checks.safix-pass-no-store =
+          mode "safix-pass-no-store" "pass_path"
+            "an_absent_store_refuses_before_any_mapping_is_read";
+
+        # No value and no field reaches an argument vector or an environment
+        # variable; the store's location reaches the child's environment and
+        # nothing else does. Reddened by putting any field in argv.
+        checks.safix-pass-pipes =
+          mode "safix-pass-pipes" "pass_path"
+            "no_value_and_no_field_reaches_an_argument_vector_or_the_environment";
+
+        # An `{ entry = …; }` field source is admissible on this target, resolved
+        # at run time, written into the body, and never printed. Reddened by
+        # refusing it, or by letting the resolved value reach argv or a report.
+        checks.safix-pass-field-source =
+          mode "safix-pass-field-source" "pass_path"
+            "a_field_sourced_from_another_entry_is_resolved_and_never_printed";
+
+        # A field-only divergence is its own word, naming the field and never
+        # either side's content. Reddened by interpolating a field's value into
+        # the report.
+        checks.safix-pass-fields-diverged =
+          mode "safix-pass-fields-diverged" "pass_path"
+            "a_field_only_divergence_is_reported_as_its_own_word";
+
+        # ── the 1password target ──
+        #
+        # None of these uses `runOneWith`: this target contributes no package to
+        # any check's closure, and never will. `_1password-cli` is unfree, there
+        # is no self-hostable server to point a sandboxed node at, and every
+        # authentication path needs the network — so the stand-in
+        # `tests/support/op-stub.rs` is the only `op` these checks have, and the
+        # absence of a real-binary row here is a decision rather than an omission.
+
+        # One mapping of each mode over one run: the item converges to safix,
+        # safix converges to the item through the ordinary write path, a two-way
+        # mapping with an absent far side bootstraps and records its agreement in
+        # the item's own concealed field, and a backup mapping writes into
+        # absence. Every declared field reaches its documented home, no value
+        # reaches standard output, and no digest of one reaches the repository.
+        checks.safix-onepassword-sync =
+          mode "safix-onepassword-sync" "onepassword_path"
+            "each_mode_converges_exactly_as_its_name_says";
+
+        # No value and no field is in an argument vector or in the child's
+        # environment, including an `{ entry = … }`-sourced field, and the
+        # stand-in was never given a word carrying an assignment. Reddened by
+        # dropping the stand-in's own `=` refusal, which turns the argv assertion
+        # green when it should refuse.
+        checks.safix-onepassword-argv =
+          mode "safix-onepassword-argv" "onepassword_path"
+            "no_value_and_no_field_ever_travels_an_argument_vector";
+
+        # A value carrying newlines is written and read back byte-identically,
+        # with no refusal anywhere: the positive statement that this target has no
+        # value-shape refusal, because the transport that would have needed one is
+        # not the transport in use.
+        checks.safix-onepassword-multiline =
+          mode "safix-onepassword-multiline" "onepassword_path"
+            "a_multi_line_value_crosses_whole";
+
+        # A passkey, a one-time-password field and a section no declaration names
+        # are byte-identical after a push rewrote the value. Reddened by
+        # assembling the edit's payload from a template instead of from the item's
+        # own JSON, which is the published danger the round trip removes.
+        checks.safix-onepassword-round-trip =
+          mode "safix-onepassword-round-trip" "onepassword_path"
+            "an_edit_preserves_what_the_declaration_does_not_name";
+
+        # A signed-out run refuses before any side is read: one invocation, and it
+        # was the preflight, with no sops decrypt of any mapping's safix side.
+        # Reddened by moving the preflight after the first read.
+        checks.safix-onepassword-signed-out =
+          mode "safix-onepassword-signed-out" "onepassword_path"
+            "a_signed_out_run_refuses_before_reading_any_side";
+
+        # Each refusal has its own sentence and its own remedy — an unknown
+        # mapping name, a safix side holding nothing, a far side holding no item
+        # under a pulling mode, a vault the session cannot see, the program
+        # refusing over one item, and the program absent — and none leaves a
+        # commit, a dirty tree or a partial write.
+        checks.safix-onepassword-run-refusals =
+          mode "safix-onepassword-run-refusals" "onepassword_path"
+            "the_refusals_each_have_their_own_code_and_leave_both_sides_alone";
+
+        # A failure against the service on one mapping refuses that mapping and
+        # does not end the run: all three appear in the report, the first and
+        # third converged, and the run exits non-zero.
+        checks.safix-onepassword-partial =
+          mode "safix-onepassword-partial" "onepassword_path"
+            "a_failure_on_one_mapping_does_not_end_the_run";
+
+        # The three-way decision over the item's own recorded state, including
+        # that a state a person corrupted is treated as absent and bootstraps
+        # rather than refusing.
+        checks.safix-onepassword-two-way =
+          mode "safix-onepassword-two-way" "onepassword_path"
+            "two_way_converges_toward_the_side_that_moved_and_will_not_guess_when_both_did";
+
+        # An item in a declared vault that no mapping declares is reported as
+        # information, is still there afterwards, and does not move audit's exit
+        # status — and every read is scoped to the mapped item rather than to the
+        # vault. Reddened by making the read ask for the whole vault's items.
+        checks.safix-onepassword-leftovers =
+          mode "safix-onepassword-leftovers" "onepassword_path"
+            "an_item_no_mapping_declares_is_reported_and_never_removed";
+
+        # audit compares and writes nothing — no create and no edit in the
+        # stand-in's own record — and names a diverged field without printing
+        # either side's content, with a value divergence taking precedence over a
+        # field one.
+        checks.safix-onepassword-audit =
+          mode "safix-onepassword-audit" "onepassword_path"
+            "audit_compares_without_writing_and_names_a_field_without_printing_it";
+
+        # ── the bitwarden target ──
+        #
+        # None of these uses `runOneWith`, and this is the one target where that
+        # is a recorded absence rather than a passing remark: `bw` cannot
+        # authenticate without a network — `login` registers a device against an
+        # account, and every path to a session goes through it — and a `nix build`
+        # has none. So the stand-in `tests/support/bw-stub.rs` is the only `bw`
+        # any check of this repository runs, `../checks/bitwarden.nix`'s header
+        # states that absence where the structural checks live, and the deferred
+        # alternative — a NixOS VM node against `services.vaultwarden` — names its
+        # own precondition there rather than being minted half-measured.
+
+        # A locked client with no terminal refuses before either side of any
+        # mapping is read: one invocation in the stand-in's spool, and it was the
+        # client's own state. Reddened by moving the terminal test after the first
+        # mapping's read, which leaves the sentence intact and the spool carrying
+        # a `get`.
+        checks.safix-bitwarden-locked =
+          mode "safix-bitwarden-locked" "bitwarden"
+            "a_locked_client_with_no_terminal_refuses_before_any_read";
+
+        # An unauthenticated client is told apart from a locked one, and the run
+        # never tries to unlock it. Reddened by task 3.8's drill: making
+        # `prose::bitwarden_locked` ignore its `state` and print one sentence for
+        # both collapses the two states and turns this red while the locked check
+        # above stays green.
+        checks.safix-bitwarden-unauthenticated =
+          mode "safix-bitwarden-unauthenticated" "bitwarden"
+            "an_unauthenticated_client_names_logging_in";
+
+        # A declared server that is not the one the client reports refuses before
+        # any side is read, naming both URLs. Reddened by comparing the declared
+        # server after the first read, which would have decrypted safix's side of
+        # every mapping into a run that then refused.
+        checks.safix-bitwarden-server =
+          mode "safix-bitwarden-server" "bitwarden"
+            "a_declared_server_that_is_not_reached_refuses_before_any_read";
+
+        # A failed refresh refuses every mapping, and nothing is read or written.
+        # Reddened by task 8.24's drill: making the pre-read `sync` non-fatal
+        # turns this red while `safix-bitwarden-suite`'s refresh-ordering test
+        # stays green, which is what separates "the refresh happens" from "a
+        # failed refresh refuses".
+        checks.safix-bitwarden-stale =
+          mode "safix-bitwarden-stale" "bitwarden"
+            "a_failed_refresh_refuses_every_mapping";
+
+        # An address two items answer to is refused rather than resolved, naming
+        # the count, with no create and no edit. Reddened by picking the first
+        # match — which is the failure the refusal exists to prevent, because a
+        # vault legitimately holds two items with one name.
+        checks.safix-bitwarden-ambiguous =
+          mode "safix-bitwarden-ambiguous" "bitwarden"
+            "an_ambiguous_address_is_refused_rather_than_resolved";
+
+        # An absent item is created by a pushing mode and refused by a pulling
+        # one, which is B8's asymmetry: safix authors what safix mints and does
+        # not author what a person types. Reddened by creating the item for the
+        # pulling mode too, which turns the refusal into an empty item.
+        checks.safix-bitwarden-absent =
+          mode "safix-bitwarden-absent" "bitwarden"
+            "an_absent_item_is_created_by_a_pushing_mode_and_refused_by_a_pulling_one";
+
+        # No payload is ever a positional argument, on a create or on an edit:
+        # every write's payload is on standard input and no argument is base64 of
+        # a JSON object. Reddened by task 7.11's drill — making the stand-in
+        # accept a positional payload — and by using the documented
+        # `<encodedJson>` form, either of which turns this red.
+        checks.safix-bitwarden-argv =
+          mode "safix-bitwarden-argv" "bitwarden"
+            "no_payload_is_ever_a_positional_argument";
+
+        # The session key travels `BW_SESSION` and nothing else: in the
+        # environment of every invocation after the unlock, in no argument vector,
+        # on no output stream, and in no file safix writes. This is the one
+        # invariant this change narrows rather than inherits, and it is the check
+        # that holds the narrowing. Reddened by task 4.13's drill, moving the key
+        # into `--session <key>`.
+        checks.safix-bitwarden-session =
+          mode "safix-bitwarden-session" "bitwarden"
+            "the_session_key_is_in_the_environment_and_nowhere_else";
+
+        # An edit preserves every member of the item the declaration does not
+        # govern — a totp, a second URI, somebody's own custom field — and the
+        # three declared fields still reach their documented homes. Reddened by
+        # task 4.12's drill: constructing a fresh payload instead of mutating the
+        # fetched item, which deletes all three.
+        checks.safix-bitwarden-edit =
+          mode "safix-bitwarden-edit" "bitwarden"
+            "an_edit_preserves_every_field_the_declaration_does_not_govern";
+
+        # A two-way mapping records its agreement in a hidden custom field of the
+        # item itself, in the same write as the value, with no companion object
+        # and nothing in the repository. Reddened by task 8.25's drill: writing
+        # the memory in a second `edit` after the value's own leaves the field
+        # assertion green and adds a second write to the spool, which the count
+        # assertion catches.
+        checks.safix-bitwarden-two-way =
+          mode "safix-bitwarden-two-way" "bitwarden"
+            "two_way_records_the_agreement_in_a_hidden_field_of_the_item";
+
+        # Both sides moved since the agreement is a conflict that writes nothing
+        # and names the two one-way remedies. Reddened by picking a side by fiat,
+        # which overwrites whichever half the tiebreak decided against.
+        checks.safix-bitwarden-conflict =
+          mode "safix-bitwarden-conflict" "bitwarden"
+            "two_way_both_changed_is_a_conflict_and_writes_nothing";
+
+        # A value carrying newlines crosses whole, with no refusal anywhere: the
+        # positive statement that the keepassxc target's `ValueSpansLines` is a
+        # property of that transport's one-line entry password and not one this
+        # target inherits.
+        checks.safix-bitwarden-multiline =
+          mode "safix-bitwarden-multiline" "bitwarden"
+            "a_multi_line_value_crosses_whole";
+
+        # A declared `tags` is refused, and no item is read, created or edited.
+        # The refusal this repository leans on is evaluation's, which
+        # `safix-bitwarden`'s own `tagsMessages` holds against its literal
+        # sentence; this is the runtime's second refusal, reddened by reporting
+        # `tags` as carried in `bitwarden::CAPABILITIES`.
+        checks.safix-bitwarden-tags =
+          mode "safix-bitwarden-tags" "bitwarden"
+            "tags_are_refused_at_evaluation";
+
+        # audit compares and writes nothing — no create and no edit in the
+        # stand-in's own record — and reports the agreeing mappings as well as the
+        # diverged one. Reddened by having audit reuse the converging pass, which
+        # writes.
+        checks.safix-bitwarden-audit =
+          mode "safix-bitwarden-audit" "bitwarden"
+            "audit_bitwarden_writes_nothing";
+
+        # An item under a declared folder that no mapping names is reported as
+        # information, and the run still exits zero: no mode deletes an item, so a
+        # mapping that was removed leaves its last value behind on purpose.
+        # Reddened by counting a lingering item as a finding, which turns a clean
+        # run into a failure.
+        checks.safix-bitwarden-lingering =
+          mode "safix-bitwarden-lingering" "bitwarden"
+            "a_lingering_item_is_information_and_does_not_move_the_exit_status";
+
+        # A field-only divergence names the field and never either side's
+        # content. Reddened by interpolating a field's value into the report,
+        # which is the same drill `safix-pass-fields-diverged` carries and for the
+        # same reason: a note is itself a secret.
+        checks.safix-bitwarden-fields =
+          mode "safix-bitwarden-fields" "bitwarden"
+            "the_report_names_a_diverged_field_and_never_its_content";
+
+        # Neither side holding a value writes nothing anywhere: no clan write,
+        # no companion write, no commit.
+        checks.safix-bridge-sync-unchanged =
+          mode "safix-bridge-sync-unchanged" "bridge_sync"
+            "neither_side_holding_anything_is_unchanged_and_writes_nothing";
+
+        # A bootstrap push into clan lands the value through clan's own command
+        # and the companion afterward as this repository's own, single new
+        # commit — the companion holding a digest tagged `safix-bridge-sync-v1`
+        # rather than the plaintext value.
+        checks.safix-bridge-sync-push =
+          mode "safix-bridge-sync-push" "bridge_sync"
+            "safix_only_bootstraps_toward_clan_and_records_the_agreement_as_a_second_commit";
+
+        # A bootstrap pull lands the value as its own commit, and the agreement
+        # as a second, separate one afterward — the load-bearing order D8
+        # states, held against the repository's own commit history rather than
+        # against a reading of the code.
+        checks.safix-bridge-sync-pull =
+          mode "safix-bridge-sync-pull" "bridge_sync"
+            "clan_only_bootstraps_toward_safix_and_records_the_agreement_as_a_second_commit";
+
+        # Both sides moved with no agreement recorded is a conflict rather than
+        # a guess: nothing written on either side, and the finding names the
+        # mapping and the two one-way remedies.
+        checks.safix-bridge-sync-conflict =
+          mode "safix-bridge-sync-conflict" "bridge_sync"
+            "both_sides_holding_different_values_with_no_agreement_is_a_conflict";
+
+        # A later divergence converges using the agreement a prior bootstrap
+        # recorded, proving the companion's own write is read back by a later
+        # run rather than only ever written.
+        checks.safix-bridge-sync-remembered =
+          mode "safix-bridge-sync-remembered" "bridge_sync"
+            "a_later_divergence_converges_using_the_recorded_agreement";
+
+        # A two-way push into clan carries the identical stale-generator refusal
+        # a safix-to-clan write already has, under the identical condition.
+        checks.safix-bridge-sync-stale-generator =
+          mode "safix-bridge-sync-stale-generator" "bridge_sync"
+            "a_stale_generator_refuses_a_two_way_push_toward_clan";
+
+        # A shared placement's clan side is reached by a machine discovered
+        # from clan's own `machines list`, never one the mapping declares — its
+        # fixture carries no machine for a declared one to have come from.
+        checks.safix-bridge-sync-shared-address =
+          mode "safix-bridge-sync-shared-address" "bridge_sync"
+            "a_shared_placements_machine_is_discovered_from_clan";
+
+        # The store's own command, driven for real against a database the check
+        # creates. Every other sync check drives the model, which answers the vectors
+        # safix sends because it was written to; this one establishes that those
+        # vectors mean to keepassxc-cli what the runtime thinks they mean. It found
+        # one thing no model would have: `ls` prints `[empty]` rather than nothing for
+        # a database holding no entry, which the runtime has to skip.
+        checks.safix-store-cli = withStore "safix-store-cli" "store_cli" "";
+
+        # The store's own command, driven for real against a store the check
+        # creates in its own directory with its own `GNUPGHOME` and a key minted
+        # inside it. Every other pass check drives the stub, which answers the
+        # vectors safix sends because it was written to; this one establishes that
+        # those vectors mean to `pass` what the runtime thinks they mean, and it
+        # is where the byte-exactness of `--multiline` was measured.
+        #
+        # Linux only, and the guard is a claim rather than a convenience: the
+        # nixpkgs derivation for `pass` disables its own insert, show, edit and
+        # reencryption tests on darwin, so a check that built there would be
+        # stating something the tool's own suite does not. The check is merged in
+        # at the end of this module under `lib.mkIf`, because a `mkIf` on the one
+        # attribute's value leaves the name defined with no value, which
+        # `nix flake show` refuses on the platform the condition excludes.
+
+        # A shared entry is one value: both carriers' placements name one file and
+        # one key, one of them mints, the other reads back what was minted, and
+        # exactly one file in the repository holds the key.
+        checks.safix-shared-placement =
+          mode "safix-shared-placement" "shared_entries"
+            "both_carriers_resolve_one_file_and_read_one_value";
+
+        # A carrier dropped from a shared entry is a revocation, and `check` says
+        # so: it names the file still holding the value, names the person who can
+        # open it, offers a new value as the remedy, and states that `fix` will not
+        # revoke. The finding arrives once, not also as an unclaimed value.
+        checks.safix-shared-shrink =
+          mode "safix-shared-shrink" "shared_entries"
+            "a_dropped_carrier_is_reported_as_a_revocation_naming_the_file_and_the_person";
+
+        # Flipping an entry to shared over values already present is reported as a
+        # migration rather than a disclosure, because every reader of the copy left
+        # behind is still in the audience — and the choice of which per-carrier
+        # value survives is left to the operator.
+        checks.safix-shared-flip =
+          mode "safix-shared-flip" "shared_entries"
+            "a_flip_to_shared_over_existing_values_is_reported_as_a_migration";
+
+        # A narrowed audience — a member left a group, a grant was dropped, a
+        # machine changed hands, all one state by the time a report reads it — is
+        # reported as the revocation it is: the key's holder named rather than
+        # printed, `fix` offered as the alignment, and a new value as the only thing
+        # that revokes.
+        checks.safix-audience-narrowed =
+          mode "safix-audience-narrowed" "subjects"
+            "a_narrowed_audience_is_reported_as_the_revocation_it_is";
+
+        # A key on the narrowed file answering to no declared subject is the more
+        # alarming half of the same finding, and is reported apart from the subjects
+        # that did match rather than swallowed by them.
+        checks.safix-audience-orphan =
+          mode "safix-audience-orphan" "subjects"
+            "a_key_answering_to_nobody_is_reported_apart_from_the_named_subjects";
+
+        # The other direction of the same fact: a widened audience — a member joining
+        # a group — leaves the file where it is, so `fix` converges it with a real
+        # `sops updatekeys` that adds the recipient and leaves the value readable.
+        checks.safix-audience-widened =
+          mode "safix-audience-widened" "subjects"
+            "a_widened_audience_is_re_wrapped_by_fix";
+
+        # An undeclared machine name is refused before any subprocess runs, with
+        # no output directory created (tasks 1.1, 1.4).
+        checks.safix-upload-unknown-machine =
+          mode "safix-upload-unknown-machine" "upload"
+            "an_undeclared_machine_is_refused_before_anything_else_runs";
+
+        # A declared machine with no recipient is refused distinctly, before any
+        # identity is read (task 1.4).
+        checks.safix-upload-no-recipient =
+          mode "safix-upload-no-recipient" "upload"
+            "a_declared_machine_with_no_recipient_is_refused_distinctly";
+
+        # A person's declared name is refused with the same message an
+        # undeclared machine gets, per D6 (task 1.4).
+        checks.safix-upload-not-a-machine =
+          mode "safix-upload-not-a-machine" "upload"
+            "a_persons_name_is_refused_the_same_way_as_an_undeclared_machine";
+
+        # `--directory` writes exactly the two host-identity files, at the
+        # declared paths and modes, and touches no network tool (tasks 2.1-2.3,
+        # 2.5).
+        checks.safix-upload-directory =
+          mode "safix-upload-directory" "upload"
+            "directory_mode_writes_the_matching_identity_at_the_declared_paths_and_modes";
+
+        # `--directory` without `--identity` refuses before touching the
+        # filesystem (task 2.4).
+        checks.safix-upload-directory-needs-identity =
+          mode "safix-upload-directory-needs-identity" "upload"
+            "directory_without_identity_is_refused_before_touching_the_filesystem";
+
+        # A supplied identity that derives to the wrong recipient is refused
+        # before DIR is created, naming both recipients (task 2.2).
+        checks.safix-upload-directory-mismatch =
+          mode "safix-upload-directory-mismatch" "upload"
+            "a_mismatched_identity_is_refused_before_directory_is_created_naming_both_recipients";
+
+        # 2.6, first drill: a recipient one character off the declared one still
+        # refuses.
+        checks.safix-upload-directory-drift-drill =
+          mode "safix-upload-directory-drift-drill" "upload"
+            "a_recipient_one_character_different_still_refuses";
+
+        # 2.6, second drill: a null-recipient machine refuses before any identity
+        # is read, even one that would otherwise derive to something plausible.
+        checks.safix-upload-directory-null-recipient-drill =
+          mode "safix-upload-directory-null-recipient-drill" "upload"
+            "a_null_recipient_machine_refuses_before_reading_any_identity";
+
+        # 3.6: a matching probe is an honest no-op that opens no write-capable
+        # session, asserted against the recorded invocation list rather than
+        # against file state alone — the claim this whole change exists for.
+        checks.safix-upload-remote-match =
+          mode "safix-upload-remote-match" "upload"
+            "a_matching_presented_key_is_an_honest_no_op_and_opens_no_session";
+
+        # 3.4: `--force` is inert on the match branch.
+        checks.safix-upload-remote-match-force =
+          mode "safix-upload-remote-match-force" "upload"
+            "force_is_inert_on_a_match";
+
+        # 3.3, second branch: no key presented writes the given identity, with
+        # the recorded invocation order and the `ssh` argv both asserted.
+        checks.safix-upload-remote-write =
+          mode "safix-upload-remote-write" "upload"
+            "no_key_presented_writes_given_identity";
+
+        # 3.3, second branch without `--identity`: refuses before opening a
+        # write-capable session.
+        checks.safix-upload-remote-needs-identity =
+          mode "safix-upload-remote-needs-identity" "upload"
+            "no_key_presented_without_identity_refuses_before_opening_a_session";
+
+        # 3.3, third branch without `--force`: refused by default, naming both
+        # recipients.
+        checks.safix-upload-remote-mismatch =
+          mode "safix-upload-remote-mismatch" "upload"
+            "a_different_presented_key_is_refused_by_default";
+
+        # 3.3, third branch with `--force` and `--identity`: the override reaches
+        # the transport.
+        checks.safix-upload-remote-force =
+          mode "safix-upload-remote-force" "upload"
+            "a_mismatched_presented_key_is_overridden_with_force_and_identity";
+
+        # 3.7: flipping one byte of the declared recipient turns 3.6's match into
+        # a mismatch, proving the branch follows the comparison.
+        checks.safix-upload-remote-flip-drill =
+          mode "safix-upload-remote-flip-drill" "upload"
+            "flipping_the_declared_recipient_turns_a_match_into_a_mismatch";
+
+        # 4.1-4.2, 4.7: the tarball's own contents — both files at mode 0400,
+        # root-owned — read back from the real archive.
+        checks.safix-upload-tarball-modes =
+          mode "safix-upload-tarball-modes" "upload"
+            "the_tarball_carries_the_declared_modes_and_root_ownership";
+
+        # 4.5: the staging root is created before the tarball is written and gone
+        # after both a success and a simulated transport failure.
+        checks.safix-upload-staging-cleanup =
+          mode "safix-upload-staging-cleanup" "upload"
+            "the_staging_root_is_gone_after_a_success_and_after_a_simulated_failure";
+
+        # 4.3-4.4, 4.6: the wipe-then-extract sequence names the fixed
+        # destination; the depth-safety constant it depends on is drilled at the
+        # unit level in `upload.rs` itself.
+        checks.safix-upload-destination =
+          mode "safix-upload-destination" "upload"
+            "the_wipe_then_extract_sequence_names_the_fixed_destination";
+
+        # Holds the `--entry`/`SAFIX_ENTRY` evaluation path (safix-cli spec) and
+        # `generate`'s flakeless refusal, over one fixture fleet declared once as
+        # nix source text and evaluated two ways: `nix eval --file <entry>`
+        # against a plain expression outside any repository, the same mechanism
+        # D1's `mkVault` wraps, and `nix eval <flakeref>#<attr>` against a
+        # from-scratch zero-input flake — no flake-parts, no network either way,
+        # because neither evaluation resolves a flake input.
+        #
+        # ── what this holds ──
+        # All thirteen `Attribute` spellings evaluate under `--file` exactly as
+        # they do under a flake target — the same strings, only how the target
+        # is built differs (D4). `generatorPlan`, `bridge` and `keepassxc`
+        # deserialize against the real `Generator`, `GeneratorFile`, `Mapping`,
+        # `SyncMapping` and `PlanInput` structs with no `deny_unknown_fields`
+        # rejection — reached through the real `safix` binary's own `generate`,
+        # `sync clan` and `sync`, which is the residual measurement gap the
+        # proposal names. The same three attributes are byte-identical between
+        # the two evaluation paths. `--entry` overrides a conflicting
+        # `SAFIX_ENTRY`. The workspace root a write stages and commits into is
+        # still the one git discovers, even with `--entry` pointed at a file
+        # outside that repository. `generate` refuses under `--entry` with no
+        # `--nixpkgs`/`SAFIX_NIXPKGS` declared and a non-empty generator order,
+        # names both remedies, is unaffected for a user with an empty order —
+        # the ordering drill — and is unaffected in flake mode regardless of
+        # `--nixpkgs`.
+        #
+        # ── what this cannot check ──
+        # That a generator actually runs to completion under `--nixpkgs`: the
+        # declared reference resolves inside a nested, network-disabled build
+        # sandbox only as far as `nix shell` itself gets, which is enough to
+        # prove the refusal lifted and not enough to prove a tool resolves. The
+        # assertions below hold the refusal's presence and absence, not the
+        # generator's own run — `safix-generate*` already holds that under a
+        # flake.
+        checks.safix-cli =
+          pkgs.runCommand "safix-cli"
+            {
+              nativeBuildInputs = [
+                pkgs.git
+                pkgs.nix
+              ];
+              # The real `safix` binary's own `nix` subprocess calls carry no
+              # `--extra-experimental-features` of their own — the same as at an
+              # operator's terminal, where the ambient nix.conf already enables
+              # them for a flake-based project. The sandbox's nix.conf does not,
+              # so this is what the sandbox stands in for that ambient config.
+              env.NIX_CONFIG = "experimental-features = nix-command flakes";
+            }
+            ''
+                      set -eu
+                      export HOME="$PWD"
+                      export GIT_AUTHOR_NAME="safix-cli fixture"
+                      export GIT_AUTHOR_EMAIL="fixture@example.invalid"
+                      export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+                      export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
+                      nix_eval() {
+                        nix --extra-experimental-features "nix-command flakes" eval "$@"
+                      }
+
+                      safix="${config.packages.safix}/bin/safix"
+
+                      # The one fleet both evaluation paths declare: alice holds a hand-set
+                      # entry and a generated one, and bob holds nothing generated — bob is
+                      # the empty-order user the ordering drill (4.7) needs. The bridge and
+                      # keepassxc mappings are synthetic: no machine, database or clan named
+                      # here exists, matching every other fixture in this directory.
+                      fleetText=$(cat <<'FLEET'
+                      {
+                        users.alice = {
+                          recipient = "age1fixtureaaa00000000000000000000000000000000000000000000000";
+                          private.tok = { };
+                          private.api-token.generator = {
+                            script = "printf '%s' fixture > \"$out/api-token\"";
+                            runtimeInputs = [ "coreutils" ];
                           };
                         };
-                      };
-                      keepassxc = {
-                        database = "/nonexistent/master.kdbx";
-                        group = "safix";
-                        mappings.a = {
-                          mode = "safix-to-keepassxc";
-                          safix = {
-                            user = "alice";
-                            name = "tok";
-                          };
-                          kdbx = {
-                            path = "alice/grafana";
+                        users.bob.recipient = "age1fixturebbb00000000000000000000000000000000000000000000000";
+                        bridge = {
+                          clanFlake = null;
+                          mappings.a = {
+                            direction = "clan-to-safix";
+                            clan = {
+                              machine = "nonexistent";
+                              generator = "ntfy";
+                              file = "token";
+                            };
+                            safix = {
+                              user = "alice";
+                              name = "tok";
+                            };
                           };
                         };
-                      };
-                      groups.oncall.members = [ ];
-                    }
-            FLEET
-                    )
-
-                    # The flake-mode side: a from-scratch flake declaring only `nixpkgs`
-                    # as an input, resolved against this system's own already-fetched
-                    # copy so nothing here fetches. Pure evaluation forbids a flake from
-                    # reading any absolute path outside its own inputs and `self`, so the
-                    # safix module is copied into the fixture tree rather than referenced
-                    # by the store path outside it; the `--entry` side below has no such
-                    # restriction; and `self` here is the flake's own store path, which is
-                    # `mkVault`'s `root` under flake-parts's own mechanism (D2, D3) — the
-                    # same `lib.evalModules` call the `--entry` side makes, differing only
-                    # in where `self` comes from, which the three compared attributes
-                    # never read (model.rs: none of Generator, GeneratorFile, Mapping,
-                    # SyncMapping or PlanInput carry a path).
-                    repo="$PWD/repo"
-                    mkdir -p "$repo/safix/groups"
-                    cd "$repo"
-                    git init -q
-                    cp -r ${../safix} ./safix-module
-
-                    cat > safix/groups/oncall.nix <<'GRP'
-                    {
-                      flake.safix.groups.oncall.members = [ ];
-                    }
-            GRP
-
-                    cat > flake.nix <<FLAKE
-                    {
-                      inputs.nixpkgs.url = "path:${pkgs.path}";
-                      outputs = { self, nixpkgs, ... }: {
-                        safix =
-                          let
-                            lib = nixpkgs.lib;
-                            projection = (lib.evalModules {
-                              modules = [
-                                ./safix-module
-                                { _module.args.self = self; }
-                                { flake.safix = $fleetText; }
-                              ];
-                            }).config.flake.safix.lib;
-                          in {
-                            lib = projection;
-                            onboardingHook = null;
-                            enrollHook = null;
+                        keepassxc = {
+                          database = "/nonexistent/master.kdbx";
+                          group = "safix";
+                          mappings.a = {
+                            mode = "safix-to-keepassxc";
+                            safix = {
+                              user = "alice";
+                              name = "tok";
+                            };
+                            kdbx = {
+                              path = "alice/grafana";
+                            };
                           };
-                      };
-                    }
-            FLAKE
+                        };
+                        groups.oncall.members = [ ];
+                      }
+              FLEET
+                      )
 
-                    git add -A
-                    git commit -q -m fixture
+                      # The flake-mode side: a from-scratch flake declaring only `nixpkgs`
+                      # as an input, resolved against this system's own already-fetched
+                      # copy so nothing here fetches. Pure evaluation forbids a flake from
+                      # reading any absolute path outside its own inputs and `self`, so the
+                      # safix module is copied into the fixture tree rather than referenced
+                      # by the store path outside it; the `--entry` side below has no such
+                      # restriction; and `self` here is the flake's own store path, which is
+                      # `mkVault`'s `root` under flake-parts's own mechanism (D2, D3) — the
+                      # same `lib.evalModules` call the `--entry` side makes, differing only
+                      # in where `self` comes from, which the three compared attributes
+                      # never read (model.rs: none of Generator, GeneratorFile, Mapping,
+                      # SyncMapping or PlanInput carry a path).
+                      repo="$PWD/repo"
+                      mkdir -p "$repo/safix/groups"
+                      cd "$repo"
+                      git init -q
+                      cp -r ${../safix} ./safix-module
 
-                    # The --entry side: a plain expression outside the repository nix
-                    # never sees as a flake at all. `self` is a literal string, which the
-                    # design's own scenario admits: "any path value that supports
-                    # `+ \"/…\"` concatenation is sufficient."
-                    mkdir -p "$PWD/../outside"
-                    entry="$PWD/../outside/entry.nix"
-                    cat > "$entry" <<ENTRY
-                    let
-                      lib = import ${pkgs.path}/lib;
-                      projection = (lib.evalModules {
-                        modules = [
-                          ${../safix}
-                          { _module.args.self = "/entry-fixture-root"; }
-                          { flake.safix = $fleetText; }
-                        ];
-                      }).config.flake.safix.lib;
-                    in {
-                      safix = {
-                        lib = projection;
-                        onboardingHook = null;
-                        enrollHook = null;
-                      };
-                    }
-            ENTRY
+                      cat > safix/groups/oncall.nix <<'GRP'
+                      {
+                        flake.safix.groups.oncall.members = [ ];
+                      }
+              GRP
 
-                    # 3.5: all thirteen attribute spellings evaluate under --file exactly as
-                    # they do against the flake target.
-                    attrs=(
-                      safix.lib.placements safix.lib.audiences safix.lib.governedFiles
-                      safix.lib.recipients safix.lib.delegation safix.lib.policyText
-                      safix.lib.generatorPlan safix.lib.nameRegex safix.lib.bridge
-                      safix.lib.keepassxc safix.lib.subjects safix.onboardingHook safix.enrollHook
-                    )
-                    formats=(
-                      --json --json --json --json --json --raw --json --raw --json --json --json --json --json
-                    )
-                    for i in "''${!attrs[@]}"; do
-                      attr="''${attrs[$i]}"
-                      fmt="''${formats[$i]}"
-                      nix_eval --file "$entry" "$attr" "$fmt" >/dev/null \
-                        || { echo "entry-mode evaluation of $attr failed" >&2; exit 1; }
-                      nix_eval "path:$repo#$attr" "$fmt" --no-write-lock-file >/dev/null \
-                        || { echo "flake-mode evaluation of $attr failed" >&2; exit 1; }
-                    done
+                      cat > flake.nix <<FLAKE
+                      {
+                        inputs.nixpkgs.url = "path:${pkgs.path}";
+                        outputs = { self, nixpkgs, ... }: {
+                          safix =
+                            let
+                              lib = nixpkgs.lib;
+                              projection = (lib.evalModules {
+                                modules = [
+                                  ./safix-module
+                                  { _module.args.self = self; }
+                                  { flake.safix = $fleetText; }
+                                ];
+                              }).config.flake.safix.lib;
+                            in {
+                              lib = projection;
+                              onboardingHook = null;
+                              enrollHook = null;
+                            };
+                        };
+                      }
+              FLAKE
 
-                    # 3.7: generatorPlan, bridge and keepassxc are byte-identical between
-                    # the two paths.
-                    for attr in safix.lib.generatorPlan safix.lib.bridge safix.lib.keepassxc; do
-                      entry_json="$(nix_eval --file "$entry" "$attr" --json)"
-                      flake_json="$(nix_eval "path:$repo#$attr" --json --no-write-lock-file)"
-                      if [ "$entry_json" != "$flake_json" ]; then
-                        echo "entry-mode and flake-mode $attr diverge:" >&2
-                        echo "  entry: $entry_json" >&2
-                        echo "  flake: $flake_json" >&2
+                      git add -A
+                      git commit -q -m fixture
+
+                      # The --entry side: a plain expression outside the repository nix
+                      # never sees as a flake at all. `self` is a literal string, which the
+                      # design's own scenario admits: "any path value that supports
+                      # `+ \"/…\"` concatenation is sufficient."
+                      mkdir -p "$PWD/../outside"
+                      entry="$PWD/../outside/entry.nix"
+                      cat > "$entry" <<ENTRY
+                      let
+                        lib = import ${pkgs.path}/lib;
+                        projection = (lib.evalModules {
+                          modules = [
+                            ${../safix}
+                            { _module.args.self = "/entry-fixture-root"; }
+                            { flake.safix = $fleetText; }
+                          ];
+                        }).config.flake.safix.lib;
+                      in {
+                        safix = {
+                          lib = projection;
+                          onboardingHook = null;
+                          enrollHook = null;
+                        };
+                      }
+              ENTRY
+
+                      # 3.5: all thirteen attribute spellings evaluate under --file exactly as
+                      # they do against the flake target.
+                      attrs=(
+                        safix.lib.placements safix.lib.audiences safix.lib.governedFiles
+                        safix.lib.recipients safix.lib.delegation safix.lib.policyText
+                        safix.lib.generatorPlan safix.lib.nameRegex safix.lib.bridge
+                        safix.lib.keepassxc safix.lib.subjects safix.onboardingHook safix.enrollHook
+                      )
+                      formats=(
+                        --json --json --json --json --json --raw --json --raw --json --json --json --json --json
+                      )
+                      for i in "''${!attrs[@]}"; do
+                        attr="''${attrs[$i]}"
+                        fmt="''${formats[$i]}"
+                        nix_eval --file "$entry" "$attr" "$fmt" >/dev/null \
+                          || { echo "entry-mode evaluation of $attr failed" >&2; exit 1; }
+                        nix_eval "path:$repo#$attr" "$fmt" --no-write-lock-file >/dev/null \
+                          || { echo "flake-mode evaluation of $attr failed" >&2; exit 1; }
+                      done
+
+                      # 3.7: generatorPlan, bridge and keepassxc are byte-identical between
+                      # the two paths.
+                      for attr in safix.lib.generatorPlan safix.lib.bridge safix.lib.keepassxc; do
+                        entry_json="$(nix_eval --file "$entry" "$attr" --json)"
+                        flake_json="$(nix_eval "path:$repo#$attr" --json --no-write-lock-file)"
+                        if [ "$entry_json" != "$flake_json" ]; then
+                          echo "entry-mode and flake-mode $attr diverge:" >&2
+                          echo "  entry: $entry_json" >&2
+                          echo "  flake: $flake_json" >&2
+                          exit 1
+                        fi
+                      done
+
+                      # Every CLI invocation below runs from inside $repo, so
+                      # Workspace::discover finds $repo as root — with --entry pointed
+                      # outside it, which is 3.8's claim.
+
+                      # 3.9 drill: --entry overrides a conflicting SAFIX_ENTRY. Only the
+                      # value --entry names is a valid nix expression, so a run that used
+                      # SAFIX_ENTRY's instead fails with a broken evaluation rather than
+                      # succeeding on bob's empty order.
+                      output="$(SAFIX_ENTRY="$PWD/../outside/does-not-exist.nix" "$safix" --entry "$entry" generate bob 2>&1)" \
+                        && status=0 || status=$?
+                      if [ "$status" != 0 ]; then
+                        echo "--entry did not override a conflicting SAFIX_ENTRY:" >&2
+                        echo "$output" >&2
                         exit 1
                       fi
-                    done
 
-                    # Every CLI invocation below runs from inside $repo, so
-                    # Workspace::discover finds $repo as root — with --entry pointed
-                    # outside it, which is 3.8's claim.
+                      # 3.6 / 4.5: alice's generatorPlan deserializes (Generator,
+                      # GeneratorFile, PlanInput) and the refusal fires before the sandbox
+                      # is probed, naming both remedies.
+                      output="$("$safix" --entry "$entry" generate alice 2>&1)" && status=0 || status=$?
+                      if [ "$status" = 0 ]; then
+                        echo "generate alice under --entry with no --nixpkgs did not refuse" >&2
+                        exit 1
+                      fi
+                      case "$output" in
+                        *"generate needs a flake or a declared nixpkgs reference"*) ;;
+                        *)
+                          echo "generate alice refused for the wrong reason:" >&2
+                          echo "$output" >&2
+                          exit 1
+                          ;;
+                      esac
+                      case "$output" in
+                        *"evaluated to a shape this runtime does not read"*)
+                          echo "generatorPlan failed to deserialize against the real structs:" >&2
+                          echo "$output" >&2
+                          exit 1
+                          ;;
+                      esac
 
-                    # 3.9 drill: --entry overrides a conflicting SAFIX_ENTRY. Only the
-                    # value --entry names is a valid nix expression, so a run that used
-                    # SAFIX_ENTRY's instead fails with a broken evaluation rather than
-                    # succeeding on bob's empty order.
-                    output="$(SAFIX_ENTRY="$PWD/../outside/does-not-exist.nix" "$safix" --entry "$entry" generate bob 2>&1)" \
-                      && status=0 || status=$?
-                    if [ "$status" != 0 ]; then
-                      echo "--entry did not override a conflicting SAFIX_ENTRY:" >&2
-                      echo "$output" >&2
-                      exit 1
-                    fi
+                      # 3.6 continued: bridge (Mapping) and keepassxc (SyncMapping)
+                      # deserialize too, reached through sync clan and sync — each refuses
+                      # afterwards for an unrelated reason (no clan, no terminal), which is
+                      # not what this asserts.
+                      output="$("$safix" --entry "$entry" sync clan 2>&1)" || true
+                      case "$output" in
+                        *"evaluated to a shape this runtime does not read"*)
+                          echo "bridge failed to deserialize against the real structs:" >&2
+                          echo "$output" >&2
+                          exit 1
+                          ;;
+                      esac
+                      output="$("$safix" --entry "$entry" sync 2>&1)" || true
+                      case "$output" in
+                        *"evaluated to a shape this runtime does not read"*)
+                          echo "keepassxc failed to deserialize against the real structs:" >&2
+                          echo "$output" >&2
+                          exit 1
+                          ;;
+                      esac
 
-                    # 3.6 / 4.5: alice's generatorPlan deserializes (Generator,
-                    # GeneratorFile, PlanInput) and the refusal fires before the sandbox
-                    # is probed, naming both remedies.
-                    output="$("$safix" --entry "$entry" generate alice 2>&1)" && status=0 || status=$?
-                    if [ "$status" = 0 ]; then
-                      echo "generate alice under --entry with no --nixpkgs did not refuse" >&2
-                      exit 1
-                    fi
-                    case "$output" in
-                      *"generate needs a flake or a declared nixpkgs reference"*) ;;
-                      *)
-                        echo "generate alice refused for the wrong reason:" >&2
+                      # 4.6 / 4.7: the ordering drill. bob's generatorPlan order is empty,
+                      # so the empty-order return above the refusal has to fire first: this
+                      # asserts directly that it does, rather than only that the refusal
+                      # itself exists.
+                      output="$("$safix" --entry "$entry" generate bob 2>&1)" && status=0 || status=$?
+                      if [ "$status" != 0 ]; then
+                        echo "generate bob (no generator) refused under --entry:" >&2
                         echo "$output" >&2
                         exit 1
-                        ;;
-                    esac
-                    case "$output" in
-                      *"evaluated to a shape this runtime does not read"*)
-                        echo "generatorPlan failed to deserialize against the real structs:" >&2
+                      fi
+                      case "$output" in
+                        *"generate needs a flake or a declared nixpkgs reference"*)
+                          echo "the empty-order user was refused -- the ordering drill fired red" >&2
+                          exit 1
+                          ;;
+                      esac
+
+                      # 4.5 continued: a declared --nixpkgs lifts the refusal. The declared
+                      # reference is this system's own already-fetched nixpkgs, so nothing
+                      # here needs the network; whether the sandbox can go on to build a
+                      # tool from it is `safix-generate*`'s claim, not this one.
+                      output="$("$safix" --entry "$entry" --nixpkgs "path:${pkgs.path}" generate alice 2>&1)" || true
+                      case "$output" in
+                        *"generate needs a flake or a declared nixpkgs reference"*)
+                          echo "--nixpkgs did not lift the refusal:" >&2
+                          echo "$output" >&2
+                          exit 1
+                          ;;
+                      esac
+
+                      # Flake mode is unaffected: an empty-order user succeeds exactly as
+                      # under --entry, with no --entry, no --nixpkgs, and no flake to
+                      # resolve --nixpkgs against even if it had been given.
+                      output="$("$safix" generate bob 2>&1)" && status=0 || status=$?
+                      if [ "$status" != 0 ]; then
+                        echo "flake-mode generate bob (no generator) refused:" >&2
                         echo "$output" >&2
                         exit 1
-                        ;;
-                    esac
+                      fi
+                      case "$output" in
+                        *"generate needs a flake or a declared nixpkgs reference"*)
+                          echo "flake mode raised the flake-only refusal, which it must never do" >&2
+                          exit 1
+                          ;;
+                      esac
 
-                    # 3.6 continued: bridge (Mapping) and keepassxc (SyncMapping)
-                    # deserialize too, reached through sync clan and sync — each refuses
-                    # afterwards for an unrelated reason (no clan, no terminal), which is
-                    # not what this asserts.
-                    output="$("$safix" --entry "$entry" sync clan 2>&1)" || true
-                    case "$output" in
-                      *"evaluated to a shape this runtime does not read"*)
-                        echo "bridge failed to deserialize against the real structs:" >&2
+                      # 3.8: the root a write stages and commits into is still the one git
+                      # discovers, with --entry pointed outside that repository.
+                      before_head="$(git rev-parse HEAD)"
+                      output="$("$safix" --entry "$entry" group add oncall alice 2>&1)" && status=0 || status=$?
+                      if [ "$status" != 0 ]; then
+                        echo "group add under --entry (pointed outside the repository) refused:" >&2
                         echo "$output" >&2
                         exit 1
-                        ;;
-                    esac
-                    output="$("$safix" --entry "$entry" sync 2>&1)" || true
-                    case "$output" in
-                      *"evaluated to a shape this runtime does not read"*)
-                        echo "keepassxc failed to deserialize against the real structs:" >&2
-                        echo "$output" >&2
+                      fi
+                      after_head="$(git rev-parse HEAD)"
+                      if [ "$before_head" = "$after_head" ]; then
+                        echo "group add under --entry committed nothing into the discovered root" >&2
                         exit 1
-                        ;;
-                    esac
-
-                    # 4.6 / 4.7: the ordering drill. bob's generatorPlan order is empty,
-                    # so the empty-order return above the refusal has to fire first: this
-                    # asserts directly that it does, rather than only that the refusal
-                    # itself exists.
-                    output="$("$safix" --entry "$entry" generate bob 2>&1)" && status=0 || status=$?
-                    if [ "$status" != 0 ]; then
-                      echo "generate bob (no generator) refused under --entry:" >&2
-                      echo "$output" >&2
-                      exit 1
-                    fi
-                    case "$output" in
-                      *"generate needs a flake or a declared nixpkgs reference"*)
-                        echo "the empty-order user was refused -- the ordering drill fired red" >&2
+                      fi
+                      if ! grep -q '"alice"' safix/groups/oncall.nix; then
+                        echo "group add under --entry did not edit the discovered root's declaration file" >&2
                         exit 1
-                        ;;
-                    esac
+                      fi
 
-                    # 4.5 continued: a declared --nixpkgs lifts the refusal. The declared
-                    # reference is this system's own already-fetched nixpkgs, so nothing
-                    # here needs the network; whether the sandbox can go on to build a
-                    # tool from it is `safix-generate*`'s claim, not this one.
-                    output="$("$safix" --entry "$entry" --nixpkgs "path:${pkgs.path}" generate alice 2>&1)" || true
-                    case "$output" in
-                      *"generate needs a flake or a declared nixpkgs reference"*)
-                        echo "--nixpkgs did not lift the refusal:" >&2
-                        echo "$output" >&2
-                        exit 1
-                        ;;
-                    esac
-
-                    # Flake mode is unaffected: an empty-order user succeeds exactly as
-                    # under --entry, with no --entry, no --nixpkgs, and no flake to
-                    # resolve --nixpkgs against even if it had been given.
-                    output="$("$safix" generate bob 2>&1)" && status=0 || status=$?
-                    if [ "$status" != 0 ]; then
-                      echo "flake-mode generate bob (no generator) refused:" >&2
-                      echo "$output" >&2
-                      exit 1
-                    fi
-                    case "$output" in
-                      *"generate needs a flake or a declared nixpkgs reference"*)
-                        echo "flake mode raised the flake-only refusal, which it must never do" >&2
-                        exit 1
-                        ;;
-                    esac
-
-                    # 3.8: the root a write stages and commits into is still the one git
-                    # discovers, with --entry pointed outside that repository.
-                    before_head="$(git rev-parse HEAD)"
-                    output="$("$safix" --entry "$entry" group add oncall alice 2>&1)" && status=0 || status=$?
-                    if [ "$status" != 0 ]; then
-                      echo "group add under --entry (pointed outside the repository) refused:" >&2
-                      echo "$output" >&2
-                      exit 1
-                    fi
-                    after_head="$(git rev-parse HEAD)"
-                    if [ "$before_head" = "$after_head" ]; then
-                      echo "group add under --entry committed nothing into the discovered root" >&2
-                      exit 1
-                    fi
-                    if ! grep -q '"alice"' safix/groups/oncall.nix; then
-                      echo "group add under --entry did not edit the discovered root's declaration file" >&2
-                      exit 1
-                    fi
-
-                    touch "$out"
-          '';
-    };
+                      touch "$out"
+            '';
+      }
+      (lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
+        checks.safix-pass-cli = withPass "safix-pass-cli" "pass_cli" "";
+      })
+    ];
 }

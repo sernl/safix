@@ -18,6 +18,12 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] — 2026-09-21
+
+safix 0.3.0 is the release where every kind of value, format and identity the two frameworks it replaces accept is accepted here too, where a migration can be interrupted and finished, where a value has a deadline, and where the README is one worked NixOS flake. `Cargo.toml` reads `0.3.0`.
+
 ### Recoverable migration, a picker that edits, scheduled rotation, and a quickstart
 
 **Migration recovers its own interruptions.** `safix migrate` writes a journal at `<receipt>.journal` before it publishes anything, recording each output's path, file identity and a digest of its bytes, and removes it once the receipt lands. Each record is written before its hard link, so a process killed between the two leaves a record naming an output that was never created, which a rerun publishes rather than refuses.

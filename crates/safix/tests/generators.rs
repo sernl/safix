@@ -15,6 +15,13 @@ mod harness;
 use harness::{ALICE_FILE, Fixture, SHARED_FILE};
 use serde_json::json;
 
+/// The unix second, as the stamps record it.
+fn stamps_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
 /// A generator record with no inputs, writing one output named for the entry.
 fn plain(script: &str) -> serde_json::Value {
     json!({
@@ -834,7 +841,13 @@ fn a_definition_edited_after_a_mint_is_reported_and_a_regeneration_clears_it() {
     assert_eq!(fixture.value(ALICE_FILE, "recorded"), MINTED);
 
     // Regenerating adopts the declaration, and refreshes the record in the same
-    // commit as the value it now describes.
+    // commit as the value it now describes. The stamp is dated to the second,
+    // so a regeneration landing in the second the mint did rewrites the stamp
+    // byte for byte and git has nothing of it to commit; the clock is let move
+    // on first, so the assertion below is about the commit and not the second.
+    while stamps_now() <= minted_at {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     fixture
         .run(&["generate", "--regenerate", "alice", "recorded"])
         .expect_success("regenerating under the current declaration");

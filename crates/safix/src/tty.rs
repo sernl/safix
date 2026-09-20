@@ -212,8 +212,17 @@ mod tests {
         let Ok(after) = tcgetattr(&terminal) else {
             return;
         };
+        // `PENDIN` and `FLUSHO` are the kernel's own transient state — "retype
+        // the pending input" and "output is being flushed" — set and cleared by
+        // the line discipline rather than by any `tcsetattr`. darwin reports a
+        // fresh pseudoterminal with `PENDIN` raised and drops it on the first
+        // attribute write, so a byte-for-byte comparison would fail there on
+        // a bit no restore could put back. What the restore owes is the bits
+        // it cleared, and those are compared with the transient two masked.
+        let transient = LocalModes::PENDIN | LocalModes::FLUSHO;
         assert_eq!(
-            after.local_modes, before.local_modes,
+            after.local_modes.difference(transient),
+            before.local_modes.difference(transient),
             "the local modes were not restored"
         );
         assert_eq!(

@@ -260,6 +260,52 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "$excluded"
 
+      # The same question for a linux runner, asked of the hardware rather than
+      # the operating system. The VM test is a NixOS test, and a NixOS test
+      # requires the `kvm` system feature: GitHub's x86_64 runners expose
+      # `/dev/kvm` and the arm64 runners do not, so on the arm64 leg the daemon
+      # refuses the derivation — "Required features: {kvm, nixos-test}" — before
+      # running anything. Derived, again, rather than listed: every check whose
+      # derivation declares `kvm` among its required features comes out, so a
+      # second VM test joins this family the day it is written. A runner that
+      # does expose `/dev/kvm` excludes nothing and this step says so.
+      - name: which checks need a hypervisor this runner does not have
+        if: runner.os == 'Linux'
+        id: kvm
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo "/dev/kvm is present; every check runs"
+            exit 0
+          fi
+          nix run --inputs-from . --option flake-registry '' nixpkgs#nix-eval-jobs -- \
+            --flake '.#checks.${{ matrix.system }}' --workers 4 \
+            | jq -r 'select(.drvPath != null) | "\(.attr)\t\(.drvPath)"' > attrs.tsv
+          excluded=$(while IFS=$'\t' read -r attr drv; do
+            if nix derivation show "$drv" \
+                | jq -e '[.. | objects | .env? // empty | .requiredSystemFeatures? // empty] | any(contains("kvm"))' >/dev/null; then
+              echo "$attr"
+            fi
+          done < attrs.tsv | sort)
+          if [ -z "$excluded" ]; then
+            echo "no check requires kvm; every check runs"
+            exit 0
+          fi
+
+          quoted=$(printf '%s\n' "$excluded" | sed 's/.*/"&"/' | tr '\n' ' ')
+          echo "select=checks: builtins.removeAttrs checks [ $quoted]" >> "$GITHUB_OUTPUT"
+
+          total=$(wc -l < attrs.tsv | tr -d ' ')
+          count=$(printf '%s\n' "$excluded" | wc -l | tr -d ' ')
+          {
+            echo "### Excluded on this runner"
+            echo
+            echo "$count of $total checks require the kvm system feature, and this"
+            echo "runner exposes no /dev/kvm. A machine with a hypervisor builds all $total."
+            echo
+            printf '%s\n' "$excluded" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$excluded"
+
       # `--inputs-from .` so that `nixpkgs` means the nixpkgs this flake pins,
       # rather than whatever the global registry resolves it to: a second nixpkgs
       # would be a second closure to fetch for one tool. With the flake supplying
@@ -288,10 +334,10 @@ jobs:
       # invocation below pushes each result to it as it is built.
       - name: build every check, and report every failure rather than the first
         env:
-          SELECT: ${{ steps.scope.outputs.select }}
+          SELECT: ${{ steps.scope.outputs.select || steps.kvm.outputs.select }}
         run: |
-          # Empty on linux, where the step that sets it does not run and the whole
-          # surface is built.
+          # Empty where neither scoping step set it, which is a linux runner
+          # with a hypervisor: the whole surface is built.
           scope=()
           if [ -n "${SELECT:-}" ]; then
             scope=(--select "$SELECT")

@@ -55,6 +55,7 @@
         "safix-installer-type"
         "safix-installer-vm"
         "safix-memory-backing"
+        "safix-pass-cli"
 
         # Not this change's check: `safix-picker` needs a controlling
         # terminal, which `setsid --ctty` supplies and darwin has no `setsid`
