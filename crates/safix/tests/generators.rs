@@ -1098,6 +1098,77 @@ fn a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit() {
         .says("is a public output");
 }
 
+/// `check` asks a public output its own file, and names the generator that
+/// writes it.
+///
+/// The placement of an output declared `secret = false` still carries the
+/// audience's document and a key inside it, because every placement does, and
+/// that document is never written for it. A report that asked the document
+/// therefore answered "no value" for every public output in the tree — for the
+/// ones already minted as loudly as for the ones not — and, because the
+/// generator is declared on a sibling entry rather than on this one, offered
+/// `safix set` for a name no operator can type: the value is a function of a
+/// private half this one has never seen.
+///
+/// So both directions are drilled here. Absent, it is one finding naming the
+/// producing entry and the `generate` that runs it. Present, it is silence —
+/// and the silence is the half that fails without the fix, because the tree it
+/// is asserted over is converged.
+#[test]
+fn a_public_output_is_judged_by_its_own_file_and_names_its_generator() {
+    const PUBLIC: &str = "public/safix/users/alice/wg-public/value";
+    const HEADLINE: &str = "flake.safix.users.alice declares 'wg-public' and public/safix/users/alice/wg-public/value \
+         holds no value for it.";
+
+    let mut fixture = Fixture::new();
+    // The private half already holds a value, so the public half is the only
+    // thing in this tree a report can have anything to say about, and a report
+    // that says nothing is a claim about it rather than about what is left.
+    fixture.make_sops_file(ALICE_FILE, &["api-token", "wg-private"]);
+    fixture.seed_generator(
+        "wg-private",
+        ALICE_FILE,
+        &["wg-public"],
+        &json!({
+            "script": "head -c 32 /dev/urandom | base64 | tr -d '\\n' > \"$out/wg-private\"\n\
+                       tr 'a-z' 'A-Z' < \"$out/wg-private\" > \"$out/wg-public\"",
+            "network": false,
+            "runtimeInputs": ["coreutils"],
+            "prompts": {}, "dependencies": [], "files": { "wg-public": { "secret": false } },
+            "share": false, "validation": null, "description": null,
+        }),
+    );
+    fixture.seed_public_output("wg-public", PUBLIC);
+
+    // Nothing has been minted. The finding is about the file that would hold the
+    // value, and the remedy is the run that writes it — named for the entry the
+    // generator is declared on, because one run writes both halves.
+    let ungenerated = fixture
+        .run(&["check", "alice"])
+        .expect_refusal("a check over an unminted public output");
+    ungenerated.says(HEADLINE);
+    ungenerated.says("It is a public output of the 'wg-private' generator.");
+    ungenerated.says("safix generate alice wg-private");
+
+    // Never `set`, and never the ciphertext: a public output has neither, and
+    // an operator sent to either is sent somewhere the value cannot come from.
+    ungenerated.silent_about("safix set alice wg-public");
+    ungenerated.silent_about(&format!("declares 'wg-public' and {ALICE_FILE}"));
+
+    // The value arrives, and the report goes quiet about this entry. Placed
+    // rather than generated: `a_wireguard_keypair_lands_encrypted_and_in_the_
+    // clear_in_one_commit` is where a run writing this file is asserted, and
+    // the subject here is which file the report reads. Nothing else in the tree
+    // moves — the document still holds no `wg-public` key and the entry still
+    // has no generator of its own — so the silence is the public file's doing
+    // and nothing else's. The rest of the fixture's valueless names are still
+    // reported, which is what says the report was produced at all.
+    fixture.write(PUBLIC, "CANARY-a-public-key\n");
+    let minted = fixture.run(&["check", "alice"]);
+    minted.silent_about("wg-public");
+    minted.says("declares 'mail-password'");
+}
+
 /// A directory the kernel's mount table reports as disk-backed, if this machine
 /// has one the suite can reach.
 ///

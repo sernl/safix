@@ -107,7 +107,9 @@ fn push_finding(out: &mut String, finding: &Finding) {
         Finding::SharedStrayMigration { .. } | Finding::SharedStrayRevocation { .. } => {
             push_shared(out, finding);
         }
-        Finding::ValuelessName { .. } | Finding::UnclaimedValue { .. } => push_values(out, finding),
+        Finding::ValuelessName { .. }
+        | Finding::ValuelessPublic { .. }
+        | Finding::UnclaimedValue { .. } => push_values(out, finding),
         Finding::DefinitionDrift { .. } => push_definition(out, finding),
         Finding::RotationDue { .. } => push_rotation(out, finding),
         _ => {}
@@ -403,6 +405,22 @@ fn push_values(out: &mut String, finding: &Finding) {
             } else {
                 remedy(out, &format!("{PROGRAM} set {user} {name}"));
             }
+        }
+
+        Finding::ValuelessPublic {
+            user,
+            name,
+            file,
+            generator,
+        } => {
+            headline(
+                out,
+                &format!(
+                    "flake.safix.users.{user} declares '{name}' and {file} holds no value for it. \
+                     It is a public output of the '{generator}' generator."
+                ),
+            );
+            remedy(out, &format!("{PROGRAM} generate {user} {generator}"));
         }
 
         Finding::UnclaimedValue { file, key } => {
