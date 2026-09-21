@@ -506,6 +506,18 @@
           mode "safix-generate-public" "generators"
             "a_wireguard_keypair_lands_encrypted_and_in_the_clear_in_one_commit";
 
+        # Which file `check` asks about a public output. Its placement carries
+        # the audience's document and a key inside it like every placement, and
+        # that document is never written for it, so a report reading the
+        # document called every public output in the tree valueless and — the
+        # generator being declared on a sibling entry — sent the operator to
+        # `safix set` for a value only a generator can write. Absent, it is one
+        # finding naming the producing entry and its `generate`; present, the
+        # report is silent about it and still speaks about the rest.
+        checks.safix-check-public-output =
+          mode "safix-check-public-output" "generators"
+            "a_public_output_is_judged_by_its_own_file_and_names_its_generator";
+
         # The definition record, and the drift `check` reports over it. A mint
         # leaves one line under `flake.safix.storage.generatorRecords` carrying a
         # digest and none of the value; an edit to the declaration afterwards is

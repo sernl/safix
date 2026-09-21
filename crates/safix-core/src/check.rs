@@ -137,6 +137,29 @@ pub enum Finding {
         generated: bool,
     },
 
+    /// A public output whose plaintext file holds nothing.
+    ///
+    /// Apart from [`Finding::ValuelessName`] because the question is asked of a
+    /// different file and has a different answer. A public output has no
+    /// ciphertext, no key and no creation rule — that is what `secret = false`
+    /// means — so the sops document its placement still names holds nothing for
+    /// it and never will, and only the plaintext file under
+    /// [`crate::public::PREFIX`] can say whether it has been minted.
+    ///
+    /// It is never typed, so there is no `set` remedy to offer: a public output
+    /// exists only as something a generator writes, and that generator is
+    /// declared on another entry, which is the one the remedy has to name.
+    ValuelessPublic {
+        /// The user who declares it.
+        user: String,
+        /// The output's name.
+        name: String,
+        /// The repository-relative path of the plaintext value.
+        file: String,
+        /// The entry the generator writing it is declared on.
+        generator: String,
+    },
+
     /// A value in a governed file that no declaration claims.
     UnclaimedValue {
         /// The repository-relative path.
@@ -495,6 +518,15 @@ fn shared(
 /// because their remedies differ: a valueless name is minted or typed, an
 /// unclaimed value is declared or deleted.
 ///
+/// A public output is asked of its own file rather than of the document its
+/// placement names. The placement of an output declared `secret = false` still
+/// carries a `file` and a `key`, because every placement does, but they
+/// describe a document that is never written — see [`crate::model::Placement`]
+/// — so asking whether that document holds a value answers "no" for every
+/// public output in the tree, generated or not. The file that can answer is
+/// [`crate::model::Placement::public`], which the resolver computes for exactly
+/// these entries and which is already the vault-relative path in vault mode.
+///
 /// The unclaimed half walks the required files rather than the managed ones.
 /// Every key in a file named through `extraGovernedFiles` is unclaimed by
 /// construction — that is what naming it there means — so reporting those would
@@ -513,6 +545,10 @@ fn values(
             continue;
         }
         for (name, placement) in placements.held_by(user).into_iter().flatten() {
+            if let Some(public) = placement.public.as_deref() {
+                findings.extend(public_finding(workspace, placements, user, name, public));
+                continue;
+            }
             if documents.has_value(workspace, &placement.file, &placement.key)? {
                 continue;
             }
@@ -550,6 +586,41 @@ fn values(
         }
     }
     Ok(())
+}
+
+/// What one public output's own file says, and who to name when it says
+/// nothing.
+///
+/// Nothing when the file holds bytes: a minted public output is converged, and
+/// the fact that no ciphertext anywhere holds it is what being public means
+/// rather than a disagreement to report.
+///
+/// The remedy names the entry the generator is declared on rather than the
+/// output, because that is the entry the run is of: one run of one generator
+/// writes every one of its outputs, and naming each output separately would
+/// read as several runs to make.
+///
+/// The producer is looked up rather than assumed, and the output's own name is
+/// the fallback, so that a tree whose resolver said "public" and whose
+/// placements name no producer still prints a command `generate` accepts.
+fn public_finding(
+    workspace: &Workspace,
+    placements: &Placements,
+    user: &str,
+    name: &str,
+    public: &str,
+) -> Option<Finding> {
+    if crate::public::holds_a_value(&workspace.vault_absolute(public)) {
+        return None;
+    }
+    Some(Finding::ValuelessPublic {
+        user: user.to_owned(),
+        name: name.to_owned(),
+        file: public.to_owned(),
+        generator: placements
+            .producer_of(user, name)
+            .map_or_else(|| name.to_owned(), |(entry, _)| entry.to_owned()),
+    })
 }
 
 /// The two questions asked of one entry at a time: whether a generated value's
@@ -730,6 +801,138 @@ mod tests {
         );
         assert_eq!(parent_of("secrets.yaml"), ".");
         assert_eq!(parent_of("/secrets.yaml"), "/");
+    }
+
+    /// One generator, two outputs: the entry it is declared on, which is
+    /// encrypted, and a public half it writes.
+    ///
+    /// The shape `resolve.nix` emits, and the one the false positive lived in:
+    /// the public entry carries the audience's document and a key inside it
+    /// like every placement, carries no generator of its own because the
+    /// generator is declared on its sibling, and carries `public` because it is
+    /// an output declared `secret = false`. `logicalPublic` is `null`, which is
+    /// what every placement outside vault mode carries and what a check reading
+    /// it instead of `public` would find nothing in.
+    fn keypair() -> Placements {
+        serde_json::from_value(serde_json::json!({
+            "alice": {
+                "wg-private": {
+                    "file": "secrets/safix/users/alice/secrets.yaml", "key": "wg-private",
+                    "origin": "private", "owner": "alice", "shared": false,
+                    "generator": {
+                        "script": "true", "network": false, "runtimeInputs": [],
+                        "prompts": {}, "dependencies": [],
+                        "files": { "wg-public": { "secret": false } },
+                        "share": false, "validation": null, "description": null,
+                    },
+                    "public": null,
+                    "definitionRecord": "state/safix/definitions/alice/wg-private",
+                    "logicalFile": null, "logicalKey": null, "logicalPublic": null,
+                    "logicalRecord": null,
+                    "stampRecord": "state/safix/definitions/alice/wg-private.stamps",
+                    "logicalStamp": null, "rotation": null,
+                },
+                "wg-public": {
+                    "file": "secrets/safix/users/alice/secrets.yaml", "key": "wg-public",
+                    "origin": "private", "owner": "alice", "shared": false,
+                    "generator": null,
+                    "public": PUBLIC,
+                    "definitionRecord": "state/safix/definitions/alice/wg-public",
+                    "logicalFile": null, "logicalKey": null, "logicalPublic": null,
+                    "logicalRecord": null,
+                    "stampRecord": "state/safix/definitions/alice/wg-public.stamps",
+                    "logicalStamp": null, "rotation": null,
+                },
+            }
+        }))
+        .expect("the fixture is the shape the resolver emits")
+    }
+
+    const PUBLIC: &str = "public/safix/users/alice/wg-public/value";
+
+    /// A tree with no git and no nix in it: [`public_finding`] resolves a path
+    /// under the vault root and reads a plaintext file, and reaches neither.
+    struct Tree(std::path::PathBuf);
+
+    impl Tree {
+        fn new(label: &str) -> Self {
+            let root =
+                std::env::temp_dir().join(format!("safix-check-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).expect("a temporary directory can be made");
+            Self(root)
+        }
+
+        fn workspace(&self) -> Workspace {
+            Workspace::at(
+                self.0.clone(),
+                self.0.clone(),
+                crate::git::Git::default(),
+                crate::nix::Nix::from_environment(),
+                crate::sops::Sops::from_environment(),
+            )
+        }
+
+        fn mint(&self, relative: &str, bytes: &str) {
+            let path = self.0.join(relative);
+            std::fs::create_dir_all(path.parent().expect("the value has a parent"))
+                .expect("the value's directory can be made");
+            std::fs::write(path, bytes).expect("the value can be written");
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A minted public output is converged, and the ciphertext that does not
+    /// hold it is not a disagreement.
+    ///
+    /// The regression this pins: every field the old reading consulted says
+    /// "no value" here. The document the placement names does not exist, the
+    /// key inside it holds nothing, the entry carries no generator of its own,
+    /// and `logicalPublic` is `null`. The one field that can answer is
+    /// `public`, and the file it names holds bytes.
+    #[test]
+    fn a_minted_public_output_is_not_a_finding() {
+        let tree = Tree::new("minted");
+        tree.mint(PUBLIC, "CANARY-a-public-key\n");
+        assert_eq!(
+            public_finding(&tree.workspace(), &keypair(), "alice", "wg-public", PUBLIC),
+            None
+        );
+    }
+
+    /// An empty file is what a truncated write leaves behind, so it holds
+    /// nothing — the same answer [`crate::public::holds_a_value`] gives the
+    /// executor, asked here so the two cannot disagree about whether a run is
+    /// still owed.
+    #[test]
+    fn an_empty_public_file_holds_nothing() {
+        let tree = Tree::new("empty");
+        tree.mint(PUBLIC, "");
+        assert!(
+            public_finding(&tree.workspace(), &keypair(), "alice", "wg-public", PUBLIC).is_some()
+        );
+    }
+
+    /// An unminted public output is reported against its own file, and the
+    /// remedy names the entry the generator is declared on rather than the
+    /// output, which is never typed and has no `set`.
+    #[test]
+    fn an_unminted_public_output_names_the_generator_that_writes_it() {
+        let tree = Tree::new("unminted");
+        assert_eq!(
+            public_finding(&tree.workspace(), &keypair(), "alice", "wg-public", PUBLIC),
+            Some(Finding::ValuelessPublic {
+                user: String::from("alice"),
+                name: String::from("wg-public"),
+                file: String::from(PUBLIC),
+                generator: String::from("wg-private"),
+            })
+        );
     }
 }
 
