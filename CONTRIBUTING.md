@@ -41,13 +41,16 @@ The declared platforms are `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`;
 ## Where the suite stands
 
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are all here and green under `nix flake check`.
-Every push and pull request builds the full check surface on both Linux architectures. The GitHub macOS runner builds the scoped surface described below. A separate job evaluates the output surface for all three declared platforms.
+Every push and pull request runs build gates on both Linux architectures and macOS, with the runner exclusions described below. A separate job evaluates the output surface for all three declared platforms.
 
-Three platform conditions decide what a given machine actually runs, and each of them is a real gap rather than a formality.
+Four platform conditions decide what a given machine actually runs, and each of them is a real gap rather than a formality.
 A skipped check is not a passing one: it made no claim on that platform, so read the summary of the leg you are on before you read the green tick.
 
 Ubuntu denies unprivileged user namespaces, and the checks that drive a generator are made of them.
 `.github/workflows/check.yml` carries the one line a linux runner has to be told first, and a local linux machine with the namespaces enabled runs the same checks unaided.
+
+The installer VM needs KVM. A Linux runner without `/dev/kvm` excludes checks whose derivations require that feature and lists them in its job summary.
+GitHub's ARM Linux runner currently excludes `safix-installer-vm`; its x86_64 runner exposes KVM and runs the full surface.
 
 darwin has no tmpfs, so `Staging::establish` refuses there and `--allow-disk-staging` is the acknowledgement the runtime documents.
 The suite runs under that flag on darwin, and the refusal itself is asserted.
