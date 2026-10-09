@@ -143,8 +143,8 @@ pub enum Finding {
     /// different file and has a different answer. A public output has no
     /// ciphertext, no key and no creation rule — that is what `secret = false`
     /// means — so the sops document its placement still names holds nothing for
-    /// it and never will, and only the plaintext file under
-    /// [`crate::public::PREFIX`] can say whether it has been minted.
+    /// it and never will. Only the plaintext file named by
+    /// [`crate::model::Placement::public`] can say whether it has been minted.
     ///
     /// It is never typed, so there is no `set` remedy to offer: a public output
     /// exists only as something a generator writes, and that generator is

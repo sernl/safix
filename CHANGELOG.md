@@ -18,10 +18,17 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-10
+
 ### Fixed
 
 - `safix check` judges a public output by its own plaintext file rather than by the encrypted document its placement also names. An output declared `files.<name>.secret = false` has no ciphertext, so the old reading reported every one of them as valueless — minted or not — and, the generator being declared on a sibling entry, offered `safix set <user> <name>` for a value only a generator can write. A minted public output is now silent; an unminted one is one finding naming its own path under `flake.safix.storage.plaintextOutputs` and the run that writes it, `safix generate <user> <producer>`. The path is read from the placement's emitted `public` field, so the reading is correct in vault mode as well. No nix change: `flake.safix.lib.placements` already carried it.
 - `safix-core`: `check::Finding` gains the `ValuelessPublic` variant. The enum is `#[non_exhaustive]`, so this is additive.
+
+### Maintenance
+
+- Reconcile archived OpenSpec closure records with the landed implementation, later contract replacements and verification evidence; synchronize and archive `check-judges-public-outputs`. Historical exceptions remain explicit rather than being relabelled as passing checks.
+- Correct contributor documentation about Linux ARM build coverage and repair the public-output finding's Rust documentation link.
 
 ## [0.3.0] — 2026-09-21
 

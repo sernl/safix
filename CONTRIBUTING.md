@@ -36,12 +36,12 @@ nix build .#checks.x86_64-linux.safix-set-new
 ```
 
 `nix flake check` evaluates the current system only.
-`nix flake show` currently fails for a reason that predates the rust work: the flake declares a darwin platform the pinned nixpkgs has dropped.
+The declared platforms are `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`; `nix flake show --all-systems` checks that each still exposes its output surface, not that every check builds.
 
 ## Where the suite stands
 
 The evaluation half, the command, the exported checks, the materializations and the two consumption modules are all here and green under `nix flake check`.
-Every push and pull request builds the whole surface on x86_64-linux and aarch64-darwin, and evaluates it for aarch64-linux, which nothing there builds.
+Every push and pull request builds the full check surface on both Linux architectures. The GitHub macOS runner builds the scoped surface described below. A separate job evaluates the output surface for all three declared platforms.
 
 Three platform conditions decide what a given machine actually runs, and each of them is a real gap rather than a formality.
 A skipped check is not a passing one: it made no claim on that platform, so read the summary of the leg you are on before you read the green tick.
