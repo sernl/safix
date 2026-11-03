@@ -262,29 +262,7 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
         String::from_utf8_lossy(&taken.stderr)
     );
 
-    let opened = sops(
-        &[
-            "decrypt",
-            "--input-type",
-            "binary",
-            "--output-type",
-            "binary",
-            backup.to_str().unwrap(),
-        ],
-        &recovery,
-    );
-    assert!(
-        opened.status.success(),
-        "the recovery identity cannot open the backup"
-    );
-    let package: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    let mut roster: Vec<String> = package
-        .get("publicRecipients")
-        .and_then(serde_json::Value::as_array)
-        .expect("the backup names its recipients")
-        .iter()
-        .map(|recipient| recipient.as_str().unwrap().to_owned())
-        .collect();
+    let mut roster = backed_up_recipients(&backup, &recovery);
     roster.sort();
     let mut expected = vec![classic, hybrid.clone()];
     expected.sort();
@@ -353,4 +331,32 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
         String::from_utf8(read.stdout).unwrap(),
         "value: CANARY-hybrid\n"
     );
+}
+
+/// The public recipients a backup package names, read by opening it with the
+/// recovery identity.
+fn backed_up_recipients(backup: &Path, recovery: &Path) -> Vec<String> {
+    let opened = sops(
+        &[
+            "decrypt",
+            "--input-type",
+            "binary",
+            "--output-type",
+            "binary",
+            backup.to_str().unwrap(),
+        ],
+        recovery,
+    );
+    assert!(
+        opened.status.success(),
+        "the recovery identity cannot open the backup"
+    );
+    let package: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    package
+        .get("publicRecipients")
+        .and_then(serde_json::Value::as_array)
+        .expect("the backup names its recipients")
+        .iter()
+        .map(|recipient| recipient.as_str().unwrap().to_owned())
+        .collect()
 }

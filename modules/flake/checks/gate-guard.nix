@@ -63,6 +63,9 @@
         # on it rather than left for the next one to trip over.
         "safix-picker"
         "safix-portability-system"
+        # `safix-wrapper-path` is declared linux-only in rust.nix: the wrapper
+        # text is the same on every platform, so one platform reads it.
+        "safix-wrapper-path"
       ];
 
       isLinuxSystem = system: lib.hasSuffix "-linux" system;
