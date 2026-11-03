@@ -18,6 +18,16 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-04
+
+safix 0.4.0 takes what the upstream projects it borrows from fixed or learned between July and November 2026 — three systemd ordering fixes from sops-nix, the Vault allowlist from sops, early-user secrets and the `--check` idea from agenix, editor hardening and stale-derivation detection from agenix-rekey, clan's new deployed paths — and adds the one algorithmic capability the pinned sops already carried: hybrid post-quantum age recipients.
+`Cargo.toml` reads `0.4.0`.
+
+**Breaking** (nix surface): `safix.installer.afterUnits` now refuses, at evaluation, a service this configuration defines with default dependencies on, because the installer is ordered before `sysinit.target` and such a unit would form a cycle; `safix-install-users-secrets` no longer orders after `local-fs.target`.
+**Breaking** (`safix-core`): `identity::generate_age` takes a `hybrid: bool`; `check::Finding` gains four variants and a `fails()` method, and `safix check`'s exit status follows failing findings only; the minimum rust toolchain is 1.99.
+**Breaking** (migration output): the agenix target writes a `group` for every entry and no longer refuses a root-owned `neededForUsers` entry.
+The survey these changes came from is `docs/notes/research/upstream-survey-2026-11.md`.
+
 ### The installer's units are ordered before the services that read them and stop cleanly at shutdown
 
 `safix-install-secrets` now runs before `sysinit.target`, so a unit with default dependencies no longer races the installer for its secret, and it is ordered before and conflicts with `shutdown.target`, so it stops with the system rather than at the final kill.
