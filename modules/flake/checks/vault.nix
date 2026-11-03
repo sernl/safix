@@ -233,7 +233,9 @@
       # The opaque name `tag` gives the readable audience record path.
       audienceUnder =
         tag:
-        "state/${resolve.opaqueOf namingKey tag (relative storage.generatorRecords agedNoVault.audienceRecord)}";
+        "state/${
+          resolve.opaqueOf namingKey tag (relative storage.generatorRecords agedNoVault.audienceRecord)
+        }";
 
       # 1.6's own claim, over `sopsFile` itself rather than the
       # root-independent `placements.*.file` — `resolveSet` is what

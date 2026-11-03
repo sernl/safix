@@ -250,7 +250,8 @@ fn refuse_bad_recipient(recipient: &str) -> Result<()> {
         });
     }
     if let Some(body) = recipient.strip_prefix("age1pq1") {
-        if body.len() == HYBRID_RECIPIENT_BODY && body.chars().all(|letter| BECH32.contains(letter)) {
+        if body.len() == HYBRID_RECIPIENT_BODY && body.chars().all(|letter| BECH32.contains(letter))
+        {
             return Ok(());
         }
         return Err(Error::BadRecipient {

@@ -223,7 +223,11 @@ fn adduser_declares_a_hybrid_recipient_minted_by_the_pinned_age_keygen() {
     std::fs::remove_file(&key).unwrap();
     let recipient = String::from_utf8(derived.stdout).unwrap().trim().to_owned();
     assert!(recipient.starts_with("age1pq1"), "not a hybrid recipient");
-    assert_eq!(recipient.len(), 1959, "the pinned hybrid recipient changed size");
+    assert_eq!(
+        recipient.len(),
+        1959,
+        "the pinned hybrid recipient changed size"
+    );
     let head = fixture.head();
 
     let truncated = &recipient[..recipient.len() - 1];

@@ -214,7 +214,11 @@ fn age_identities(fixture: &Fixture, name: &str, hybrid: &[bool]) -> (PathBuf, V
             command.arg("-pq");
         }
         assert!(command.arg("-o").arg(&one).status().unwrap().success());
-        let derived = Command::new("age-keygen").arg("-y").arg(&one).output().unwrap();
+        let derived = Command::new("age-keygen")
+            .arg("-y")
+            .arg(&one)
+            .output()
+            .unwrap();
         recipients.push(String::from_utf8(derived.stdout).unwrap().trim().to_owned());
         joined.extend(std::fs::read(&one).unwrap());
         std::fs::remove_file(&one).unwrap();
@@ -239,8 +243,7 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
     let [classic, hybrid]: [String; 2] = own.try_into().unwrap();
     assert!(classic.starts_with("age1") && !classic.starts_with("age1pq1"));
     assert!(hybrid.starts_with("age1pq1"));
-    let (recovery, recovery_recipients) =
-        age_identities(&fixture, "recovery-identity", &[true]);
+    let (recovery, recovery_recipients) = age_identities(&fixture, "recovery-identity", &[true]);
     let [recovery_recipient]: [String; 1] = recovery_recipients.try_into().unwrap();
     assert!(recovery_recipient.starts_with("age1pq1"));
 
@@ -261,12 +264,19 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
 
     let opened = sops(
         &[
-            "decrypt", "--input-type", "binary", "--output-type", "binary",
+            "decrypt",
+            "--input-type",
+            "binary",
+            "--output-type",
+            "binary",
             backup.to_str().unwrap(),
         ],
         &recovery,
     );
-    assert!(opened.status.success(), "the recovery identity cannot open the backup");
+    assert!(
+        opened.status.success(),
+        "the recovery identity cannot open the backup"
+    );
     let package: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     let mut roster: Vec<String> = package
         .get("publicRecipients")
@@ -278,7 +288,10 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
     roster.sort();
     let mut expected = vec![classic, hybrid.clone()];
     expected.sort();
-    assert_eq!(roster, expected, "the backup's roster is not both identities");
+    assert_eq!(
+        roster, expected,
+        "the backup's roster is not both identities"
+    );
 
     let empty = fixture.scratch_dir("restored-identities");
     std::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -301,8 +314,16 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
     std::fs::write(&plaintext, "value: CANARY-hybrid\n").unwrap();
     let wrapped = sops(
         &[
-            "--encrypt", "--config", "/dev/null", "--age", &hybrid, "--input-type", "yaml",
-            "--output-type", "yaml", plaintext.to_str().unwrap(),
+            "--encrypt",
+            "--config",
+            "/dev/null",
+            "--age",
+            &hybrid,
+            "--input-type",
+            "yaml",
+            "--output-type",
+            "yaml",
+            plaintext.to_str().unwrap(),
         ],
         &recovery,
     );
@@ -315,7 +336,11 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
     std::fs::write(&ciphertext, wrapped.stdout).unwrap();
     let read = sops(
         &[
-            "decrypt", "--input-type", "yaml", "--output-type", "yaml",
+            "decrypt",
+            "--input-type",
+            "yaml",
+            "--output-type",
+            "yaml",
             ciphertext.to_str().unwrap(),
         ],
         &restored,
@@ -324,5 +349,8 @@ fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
         read.status.success(),
         "the restored identity file cannot open a file wrapped to the hybrid recipient alone"
     );
-    assert_eq!(String::from_utf8(read.stdout).unwrap(), "value: CANARY-hybrid\n");
+    assert_eq!(
+        String::from_utf8(read.stdout).unwrap(),
+        "value: CANARY-hybrid\n"
+    );
 }

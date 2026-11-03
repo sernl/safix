@@ -55,12 +55,14 @@ let
     identitySshKeyPaths
     ++ lib.optional (cfg.identity.keyFile != null) (toString cfg.identity.keyFile)
     ++ lib.optional (cfg.identity.gnupgHome != null) (toString cfg.identity.gnupgHome);
-  defaultDependenciesOff = unit: lib.elem (unit.unitConfig.DefaultDependencies or true) [
-    false
-    "no"
-    "false"
-    "0"
-  ];
+  defaultDependenciesOff =
+    unit:
+    lib.elem (unit.unitConfig.DefaultDependencies or true) [
+      false
+      "no"
+      "false"
+      "0"
+    ];
   lateAfterUnits = lib.filter (
     name:
     let

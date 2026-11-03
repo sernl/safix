@@ -76,9 +76,11 @@
       # plugin on `PATH` only, and a default would let `enroll` generate a card
       # identity with this plugin while sops wraps to it with the operator's.
       # Without one, `enroll` and sops resolve the same binary.
-      plugins = pkgs.lib.optionals (pkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.age-plugin-yubikey) [
-        pkgs.age-plugin-yubikey
-      ];
+      plugins =
+        pkgs.lib.optionals (pkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.age-plugin-yubikey)
+          [
+            pkgs.age-plugin-yubikey
+          ];
     in
     {
       packages.safix = craneLib.buildPackage (

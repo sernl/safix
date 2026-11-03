@@ -32,7 +32,11 @@ fn identity_file(fixture: &Fixture) -> PathBuf {
 fn keygen(fixture: &Fixture, file: &Path, arguments: &[&str]) -> Run {
     let mut full = vec!["keygen"];
     full.extend_from_slice(arguments);
-    fixture.run_env(&full, None, &[("SAFIX_AGE_KEY_FILE", file.to_str().unwrap())])
+    fixture.run_env(
+        &full,
+        None,
+        &[("SAFIX_AGE_KEY_FILE", file.to_str().unwrap())],
+    )
 }
 
 /// What `age-keygen -y` derives from one private line.

@@ -1142,7 +1142,11 @@ mod tests {
 
     #[test]
     fn a_sops_set_may_mix_hybrid_and_classic() {
-        let recipients = [hybrid('q'), CLASSIC.to_owned(), "ssh-ed25519 AAAA".to_owned()];
+        let recipients = [
+            hybrid('q'),
+            CLASSIC.to_owned(),
+            "ssh-ed25519 AAAA".to_owned(),
+        ];
         let (age, _) = recipient_sets(&destination(Format::Yaml), &recipients)
             .expect("sops wraps each recipient on its own");
         assert_eq!(age.len(), 3);
@@ -1167,6 +1171,10 @@ mod tests {
             key: String::new(),
         });
         let _ = std::fs::remove_file(&path);
-        assert!(admitted.is_ok(), "{:?}", admitted.err().map(|error| error.to_string()));
+        assert!(
+            admitted.is_ok(),
+            "{:?}",
+            admitted.err().map(|error| error.to_string())
+        );
     }
 }

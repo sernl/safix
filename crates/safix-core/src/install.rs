@@ -2320,10 +2320,7 @@ mod tests {
     ) -> impl FnMut(&str, &std::ffi::CStr) -> rustix::io::Result<()> {
         let mut answers = answers.into_iter();
         move |filesystem: &str, data: &std::ffi::CStr| {
-            attempts.push((
-                filesystem.to_owned(),
-                data.to_string_lossy().into_owned(),
-            ));
+            attempts.push((filesystem.to_owned(), data.to_string_lossy().into_owned()));
             answers.next().expect("the script answers every attempt")
         }
     }
@@ -2368,10 +2365,7 @@ mod tests {
 
         assert_eq!(refusal.code().as_str(), "safix::install_mount_failed");
         assert_eq!(refused_filesystem(&refusal), Some("tmpfs"));
-        assert_eq!(
-            attempts,
-            vec![attempted("tmpfs", "noswap,mode=0751")]
-        );
+        assert_eq!(attempts, vec![attempted("tmpfs", "noswap,mode=0751")]);
     }
 
     #[test]
@@ -2399,10 +2393,7 @@ mod tests {
             mount_attempts(Path::new("/run/safix.d"), true, mount).expect("noswap is accepted");
 
         assert_eq!(mounted, "tmpfs");
-        assert_eq!(
-            attempts,
-            vec![attempted("tmpfs", "noswap,mode=0751")]
-        );
+        assert_eq!(attempts, vec![attempted("tmpfs", "noswap,mode=0751")]);
     }
 
     #[test]

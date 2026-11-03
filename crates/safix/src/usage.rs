@@ -884,8 +884,10 @@ ageKeyFile, ageSshKeyPaths and gnupgHome. Ambient keys cannot satisfy target
 verification. Every candidate must decrypt byte-identically before any output
 is published. Existing outputs are refused. Sources are always retained.
 Unsupported target deployment semantics are refused rather than dropped.
-Templates use <safix:secret-name> references. Agenix cannot retain templates,
-service hooks or early-user metadata. Native sops-nix needs whole binary files
+Templates use <safix:secret-name> references. Agenix cannot retain templates or
+service hooks. An early-user entry is published as an ordinary agenix entry,
+because agenix installs every secret before user creation. The agenix target
+is written for agenix 0.18.0 or later. Native sops-nix needs whole binary files
 for binary or intentional empty values, not Safix's keyed byte envelope.
 
 \u{2500}\u{2500} interruption and recovery \u{2500}\u{2500}
