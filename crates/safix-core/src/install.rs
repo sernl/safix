@@ -33,11 +33,11 @@
 //!
 //! # Privilege without `unsafe`
 //!
-//! `mount(2)` and the filesystem-magic read are the two syscalls here the
-//! standard library does not expose, and both are reached through `rustix`'s
-//! safe wrappers. The workspace forbids unsafe code with no per-module
-//! exception, and a new syscall is exactly the occasion on which such a rule
-//! acquires its first one.
+//! `mount(2)` is the one syscall here the standard library does not expose,
+//! and it is reached through `rustix`'s safe wrapper; whether a store is
+//! already mounted is read from `/proc/self/mountinfo` as text. The workspace
+//! forbids unsafe code with no per-module exception, and a new syscall is
+//! exactly the occasion on which such a rule acquires its first one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{DirBuilder, File, OpenOptions, Permissions};
@@ -91,12 +91,6 @@ const RESTART_LIST: &str = "/run/nixos/activation-restart-list";
 
 /// Where an activation script expects to find the units to reload.
 const RELOAD_LIST: &str = "/run/nixos/activation-reload-list";
-
-/// `statfs`'s answer for tmpfs, from `linux/magic.h`.
-const TMPFS_MAGIC: i128 = 0x0102_1994;
-
-/// `statfs`'s answer for ramfs, from `linux/magic.h`.
-const RAMFS_MAGIC: i128 = 0x8584_58f6;
 
 /// The mode every directory of the store is made at.
 ///
@@ -1245,7 +1239,8 @@ fn missing_key(entry: &ManifestSecret) -> Error {
 ///
 /// # Errors
 ///
-/// [`Error::InstallMountFailed`] when the mount cannot be made, and
+/// [`Error::InstallMountFailed`] when the mount cannot be made,
+/// [`Error::FileUnreadable`] when the mount table cannot be read, and
 /// [`Error::FileUnwritable`] when the directory cannot be made or owned.
 fn mount_store(
     manifest: &Manifest,
@@ -1268,7 +1263,11 @@ fn mount_store(
         return Ok(());
     }
 
-    if !store_already_mounted(manifest.use_tmpfs, filesystem_magic(mount_point)) {
+    let canonical =
+        std::fs::canonicalize(mount_point).map_err(|cause| unwritable(mount_point, cause))?;
+    let mountinfo = read_mountinfo()?;
+    let current = mount_entry_at(&mountinfo, &canonical);
+    if !store_already_mounted(manifest.use_tmpfs, current.as_ref()) {
         let mounted = mount_memory_backed(mount_point, manifest.use_tmpfs)?;
         if manifest.use_tmpfs && mounted == "ramfs" {
             note(
@@ -1284,31 +1283,120 @@ fn mount_store(
     own(mount_point, 0, keys_gid)
 }
 
-/// Whether the filesystem already at the mount point serves the request.
-///
-/// A tmpfs request accepts ramfs as well, because ramfs is what the
-/// `noswap` fallback mounts, and mounting again on top of it at every
-/// activation would stack stores. A ramfs request accepts only ramfs: a tmpfs
-/// mounted by an earlier safix's fallback may lack `noswap`, and `statfs` does
-/// not report mount options.
-///
-/// So a live change of type is not symmetric. Turning tmpfs on for a running
-/// host keeps the existing ramfs until reboot; turning it off mounts ramfs over
-/// the existing tmpfs, whose earlier generations stay in memory, unreachable,
-/// until reboot.
-fn store_already_mounted(use_tmpfs: bool, magic: Option<i128>) -> bool {
-    match magic {
-        Some(RAMFS_MAGIC) => true,
-        Some(TMPFS_MAGIC) => use_tmpfs,
-        _ => false,
-    }
+/// Where Linux lists the mounts of the calling process's namespace.
+const MOUNTINFO: &str = "/proc/self/mountinfo";
+
+/// The mount table, read whole; a failure is refused, because guessing past
+/// it would stack a store at every activation.
+#[cfg(target_os = "linux")]
+fn read_mountinfo() -> Result<String> {
+    std::fs::read_to_string(MOUNTINFO).map_err(|cause| Error::FileUnreadable {
+        path: MOUNTINFO.to_owned(),
+        cause,
+    })
 }
 
-/// The magic number of the filesystem mounted at this path.
-fn filesystem_magic(path: &Path) -> Option<i128> {
-    rustix::fs::statfs(path).ok().map(|answer| {
-        let kind: i128 = answer.f_type.into();
-        kind
+/// The platforms with no mount table; [`mount_memory_backed`] refuses there.
+#[cfg(not(target_os = "linux"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the signature matches the linux reader"
+)]
+fn read_mountinfo() -> Result<String> {
+    Ok(String::new())
+}
+
+/// One line of `/proc/self/mountinfo`, borrowed from the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MountEntry<'table> {
+    /// The mount point as the kernel writes it, with `\ooo` octal escapes.
+    mount_point: &'table str,
+    /// The filesystem type, the first field after the lone `-`.
+    filesystem: &'table str,
+    /// The super-block options, the third field after the lone `-`.
+    super_options: &'table str,
+}
+
+/// One mount table line, or none when it does not have the documented shape.
+///
+/// The mount point is field 5; the optional fields after the mount options run
+/// to a lone `-`, after which come the type, the source and the super-block
+/// options (proc(5)).
+fn parse_mount_entry(line: &str) -> Option<MountEntry<'_>> {
+    let mut fields = line.split(' ');
+    let mount_point = fields.nth(4)?;
+    let mut after = fields.skip_while(|field| *field != "-").skip(1);
+    let filesystem = after.next()?;
+    let _source = after.next()?;
+    let super_options = after.next()?;
+    Some(MountEntry {
+        mount_point,
+        filesystem,
+        super_options,
+    })
+}
+
+/// The topmost mount at exactly this path, if the path is a mount point.
+///
+/// The kernel lists a namespace's mounts in the order they were made, so of
+/// two stacked at one point the later line is the one the path reaches.
+fn mount_entry_at<'table>(mountinfo: &'table str, path: &Path) -> Option<MountEntry<'table>> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let wanted = path.as_os_str().as_bytes();
+    mountinfo
+        .lines()
+        .rev()
+        .filter_map(parse_mount_entry)
+        .find(|entry| unescape_octal(entry.mount_point).eq(wanted.iter().copied()))
+}
+
+/// The bytes of a mount table field, with each `\ooo` escape decoded.
+///
+/// The kernel escapes space, tab, newline and backslash this way; a backslash
+/// not followed by three octal digits is kept as it is.
+fn unescape_octal(field: &str) -> impl Iterator<Item = u8> + '_ {
+    let mut pieces = field.split('\\');
+    let first = pieces.next().unwrap_or_default();
+    let escaped = pieces.map(|piece| {
+        let code = piece
+            .get(..3)
+            .filter(|digits| digits.bytes().all(|digit| matches!(digit, b'0'..=b'7')))
+            .and_then(|digits| u8::from_str_radix(digits, 8).ok());
+        match code {
+            Some(byte) => (byte, piece.get(3..).unwrap_or_default()),
+            None => (b'\\', piece),
+        }
+    });
+    first
+        .bytes()
+        .chain(escaped.flat_map(|(byte, rest)| std::iter::once(byte).chain(rest.bytes())))
+}
+
+/// Whether the mount at the mount point, if it is one, serves the request.
+///
+/// Only a mount at the path itself counts: a directory on a tmpfs `/run` is
+/// not a store. ramfs is never swapped, so it is accepted for either request;
+/// for a tmpfs request that is what the `noswap` fallback mounts, and mounting
+/// again on top of it at every activation would stack stores. A tmpfs is
+/// accepted only for a tmpfs request and only with `noswap` among its
+/// super-block options. A ramfs request accepts only ramfs.
+///
+/// Anything else is mounted over, and what it covers stays in memory,
+/// unreachable, until reboot. So turning tmpfs on for a running host keeps the
+/// existing ramfs; turning it off mounts ramfs over the existing tmpfs; and a
+/// tmpfs store without `noswap` gets a `noswap` store over it.
+fn store_already_mounted(use_tmpfs: bool, entry: Option<&MountEntry<'_>>) -> bool {
+    entry.is_some_and(|entry| match entry.filesystem {
+        "ramfs" => true,
+        "tmpfs" => {
+            use_tmpfs
+                && entry
+                    .super_options
+                    .split(',')
+                    .any(|option| option == "noswap")
+        }
+        _ => false,
     })
 }
 
@@ -2396,24 +2484,115 @@ mod tests {
         assert_eq!(attempts, vec![attempted("tmpfs", "noswap,mode=0751")]);
     }
 
-    #[test]
-    fn a_tmpfs_request_accepts_an_existing_ramfs() {
-        assert!(
-            store_already_mounted(true, Some(RAMFS_MAGIC)),
-            "a fallback store is not mounted over on the next activation"
+    /// A mount table with the root and a tmpfs `/run`, then `store` lines.
+    fn mount_table(store: &[&str]) -> String {
+        let mut table = String::from(
+            "25 1 254:1 / / rw,relatime shared:1 - ext4 /dev/vda rw\n\
+             26 25 0:23 / /run rw,nosuid,nodev shared:2 - tmpfs tmpfs rw,size=1024k,mode=755\n",
         );
-        assert!(store_already_mounted(true, Some(TMPFS_MAGIC)));
-        assert!(!store_already_mounted(true, None));
+        for line in store {
+            table.push_str(line);
+            table.push('\n');
+        }
+        table
+    }
+
+    /// The reuse decision for a request against the store lines of a table.
+    fn reused(use_tmpfs: bool, store: &[&str]) -> bool {
+        let table = mount_table(store);
+        let entry = mount_entry_at(&table, Path::new("/run/safix.d"));
+        store_already_mounted(use_tmpfs, entry.as_ref())
+    }
+
+    const RAMFS_STORE: &str =
+        "40 26 0:40 / /run/safix.d rw,nosuid,nodev,noexec,relatime - ramfs ramfs rw,mode=751";
+    const NOSWAP_STORE: &str = "41 26 0:41 / /run/safix.d rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=751,noswap";
+    const SWAPPABLE_STORE: &str =
+        "42 26 0:42 / /run/safix.d rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=751";
+
+    #[test]
+    fn a_directory_on_a_tmpfs_run_is_not_a_store() {
+        assert!(
+            !reused(true, &[]),
+            "a fresh directory under a tmpfs /run is not its own mount"
+        );
+        assert!(!reused(false, &[]));
     }
 
     #[test]
-    fn a_ramfs_request_does_not_accept_an_existing_tmpfs() {
+    fn a_ramfs_store_is_reused_for_either_request() {
         assert!(
-            !store_already_mounted(false, Some(TMPFS_MAGIC)),
-            "a tmpfs may lack noswap, and statfs cannot say"
+            reused(true, &[RAMFS_STORE]),
+            "a fallback store is not mounted over on the next activation"
         );
-        assert!(store_already_mounted(false, Some(RAMFS_MAGIC)));
-        assert!(!store_already_mounted(false, None));
+        assert!(reused(false, &[RAMFS_STORE]));
+    }
+
+    #[test]
+    fn a_noswap_tmpfs_store_is_reused_for_a_tmpfs_request() {
+        assert!(reused(true, &[NOSWAP_STORE]));
+    }
+
+    #[test]
+    fn a_tmpfs_store_without_noswap_is_mounted_over() {
+        assert!(
+            !reused(true, &[SWAPPABLE_STORE]),
+            "a swappable tmpfs store is never reused"
+        );
+    }
+
+    #[test]
+    fn a_ramfs_request_does_not_accept_a_noswap_tmpfs() {
+        assert!(
+            !reused(false, &[NOSWAP_STORE]),
+            "a ramfs request accepts only ramfs"
+        );
+        assert!(!reused(false, &[SWAPPABLE_STORE]));
+    }
+
+    #[test]
+    fn noswap_must_be_a_whole_option() {
+        assert!(!reused(
+            true,
+            &["43 26 0:43 / /run/safix.d rw - tmpfs tmpfs rw,mode=751,noswapfile"]
+        ));
+    }
+
+    #[test]
+    fn the_topmost_of_stacked_mounts_decides() {
+        assert!(
+            reused(true, &[SWAPPABLE_STORE, NOSWAP_STORE]),
+            "a noswap store mounted over a swappable one is reused"
+        );
+        assert!(!reused(true, &[NOSWAP_STORE, SWAPPABLE_STORE]));
+    }
+
+    #[test]
+    fn an_escaped_mount_point_is_decoded() {
+        let table = mount_table(&[
+            "44 26 0:44 / /run/safix\\040store.d rw - ramfs ramfs rw,mode=751",
+            "45 26 0:45 / /run/back\\134slash rw - ramfs ramfs rw,mode=751",
+        ]);
+        let spaced = mount_entry_at(&table, Path::new("/run/safix store.d"));
+        assert!(store_already_mounted(false, spaced.as_ref()));
+        assert!(mount_entry_at(&table, Path::new("/run/safix\\040store.d")).is_none());
+        assert!(mount_entry_at(&table, Path::new("/run/back\\slash")).is_some());
+    }
+
+    #[test]
+    fn a_line_without_the_separator_is_skipped() {
+        assert_eq!(
+            parse_mount_entry("40 26 0:40 / /run/safix.d rw ramfs ramfs rw"),
+            None
+        );
+        assert_eq!(
+            parse_mount_entry(RAMFS_STORE),
+            Some(MountEntry {
+                mount_point: "/run/safix.d",
+                filesystem: "ramfs",
+                super_options: "rw,mode=751",
+            })
+        );
     }
 
     /// A scratch directory of this module's own, removed by nothing: the tests

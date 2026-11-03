@@ -1,8 +1,9 @@
 # Real activation under legacy users, systemd-sysusers and userborn. The identity
 # is provisioned on the first boot; the rotated profile must install a password
 # before creating a new account. A fourth node keeps its identity on a mount
-# needed for boot and reboots, so shutdown ordering is observed as well. All keys
-# and values below are disposable fixtures.
+# needed for boot and reboots, so shutdown ordering is observed as well. A fifth
+# asks for a tmpfs store, which must be its own noswap mount. All keys and
+# values below are disposable fixtures.
 { config, lib, ... }:
 {
   perSystem =
@@ -223,9 +224,30 @@
                     hashedPasswordFile = config.safix.secrets.account-password.path;
                   };
                 };
+              # A fresh /run/safix.d under NixOS's tmpfs /run is not a store.
+              # Drilled: deciding from statfs, which names the containing
+              # filesystem, mounts nothing here and turns this node red.
+              tmpfsMachine = {
+                imports = [ (machineFor "${fixture}/first.yaml") ];
+                safix.installer.useTmpfs = true;
+              };
             };
           testScript = ''
             start_all()
+            def store_mount(node, mount_point):
+                """The topmost mountinfo entry at mount_point: (type, super options).
+
+                Field 5 is the mount point, compared undecoded: the mount points
+                here carry no character the kernel escapes."""
+                found = None
+                for line in node.succeed("cat /proc/self/mountinfo").splitlines():
+                    fields = line.split(" ")
+                    after = fields[fields.index("-") + 1:]
+                    if fields[4] == mount_point:
+                        found = (after[0], after[2].split(","))
+                assert found is not None, f"{mount_point} is not its own mount"
+                return found
+
             for node in [machine, systemdMachine, userborn]:
                 node.wait_for_unit("multi-user.target")
                 node.succeed("systemctl is-active safix-consumer.service")
@@ -237,7 +259,7 @@
                     conflicts = node.succeed("systemctl show -p Conflicts --value safix-install-secrets.service")
                     assert "shutdown.target" in conflicts.split(), f"the installer does not conflict with shutdown.target: {conflicts}"
                 assert node.succeed("readlink /run/safix").strip() == "/run/safix.d/1"
-                assert "ramfs" in node.succeed("stat -f -c %T /run/safix.d")
+                assert store_mount(node, "/run/safix.d")[0] == "ramfs", "the default store is not its own ramfs mount"
                 assert node.succeed("cat /run/safix/shared-token") == "first-shared"
                 assert node.succeed("cat /run/safix/private-token") == "first-private"
                 assert node.succeed("cat /run/safix/application") == "token=first-private\n"
@@ -263,6 +285,12 @@
                 assert node.succeed("find /run/safix.d -mindepth 1 -maxdepth 1 -type d | wc -l").strip() == "1"
                 starts_after = node.succeed("wc -l < /var/lib/safix-observer-starts").strip()
                 assert int(starts_after) > int(starts_before)
+
+            tmpfsMachine.wait_for_unit("multi-user.target")
+            assert tmpfsMachine.succeed("cat /run/safix/shared-token") == "first-shared"
+            kind, options = store_mount(tmpfsMachine, "/run/safix.d")
+            assert kind == "tmpfs", f"the tmpfs store is a {kind} mount"
+            assert "noswap" in options, f"the tmpfs store lacks noswap: {options}"
 
             # Run the actual user service manager, not a systemctl stand-in.
             node = systemdMachine

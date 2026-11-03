@@ -25,7 +25,9 @@ A change to it is a breaking change whether or not any rust changed.
 Both units use `WantsMountsFor` for the identity paths rather than `RequiresMountsFor`, which is what looped at shutdown in sops-nix (#962) and now in safix's own reboot test; a missing key path is still refused, by safix's own preflight naming the path.
 `safix.installer.afterUnits` must name units that themselves run before `sysinit.target`, and an evaluation assertion refuses a named service this configuration defines with default dependencies on.
 `safix.identity.deriveHostKeys` also derives from `services.openssh.generateHostKeys`, guarded so older nixpkgs evaluate.
-A tmpfs store whose kernel rejects `noswap` now falls back to ramfs rather than to a swappable tmpfs; a tmpfs request accepts an existing ramfs or tmpfs mount so the fallback does not stack a mount on every activation.
+A tmpfs store whose kernel rejects `noswap` now falls back to ramfs rather than to a swappable tmpfs.
+Whether a store is already mounted is read from `/proc/self/mountinfo` rather than from `statfs`, which reports the containing filesystem: a ramfs store is reused, a tmpfs store is reused only when it is its own mount with `noswap` in its options, and anything else — a fresh directory on a tmpfs `/run`, or an older swappable tmpfs store — gets a store mounted over it, whose covered generations stay in memory until reboot.
+A new `tmpfsMachine` node in `safix-installer-vm` boots with `useTmpfs = true` and asserts the store is its own `noswap` tmpfs mount, and the ramfs nodes assert their own ramfs mount.
 The `safix-installer-ordering` facts and a new userborn key-mount reboot node in `safix-installer-vm` hold each edge, and each drill's observation is recorded in `openspec/changes/harden-installer-ordering/tasks.md`.
 These are the three systemd fixes sops-nix landed between f140661 and b18e01c, with the `local-fs.target` finding safix's own.
 

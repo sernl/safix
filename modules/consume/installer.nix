@@ -105,7 +105,7 @@ in
     useTmpfs = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Use tmpfs instead of ramfs for both secret stores. The installer mounts tmpfs with noswap; a kernel that refuses noswap gets ramfs instead, never a swappable tmpfs. Turning this on for a running host keeps the existing ramfs until reboot; turning it off mounts ramfs over the existing tmpfs, whose earlier generations stay in memory until reboot.";
+      description = "Use tmpfs instead of ramfs for both secret stores. The installer mounts tmpfs with noswap; a kernel that refuses noswap gets ramfs instead, never a swappable tmpfs. An existing store is reused only when the mount point is itself a mount: a ramfs, or with this option on a tmpfs with noswap; anything else gets a store mounted over it. Turning this on for a running host keeps the existing ramfs until reboot; turning it off mounts ramfs over the existing tmpfs, and a running tmpfs store without noswap gets a noswap store over it, the earlier generations staying in memory until reboot in both cases.";
     };
     useSystemdActivation = lib.mkOption {
       type = lib.types.bool;

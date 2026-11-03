@@ -419,9 +419,14 @@ Use tmpfs instead of ramfs for both secret stores. The installer mounts tmpfs
 with `noswap`; a kernel that refuses `noswap` gets ramfs instead, never a
 swappable tmpfs.
 
+An existing store is reused only when the mount point is itself a mount, read
+from `/proc/self/mountinfo`: a ramfs, or, with this option on, a tmpfs with
+`noswap` among its options. Anything else gets a store mounted over it.
+
 Turning this on for a running host keeps the existing ramfs until reboot.
 Turning it off mounts ramfs over the existing tmpfs, whose earlier generations
-stay in memory, unreachable, until reboot.
+stay in memory, unreachable, until reboot. A running tmpfs store without
+`noswap` gets a `noswap` store mounted over it in the same way.
 
 #### `safix.installer.useSystemdActivation`
 
