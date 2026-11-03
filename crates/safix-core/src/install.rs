@@ -1284,6 +1284,7 @@ fn mount_store(
 }
 
 /// Where Linux lists the mounts of the calling process's namespace.
+#[cfg(target_os = "linux")]
 const MOUNTINFO: &str = "/proc/self/mountinfo";
 
 /// The mount table, read whole; a failure is refused, because guessing past
