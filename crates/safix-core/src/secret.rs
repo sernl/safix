@@ -829,7 +829,7 @@ mod tests {
             .write_json_to(&mut output)
             .expect_err("text-only boundary");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     #[test]
@@ -983,9 +983,9 @@ mod tests {
 
     #[test]
     fn nothing_is_drawn_for_an_empty_value_or_a_region_with_no_room() {
-        assert!(preview(b"", 4, 20).is_empty());
-        assert!(preview(b"grafana-token", 0, 20).is_empty());
-        assert!(preview(b"grafana-token", 4, 0).is_empty());
+        assert_eq!(preview(b"", 4, 20), [] as [u8; 0]);
+        assert_eq!(preview(b"grafana-token", 0, 20), [] as [u8; 0]);
+        assert_eq!(preview(b"grafana-token", 4, 0), [] as [u8; 0]);
     }
 
     #[test]

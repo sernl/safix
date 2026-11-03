@@ -16,8 +16,11 @@
 //! - clan's shared-placement address discovery, `crate::bridge::Addressing`,
 //!   which asks clan which machine answers for a shared var rather than taking
 //!   one from the declaration.
-//! - clan's committing in its own repository rather than in this one, which is
-//!   why a transfer toward clan commits nothing here.
+//! - clan's committing in its own store repository rather than in this one —
+//!   the flake, or `CLAN_AGE_STORE_DIR` when the clan sets
+//!   `vars.settings.age.externalStore`, where clan commits nothing if that
+//!   directory is not a git repository — which is why a transfer toward clan
+//!   commits nothing here.
 //! - clan's ungenerated var as an ordinary absence,
 //!   `crate::bridge::Outcome::AbsentAtSource`, rather than a refusal.
 //! - the keepassxc value channel's single-line limit,
@@ -611,7 +614,7 @@ mod tests {
             tags: vec![Field::Literal("and-this".to_owned())],
         };
 
-        assert!(declaration.diff(&held).is_empty());
+        assert_eq!(declaration.diff(&held), [] as [&str; 0]);
         assert_eq!(declaration.wanted(), vec![FieldName::Username]);
         assert!(declaration.declares());
         assert!(!ResolvedFields::default().declares());
@@ -667,7 +670,7 @@ mod tests {
 
         assert_eq!(declaration.diff(&reordered), vec!["tags"]);
         assert_eq!(declaration.diff(&shorter), vec!["tags"]);
-        assert!(declaration.diff(&declaration).is_empty());
+        assert_eq!(declaration.diff(&declaration), [] as [&str; 0]);
     }
 
     #[test]
@@ -691,7 +694,7 @@ mod tests {
             notes: Some(Field::Resolved(secret("minted by safix"))),
             ..ResolvedFields::default()
         };
-        assert!(declaration.diff(&held).is_empty());
+        assert_eq!(declaration.diff(&held), [] as [&str; 0]);
     }
 
     #[test]

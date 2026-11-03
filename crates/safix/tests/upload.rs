@@ -277,7 +277,7 @@ fn directory_without_identity_is_refused_before_touching_the_filesystem() {
         .expect_refusal("directory mode without --identity");
     run.says("--identity is required to write a host identity; nothing was written");
     assert!(!out.exists());
-    assert!(fixture.transport_invocations().is_empty());
+    assert_eq!(fixture.transport_invocations(), [] as [String; 0]);
 }
 
 #[test]

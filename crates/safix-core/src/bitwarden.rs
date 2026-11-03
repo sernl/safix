@@ -9,8 +9,9 @@
 //!
 //! # What the client's own behaviour requires, measured rather than assumed
 //!
-//! Read out of `bitwarden-cli` 2026.8.0 — this flake's pin — on 2026-09-16,
-//! against a client whose `BITWARDENCLI_APPDATA_DIR` was a scratch directory:
+//! Read out of `bitwarden-cli` 2026.8.0 on 2026-09-16, against a client whose
+//! `BITWARDENCLI_APPDATA_DIR` was a scratch directory. This flake's pin is now
+//! 2026.10.1, and the reading was not repeated against it:
 //!
 //! - `bw --nointeraction status` prints one JSON object,
 //!   `{"serverUrl":…,"lastSync":…,"status":…}`, and `status` is
@@ -1820,7 +1821,7 @@ mod tests {
             environment.first().map(|(_, key)| key.as_str()),
             Some(session)
         );
-        assert!(session_environment(None).is_empty());
+        assert_eq!(session_environment(None), [] as [(&str, String); 0]);
     }
 
     /// The payload the unlock's password travels is standard input, and the

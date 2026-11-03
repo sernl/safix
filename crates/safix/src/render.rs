@@ -272,61 +272,7 @@ fn push_not_revocation(out: &mut String) {
 /// an agreement is a note, never a pass.
 fn push_raw_age(out: &mut String, finding: &Finding) {
     match finding {
-        Finding::RecipientTagDrift {
-            file,
-            missing,
-            extra,
-            duplicate,
-            narrowed,
-            mints,
-        } => {
-            headline(
-                out,
-                &format!(
-                    "{file} is not encrypted to the SSH recipients declared for it, by the tags \
-                     age writes into its stanzas."
-                ),
-            );
-            if !extra.is_empty() {
-                detail(
-                    out,
-                    "carries a stanza whose tag no SSH recipient of its audience has:",
-                );
-                for key in extra {
-                    item(out, key);
-                }
-            }
-            if !missing.is_empty() {
-                detail(
-                    out,
-                    "is in its audience and has no stanza carrying its tag:",
-                );
-                for key in missing {
-                    item(out, key);
-                }
-            }
-            if !duplicate.is_empty() {
-                detail(
-                    out,
-                    "carries more stanzas with this tag than its audience declares keys with it:",
-                );
-                for key in duplicate {
-                    item(out, key);
-                }
-            }
-            push_narrowing(out, narrowed);
-            if narrowed.named.is_empty() && narrowed.orphaned.is_empty() && !extra.is_empty() {
-                push_not_revocation(out);
-            }
-            remedy(out, &format!("{PROGRAM} fix --yes"));
-            remedy(out, &format!("git diff -- {file}"));
-            if !extra.is_empty() && !mints.is_empty() {
-                remedy(out, "then, to revoke rather than align, mint new values:");
-                for mint in mints {
-                    remedy(out, &mint_command(mint));
-                }
-            }
-        }
+        Finding::RecipientTagDrift { .. } => push_tag_drift(out, finding),
 
         Finding::RecipientRosterTagMatched { file, matched } => {
             headline(
@@ -380,6 +326,67 @@ fn push_raw_age(out: &mut String, finding: &Finding) {
         }
 
         _ => {}
+    }
+}
+
+/// A raw age file whose SSH stanza tags disagree with its declared audience.
+fn push_tag_drift(out: &mut String, finding: &Finding) {
+    let Finding::RecipientTagDrift {
+        file,
+        missing,
+        extra,
+        duplicate,
+        narrowed,
+        mints,
+    } = finding
+    else {
+        return;
+    };
+    headline(
+        out,
+        &format!(
+            "{file} is not encrypted to the SSH recipients declared for it, by the tags \
+             age writes into its stanzas."
+        ),
+    );
+    if !extra.is_empty() {
+        detail(
+            out,
+            "carries a stanza whose tag no SSH recipient of its audience has:",
+        );
+        for key in extra {
+            item(out, key);
+        }
+    }
+    if !missing.is_empty() {
+        detail(
+            out,
+            "is in its audience and has no stanza carrying its tag:",
+        );
+        for key in missing {
+            item(out, key);
+        }
+    }
+    if !duplicate.is_empty() {
+        detail(
+            out,
+            "carries more stanzas with this tag than its audience declares keys with it:",
+        );
+        for key in duplicate {
+            item(out, key);
+        }
+    }
+    push_narrowing(out, narrowed);
+    if narrowed.named.is_empty() && narrowed.orphaned.is_empty() && !extra.is_empty() {
+        push_not_revocation(out);
+    }
+    remedy(out, &format!("{PROGRAM} fix --yes"));
+    remedy(out, &format!("git diff -- {file}"));
+    if !extra.is_empty() && !mints.is_empty() {
+        remedy(out, "then, to revoke rather than align, mint new values:");
+        for mint in mints {
+            remedy(out, &mint_command(mint));
+        }
     }
 }
 

@@ -835,8 +835,8 @@ CHUID:  no data available
             serials_in("  12345678  \n\n"),
             vec![String::from("12345678")]
         );
-        assert!(serials_in("").is_empty());
-        assert!(serials_in("\n\n").is_empty());
+        assert_eq!(serials_in(""), [] as [String; 0]);
+        assert_eq!(serials_in("\n\n"), [] as [String; 0]);
     }
 
     #[test]

@@ -1995,7 +1995,7 @@ mod tests {
                 .unwrap();
         assert!(mirror.database.is_none());
         assert!(mirror.mappings.is_empty());
-        assert!(mirror.declared().is_empty());
+        assert_eq!(mirror.declared(), [] as [String; 0]);
     }
 
     #[test]
@@ -2422,7 +2422,7 @@ mod tests {
         let mirror: OnePassword =
             serde_json::from_str(r#"{"account": null, "mappings": []}"#).unwrap();
         assert!(mirror.account.is_none());
-        assert!(mirror.declared().is_empty());
+        assert_eq!(mirror.declared(), [] as [String; 0]);
     }
 
     /// What makes the nix half and this one a single change: a key the
