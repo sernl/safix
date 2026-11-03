@@ -46,6 +46,11 @@ const BECH32: &str = "023456789acdefghjklmnpqrstuvwxyz";
 /// How many bech32 characters follow `age1` in an age X25519 recipient.
 const RECIPIENT_BODY: usize = 58;
 
+/// How many bech32 characters follow `age1pq1` in a hybrid X25519 + ML-KEM-768
+/// recipient: bech32 with human-readable part `age1pq` over a 1216-byte public key
+/// is 1946 data characters and a 6-character checksum.
+const HYBRID_RECIPIENT_BODY: usize = 1952;
+
 /// Where the operator answers the one question this asks.
 ///
 /// Read from this process's standard input rather than from a terminal, which is
@@ -233,11 +238,22 @@ fn refuse_bad_name(workspace: &Workspace, name: &str) -> Result<()> {
     })
 }
 
-/// Shape only. Nothing here can tell whether anyone holds the private half, and a
-/// recipient no one can decrypt with is the one error this command cannot catch.
+/// Shape only: a card, then a hybrid recipient (`age1pq1` and 1952 bech32
+/// characters), an SSH public key, an X25519 recipient (`age1` and 58 bech32
+/// characters) or a PGP fingerprint. Nothing here can tell whether anyone holds
+/// the private half, and a recipient no one can decrypt with is the one error this
+/// command cannot catch.
 fn refuse_bad_recipient(recipient: &str) -> Result<()> {
     if recipient.starts_with(HARDWARE_PREFIX) {
         return Err(Error::HardwareRecipient {
+            recipient: recipient.to_owned(),
+        });
+    }
+    if let Some(body) = recipient.strip_prefix("age1pq1") {
+        if body.len() == HYBRID_RECIPIENT_BODY && body.chars().all(|letter| BECH32.contains(letter)) {
+            return Ok(());
+        }
+        return Err(Error::BadRecipient {
             recipient: recipient.to_owned(),
         });
     }
@@ -484,5 +500,40 @@ mod tests {
                 Err(Error::BadRecipient { .. })
             ));
         }
+    }
+
+    fn hybrid(body: usize) -> String {
+        format!("age1pq1{}", "q".repeat(body))
+    }
+
+    #[test]
+    fn a_well_formed_hybrid_recipient_is_age1pq1_and_1952_bech32_characters() {
+        assert!(refuse_bad_recipient(&hybrid(HYBRID_RECIPIENT_BODY)).is_ok());
+    }
+
+    #[test]
+    fn a_hybrid_recipient_of_the_wrong_length_or_alphabet_is_refused() {
+        let mut lettered = "q".repeat(HYBRID_RECIPIENT_BODY.saturating_sub(1));
+        lettered.push('b');
+        for wrong in [
+            hybrid(HYBRID_RECIPIENT_BODY.saturating_sub(1)),
+            hybrid(HYBRID_RECIPIENT_BODY.saturating_add(1)),
+            format!("age1pq1{lettered}"),
+            "age1pq1".to_owned(),
+        ] {
+            assert!(matches!(
+                refuse_bad_recipient(&wrong),
+                Err(Error::BadRecipient { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn a_card_is_still_a_card_beside_the_hybrid_branch() {
+        let card = format!("age1yubikey1{}", "q".repeat(HYBRID_RECIPIENT_BODY));
+        assert!(matches!(
+            refuse_bad_recipient(&card),
+            Err(Error::HardwareRecipient { .. })
+        ));
     }
 }

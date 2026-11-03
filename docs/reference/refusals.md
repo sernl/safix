@@ -136,7 +136,7 @@ runtime's shape — see [Environment](environment.md#safix_error_format).
 | Code | What it means | The remedy it names |
 | --- | --- | --- |
 | `safix::bad_user_name` | The name is outside the alphabet a path and a rule pattern are built from | It prints the anchored pattern: lowercase letters and digits, then any of those plus underscore and hyphen |
-| `safix::bad_recipient` | The recipient is not a well-formed age recipient | They mint one with `safix keygen`, or convert an ed25519 ssh key with `ssh-to-age` |
+| `safix::bad_recipient` | The recipient is not a well-formed age recipient: an X25519 one is `age1` followed by 58 bech32 characters, and a hybrid post-quantum one is `age1pq1` followed by 1952 | They mint one with `safix keygen` (or `safix keygen --kind age --hybrid`), or convert an ed25519 ssh key with `ssh-to-age` |
 | `safix::hardware_recipient` | A recipient needing a physical interaction cannot be the primary one | Pass their software recipient, then add the card to their `recoveryRecipients`, which is additive |
 | `safix::already_declared` | The declarations already name that person | `safix list <user>` shows what they hold; changing their recipient is an edit to their declaration followed by `safix fix` |
 | `safix::scaffold_exists` | The file exists and declares no person | Resolve that by hand before scaffolding over it |

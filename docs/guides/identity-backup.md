@@ -18,6 +18,8 @@ This page shows you how to mint an identity, back it up so that the backup is pr
 
    The age form appends to the managed key file and never truncates it. The encryption tool tries every identity in that file, so a second identity beside a first is a working state, and overwriting is how somebody loses the key to everything they hold.
 
+   `safix keygen --kind age --hybrid` appends a hybrid post-quantum identity (`AGE-SECRET-KEY-PQ-1…`) to the same file instead; the backup and restore below carry it with the others. See [`keygen`](../reference/cli.md#keygen) for its size and the sops and age versions a reader needs.
+
 2. Use the GnuPG profile instead where you want a certificate with an expiry:
 
    ```console

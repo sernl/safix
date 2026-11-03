@@ -375,6 +375,8 @@ The age public key this person's secrets are encrypted to — a recipient, never
 identity — and the field that gives them an anchor and a creation rule in the
 generated policy.
 
+An X25519 recipient (`age1…`) or a hybrid post-quantum one (`age1pq1…`, from `safix keygen --kind age --hybrid`) is accepted.
+
 #### `flake.safix.users.<name>.recipientNote`
 
 *Type:* null or lines. *Default:* `null`.
@@ -388,6 +390,8 @@ Prose emitted above this person's key in the generated policy's keys block.
 Further recipients belonging to this same person's custody, keyed by the anchor
 the generated policy defines them as, and added to every file their audience
 includes.
+
+A hybrid post-quantum recipient (`age1pq1…`) is accepted here as it is for `recipient`.
 
 #### `flake.safix.users.<name>.recoveryRecipients.<anchor>.key`
 

@@ -136,6 +136,17 @@
         }) (planOf users).rules;
 
       rendered = policy.render { users = granted; };
+
+      # A hybrid post-quantum recipient: `age1pq1` and 1952 bech32 characters.
+      hybridRecipient = "age1pq1" + lib.concatStrings (lib.genList (_: "q") 1952);
+      hybridRendered = policy.render {
+        users = fleetOf {
+          alice = {
+            recipient = hybridRecipient;
+            custody.private.alice-alone = { };
+          };
+        };
+      };
     in
     {
       checks.safix-policy = mkStructuralCheck {
@@ -212,6 +223,10 @@
           # The header a reader meets and the failure that sends them to it name
           # one command.
           driftNamesCommand = lib.hasInfix policy.regenerateCommand policy.driftMessage;
+
+          # A 1959-character hybrid recipient is one bare scalar on its anchor line,
+          # not a quoted or folded one.
+          hybridAnchorBare = lib.hasInfix "  - &alice-safix ${hybridRecipient}\n" hybridRendered;
         };
         expected = {
           fixtureRoster = [
@@ -306,6 +321,8 @@
           };
 
           driftNamesCommand = true;
+
+          hybridAnchorBare = true;
         };
       };
     };

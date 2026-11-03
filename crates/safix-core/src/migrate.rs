@@ -443,6 +443,18 @@ fn validate_recipients(recipients: &[String], format: Format) -> Result<()> {
             "unsupported or malformed public migration recipient",
         ));
     }
+    if format == Format::Age
+        && recipients
+            .iter()
+            .any(|recipient| ciphertext::is_hybrid_recipient(recipient))
+        && !recipients
+            .iter()
+            .all(|recipient| ciphertext::is_hybrid_recipient(recipient))
+    {
+        return Err(refused(
+            "raw age destinations cannot mix post-quantum and classic recipients",
+        ));
+    }
     Ok(())
 }
 
@@ -1939,8 +1951,10 @@ pub fn abandon(plan_path: &Path, progress: &dyn Progress) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Journal, JournalOutput, JournalWriter, OutputKind, Transaction, private_directory,
+        Format, Journal, JournalOutput, JournalWriter, OutputKind, Transaction,
+        private_directory, validate_recipients,
     };
+    use crate::error::Error;
     use std::os::unix::fs::MetadataExt as _;
     use std::path::PathBuf;
 
@@ -2081,5 +2095,37 @@ mod tests {
             directory.display()
         );
         std::fs::remove_dir_all(&directory).expect("the scratch directory is removable");
+    }
+
+    fn hybrid() -> String {
+        format!("age1pq1{}", "q".repeat(1952))
+    }
+
+    #[test]
+    fn a_raw_age_plan_that_mixes_hybrid_and_classic_recipients_is_refused() {
+        for classic in [
+            "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "ssh-ed25519 AAAA",
+        ] {
+            let refusal = validate_recipients(&[hybrid(), classic.to_owned()], Format::Age);
+            assert!(
+                matches!(
+                    &refusal,
+                    Err(Error::MigrationRefused { reason })
+                        if reason == "raw age destinations cannot mix post-quantum and classic recipients"
+                ),
+                "a raw age plan mixing a hybrid recipient and {classic} was not refused"
+            );
+        }
+        assert!(validate_recipients(&[hybrid()], Format::Age).is_ok());
+    }
+
+    #[test]
+    fn a_sops_plan_may_name_a_hybrid_recipient() {
+        let recipients = [
+            hybrid(),
+            "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq".to_owned(),
+        ];
+        assert!(validate_recipients(&recipients, Format::Yaml).is_ok());
     }
 }

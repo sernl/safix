@@ -807,7 +807,7 @@ neither is a value.
 pub const KEYGEN: &str = "\
 safix keygen [--for-someone-else] [<user>]
 safix keygen --show
-safix keygen --kind age
+safix keygen --kind age [--hybrid]
 safix keygen --kind pgp --uid <identity> [--expires 2y]
 
 Mint an age identity and append it to ${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt,
@@ -841,6 +841,13 @@ Prints the public recipient derived from the identity already minted on this
 machine, and mints nothing: no identity, no line appended to keys.txt, no
 write of any kind. Refused, naming plain keygen as the remedy, when no
 identity has been minted here yet.
+
+\u{2500}\u{2500} --hybrid \u{2500}\u{2500}
+Only after --kind age. Mints a hybrid X25519 + ML-KEM-768 identity with
+age-keygen -pq and appends it to the same file. Its recipient is age1pq1 and
+1952 more characters, about 2,000 in all, and each hybrid recipient adds about
+4.8 KB of metadata to every sops file wrapped to it, against about 0.57 KB for
+an X25519 one. Every reader needs sops 3.12.0 or later, or age 1.3.0 or later.
 ";
 
 /// `safix migrate -h`.
@@ -920,10 +927,10 @@ and then hand the name and the recipient to flake.safix.onboardingHook.
               of a consumer's module tree and safix has none.
   --yes       skip the confirmation.
 
-<recipient> is theirs: a native age recipient, an SSH public key, or
-pgp:FULL_UPPERCASE_FINGERPRINT. Only its shape is checked here; whether anyone
-holds the private half is not knowable from this machine. An SSH key with a
-comment must be passed as one quoted argument.
+<recipient> is theirs: a native age recipient (X25519 or hybrid post-quantum),
+an SSH public key, or pgp:FULL_UPPERCASE_FINGERPRINT. Only its shape is
+checked here; whether anyone holds the private half is not knowable from this
+machine. An SSH key with a comment must be passed as one quoted argument.
 A recipient that needs physical interaction is refused for this field:
 activation decrypts non-interactively and a card needs a touch, so it belongs in
 that person's recoveryRecipients instead, where it is additive.
@@ -1251,7 +1258,7 @@ safix \u{2014} secrets by declaration name, with explicit migration and key cust
   safix audit    [<target>] [<mapping>...]          report bridge or mirror drift
   safix sync     [<target>] [<mapping>...]          converge declared relationships
                  <target> is clan, keepassxc, pass, bitwarden or 1password
-  safix keygen   [--kind age|pgp] [...]             create a protected local identity
+  safix keygen   [--kind age [--hybrid]|pgp] [...]  create a protected local identity
   safix migrate [--abandon] <plan.json>            convert and verify before publishing
   safix identity backup|restore [...]              verified independent recovery
   safix adduser  <name> <recipient> [...]           declare a person who holds none

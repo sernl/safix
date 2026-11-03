@@ -487,6 +487,18 @@
         };
       };
 
+      # The shape of a hybrid post-quantum recipient: `age1pq1` and 1952 bech32
+      # characters, 1959 in all, as `age-keygen -pq` prints one.
+      hybridRecipient = "age1pq1" + lib.concatStrings (lib.genList (_: "q") 1952);
+
+      hybridRecipients = fleetOf {
+        alice.recipient = hybridRecipient;
+        bob = {
+          recipient = fixtureRecipient;
+          recoveryRecipients.pq = hybridRecipient;
+        };
+      };
+
       unsafeUserName = fleetOf {
         Alice.recipient = fixtureRecipient;
       };
@@ -751,6 +763,8 @@
           anchorConflictMessages = violationsOf anchorConflict;
           anchorConflictFires = fires (resolvesFor anchorConflict "alice");
 
+          hybridRecipientViolations = violationsOf hybridRecipients;
+
           unsafeUserNameMessages = violationsOf unsafeUserName;
           unsafeUserNameFires = fires (resolvesFor unsafeUserName "Alice");
 
@@ -999,6 +1013,8 @@
             "the declarations give the recipient policy anchor 'master' more than one key, declared by flake.safix.users.alice and flake.safix.users.dave"
           ];
           anchorConflictFires = true;
+
+          hybridRecipientViolations = [ ];
 
           unsafeUserNameMessages = [
             "flake.safix.users names 'Alice', which is not [a-z0-9][a-z0-9_-]* and so cannot be interpolated into a secrets path or a recipient rule's path_regex"

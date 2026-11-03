@@ -169,12 +169,13 @@ pub(super) fn hardware_recipient(recipient: &str) -> String {
     )
 }
 
-/// A recipient that is not shaped like an age X25519 key.
+/// A recipient that is not shaped like an age X25519 or hybrid key.
 pub(super) fn bad_recipient(recipient: &str) -> String {
     format!(
         "{recipient} is not a well-formed age recipient.\n\
         \n\
-        An age X25519 recipient is age1 followed by 58 bech32 characters\n\
+        An age X25519 recipient is age1 followed by 58 bech32 characters, and a\n\
+        hybrid post-quantum recipient is age1pq1 followed by 1952 bech32 characters\n\
         (no 1, b, i or o). This checks the shape and nothing else: whether anyone\n\
         holds the private half is not knowable from here.\n\
         \n\

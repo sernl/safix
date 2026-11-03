@@ -339,6 +339,16 @@ AGE-PLUGIN-YUBIKEY-1QFIXTURE000000000000000000
     }
 
     #[test]
+    fn a_hybrid_recipient_line_captures_nothing() {
+        let hybrid = PRINTED.replace(
+            "age1yubikey1qfixture000000000000000000000000000000000000000000000000",
+            &format!("age1pq1{}", "q".repeat(1952)),
+        );
+        assert_ne!(hybrid, PRINTED);
+        assert_eq!(capture(&hybrid), None);
+    }
+
+    #[test]
     fn the_identity_is_named_for_the_person_and_the_card() {
         assert_eq!(
             Request::new("alice", "12345678").name(),

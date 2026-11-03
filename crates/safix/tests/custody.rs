@@ -200,6 +200,56 @@ fn adduser_refusals_leave_the_tree_as_they_found_it() {
     );
 }
 
+/// A hybrid post-quantum recipient as the pinned `age-keygen -pq` prints one:
+/// refused one character short, declared whole, and carried whole into the
+/// regenerated policy.
+#[test]
+fn adduser_declares_a_hybrid_recipient_minted_by_the_pinned_age_keygen() {
+    let fixture = Fixture::new();
+    fixture.seed_declarations();
+    let key = fixture.work.join("hybrid-key.txt");
+    let minted = Command::new("age-keygen")
+        .arg("-pq")
+        .arg("-o")
+        .arg(&key)
+        .output()
+        .expect("could not run age-keygen");
+    assert!(minted.status.success(), "age-keygen -pq failed");
+    let derived = Command::new("age-keygen")
+        .arg("-y")
+        .arg(&key)
+        .output()
+        .expect("could not run age-keygen");
+    std::fs::remove_file(&key).unwrap();
+    let recipient = String::from_utf8(derived.stdout).unwrap().trim().to_owned();
+    assert!(recipient.starts_with("age1pq1"), "not a hybrid recipient");
+    assert_eq!(recipient.len(), 1959, "the pinned hybrid recipient changed size");
+    let head = fixture.head();
+
+    let truncated = &recipient[..recipient.len() - 1];
+    fixture
+        .run(&["adduser", "carol", truncated, "--yes"])
+        .expect_refusal("a hybrid recipient one character short")
+        .says("age1pq1 followed by 1952");
+    assert_untouched(&fixture, &head, "a truncated hybrid recipient");
+
+    fixture
+        .run(&["adduser", "carol", &recipient, "--yes"])
+        .expect_success("declaring a hybrid recipient");
+    assert!(
+        fixture
+            .read("safix/users/carol.nix")
+            .contains(&format!("recipient = \"{recipient}\";")),
+        "the scaffold does not carry the whole hybrid recipient"
+    );
+    assert!(
+        fixture
+            .read(".sops.yaml")
+            .contains(&format!("- &carol {recipient}\n")),
+        "the regenerated .sops.yaml does not carry the whole hybrid recipient"
+    );
+}
+
 /// Host attachment reaches a consumer through the hook or not at all.
 #[test]
 fn host_attachment_is_refused_without_a_hook_and_handed_to_one_after_the_commit() {

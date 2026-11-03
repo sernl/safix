@@ -321,17 +321,22 @@ pub(crate) fn validate_age_location(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate a native age identity into the protected local identity file.
+/// Generate an age identity into the protected local identity file.
 ///
-/// Existing identities are retained. Only the public recipient is returned.
+/// `hybrid` mints an X25519 + ML-KEM-768 identity with `age-keygen -pq` instead
+/// of a native X25519 one. Existing identities are retained. Only the public
+/// recipient is returned.
 ///
 /// # Errors
 ///
 /// Refuses unsafe custody paths and unsuccessful upstream key generation.
-pub fn generate_age() -> Result<String> {
+pub fn generate_age(hybrid: bool) -> Result<String> {
     let path = age_identity_path()?;
     validate_age_location(&path)?;
-    let command = Command::new(crate::keygen::keygen_binary());
+    let mut command = Command::new(crate::keygen::keygen_binary());
+    if hybrid {
+        command.arg("-pq");
+    }
     let private = execute(command, None)?;
     let recipients = age_recipients(&private)?;
     let [recipient]: [String; 1] = recipients
@@ -735,8 +740,10 @@ fn age_recipients(bytes: &[u8]) -> Result<Vec<String>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if !line.starts_with("AGE-SECRET-KEY-1") {
-            return Err(refused("Only native age private identities are supported"));
+        if !line.starts_with("AGE-SECRET-KEY-1") && !line.starts_with("AGE-SECRET-KEY-PQ-1") {
+            return Err(refused(
+                "Only native or hybrid age private identities are supported",
+            ));
         }
         let mut command = Command::new(crate::keygen::keygen_binary());
         command.arg("-y");
@@ -1094,4 +1101,19 @@ pub fn restore(
     }?;
     progress.write("Private identity recovery verified; existing identities were not replaced.\n");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_recipient;
+
+    #[test]
+    fn normalize_recipient_keeps_a_hybrid_recipient_verbatim() {
+        let hybrid = format!("age1pq1{}", "q".repeat(1952));
+        assert_eq!(hybrid.len(), 1959);
+        assert_eq!(
+            normalize_recipient(&hybrid).expect("a hybrid recipient is a native age recipient"),
+            hybrid
+        );
+    }
 }

@@ -198,3 +198,131 @@ fn a_different_certificate_sharing_the_encryption_key_is_not_independent_recover
     assert!(!result.status.success());
     assert!(!destination.exists());
 }
+
+/// A mode-700 directory holding the identities age-keygen mints into it, in
+/// order, as one identity file; returns the file and each identity's recipient.
+fn age_identities(fixture: &Fixture, name: &str, hybrid: &[bool]) -> (PathBuf, Vec<String>) {
+    let directory = fixture.scratch_dir(name);
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let file = directory.join("keys.txt");
+    let mut joined = Vec::new();
+    let mut recipients = Vec::new();
+    for (index, pq) in hybrid.iter().enumerate() {
+        let one = directory.join(format!("minted-{index}.txt"));
+        let mut command = Command::new("age-keygen");
+        if *pq {
+            command.arg("-pq");
+        }
+        assert!(command.arg("-o").arg(&one).status().unwrap().success());
+        let derived = Command::new("age-keygen").arg("-y").arg(&one).output().unwrap();
+        recipients.push(String::from_utf8(derived.stdout).unwrap().trim().to_owned());
+        joined.extend(std::fs::read(&one).unwrap());
+        std::fs::remove_file(&one).unwrap();
+    }
+    std::fs::write(&file, joined).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    (file, recipients)
+}
+
+fn sops(arguments: &[&str], key_file: &Path) -> Output {
+    Command::new(harness::real_sops())
+        .args(arguments)
+        .env("SOPS_AGE_KEY_FILE", key_file)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn an_identity_file_holding_a_hybrid_identity_is_backed_up_and_restored() {
+    let fixture = Fixture::new();
+    let (source, own) = age_identities(&fixture, "source-identities", &[false, true]);
+    let [classic, hybrid]: [String; 2] = own.try_into().unwrap();
+    assert!(classic.starts_with("age1") && !classic.starts_with("age1pq1"));
+    assert!(hybrid.starts_with("age1pq1"));
+    let (recovery, recovery_recipients) =
+        age_identities(&fixture, "recovery-identity", &[true]);
+    let [recovery_recipient]: [String; 1] = recovery_recipients.try_into().unwrap();
+    assert!(recovery_recipient.starts_with("age1pq1"));
+
+    let backup = fixture.scratch("hybrid-backup.sops");
+    let taken = fixture
+        .command(&["identity", "backup", "age"])
+        .arg(&backup)
+        .args(["--recipient", &recovery_recipient, "--age-key-file"])
+        .arg(&recovery)
+        .env("SAFIX_AGE_KEY_FILE", &source)
+        .output()
+        .unwrap();
+    assert!(
+        taken.status.success(),
+        "an identity file holding a hybrid identity was not backed up: {}",
+        String::from_utf8_lossy(&taken.stderr)
+    );
+
+    let opened = sops(
+        &[
+            "decrypt", "--input-type", "binary", "--output-type", "binary",
+            backup.to_str().unwrap(),
+        ],
+        &recovery,
+    );
+    assert!(opened.status.success(), "the recovery identity cannot open the backup");
+    let package: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    let mut roster: Vec<String> = package
+        .get("publicRecipients")
+        .and_then(serde_json::Value::as_array)
+        .expect("the backup names its recipients")
+        .iter()
+        .map(|recipient| recipient.as_str().unwrap().to_owned())
+        .collect();
+    roster.sort();
+    let mut expected = vec![classic, hybrid.clone()];
+    expected.sort();
+    assert_eq!(roster, expected, "the backup's roster is not both identities");
+
+    let empty = fixture.scratch_dir("restored-identities");
+    std::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let restored = empty.join("keys.txt");
+    let result = fixture
+        .command(&["identity", "restore"])
+        .arg(&backup)
+        .arg("--age-key-file")
+        .arg(&recovery)
+        .env("SAFIX_AGE_KEY_FILE", &restored)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "the hybrid backup was not restored: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let plaintext = fixture.scratch("hybrid-only.plain.yaml");
+    std::fs::write(&plaintext, "value: CANARY-hybrid\n").unwrap();
+    let wrapped = sops(
+        &[
+            "--encrypt", "--config", "/dev/null", "--age", &hybrid, "--input-type", "yaml",
+            "--output-type", "yaml", plaintext.to_str().unwrap(),
+        ],
+        &recovery,
+    );
+    assert!(
+        wrapped.status.success(),
+        "sops could not wrap to the hybrid recipient: {}",
+        String::from_utf8_lossy(&wrapped.stderr)
+    );
+    let ciphertext = fixture.scratch("hybrid-only.yaml");
+    std::fs::write(&ciphertext, wrapped.stdout).unwrap();
+    let read = sops(
+        &[
+            "decrypt", "--input-type", "yaml", "--output-type", "yaml",
+            ciphertext.to_str().unwrap(),
+        ],
+        &restored,
+    );
+    assert!(
+        read.status.success(),
+        "the restored identity file cannot open a file wrapped to the hybrid recipient alone"
+    );
+    assert_eq!(String::from_utf8(read.stdout).unwrap(), "value: CANARY-hybrid\n");
+}

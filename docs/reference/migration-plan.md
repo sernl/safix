@@ -84,12 +84,14 @@ The list must be nonempty and carry no duplicate. Each entry is one of three
 shapes.
 
 - A native age recipient: `age1` followed by lowercase letters and digits.
+  That is an X25519 recipient or a hybrid post-quantum one (`age1pq1…`).
 - An SSH public key. Against a destination whose format is not `age`, one
   carrying a comma is refused.
 - `pgp:` followed by an uppercase hexadecimal fingerprint of 40 or 64
   characters.
 
 A `pgp:` recipient is refused against a raw age destination.
+A raw age destination also refuses a list that mixes hybrid (`age1pq1…`) and classic (X25519 or SSH) recipients, because age cannot encrypt one file to both.
 
 ### `deployment`
 

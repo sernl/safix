@@ -71,6 +71,16 @@ person's primary recipient, because activation decrypts without a human present.
 Such a key belongs among their recovery identities, where it is additive — see
 [Hardware keys](../guides/hardware-keys.md).
 
+### Hybrid post-quantum recipients
+
+A native age recipient is either X25519 (`age1…`) or hybrid post-quantum, X25519 combined with ML-KEM-768 (`age1pq1…`).
+A hybrid identity is an `AGE-SECRET-KEY-PQ-1…` line, and it lives in the same identity file as X25519 identities; `identity backup age` and `identity restore` carry both.
+`safix keygen --kind age --hybrid` mints one; see [`keygen`](../reference/cli.md#keygen) for its size and the sops and age versions a reader needs.
+
+A sops file may name hybrid and classic recipients together, because sops wraps the data key to each recipient separately.
+Such a file is only as resistant to a quantum adversary as its classic recipients.
+A native-age file (`format = "age"`) may not mix them, because age encrypts one file to every recipient at once and refuses the mix; safix refuses it before age runs.
+
 ## Recovery recipients
 
 `flake.safix.users.<u>.recoveryRecipients` lists further identities of the same

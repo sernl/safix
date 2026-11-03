@@ -997,3 +997,71 @@ fn abandon_takes_exactly_one_plan() {
         .expect_refusal("--abandon with two plans")
         .says("migrate --abandon <plan.json>");
 }
+
+/// A hybrid post-quantum identity minted by the pinned `age-keygen -pq`.
+fn mint_hybrid_identity(path: &Path) {
+    let minted = Command::new("age-keygen")
+        .arg("-pq")
+        .arg("-o")
+        .arg(path)
+        .output()
+        .expect("age-keygen does not run");
+    assert!(minted.status.success(), "age-keygen -pq failed");
+}
+
+/// The plan's one entry, pointed at these recipients.
+fn retarget(migration: &Migration, recipients: &[&str]) {
+    let mut plan: Value =
+        serde_json::from_slice(&std::fs::read(&migration.plan).unwrap()).unwrap();
+    plan["entries"][0]["recipients"] = json!(recipients);
+    std::fs::write(&migration.plan, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
+}
+
+/// A raw age destination may be written to hybrid recipients alone; one that
+/// adds a classic recipient is refused before anything is written, because age
+/// cannot encrypt one file to both.
+#[test]
+fn a_raw_age_destination_is_written_to_hybrid_recipients_and_refused_a_mix() {
+    let fixture = Fixture::new();
+    let migration = Migration::new(&fixture, "hybrid", &[("api-token", "CANARY-api-token")]);
+    let first = migration.root.join("hybrid-first.txt");
+    let second = migration.root.join("hybrid-second.txt");
+    mint_hybrid_identity(&first);
+    mint_hybrid_identity(&second);
+    let first_recipient = recipient_of(&first);
+    let second_recipient = recipient_of(&second);
+    for recipient in [&first_recipient, &second_recipient] {
+        assert!(recipient.starts_with("age1pq1"), "not a hybrid recipient");
+    }
+    let mut both = std::fs::read(&first).unwrap();
+    both.extend(std::fs::read(&second).unwrap());
+    std::fs::write(&migration.target_identity, both).unwrap();
+    retarget(&migration, &[&first_recipient, &second_recipient]);
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_success("a raw age destination for two hybrid recipients");
+    let destination = &migration.entry("api-token").destination;
+    for identity in [&first, &second] {
+        assert_eq!(
+            age_decrypt(identity, destination),
+            "CANARY-api-token",
+            "{} does not open the hybrid destination",
+            identity.display()
+        );
+    }
+
+    let mixed = Migration::new(&fixture, "hybrid-mix", &[("api-token", "CANARY-api-token")]);
+    let classic = mixed.target_recipient.clone();
+    retarget(&mixed, &[&first_recipient, &second_recipient, &classic]);
+    fixture
+        .run(&["migrate", &mixed.argument()])
+        .expect_refusal("a raw age destination mixing hybrid and classic recipients")
+        .says("raw age destinations cannot mix post-quantum and classic recipients");
+    assert!(
+        !mixed.entry("api-token").destination.exists(),
+        "a refused plan wrote its destination"
+    );
+    assert!(!mixed.receipt.exists(), "a refused plan wrote a receipt");
+    assert!(!mixed.journal.exists(), "a refused plan left a journal");
+}

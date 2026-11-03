@@ -934,6 +934,9 @@ let
           policy; there is no second place to register them, and no catch-all rule
           to fall through to if this is left null.
 
+          An X25519 recipient (`age1…`) or a hybrid post-quantum one (`age1pq1…`,
+          from `safix keygen --kind age --hybrid`) is accepted.
+
           Owner-declared sharing needs it. A secret shared to this person is
           encrypted to this recipient in its audience's own file, so a grant aimed
           at a user who records none is refused by name rather than resolving into
@@ -973,6 +976,8 @@ let
           Further recipients belonging to this same person's custody, keyed by the
           anchor the generated policy defines them as. Every file whose audience
           includes this person is encrypted to these as well as to `recipient`.
+          A hybrid post-quantum recipient (`age1pq1…`) is accepted here as it is
+          for `recipient`.
 
           This is where escrowed custody and independent custody differ, and the
           difference is a property of the person rather than of a hand-written
