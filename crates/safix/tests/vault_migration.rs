@@ -383,16 +383,17 @@ const AUDIENCE_TEXT: &str = "safix-age-audience-v1 \
     3333333333333333333333333333333333333333333333333333333333333333 \
     4444444444444444444444444444444444444444444444444444444444444444\n";
 
-/// A raw age entry's audience record moves with the entry: `check` reports
+/// A raw age entry's audience record relocates and rolls back: `check` reports
 /// the readable record as pending, `fix` copies it byte for byte to its opaque
 /// name and removes the readable one, and a rollback puts it back.
 ///
-/// The raw age file itself is absent from this fixture, so the record is the
-/// only one of the entry's leaves that moves; what is asserted is that the
-/// record is enumerated and moved by the same machinery as the stamp beside
-/// it, gated on `logicalAudience`.
+/// The raw age file itself is absent from this fixture, so this test does not
+/// establish a value-and-record round trip; what is asserted is that the record
+/// is enumerated and moved by the same machinery as the stamp beside it, gated
+/// on `logicalAudience`. Whether the raw age ciphertext itself relocates is
+/// `relocate_document`'s question and is not answered here.
 #[test]
-fn a_raw_age_audience_record_relocates_with_its_value() {
+fn a_raw_age_audience_record_relocates_on_its_own() {
     let (mut fixture, vault) = populated_readable_fixture();
     let extra = [("SAFIX_VAULT_ROOT", vault.to_str().expect("a utf-8 path"))];
     fixture.seed_vault_placement(

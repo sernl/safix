@@ -231,7 +231,8 @@ In vault mode it SHALL be an opaque name with its readable form carried beside i
 - **THEN** its audience record is its definition record path with an `.audience` suffix
 - **AND** the runtime reconstructs no part of it
 
-#### Scenario: A vault moves the record with the file
+#### Scenario: A vault relocation moves the record
 
-- **WHEN** `fix` relocates a raw-age entry into or out of a vault
-- **THEN** its audience record moves with it, and `check` reports a readable-layout record left at the declaration root as pending relocation
+- **WHEN** `fix` relocates a vault-mode fleet into or out of a vault
+- **THEN** a raw-age entry's audience record moves between its readable and opaque names and rolls back with the other records, and `check` reports a readable-layout record left at the declaration root as pending relocation
+- **AND** this says nothing about the raw-age file itself, whose relocation is the document relocation's own contract

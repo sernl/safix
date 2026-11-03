@@ -106,8 +106,10 @@ recipients the file was last wrapped to and the SHA-256 of the bytes that wrap
 produced, and nothing derived from the value. Only `safix fix` writes it, after
 each raw age re-wrap, and it is what lets the next `fix` leave a file alone
 whose audience and bytes have not moved. In vault mode it is one opaque name
-under the vault's `state/` bucket, and a migration or rollback moves it with
-the value.
+under the vault's `state/` bucket, and a migration or rollback moves the
+record between its two names the way it moves a stamp; what that says about
+the raw age file itself is nothing, because the file's own relocation is the
+document relocation's contract rather than the record's.
 
 ## Ignore, backup and files safix did not place
 

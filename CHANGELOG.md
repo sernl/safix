@@ -18,6 +18,12 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### Fixed
+
+- The 0.4.0 notes said a raw-age entry's audience record "relocates and rolls back with its value".
+  The record relocates and rolls back on its own, by the machinery that moves stamps; the vault migration test fixtures the record alone and establishes no value-and-record round trip, and the raw-age file's own relocation is unchanged by 0.4.0.
+  `docs/concepts/storage-layout.md`, the `recipient-policy` spec and the test name now say so.
+
 ## [0.4.0] — 2026-11-04
 
 safix 0.4.0 takes what the upstream projects it borrows from fixed or learned between July and November 2026 — three systemd ordering fixes from sops-nix, the Vault allowlist from sops, early-user secrets and the `--check` idea from agenix, editor hardening and stale-derivation detection from agenix-rekey, clan's new deployed paths — and adds the one algorithmic capability the pinned sops already carried: hybrid post-quantum age recipients.
