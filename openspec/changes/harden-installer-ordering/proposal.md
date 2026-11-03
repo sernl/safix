@@ -12,8 +12,9 @@ With `safix.installer.useTmpfs` set, a kernel that refuses `noswap` gets a swapp
 ## What Changes
 
 - `safix-install-secrets` is ordered before `sysinit.target` and before `shutdown.target`, and conflicts with `shutdown.target`.
-- `safix-install-users-secrets` gets the same `sysinit.target` and `shutdown.target` edges.
+- `safix-install-users-secrets` gets the same `sysinit.target` edge and no shutdown edge, because a stop job for it closes an ordering cycle through userborn and the key mount at shutdown.
 - Both units order after the mounts holding configured identity paths through `WantsMountsFor=` instead of `RequiresMountsFor=`.
+- `safix-install-users-secrets` is no longer ordered after `local-fs.target`, which on a userborn host with an early entry closed a boot-time ordering cycle that systemd broke by dropping a start job, at times the early installer's own.
 - `safix.installer.afterUnits` states that a named unit must itself run before `sysinit.target`, and evaluation refuses a named unit this configuration defines with default dependencies.
 - `safix.identity.deriveHostKeys` also derives from `services.openssh.hostKeys` when `services.openssh.generateHostKeys` is on, where the host's nixpkgs has that option.
 - **BREAKING** (narrow): with `useTmpfs`, a kernel that rejects `noswap` with `EINVAL` now gets a ramfs store instead of a swappable tmpfs; any other mount error is still refused.

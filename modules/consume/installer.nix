@@ -55,34 +55,55 @@ let
     identitySshKeyPaths
     ++ lib.optional (cfg.identity.keyFile != null) (toString cfg.identity.keyFile)
     ++ lib.optional (cfg.identity.gnupgHome != null) (toString cfg.identity.gnupgHome);
-  unitBase = script: {
-    environment = cfg.installer.environment // {
-      SOPS_RESTART_UNITS_VIA_SYSTEMCTL = "1";
+  defaultDependenciesOff = unit: lib.elem (unit.unitConfig.DefaultDependencies or true) [
+    false
+    "no"
+    "false"
+    "0"
+  ];
+  lateAfterUnits = lib.filter (
+    name:
+    let
+      unit = config.systemd.services.${lib.removeSuffix ".service" name} or null;
+    in
+    lib.hasSuffix ".service" name && unit != null && !defaultDependenciesOff unit
+  ) cfg.installer.afterUnits;
+  unitBase =
+    { script, before }:
+    {
+      environment = cfg.installer.environment // {
+        SOPS_RESTART_UNITS_VIA_SYSTEMCTL = "1";
+      };
+      path = cfg.installer.agePlugins ++ [
+        pkgs.age
+        pkgs.gnupg
+        pkgs.sops
+        pkgs.ssh-to-age
+        pkgs.systemd
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = [ "${script}" ];
+        RemainAfterExit = true;
+      };
+      # Being wanted by sysinit.target pulls a unit in without ordering it, so
+      # services with default dependencies would race the installer without the
+      # explicit edge. The mounts are wanted, not required: a key mount stopped
+      # at shutdown must not pull these units, or the user-creation units they
+      # precede, into a dependency loop.
+      before = [ "sysinit.target" ] ++ before;
+      unitConfig = {
+        DefaultDependencies = "no";
+        WantsMountsFor = identityMounts;
+      };
     };
-    path = cfg.installer.agePlugins ++ [
-      pkgs.age
-      pkgs.gnupg
-      pkgs.sops
-      pkgs.ssh-to-age
-      pkgs.systemd
-    ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = [ "${script}" ];
-      RemainAfterExit = true;
-    };
-    unitConfig = {
-      DefaultDependencies = "no";
-      RequiresMountsFor = identityMounts;
-    };
-  };
 in
 {
   options.safix.installer = common.installerOptions { inherit cfg pkgs; } // {
     useTmpfs = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Use tmpfs instead of ramfs for both secret stores. The installer requests noswap where supported.";
+      description = "Use tmpfs instead of ramfs for both secret stores. The installer mounts tmpfs with noswap; a kernel that refuses noswap gets ramfs instead, never a swappable tmpfs. Turning this on for a running host keeps the existing ramfs until reboot; turning it off mounts ramfs over the existing tmpfs, whose earlier generations stay in memory until reboot.";
     };
     useSystemdActivation = lib.mkOption {
       type = lib.types.bool;
@@ -100,7 +121,7 @@ in
     afterUnits = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      description = "Additional units the normal installer waits for. These are not added to the pre-user unit, to avoid a user-creation ordering cycle.";
+      description = "Additional units the normal installer waits for. These are not added to the pre-user unit, to avoid a user-creation ordering cycle. The installer runs before sysinit.target, so each named unit must itself run before sysinit.target, which for a service means default dependencies off. Evaluation refuses a named service defined through systemd.services with default dependencies on; units defined elsewhere are not checked.";
     };
   };
 
@@ -119,7 +140,10 @@ in
         && cfg.identity.keyFile == null
         && cfg.identity.gnupgHome == null
         && cfg.identity.sshKeyPaths == [ ]
-        && config.services.openssh.enable
+        && (
+          config.services.openssh.enable
+          || (options.services.openssh ? generateHostKeys && config.services.openssh.generateHostKeys)
+        )
       then
         map (e: e.path) (
           lib.filter (
@@ -133,7 +157,7 @@ in
         )
       else
         [ ];
-    defaultText = lib.literalMD "eligible ed25519 host keys, when no explicit identity was supplied";
+    defaultText = lib.literalMD "eligible ed25519 host keys, when no explicit identity was supplied and `services.openssh.enable` or `services.openssh.generateHostKeys` is on";
     description = "Derived host identity paths shared by the manifest, preflight and mount ordering.";
   };
 
@@ -148,7 +172,11 @@ in
           assertion = lib.all common.privatePath identitySshKeyPaths;
           message = "safix: derived private identity paths must be absolute and outside the Nix store.";
         }
-      ];
+      ]
+      ++ map (unit: {
+        assertion = false;
+        message = "safix: safix.installer.afterUnits names ${unit}, which has default dependencies and so runs after sysinit.target; safix-install-secrets runs before sysinit.target, so the ordering is a cycle. Set DefaultDependencies=no on ${unit} or remove it from afterUnits.";
+      }) lateAfterUnits;
 
     system.build.safix-manifest = manifest;
     system.build.safix-users-manifest = usersManifest;
@@ -189,7 +217,14 @@ in
     systemd.services.safix-install-users-secrets =
       lib.mkIf (cfg.installer.useSystemdActivation && hasEarly)
         (
-          unitBase usersInstallerScript
+          unitBase {
+            script = usersInstallerScript;
+            before = [
+              "systemd-sysusers.service"
+              "userborn.service"
+              "sysinit-reactivation.target"
+            ];
+          }
           // {
             description = "Install root-only safix secrets before user creation";
             wantedBy = [
@@ -201,21 +236,26 @@ in
               "userborn.service"
               "sysinit-reactivation.target"
             ];
-            before = [
-              "systemd-sysusers.service"
-              "userborn.service"
-              "sysinit-reactivation.target"
-            ];
-            after = [ "local-fs.target" ];
+            # No local-fs.target edge and no shutdown edges. This unit is
+            # ordered after its key mount, and userborn, systemd-tmpfiles-setup-dev
+            # and local-fs-pre.target lie between it and that mount, so both close
+            # a cycle: local-fs.target at boot, and a stop job at shutdown.
           }
         );
     systemd.services.safix-install-secrets = lib.mkIf cfg.installer.useSystemdActivation (
-      unitBase installerScript
+      unitBase {
+        script = installerScript;
+        before = [
+          "shutdown.target"
+          "sysinit-reactivation.target"
+        ];
+      }
       // {
+        # With default dependencies off nothing else stops this unit at shutdown.
+        conflicts = [ "shutdown.target" ];
         description = "Install safix secrets and render public templates";
         wantedBy = [ "sysinit.target" ];
         requiredBy = [ "sysinit-reactivation.target" ];
-        before = [ "sysinit-reactivation.target" ];
         requires = lib.optional hasEarly "safix-install-users-secrets.service";
         after = [
           "local-fs.target"

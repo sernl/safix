@@ -20,13 +20,15 @@ Being wanted by `sysinit.target` SHALL NOT be relied on for ordering, because a 
 
 ### Requirement: Installer units stop at shutdown without an ordering cycle
 
-Both installer units SHALL conflict with `shutdown.target` and be ordered before it.
-They SHALL be ordered after the mounts holding configured identity paths without requiring those mounts, so stopping a key mount at shutdown cannot pull an installer unit or the user-creation units it precedes into a dependency loop.
+The normal installer unit SHALL conflict with `shutdown.target` and be ordered before it.
+The installer unit that precedes user creation SHALL NOT conflict with `shutdown.target` or be ordered before it, because user creation and the local file systems' prerequisites lie between it and its key mount, and a stop job for it closes that loop at shutdown.
+Both units SHALL be ordered after the mounts holding configured identity paths without requiring them.
 
-#### Scenario: Both units carry the shutdown edges
+#### Scenario: The shutdown edges are on the normal unit only
 
 - **WHEN** a system configuration that installs through units and declares an early entry is evaluated
-- **THEN** both installer units conflict with `shutdown.target` and are ordered before it
+- **THEN** the normal installer unit conflicts with `shutdown.target` and is ordered before it
+- **AND** the pre-user installer unit does neither
 - **AND** both order after the identity mounts through a wanting edge, and neither carries a requiring mount edge
 
 #### Scenario: A key on an initrd mount survives a reboot cleanly
@@ -34,6 +36,17 @@ They SHALL be ordered after the mounts holding configured identity paths without
 - **WHEN** a host with userborn and an early entry keeps its identity on a mount needed for boot, boots, shuts down and boots again
 - **THEN** the early secret is installed on both boots and the user created from it has its password
 - **AND** the previous boot's service-manager journal records a reached system shutdown and no line reporting an ordering cycle
+
+### Requirement: The pre-user installer unit has no boot-time ordering cycle
+
+The installer unit that precedes user creation SHALL NOT be ordered after the local file systems target, because user creation precedes that target's prerequisites and the edge closes a boot-time ordering cycle.
+Its ordering after the identity mounts SHALL come from the mount edge alone.
+
+#### Scenario: The pre-user unit is not ordered after the local file systems
+
+- **WHEN** a system configuration that installs through units and declares an early entry is evaluated
+- **THEN** the pre-user installer unit does not list `local-fs.target` among the units it runs after
+- **AND** on a booted host with userborn it is active on every boot, rather than having its start job deleted to break a cycle
 
 ### Requirement: The secret store is never swappable
 

@@ -279,8 +279,9 @@ activation.
 *Type:* boolean. *Default:* `true`. **System only.**
 
 Derive SSH identities from OpenSSH ed25519 host keys where no explicit identity
-is configured; keys in either safix store are excluded. See
-[Unattended hosts](../guides/unattended-hosts.md).
+is configured and `services.openssh.enable` or
+`services.openssh.generateHostKeys` is on; keys in either safix store are
+excluded. See [Unattended hosts](../guides/unattended-hosts.md).
 
 #### `safix.identity.derivedHostKeys`
 
@@ -414,15 +415,25 @@ The age plugin packages available to the installer and to crypto subprocesses.
 
 *Type:* boolean. *Default:* `false`. **System only.**
 
-Use tmpfs instead of ramfs for both secret stores; the installer requests
-`noswap` where that is supported.
+Use tmpfs instead of ramfs for both secret stores. The installer mounts tmpfs
+with `noswap`; a kernel that refuses `noswap` gets ramfs instead, never a
+swappable tmpfs.
+
+Turning this on for a running host keeps the existing ramfs until reboot.
+Turning it off mounts ramfs over the existing tmpfs, whose earlier generations
+stay in memory, unreachable, until reboot.
 
 #### `safix.installer.useSystemdActivation`
 
 *Type:* boolean. *Default:* true where the host enables `systemd.sysusers` or
 `services.userborn`. **System only.**
 
-Install with units instead of legacy activation scripts.
+Install with units instead of legacy activation scripts. The normal installer
+is ordered before `sysinit.target`, so a service with default dependencies
+starts after its secrets are installed, and it stops at shutdown. Identity
+paths must therefore be on filesystems mounted before `sysinit.target`; an
+identity on a later mount, such as a network filesystem, forms an ordering
+cycle.
 
 #### `safix.installer.afterActivation`
 
@@ -437,6 +448,11 @@ identities must be available before user creation.
 
 Additional units the normal installer waits for; these are not added to the
 pre-user unit, which would create a user-creation ordering cycle.
+
+The installer runs before `sysinit.target`, so each named unit must itself run
+before `sysinit.target`, which for a service means default dependencies off.
+Evaluation refuses a named service defined through `systemd.services` with
+default dependencies on; units defined elsewhere are not checked.
 
 #### `safix.installer.manifest`
 

@@ -99,6 +99,8 @@ Those entries use a separate store and symlink, with `-for-users` appended to th
 
 Legacy activation installs them before `users`. Systemd activation orders them before `systemd-sysusers` or `userborn`. Ordinary entries stay after user creation.
 
+Systemd activation also orders the normal installer before `sysinit.target`, so a service with default dependencies starts after its secrets are installed without naming the installer. The normal installer unit stops at shutdown; the early one is not stopped, because stopping it would close an ordering cycle with user creation and the identity's mount.
+
 Provision the decryption identity before that phase. [`safix.installer.afterActivation`](../reference/profile-options.md#safixinstallerafteractivation) and [`safix.installer.afterUnits`](../reference/profile-options.md#safixinstallerafterunits) order the normal installer and do not postpone the early one past the users it has to precede.
 
 Three things are refused around early entries. Home-manager cannot request one at all. An early entry that is not root-owned, or that carries group or other permission bits, is refused. A template referencing an early secret is refused, because the template renders after the phase that secret exists for.

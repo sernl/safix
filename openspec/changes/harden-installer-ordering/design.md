@@ -31,33 +31,31 @@ The mount step is `mount_store` (`crates/safix-core/src/install.rs:1250-1277`), 
 
 ## Decisions
 
-### D-a. Shutdown edges on both units
+### D-a. Shutdown edges on the main unit only
 
 `safix-install-secrets` gains `before = [ "sysinit.target" "shutdown.target" ]` beside its existing `sysinit-reactivation.target`, and `conflicts = [ "shutdown.target" ]`, matching sops-nix 166fc0d and a8be3b1.
 
-`safix-install-users-secrets` gets the same three edges.
-Reasons:
+`safix-install-users-secrets` gets `before sysinit.target` and no shutdown edge, as upstream's equivalent unit has none (survey sops-nix §5 Q1).
+An explicit `before sysinit.target` makes the early unit's position independent of whether the host enables userborn or sysusers.
+`useSystemdActivation` can be set to true on a host with neither, and the early unit is then otherwise unordered against `sysinit.target`.
 
-- It is the same kind of unit: a oneshot with `RemainAfterExit`, default dependencies off, wanted by `sysinit.target`.
-  Without the conflict it stays active until the final kill, which is the state the main unit is being moved out of.
-- The units it is required by and ordered before, `userborn.service` and `systemd-sysusers.service`, conflict with `shutdown.target` and are ordered before it themselves; the early unit is the one unit in that chain that does not.
-- An explicit `before sysinit.target` makes the early unit's position independent of whether the host enables userborn or sysusers.
-  `useSystemdActivation` can be set to true on a host with neither, and the early unit is then otherwise unordered against `sysinit.target`.
-- Neither unit has an `ExecStop`, so the stop job deactivates the unit and removes nothing; secrets stay in place until the store is unmounted.
-
-Upstream added these edges only to its main unit (survey sops-nix §5 Q1).
-The early unit's coupling is tighter than upstream's (`requiredBy` rather than `wantedBy` the user-creation unit), which is a reason to give it the same shutdown behaviour as the units it is coupled to rather than leave it out.
+This change first gave the early unit the same three edges, on the grounds that the units it precedes, `userborn.service` and `systemd-sysusers.service`, conflict with `shutdown.target` themselves.
+The `userbornKeyMount` VM node (D-f) refuted that: with the conflict in place the shutdown logged `local-fs-pre.target: Found ordering cycle: var-lib-safix\x2dkey.mount/stop after safix-install-users-secrets.service/stop after userborn.service/stop after systemd-tmpfiles-setup-dev.service/stop after local-fs-pre.target/stop - after var-lib-safix\x2dkey.mount`, and systemd deleted the key mount's stop job.
+In start terms the early unit is after its key mount (D-b), `userborn.service` is after the early unit, `systemd-tmpfiles-setup-dev.service` is after `userborn.service`, `local-fs-pre.target` is after that, and a local mount is after `local-fs-pre.target`.
+That loop is inert at boot, where the key mount is already active from the initrd, and closes at shutdown as soon as every member has a stop job; a conflict on `shutdown.target` is what gives the early unit one.
+The main unit is not in the loop: none of the units ordered after it runs before `local-fs-pre.target`.
+Neither unit has an `ExecStop`, so the main unit's stop job deactivates it and removes nothing; secrets stay in place until the store is unmounted.
 
 ### D-b. `WantsMountsFor` on both units
 
 Both units use `WantsMountsFor = identityMounts`, and `RequiresMountsFor` is removed from `unitBase`.
-`unitBase` therefore stays shared and is not split; the shutdown and `sysinit.target` edges, which are also shared, move into `unitBase`.
+`unitBase` therefore stays shared and is not split; the `sysinit.target` edge, which is also shared, moves into `unitBase`, and the main unit adds its shutdown edges itself.
 
 The early unit's change follows sops-nix e80b8b7 (#962).
 For the main unit, sops-nix kept `RequiresMountsFor` (`modules/sops/default.nix:496`); safix does not, for these reasons:
 
 - `WantsMountsFor=` adds the same `After=` on the mount units as `RequiresMountsFor=`; only the requirement edge differs, so the main unit still starts after its key mounts.
-- After this change the main unit has the same shape as the early unit that looped in #962: default dependencies off, before `sysinit.target`, conflicting with `shutdown.target`, with a requiring edge on a mount stopped at shutdown.
+- After this change the main unit has default dependencies off, runs before `sysinit.target` and conflicts with `shutdown.target`; a requiring edge on a mount stopped at shutdown is the edge that looped the early unit in #962.
   The reason for weakening the early unit's edge applies to it as well.
 - When a key mount fails, a requiring edge fails the unit with a systemd dependency error and safix's own message never runs.
   With a wanting edge the unit starts, and the identity preflight refuses, naming each identity path and how it failed (`common.identityPreflight`, `modules/consume/installer.nix:42-47`).
@@ -114,19 +112,38 @@ This is documented on `useTmpfs`, with a reboot as the remedy; agenix's tmpfs ch
 ### D-f. Checks
 
 - Structural: `orderingFacts.actual.unit` (`modules/flake/checks/installer.nix:671-680`) gains `beforeSysinit`, `beforeShutdown`, `conflictsShutdown`, `wantsIdentityMounts` and `requiresNoMounts` beside `wantedBySysinit`, read off `orderedUnitFixture`.
-  A new fixture with one `neededForUsers` entry through `safix.importedSecrets` and a store `sopsFile` written with `pkgs.writeText` (the pattern at `:295`) supplies the same facts for `safix-install-users-secrets` under a new `earlyUnit` key.
+  A new fixture with one `neededForUsers` entry through `safix.importedSecrets` and a store `sopsFile` written with `pkgs.writeText` (the pattern at `:295`) supplies `beforeSysinit`, `wantsIdentityMounts` and `requiresNoMounts` for `safix-install-users-secrets` under a new `earlyUnit` key, with `notBeforeShutdown` and `noShutdownConflict` (D-a) and `notAfterLocalFs` (D-g) beside them.
   A fixture defining a default-dependency service and naming it in `afterUnits`, and one defining it with default dependencies off, supply `afterUnitsCycle` facts read from the failed `config.assertions` messages.
 - VM (`modules/flake/checks/installer-vm.nix`): every node gains a `safix-consumer` oneshot, wanted by `multi-user.target`, with default dependencies and no ordering against safix, whose script tests for `/run/safix/shared-token`.
-  On the unit-mode nodes the script also asserts `sysinit.target`'s `After` lists `safix-install-secrets.service`, and both units' `Before` and `Conflicts` hold `shutdown.target`.
+  On the unit-mode nodes the script also asserts `sysinit.target`'s `After` lists `safix-install-secrets.service`, and that unit's `Before` and `Conflicts` hold `shutdown.target`.
 - VM key-mount node: a fourth node `userbornKeyMount` mirrors sops-nix `checks/nixos-test.nix:635-693` (`user-passwords-userborn-key-mount`): systemd initrd, userborn, `users.mutableUsers = false`, the age identity on a `neededForBoot` bind mount from a store directory, `safix.identity.keyFile` forced to the mounted path, and the `account-password` early entry backing a user's `hashedPasswordFile`.
-  After the first boot it asserts the password and that the early unit's `After` names the key mount; after `shutdown()` and `start()` it asserts the password again and reads `journalctl -b -1 --no-pager -o cat _PID=1` for `Reached target System Shutdown` and the absence of `ordering cycle`.
+  After the first boot it asserts the early unit is active, the early secret exists, the password, and that the early unit's `After` names the key mount; after `shutdown()` and `start()` it asserts the same again and reads `journalctl -b -1 --no-pager -o cat _PID=1` for `Reached target System Shutdown` and the absence of `ordering cycle`.
+  The shadow entry persists across boots, so the password alone does not show the second boot installed anything; the unit's state does.
   It is excluded from the shared loop at `:181`, whose rotation steps it does not need.
+  Severity drill, observed: restoring `RequiresMountsFor` on the early unit alone turns the node red at shutdown with `systemd-tmpfiles-setup-dev.service: Found ordering cycle: local-fs-pre.target/stop after var-lib-safix\x2dkey.mount/stop after safix-install-users-secrets.service/stop after userborn.service/stop after systemd-tmpfiles-setup-dev.service/stop`, so the node reproduces #962 rather than only guarding its shape.
+  Adding `conflicts = [ "shutdown.target" ]` to the early unit turns it red with the D-a cycle.
 - Identity: `identityManifests` gains `generatedOnly` (sshd disabled with `lib.mkForce false`, `generateHostKeys = true`, `foreignHostKeys`), and the check reads `derivedHostKeys` of a `neither` fixture.
 - Rust: unit tests in `crates/safix-core/src/install.rs`'s `tests` module, run by `safix-rs-test` (`modules/flake/rust.nix:118-124`, `--lib --bins`).
 
+### D-g. No `local-fs.target` edge on the early unit
+
+`safix-install-users-secrets` no longer orders after `local-fs.target`; `safix-install-secrets` keeps that edge.
+The edge closes a boot-time ordering cycle on a userborn host with an early entry: `userborn.service` runs before `systemd-tmpfiles-setup-dev.service`, which runs before `local-fs-pre.target`.
+
+Evidence, from the first run of the `userbornKeyMount` VM node (D-f) with the edge in place:
+
+- First boot: `local-fs-pre.target: Found ordering cycle: systemd-tmpfiles-setup-dev.service/start after userborn.service/start after safix-install-users-secrets.service/start after local-fs.target/start after local-fs-pre.target/start - after systemd-tmpfiles-setup-dev.service`, broken by deleting the `systemd-tmpfiles-setup-dev.service` start job.
+- Second boot: `userborn.service: Found ordering cycle: safix-install-users-secrets.service/start after local-fs.target/start after run-wrappers.mount/start after local-fs-pre.target/start after systemd-tmpfiles-setup-dev.service/...`, broken by deleting the `safix-install-users-secrets.service` start job, so the early secret was not installed on that boot.
+  The user's password check still passed, because the shadow entry from the first boot persists.
+
+The existing VM nodes did not show this because none boots with an early entry; they reach one only by switching into the rotated specialisation.
+sops-nix's equivalent unit has no `local-fs.target` edge either (`modules/sops/secrets-for-users/default.nix`).
+`WantsMountsFor = identityMounts` (D-b) still orders the early unit after the mounts holding its identity, which is the ordering the `local-fs.target` edge was standing in for; the store itself is under `/run`, mounted before any unit starts.
+The structural fact `earlyUnit.notAfterLocalFs` holds the absence, and the VM node asserts the early unit is active on both boots.
+
 ## Risks / Trade-offs
 
-- [The reboot node may not reproduce #962 with `RequiresMountsFor` restored, so it may guard the shape without demonstrating the failure] → The severity drill in tasks.md records what it observed; if the drill stays green the check comment and this design say so rather than claiming a reproduction.
+- [The reboot node might not have reproduced #962 with `RequiresMountsFor` restored] → It did (D-f); the drill is recorded in tasks.md and above the node.
 - [An identity on a filesystem mounted after `sysinit.target`, such as a network filesystem, now forms an ordering cycle] → Stated in the `afterUnits` and `useSystemdActivation` docs as part of the before-`sysinit.target` constraint; the reboot node's ordering-cycle assertion covers the local case.
 - [The `afterUnits` assertion inspects only units defined through `systemd.services`] → Stated in the option description.
 - [A container with `useTmpfs` that previously ran on a swappable tmpfs keeps that mount until reboot, because a tmpfs request accepts an existing tmpfs] → Documented on `useTmpfs`; a reboot of the container remounts as ramfs.

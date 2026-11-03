@@ -52,7 +52,7 @@ use zeroize::Zeroizing;
 
 use crate::ciphertext::{self, Format, Identities, Source};
 use crate::error::{Error, Result};
-use crate::progress::{Progress, log};
+use crate::progress::{Progress, log, note};
 use crate::secret::Secret;
 
 /// The manifest schema version this binary reads.
@@ -391,7 +391,7 @@ pub fn run(manifest_path: &Path, options: &Options, progress: &dyn Progress) -> 
     let mount_point = PathBuf::from(&manifest.secrets_mount_point);
     let symlink_path = PathBuf::from(&manifest.symlink_path);
     refuse_occupied_store(&symlink_path)?;
-    mount_store(&manifest, &mount_point, keys_gid)?;
+    mount_store(&manifest, &mount_point, keys_gid, progress)?;
     let identity = assemble_identity(&manifest, &mount_point, progress)?;
     let documents = decrypt_documents(&manifest, Some(&identity))?;
     let mut values = BTreeMap::new();
@@ -1238,16 +1238,21 @@ fn missing_key(entry: &ManifestSecret) -> Error {
 /// none of the privileges the three steps here need, and the installation it
 /// replaces did not have them either.
 ///
-/// `ramfs` by default and `tmpfs` when the consumer asked for one, with
-/// `noswap` where the kernel takes it — the mount options are the point of the
-/// whole step, since a secret store that can be swapped out is a secret store
-/// on a disk.
+/// `ramfs` by default and `tmpfs` with `noswap` when the consumer asked for
+/// one, falling back to `ramfs` where the kernel refuses `noswap` — the mount
+/// options are the point of the whole step, since a secret store that can be
+/// swapped out is a secret store on a disk.
 ///
 /// # Errors
 ///
 /// [`Error::InstallMountFailed`] when the mount cannot be made, and
 /// [`Error::FileUnwritable`] when the directory cannot be made or owned.
-fn mount_store(manifest: &Manifest, mount_point: &Path, keys_gid: u32) -> Result<()> {
+fn mount_store(
+    manifest: &Manifest,
+    mount_point: &Path,
+    keys_gid: u32,
+    progress: &dyn Progress,
+) -> Result<()> {
     match std::fs::symlink_metadata(mount_point) {
         Ok(metadata) if !metadata.is_dir() => {
             return Err(layout_error(
@@ -1263,17 +1268,40 @@ fn mount_store(manifest: &Manifest, mount_point: &Path, keys_gid: u32) -> Result
         return Ok(());
     }
 
-    let (filesystem, magic) = if manifest.use_tmpfs {
-        ("tmpfs", TMPFS_MAGIC)
-    } else {
-        ("ramfs", RAMFS_MAGIC)
-    };
-
-    if filesystem_magic(mount_point) != Some(magic) {
-        mount_memory_backed(mount_point, filesystem, manifest.use_tmpfs)?;
+    if !store_already_mounted(manifest.use_tmpfs, filesystem_magic(mount_point)) {
+        let mounted = mount_memory_backed(mount_point, manifest.use_tmpfs)?;
+        if manifest.use_tmpfs && mounted == "ramfs" {
+            note(
+                progress,
+                &format!(
+                    "safix: the kernel refused noswap for a tmpfs at {}, so ramfs was mounted instead",
+                    mount_point.display()
+                ),
+            );
+        }
     }
 
     own(mount_point, 0, keys_gid)
+}
+
+/// Whether the filesystem already at the mount point serves the request.
+///
+/// A tmpfs request accepts ramfs as well, because ramfs is what the
+/// `noswap` fallback mounts, and mounting again on top of it at every
+/// activation would stack stores. A ramfs request accepts only ramfs: a tmpfs
+/// mounted by an earlier safix's fallback may lack `noswap`, and `statfs` does
+/// not report mount options.
+///
+/// So a live change of type is not symmetric. Turning tmpfs on for a running
+/// host keeps the existing ramfs until reboot; turning it off mounts ramfs over
+/// the existing tmpfs, whose earlier generations stay in memory, unreachable,
+/// until reboot.
+fn store_already_mounted(use_tmpfs: bool, magic: Option<i128>) -> bool {
+    match magic {
+        Some(RAMFS_MAGIC) => true,
+        Some(TMPFS_MAGIC) => use_tmpfs,
+        _ => false,
+    }
 }
 
 /// The magic number of the filesystem mounted at this path.
@@ -1290,49 +1318,59 @@ fn filesystem_magic(path: &Path) -> Option<i128> {
 /// has no memory-backed mount to make and is told so rather than silently
 /// installing onto a disk.
 #[cfg(target_os = "linux")]
-fn mount_memory_backed(mount_point: &Path, filesystem: &str, use_tmpfs: bool) -> Result<()> {
+fn mount_memory_backed(mount_point: &Path, use_tmpfs: bool) -> Result<&'static str> {
     use rustix::mount::{MountFlags, mount};
 
     let flags = MountFlags::NODEV | MountFlags::NOSUID | MountFlags::NOEXEC;
-    let failed = |cause: rustix::io::Errno| Error::InstallMountFailed {
-        path: mount_point.display().to_string(),
-        filesystem: filesystem.to_owned(),
-        cause: io::Error::from(cause),
-    };
-
-    // The mount data is a C string because that is what the syscall takes;
-    // both spellings are literals, so neither is assembled at runtime.
-    if !use_tmpfs {
-        return mount(filesystem, mount_point, filesystem, flags, c"mode=0751").map_err(failed);
-    }
-
-    // `noswap` is what makes a tmpfs as good as a ramfs for this, and it is
-    // also younger than the kernels this may run on: a kernel that does not
-    // know the option rejects the whole mount with EINVAL, and the fallback is
-    // the same mount without it rather than no store at all.
-    match mount(
-        filesystem,
-        mount_point,
-        filesystem,
-        flags,
-        c"noswap,mode=0751",
-    ) {
-        Ok(()) => Ok(()),
-        Err(rustix::io::Errno::INVAL) => {
-            mount(filesystem, mount_point, filesystem, flags, c"mode=0751").map_err(failed)
-        }
-        Err(cause) => Err(failed(cause)),
-    }
+    mount_attempts(mount_point, use_tmpfs, |filesystem, data| {
+        mount(filesystem, mount_point, filesystem, flags, data)
+    })
 }
 
 /// The platforms with no memory-backed mount of either kind.
 #[cfg(not(target_os = "linux"))]
-fn mount_memory_backed(mount_point: &Path, filesystem: &str, _use_tmpfs: bool) -> Result<()> {
+fn mount_memory_backed(mount_point: &Path, use_tmpfs: bool) -> Result<&'static str> {
     Err(Error::InstallMountFailed {
         path: mount_point.display().to_string(),
-        filesystem: filesystem.to_owned(),
+        filesystem: (if use_tmpfs { "tmpfs" } else { "ramfs" }).to_owned(),
         cause: io::Error::from(io::ErrorKind::Unsupported),
     })
+}
+
+/// The sequence of mounts a store request makes, with the syscall handed in
+/// as `(filesystem, data)`, returning the filesystem that was mounted.
+///
+/// The mount data is a C string because that is what the syscall takes; every
+/// spelling is a literal, so none is assembled at runtime.
+#[cfg(any(target_os = "linux", test))]
+fn mount_attempts(
+    mount_point: &Path,
+    use_tmpfs: bool,
+    mut mount: impl FnMut(&str, &std::ffi::CStr) -> rustix::io::Result<()>,
+) -> Result<&'static str> {
+    let failed = |filesystem: &str, cause: rustix::io::Errno| Error::InstallMountFailed {
+        path: mount_point.display().to_string(),
+        filesystem: filesystem.to_owned(),
+        cause: io::Error::from(cause),
+    };
+    let ramfs = |mount: &mut dyn FnMut(&str, &std::ffi::CStr) -> rustix::io::Result<()>| {
+        mount("ramfs", c"mode=0751")
+            .map(|()| "ramfs")
+            .map_err(|cause| failed("ramfs", cause))
+    };
+
+    if !use_tmpfs {
+        return ramfs(&mut mount);
+    }
+
+    // `noswap` is younger than the kernels this may run on, and a kernel that
+    // does not know it rejects the whole mount with EINVAL. A tmpfs without it
+    // can be swapped to disk, which ramfs cannot, so the fallback is ramfs.
+    match mount("tmpfs", c"noswap,mode=0751") {
+        Ok(()) => Ok("tmpfs"),
+        Err(rustix::io::Errno::INVAL) => ramfs(&mut mount),
+        Err(cause) => Err(failed("tmpfs", cause)),
+    }
 }
 
 /// Refuse a store symlink path something that is not a symlink already holds.
@@ -2272,6 +2310,119 @@ mod tests {
             said.contains("absent-one"),
             "the absence is reported: {said}"
         );
+    }
+
+    /// A scripted `mount(2)`: each call is recorded as `(filesystem, data)`
+    /// and answered by the next result in turn.
+    fn scripted(
+        attempts: &mut Vec<(String, String)>,
+        answers: Vec<rustix::io::Result<()>>,
+    ) -> impl FnMut(&str, &std::ffi::CStr) -> rustix::io::Result<()> {
+        let mut answers = answers.into_iter();
+        move |filesystem: &str, data: &std::ffi::CStr| {
+            attempts.push((
+                filesystem.to_owned(),
+                data.to_string_lossy().into_owned(),
+            ));
+            answers.next().expect("the script answers every attempt")
+        }
+    }
+
+    fn attempted(filesystem: &str, data: &str) -> (String, String) {
+        (filesystem.to_owned(), data.to_owned())
+    }
+
+    fn refused_filesystem(refusal: &Error) -> Option<&str> {
+        match refusal {
+            Error::InstallMountFailed { filesystem, .. } => Some(filesystem),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_refused_noswap_falls_back_to_ramfs_not_swappable_tmpfs() {
+        let mut attempts = Vec::new();
+        let mount = scripted(&mut attempts, vec![Err(rustix::io::Errno::INVAL), Ok(())]);
+
+        let mounted = mount_attempts(Path::new("/run/safix.d"), true, mount)
+            .expect("the ramfs fallback mounts");
+
+        assert_eq!(mounted, "ramfs");
+        assert_eq!(
+            attempts,
+            vec![
+                attempted("tmpfs", "noswap,mode=0751"),
+                attempted("ramfs", "mode=0751"),
+            ],
+            "no tmpfs without noswap is ever attempted"
+        );
+    }
+
+    #[test]
+    fn a_mount_error_other_than_einval_is_refused() {
+        let mut attempts = Vec::new();
+        let mount = scripted(&mut attempts, vec![Err(rustix::io::Errno::PERM)]);
+
+        let refusal = mount_attempts(Path::new("/run/safix.d"), true, mount)
+            .expect_err("a permission error is not a missing option");
+
+        assert_eq!(refusal.code().as_str(), "safix::install_mount_failed");
+        assert_eq!(refused_filesystem(&refusal), Some("tmpfs"));
+        assert_eq!(
+            attempts,
+            vec![attempted("tmpfs", "noswap,mode=0751")]
+        );
+    }
+
+    #[test]
+    fn a_failed_ramfs_fallback_is_refused_naming_ramfs() {
+        let mut attempts = Vec::new();
+        let mount = scripted(
+            &mut attempts,
+            vec![Err(rustix::io::Errno::INVAL), Err(rustix::io::Errno::NODEV)],
+        );
+
+        let refusal = mount_attempts(Path::new("/run/safix.d"), true, mount)
+            .expect_err("a failed fallback is refused");
+
+        assert_eq!(refusal.code().as_str(), "safix::install_mount_failed");
+        assert_eq!(refused_filesystem(&refusal), Some("ramfs"));
+        assert_eq!(attempts.len(), 2);
+    }
+
+    #[test]
+    fn an_accepted_noswap_mounts_tmpfs_once() {
+        let mut attempts = Vec::new();
+        let mount = scripted(&mut attempts, vec![Ok(())]);
+
+        let mounted =
+            mount_attempts(Path::new("/run/safix.d"), true, mount).expect("noswap is accepted");
+
+        assert_eq!(mounted, "tmpfs");
+        assert_eq!(
+            attempts,
+            vec![attempted("tmpfs", "noswap,mode=0751")]
+        );
+    }
+
+    #[test]
+    fn a_tmpfs_request_accepts_an_existing_ramfs() {
+        assert!(
+            store_already_mounted(true, Some(RAMFS_MAGIC)),
+            "a fallback store is not mounted over on the next activation"
+        );
+        assert!(store_already_mounted(true, Some(TMPFS_MAGIC)));
+        assert!(!store_already_mounted(true, None));
+    }
+
+    #[test]
+    fn a_ramfs_request_does_not_accept_an_existing_tmpfs() {
+        assert!(
+            !store_already_mounted(false, Some(TMPFS_MAGIC)),
+            "a tmpfs may lack noswap, and statfs cannot say"
+        );
+        assert!(store_already_mounted(false, Some(RAMFS_MAGIC)));
+        assert!(!store_already_mounted(false, None));
     }
 
     /// A scratch directory of this module's own, removed by nothing: the tests

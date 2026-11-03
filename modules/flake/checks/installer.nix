@@ -90,14 +90,17 @@
 # messages are declared in `common.nix` so this check can read them.
 #
 # ── the identity the system scope derives ──
-# `safix-installer-identity` reads `ageSshKeyPaths` out of five built
+# `safix-installer-identity` reads `ageSshKeyPaths` out of six built
 # manifests rather than out of the option that fed them. A clan-shaped host
 # whose keys lie under `/run/secrets` derives its ed25519 key and drops the
-# rsa one; a host whose keys lie inside safix's own store derives nothing; a
-# named identity survives both placements unchanged; and the switch turned
-# off contributes nothing. The exclusion prefix is safix's own symlink path,
-# because the catch-22 the exclusion avoids is decrypting with a key this
-# installer itself deploys.
+# rsa one, whether it runs sshd or only generates its host keys; a host whose
+# keys lie inside safix's own store derives nothing; a named identity survives
+# both placements unchanged; and the switch turned off contributes nothing. A
+# host that neither runs sshd nor generates host keys derives nothing, read off
+# the derived option because its manifest would refuse for want of an
+# identity. The exclusion prefix is safix's own symlink path, because the
+# catch-22 the exclusion avoids is decrypting with a key this installer itself
+# deploys.
 #
 # ── the two refusals ──
 # `safix-installer-refusals` holds both. The evaluation refusal is a throw
@@ -537,26 +540,72 @@
       # A host whose user management moves secret installation into a unit,
       # so the selection is exercised from the host's own option rather than
       # from safix's override, and the ordering is a unit ordering.
-      orderedUnitFixture = inputs.nixpkgs.lib.nixosSystem {
-        modules = [
-          config.flake.nixosModules.default
-          {
-            nixpkgs.hostPlatform = system;
-            networking.hostName = "server";
-            system.stateVersion = "24.05";
-            services.userborn.enable = true;
-            safix = {
-              lib = config.flake.safix.lib;
-              user = "bob";
-              identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
-              installer = {
-                package = installerPackage;
-                validate = false;
-                afterUnits = [ "age-decrypt-secrets.service" ];
+      orderedUnitFixtureWith =
+        extra:
+        inputs.nixpkgs.lib.nixosSystem {
+          modules = [
+            config.flake.nixosModules.default
+            {
+              nixpkgs.hostPlatform = system;
+              networking.hostName = "server";
+              system.stateVersion = "24.05";
+              services.userborn.enable = true;
+              safix = {
+                lib = config.flake.safix.lib;
+                user = "bob";
+                identity.sshKeyPaths = [ "/etc/ssh/safix-fixture-identity" ];
+                installer = {
+                  package = installerPackage;
+                  validate = false;
+                  afterUnits = [ "age-decrypt-secrets.service" ];
+                };
               };
-            };
-          }
-        ];
+            }
+            extra
+          ];
+        };
+
+      orderedUnitFixture = orderedUnitFixtureWith { };
+
+      # One early entry, so the pre-user unit exists and its edges are read
+      # off the same host shape as the normal unit's.
+      orderedEarlyUnitFixture = orderedUnitFixtureWith {
+        safix.importedSecrets.fixture-early = {
+          sopsFile = pkgs.writeText "safix-fixture-early.yaml" "fixture: encrypted\n";
+          key = "fixture";
+          neededForUsers = true;
+        };
+      };
+
+      # A named unit this configuration defines, once with default
+      # dependencies, which run it after sysinit.target, and once without.
+      lateUnitFixtureWith =
+        unitConfig:
+        orderedUnitFixtureWith {
+          systemd.services.safix-fixture-late = {
+            inherit unitConfig;
+            script = "true";
+          };
+          safix.installer.afterUnits = [ "safix-fixture-late.service" ];
+        };
+
+      failedMessages =
+        fixture: map (a: a.message) (lib.filter (a: !a.assertion) fixture.config.assertions);
+
+      # The edges both installer units share, read with fallbacks so a removed
+      # edge is a failing diff rather than an evaluation error.
+      sharedEdges = unit: {
+        beforeSysinit = builtins.elem "sysinit.target" unit.before;
+        wantsIdentityMounts = builtins.elem "/etc/ssh/safix-fixture-identity" (
+          unit.unitConfig.WantsMountsFor or [ ]
+        );
+        requiresNoMounts = !(unit.unitConfig ? RequiresMountsFor);
+      };
+
+      sharedEdgesExpected = {
+        beforeSysinit = true;
+        wantsIdentityMounts = true;
+        requiresNoMounts = true;
       };
 
       # Two definitions of one activation step name, each in the shape a
@@ -644,14 +693,24 @@
               deps = [ ];
               text = "";
             };
-          unit =
-            orderedUnitFixture.config.systemd.services.safix-install-secrets or {
-              after = [ ];
-              wantedBy = [ ];
-              requiredBy = [ ];
-              before = [ ];
-              serviceConfig = { };
-            };
+          unitFallback = {
+            after = [ ];
+            wantedBy = [ ];
+            requiredBy = [ ];
+            before = [ ];
+            conflicts = [ ];
+            serviceConfig = { };
+            unitConfig = { };
+          };
+          unit = orderedUnitFixture.config.systemd.services.safix-install-secrets or unitFallback;
+          earlyUnit =
+            orderedEarlyUnitFixture.config.systemd.services.safix-install-users-secrets or unitFallback;
+          lateMessages = failedMessages (lateUnitFixtureWith { });
+          earlyMessages = failedMessages (lateUnitFixtureWith {
+            DefaultDependencies = false;
+          });
+          undefinedMessages = failedMessages orderedUnitFixture;
+          refuses = lib.any (lib.hasInfix "safix-install-secrets runs before sysinit.target");
           unorderedScripts = manifestFixture.config.system.activationScripts;
           unorderedStep =
             unorderedScripts.safixInstallSecrets or {
@@ -677,6 +736,31 @@
                 && builtins.elem "sysinit-reactivation.target" unit.before;
               runsTheInstaller = lib.any (lib.hasInfix unitInstaller) (lib.toList unit.serviceConfig.ExecStart);
               noActivationStep = orderedUnitFixture.config.system.activationScripts ? safixInstallSecrets;
+              beforeShutdown = builtins.elem "shutdown.target" unit.before;
+              conflictsShutdown = builtins.elem "shutdown.target" unit.conflicts;
+            }
+            // sharedEdges unit;
+
+            # userborn, systemd-tmpfiles-setup-dev and local-fs-pre.target lie
+            # between this unit and its key mount, so a local-fs.target edge is
+            # a cycle at boot and a stop job at shutdown is a cycle there.
+            earlyUnit = {
+              exists = orderedEarlyUnitFixture.config.systemd.services ? safix-install-users-secrets;
+              notAfterLocalFs = !(builtins.elem "local-fs.target" earlyUnit.after);
+              notBeforeShutdown = !(builtins.elem "shutdown.target" earlyUnit.before);
+              noShutdownConflict = !(builtins.elem "shutdown.target" earlyUnit.conflicts);
+            }
+            // sharedEdges earlyUnit;
+
+            # The installer runs before sysinit.target, so a named unit that
+            # runs after it closes a cycle; only defined units can be read.
+            afterUnitsCycle = {
+              refusesLateUnit = refuses lateMessages;
+              namesTheUnit = lib.any (
+                m: lib.hasInfix "safix-fixture-late.service" m && lib.hasInfix "DefaultDependencies=no" m
+              ) lateMessages;
+              acceptsEarlyUnit = !(refuses earlyMessages);
+              acceptsUndefinedUnit = !(refuses undefinedMessages);
             };
 
             # A fixture naming neither option: registered, and unordered
@@ -730,6 +814,24 @@
               rerunsOnSwitch = true;
               runsTheInstaller = true;
               noActivationStep = false;
+              beforeShutdown = true;
+              conflictsShutdown = true;
+            }
+            // sharedEdgesExpected;
+
+            earlyUnit = {
+              exists = true;
+              notAfterLocalFs = true;
+              notBeforeShutdown = true;
+              noShutdownConflict = true;
+            }
+            // sharedEdgesExpected;
+
+            afterUnitsCycle = {
+              refusesLateUnit = true;
+              namesTheUnit = true;
+              acceptsEarlyUnit = true;
+              acceptsUndefinedUnit = true;
             };
 
             unordered = {
@@ -766,7 +868,8 @@
       # derivation reads: where the host's keys lie, whether an identity is
       # named, and whether the switch is on. `services.openssh.enable` is on
       # because the derivation derives nothing from a host whose keys openssh
-      # does not manage.
+      # neither uses nor generates; the fixtures that turn it off turn on
+      # `services.openssh.generateHostKeys` or derive nothing.
       identityFixture =
         extra:
         inputs.nixpkgs.lib.nixosSystem {
@@ -839,7 +942,19 @@
             safix.identity.deriveHostKeys = false;
             safix.identity.keyFile = "/var/lib/safix-fixture/key.txt";
           }).config.system.build.safix-manifest;
+        generatedOnly =
+          (identityFixture {
+            services.openssh.enable = lib.mkForce false;
+            services.openssh.generateHostKeys = true;
+            services.openssh.hostKeys = foreignHostKeys;
+          }).config.system.build.safix-manifest;
       };
+
+      neitherDerivedHostKeys = builtins.toJSON (identityFixture {
+        services.openssh.enable = lib.mkForce false;
+        services.openssh.generateHostKeys = false;
+        services.openssh.hostKeys = foreignHostKeys;
+      }).config.safix.identity.derivedHostKeys;
 
       # ── the refusals ──
 
@@ -1492,6 +1607,8 @@
               namedOverForeign = identityManifests.namedOverForeign;
               namedOverSafix = identityManifests.namedOverSafix;
               derivationOff = identityManifests.derivationOff;
+              generatedOnly = identityManifests.generatedOnly;
+              inherit neitherDerivedHostKeys;
               meta.description = "the system-scope identity derivation, excluding only safix's own store";
             }
             ''
@@ -1513,6 +1630,13 @@
                 "a named identity did not survive safix-store host keys"
               assertIdentity "$derivationOff" '[]' \
                 "the derivation contributed with its switch off"
+              assertIdentity "$generatedOnly" '["/run/secrets/openssh/ssh.id_ed25519"]' \
+                "host keys generated without sshd were not derived"
+              if ! diff -u <(echo '[]') <(echo "$neitherDerivedHostKeys" | jq -S .); then
+                echo ""
+                echo "safix-installer-identity: a host that neither runs sshd nor generates host keys derived an identity"
+                exit 1
+              fi
 
               touch $out
             '';

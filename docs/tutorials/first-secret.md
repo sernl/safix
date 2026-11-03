@@ -134,8 +134,8 @@ because it is the host.
 [`safix.identity.deriveHostKeys`](../reference/profile-options.md#safixidentityderivehostkeys)
 is on by default. It derives the identity from the ed25519 entries of
 `services.openssh.hostKeys` when no identity is named explicitly, and it needs
-`services.openssh.enable` for those keys to exist. Keys inside either safix
-store are excluded.
+`services.openssh.enable` or `services.openssh.generateHostKeys` for those keys
+to exist. Keys inside either safix store are excluded.
 
 Nothing outside the `safix.*` namespace is set for safix's benefit here — see
 the namespace rule in [The model](../concepts/model.md).
