@@ -18,6 +18,60 @@ A change to it is a breaking change whether or not any rust changed.
 
 ## [Unreleased]
 
+### The installer's units are ordered before the services that read them and stop cleanly at shutdown
+
+`safix-install-secrets` now runs before `sysinit.target`, so a unit with default dependencies no longer races the installer for its secret, and it is ordered before and conflicts with `shutdown.target`, so it stops with the system rather than at the final kill.
+`safix-install-users-secrets` gains the `sysinit.target` edge and keeps no shutdown edge and no `local-fs.target` edge: a userborn host with an initrd key mount produced an ordering cycle at boot through the first and at shutdown through the second, and on the second boot systemd broke the cycle by deleting the early installer's own start job.
+Both units use `WantsMountsFor` for the identity paths rather than `RequiresMountsFor`, which is what looped at shutdown in sops-nix (#962) and now in safix's own reboot test; a missing key path is still refused, by safix's own preflight naming the path.
+`safix.installer.afterUnits` must name units that themselves run before `sysinit.target`, and an evaluation assertion refuses a named service this configuration defines with default dependencies on.
+`safix.identity.deriveHostKeys` also derives from `services.openssh.generateHostKeys`, guarded so older nixpkgs evaluate.
+A tmpfs store whose kernel rejects `noswap` now falls back to ramfs rather than to a swappable tmpfs; a tmpfs request accepts an existing ramfs or tmpfs mount so the fallback does not stack a mount on every activation.
+The `safix-installer-ordering` facts and a new userborn key-mount reboot node in `safix-installer-vm` hold each edge, and each drill's observation is recorded in `openspec/changes/harden-installer-ordering/tasks.md`.
+These are the three systemd fixes sops-nix landed between f140661 and b18e01c, with the `local-fs.target` finding safix's own.
+
+### sops is denied Vault servers by default, the card plugin ships on the wrapper's `PATH`, and macOS keygen prints the export line
+
+Every sops child safix starts carries `SOPS_HC_VAULT_ALLOWLIST=none` unless the operator set the variable themselves, and runs that must not inherit identity material also drop `VAULT_TOKEN` and `VAULT_ADDR`.
+Without it, decrypting a committed document whose metadata names a Vault server sends the operator's token there (GHSA-jgf3-f6rg-8x3h, unpatched upstream, whose default is announced to flip to `none` without a major release).
+safix never reads a Vault key, so nothing is lost.
+The packaged `safix` suffixes `age-plugin-yubikey` onto `PATH`, after whatever the operator's own `PATH` names, because sops runs the plugin to wrap a data key to an `age1yubikey1…` recipient and a bare `nix run` had no plugin to run after `safix enroll` had declared one.
+On macOS `safix keygen` prints the `export SOPS_AGE_KEY_FILE=…` line a standalone `sops` or `clan` needs, because those default to `~/Library/Application Support/sops/age/keys.txt` when `XDG_CONFIG_HOME` is unset while safix's identity file is under `~/.config`; safix-launched sops always received the path explicitly and is unchanged.
+The FIDO2 hmac-secret key is stated as out of scope for `safix enroll` in the hardware-keys guide.
+
+### Hybrid post-quantum age recipients, and `keygen --kind age --hybrid` to mint one
+
+`age1pq1…` recipients (X25519 plus ML-KEM-768, 1959 characters) and `AGE-SECRET-KEY-PQ-1…` identities are accepted wherever an age recipient or identity is: `safix adduser`, the recipient options, `identity backup` and `restore`, and a migration plan.
+The hardware prefix `age1yubikey1` is still judged first, so a card is refused as a primary recipient as before.
+`safix keygen --kind age --hybrid` mints a hybrid identity with the pinned `age-keygen -pq` and appends it to the same identity file.
+A native-age (`format = "age"`) destination that mixes hybrid and classic recipients is refused before age runs, because the `age` binary refuses the mix; sops wraps each recipient separately and is unaffected.
+Measured with the pinned age 1.3.1 and sops 3.13.3: one hybrid recipient adds about 4.8 KB to a document's `sops.age` list against about 0.57 KB for an X25519 one, and every reader needs sops 3.12.0 or age 1.3.0 or later.
+
+### `safix edit` switches off vim's and nvim's persistence while a value is open
+
+When the editor's last path component is `vim` or `nvim`, `safix edit` passes `-n` and `--cmd` with the option string agenix-rekey uses — no backup, modeline, shell temp, swap, undo, write-backup or history file — after the operator's own arguments and before the staged path.
+nvim's default swap directory and shada file, and vim's viminfo, live outside the memory-backed staging root, so a default configuration escaped the shredding guarantee; `-n` is passed as well because nvim creates its swap file before the autocommand runs and that file records the user, the host and the path.
+Bare `vi`, `view` and `gvim` are left alone because nvi and busybox vi reject `--cmd`, and every other editor keeps the stated limit.
+
+### `check` reports stale derived values and SSH-tag roster drift, and `fix` skips a raw-age file whose audience is unchanged
+
+`safix check` reports `DerivedValueStale` when a generator dependency's UPDATED stamp is later than the value derived from it, which is what `safix set`, `safix edit` and `safix sync` leave behind when they write a dependency outside a cascade; the remedy is `safix generate --regenerate <user> <dependent>`, never the dependency, because naming the dependency re-mints the value the operator just changed.
+For a raw-age file, `check` reads the age header without decrypting and recomputes the 4-byte tag of each declared `ssh-ed25519` or `ssh-rsa` recipient: a missing, extra or duplicated SSH stanza is a failing `RecipientTagDrift`, an exact all-SSH match is a non-failing `RecipientRosterTagMatched` note whose text says a 32-bit tag does not establish the keys, and any X25519, plugin or `scrypt` stanza keeps the file `RecipientRosterUnverifiable`.
+`check`'s exit status and closing count now follow failing findings only.
+`safix fix` writes a `safix-age-audience-v1` record beside each raw-age entry's definition record — a digest of the declared audience and of the ciphertext bytes — and leaves a file alone when the record still matches, with or without `--yes`; `check` reports `AgeAudienceChanged` when the record matches the bytes but names an audience no longer declared, and reports nothing when the record is absent.
+The resolver emits `audienceRecord`, and `logicalAudience` in vault mode, for `format = "age"` entries only, and the record relocates and rolls back with its value.
+`safix-core` gains `base64`, `age_header` and `age_audience`; `check::Finding` gains `DerivedValueStale`, `RecipientTagDrift`, `RecipientRosterTagMatched` and `AgeAudienceChanged` and a `fails()` method; the refusal `safix::age_header_unreadable` is new.
+The guide sentence that a raw age file "records nothing a reader can attribute" was wrong for SSH recipients and is corrected.
+
+### Upstream claims refreshed: clan's deployed paths, agenix 0.18, the clan external store, and the inputs
+
+The synthetic clan fixtures in the installer checks use clan's current deployed shape, `/run/secrets/per-machine/<machine>/<generator>/<file>` (clan-core PR #7298); safix's own derivation of host keys was unaffected because it reads `services.openssh.hostKeys`.
+The agenix migration target accepts a root-owned `neededForUsers` entry and writes it as a plain `age.secrets` entry, because agenix 0.16 and later install every secret before user creation; the flag is dropped from the output and the receipt still records it.
+The same target now writes a `group` for every entry, with agenix 0.18.0's own default expression when the plan names an owner and no group, because agenix 0.16.0 and 0.17.0 failed to evaluate on nix-darwin without one.
+The migration guide states the agenix 0.18.0 floor, the `agenix-rules.nix` rename and its clash with the quickstart's `secrets.nix`, the sops-nix revision (311ef94) nested JSON keys need, and gains an agenix-rekey subsection.
+`sync clan` commits in clan's store repository — the flake, or `CLAN_AGE_STORE_DIR` when `vars.settings.age.externalStore` is set — and the sync guide says the variable must be exported; the hardware-keys guide says that on an age-backend clan the `clan secrets users` registration grants no vars access.
+Flake inputs move to nixpkgs `0bb2eed` (rustc 1.99.0, age 1.3.2, bitwarden-cli 2026.10.1, sops still 3.13.3), home-manager `095fef2`, crane `788369e`, flake-parts `ea2630b`, treefmt-nix `0d6d739` and advisory-db `6c5fedf`; `rust-version` is `1.99`, tokio moves to 1.53.3 for RUSTSEC-2026-0386, the `userbornKeyMount` VM node drops the retired `boot.initrd.systemd.enable` line, and the thirteen `assert!(…is_empty())` assertions clippy 1.99 reports take its suggested form.
+The survey these changes came from is `docs/notes/research/upstream-survey-2026-11.md`.
+
 ## [0.3.1] — 2026-10-10
 
 ### Fixed
