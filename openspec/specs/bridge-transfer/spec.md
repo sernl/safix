@@ -94,7 +94,7 @@ A value entering safix SHALL be written by the same path a hand-supplied value t
 
 - **WHEN** the safix-to-clan write path is documented
 - **THEN** it records that clan's write command writes unconditionally and that a backend re-encrypting an unchanged value produces fresh ciphertext
-- **AND** it states that without the comparison every run would commit in the clan repository for every mapping
+- **AND** it states that without the comparison every run would commit in clan's store repository for every mapping, that repository being the clan flake or the external age store clan is configured to use
 
 #### Scenario: A second run changes nothing
 
@@ -192,7 +192,7 @@ A transfer SHALL commit each mapping separately, naming the mapping, and SHALL N
 
 - **WHEN** a run transfers a mapping into clan
 - **THEN** it makes no commit in the consumer's own repository, where nothing changed
-- **AND** each mapping is one invocation of clan's write, which commits what it wrote
+- **AND** each mapping is one invocation of clan's write, which commits what it wrote in clan's store repository, or nowhere when clan's external age store is not a git repository
 
 #### Scenario: The commit names the mapping and not the value
 

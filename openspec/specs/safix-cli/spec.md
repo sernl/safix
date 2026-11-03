@@ -594,3 +594,250 @@ The command SHALL accept `rotate` and `rotation` as subcommands, listed in its h
 #### Scenario: `list` carries the deadline
 - **WHEN** `list` runs
 - **THEN** each row shows the remaining time, `due`, or the absent marker in a column of its own
+
+### Requirement: The encrypting backend is denied every key-service address unless the operator says otherwise
+
+Every invocation of the encrypting backend SHALL carry `SOPS_HC_VAULT_ALLOWLIST=none` unless the operator's environment sets it to a non-empty value, which SHALL reach the backend unchanged.
+An invocation for a run that must not inherit ambient identity material SHALL additionally carry neither `VAULT_TOKEN` nor `VAULT_ADDR`.
+The environment reference SHALL name both behaviours and GHSA-jgf3-f6rg-8x3h.
+
+#### Scenario: An unset allowlist is set to none
+
+- **WHEN** a value is written to a declared secret whose file does not exist yet, with `SOPS_HC_VAULT_ALLOWLIST` unset
+- **THEN** every backend invocation the run makes, the one creating the file and the one writing the value, carries `SOPS_HC_VAULT_ALLOWLIST=none`
+
+#### Scenario: An operator's allowlist wins
+
+- **WHEN** the same write runs with `SOPS_HC_VAULT_ALLOWLIST` set to a non-empty value by the operator
+- **THEN** every backend invocation carries exactly that value
+- **AND** none carries `none`
+
+#### Scenario: An isolated run hands the backend no Vault credentials
+
+- **WHEN** an installation decrypts with `VAULT_TOKEN` and `VAULT_ADDR` present in its own environment
+- **THEN** the backend invocation carries neither variable
+- **AND** it carries `SOPS_HC_VAULT_ALLOWLIST=none`
+
+### Requirement: The packaged command carries the card plugin as a fallback on its search path
+
+The packaged command SHALL append `age-plugin-yubikey` from its own closure to the end of its executable search path, after whatever the operator's search path already holds, so a write to a card's recipient succeeds without the operator installing the plugin and an operator's own plugin is still the one found first.
+The packaged command SHALL evaluate on every system the flake declares.
+
+#### Scenario: The plugin is found with nothing else installed
+
+- **WHEN** the packaged command runs with an operator search path that holds no `age-plugin-yubikey`
+- **THEN** the search path its children inherit ends with the directory holding the packaged plugin
+
+#### Scenario: The operator's plugin comes first
+
+- **WHEN** the packaged command runs with an operator search path
+- **THEN** every operator entry precedes the packaged plugin's directory in the search path its children inherit
+
+### Requirement: keygen names its identity file to standalone tools where their default differs
+
+On macOS, after appending an age identity, `keygen` and `keygen --kind age` SHALL print an `export SOPS_AGE_KEY_FILE=<file>` line naming the file written, unless that file is the one standalone sops reads by default or `SOPS_AGE_KEY_FILE` already names it.
+Standalone sops's default on macOS is `$XDG_CONFIG_HOME/sops/age/keys.txt` where `XDG_CONFIG_HOME` is non-empty and `$HOME/Library/Application Support/sops/age/keys.txt` otherwise.
+Where safix itself looks for identities SHALL NOT change.
+
+#### Scenario: A macOS identity under the XDG default is named
+
+- **WHEN** `keygen` appends an identity on macOS with `XDG_CONFIG_HOME` and `SOPS_AGE_KEY_FILE` unset
+- **THEN** the output includes `export SOPS_AGE_KEY_FILE=` followed by the file it appended to
+
+#### Scenario: Nothing is printed where standalone sops already looks
+
+- **WHEN** `keygen` appends an identity on macOS with `XDG_CONFIG_HOME` set, so the file written is the one standalone sops reads
+- **THEN** the output includes no `export SOPS_AGE_KEY_FILE=` line
+
+#### Scenario: Nothing is printed off macOS
+
+- **WHEN** `keygen` appends an identity on Linux
+- **THEN** the output includes no `export SOPS_AGE_KEY_FILE=` line
+
+#### Scenario: safix's own discovery is unchanged
+
+- **WHEN** a run on macOS discovers its age identity file
+- **THEN** it consults `SOPS_AGE_KEY_FILE`, then `SAFIX_AGE_KEY_FILE`, then `$XDG_CONFIG_HOME/sops/age/keys.txt` falling back to `$HOME/.config`, exactly as on Linux
+
+### Requirement: `keygen --kind age --hybrid` mints a hybrid post-quantum identity
+
+`keygen --kind age --hybrid` SHALL mint one hybrid X25519 + ML-KEM-768 identity through the upstream `age-keygen`, append it to the identity file plain `--kind age` appends to, and print only its public recipient.
+Plain `--kind age` SHALL keep minting an X25519 identity.
+The help text SHALL state the per-recipient ciphertext cost and the sops and age versions every reader needs.
+
+#### Scenario: A hybrid identity is appended beside an existing one
+
+- **GIVEN** an identity file that already holds an X25519 identity
+- **WHEN** `keygen --kind age --hybrid` runs
+- **THEN** the file holds the X25519 identity unchanged and one new `AGE-SECRET-KEY-PQ-1…` identity after it
+- **AND** the printed recipient begins `age1pq1` and is the one `age-keygen -y` derives from the new identity
+
+#### Scenario: The private half is never printed
+
+- **WHEN** `keygen --kind age --hybrid` runs
+- **THEN** neither standard output nor standard error carries the `AGE-SECRET-KEY-PQ-1…` line
+
+#### Scenario: `--show` names the hybrid recipient after a hybrid mint
+
+- **WHEN** `keygen --show` runs after `keygen --kind age --hybrid`
+- **THEN** it prints the hybrid recipient, because that identity was appended last
+
+#### Scenario: `--hybrid` outside the age profile is a usage error
+
+- **WHEN** `--hybrid` is given with `--kind pgp`, or without `--kind age`
+- **THEN** the command refuses with its usage form and mints nothing
+
+#### Scenario: The cost is stated
+
+- **WHEN** the `keygen` help text is read
+- **THEN** it states that a hybrid recipient is about 2,000 characters long and adds about 4.8 KB to every sops file wrapped to it
+- **AND** it states that every reader needs sops 3.12.0 or later, or age 1.3.0 or later
+
+### Requirement: `adduser` admits a hybrid recipient by shape
+
+`adduser` SHALL accept `age1pq1` followed by exactly 1952 bech32 characters as a well-formed recipient, beside the X25519, SSH and `pgp:` shapes it already accepts.
+It SHALL keep refusing `age1yubikey1…` as a hardware recipient, and SHALL refuse a hybrid-prefixed string of any other length or alphabet as malformed.
+
+#### Scenario: A hybrid recipient is declared
+
+- **WHEN** `adduser` is given a well-formed hybrid recipient
+- **THEN** the scaffold records it as the person's recipient and the regenerated policy names it
+
+#### Scenario: A truncated hybrid recipient is refused
+
+- **WHEN** `adduser` is given `age1pq1` followed by fewer or more than 1952 bech32 characters, or by a character outside the bech32 alphabet
+- **THEN** it refuses as a malformed recipient and writes nothing
+
+#### Scenario: The refusal names both age shapes
+
+- **WHEN** a malformed recipient is refused
+- **THEN** the message describes the X25519 shape and the hybrid shape
+
+### Requirement: check reports a derived value whose dependency changed after it
+
+`safix check` SHALL report a finding for each generator, per holder, when a dependency it declares has an `updated` stamp later than the earliest `updated` stamp among the values that generator writes.
+The finding SHALL name the holder, the generator's entry and the dependency, SHALL name `safix generate --regenerate <user> <entry>` as the remedy, and SHALL fail the run.
+It SHALL be answered from the stamp records alone.
+
+#### Scenario: A dependency set by hand after the derivation is reported
+
+- **WHEN** a value a generator reads is written by `set`, `edit` or `sync` after that generator last ran
+- **THEN** `check` reports the generator's entry as derived from a dependency that has changed since, naming the dependency
+- **AND** the remedy is `safix generate --regenerate <user> <entry>` naming the dependent entry, never the dependency
+- **AND** `check` exits non-zero
+- **AND** no ciphertext is opened and the finding carries no value
+
+#### Scenario: A regeneration cascade leaves nothing to report
+
+- **WHEN** a dependency is regenerated through `generate --regenerate` or `rotate`, which re-run every generator derived from it
+- **THEN** no staleness finding exists for any generator in that cascade
+
+#### Scenario: The remedy clears the finding
+
+- **WHEN** the named remedy runs
+- **THEN** the finding is gone on the next `check`
+
+#### Scenario: A missing stamp makes no claim
+
+- **WHEN** the dependency or every value the generator writes has no stamp record
+- **THEN** no staleness finding exists for that pair
+
+#### Scenario: Equal stamps are not stale
+
+- **WHEN** a dependency's `updated` stamp equals the dependent's, as a cascade completing within one second leaves them
+- **THEN** no staleness finding exists for that pair
+
+### Requirement: check judges a raw-age file's SSH recipients by their tags
+
+`safix check` SHALL read each existing raw-age governed file's header, binary or ASCII-armored, without decrypting it, and SHALL compare each SSH stanza's tag against the tags of the SSH recipients the file's declared audience names.
+A missing, extra or duplicated SSH stanza SHALL be a failing finding naming `safix fix --yes`.
+A header that cannot be read SHALL refuse the run naming the file.
+
+#### Scenario: An extra SSH recipient is reported
+
+- **WHEN** a raw-age file carries an `ssh-ed25519` or `ssh-rsa` stanza whose tag matches no declared SSH recipient of its audience
+- **THEN** `check` reports the file's SSH recipients as drifted, listing the stanza as extra
+- **AND** names the declared subject holding a key with that tag when exactly one declared key anywhere has it, and the stanza's type and tag otherwise
+- **AND** states that re-wrapping is not revocation and names what mints a new value
+- **AND** `check` exits non-zero
+
+#### Scenario: A missing SSH recipient is reported
+
+- **WHEN** a declared SSH recipient of the audience has no stanza with its tag in the file
+- **THEN** `check` reports that recipient as missing and exits non-zero
+
+#### Scenario: A duplicated SSH stanza is reported
+
+- **WHEN** more stanzas carry one type and tag than the audience declares distinct keys with that type and tag
+- **THEN** `check` reports the surplus as duplicated and exits non-zero
+
+#### Scenario: Armored and binary files are read alike
+
+- **WHEN** a raw-age file is ASCII-armored
+- **THEN** its header is decoded from the armor and judged exactly as the binary form would be
+
+#### Scenario: Grease stanzas are ignored
+
+- **WHEN** a stanza's type ends in `-grease`
+- **THEN** it is neither counted as a recipient nor as unverifiable
+
+#### Scenario: An unreadable header refuses
+
+- **WHEN** a raw-age governed file does not begin with the age v1 header, its armor does not decode, or its header has no closing MAC line
+- **THEN** `check` refuses with `safix::recipients_unreadable` naming the file, caused by `safix::age_header_unreadable`
+
+### Requirement: An exact SSH tag match is a note, never a pass
+
+When every stanza of a raw-age file is an SSH stanza and the stanzas match the declared SSH recipients exactly, `safix check` SHALL report a note that the roster matched by 32-bit tag only and that a tag match does not establish which keys the file is wrapped to.
+The note SHALL NOT fail the run.
+
+#### Scenario: A matching all-SSH file is a note
+
+- **WHEN** a raw-age file's audience declares only SSH recipients and the file's stanzas match their tags one for one
+- **THEN** `check` prints a note naming the file and stating that the match is by a four-byte tag anyone can collide with
+- **AND** that note alone does not make `check` exit non-zero
+
+#### Scenario: Any non-SSH recipient keeps the file unverifiable
+
+- **WHEN** a raw-age file carries an X25519, plugin, scrypt or other non-SSH stanza, or its audience declares a non-SSH recipient
+- **THEN** `check` reports the file's roster as unverifiable, failing the run as it does today
+- **AND** any SSH stanza disagreement in the same file is reported as well, as its own finding
+
+### Requirement: check's exit status follows its failing findings
+
+`safix check` SHALL exit non-zero when at least one failing finding is reported and zero otherwise.
+Every finding SHALL fail except the SSH tag-match note.
+The closing line SHALL count failing findings only.
+
+#### Scenario: Notes alone exit zero
+
+- **WHEN** the only findings are tag-match notes
+- **THEN** `check` prints them, closes by stating that no drift was found and that the notes above qualify it, and exits zero
+
+#### Scenario: A failing finding beside a note exits non-zero
+
+- **WHEN** a note and a failing finding are both reported
+- **THEN** the closing line counts the failing finding and not the note
+- **AND** `check` exits non-zero
+
+### Requirement: check reports a raw-age file wrapped to an audience that is no longer declared
+
+When a raw-age file's audience record exists, is in a format this version reads, and records the SHA-256 of the file's current bytes, `safix check` SHALL report a failing finding if the audience digest it records differs from the digest of the audience declared now, naming the file and `safix fix --yes`.
+An absent or unreadable record, or one recording other bytes, SHALL produce no finding.
+
+#### Scenario: A narrowed audience over a recorded raw-age file is reported
+
+- **WHEN** `fix --yes` re-wrapped a raw-age file and wrote its record, and a recipient is then removed from the file's declared audience
+- **THEN** `check` reports the file as wrapped to an audience that is no longer declared
+- **AND** states that re-wrapping is not revocation
+- **AND** exits non-zero
+
+#### Scenario: An absent record is not a finding
+
+- **WHEN** a raw-age file has no audience record, as every file written before this change has none
+- **THEN** no audience-record finding exists for it
+
+#### Scenario: A record about other bytes is silent
+
+- **WHEN** the file was rewritten after its record, by `set`, `edit`, `generate`, `sync` or a tool outside safix
+- **THEN** the record says nothing about the current file and no audience-record finding exists for it

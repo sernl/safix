@@ -69,6 +69,7 @@ A generator's prompted answers SHALL arrive one per file under a `prompts` direc
 
 Declaring a dependency SHALL make the depending generator re-run whenever the depended-upon value is regenerated, transitively, in dependency order.
 The set to be re-run SHALL be shown and confirmed before anything runs.
+A depended-upon value written outside a cascade SHALL leave the depending generator reported by `check` until it re-runs.
 
 #### Scenario: Regenerating cascades downstream
 
@@ -81,6 +82,12 @@ The set to be re-run SHALL be shown and confirmed before anything runs.
 - **WHEN** a cascade is about to run
 - **THEN** the full set is listed and one confirmation is requested
 - **AND** a documented flag answers that confirmation in advance
+
+#### Scenario: A dependency written outside a cascade is reported
+
+- **WHEN** a depended-upon value is written by `set`, `edit` or `sync`, none of which run generators
+- **THEN** `check` reports every generator declaring that dependency as derived from a value that has changed since it ran
+- **AND** the remedy regenerates the depending entry, whose own cascade re-runs everything derived from it in turn
 
 #### Scenario: A dependency on another person's secret is refused
 
