@@ -255,3 +255,66 @@ fn the_editor_receives_the_path_and_never_the_value() {
         "the value was in the editor's argv, where a process listing reads it:\n{argv}"
     );
 }
+
+/// The autocommand `safix edit` hands nvim, as the runtime writes it.
+const NVIM_OPTIONS: &str = "au BufRead * setlocal nobackup nomodeline noshelltemp noswapfile noundofile nowritebackup shadafile=NONE";
+
+/// A program named `nvim` is opened with its swap, undo, backup and history
+/// writes switched off, ahead of the staged path.
+///
+/// The editor is an executable script named `nvim` and run by its absolute
+/// path, so the recognition is exercised the way a store path reaches it, and
+/// the vector recorded is the one the runtime executed rather than one built
+/// for a test.
+#[test]
+fn a_vim_or_nvim_editor_is_opened_with_its_persistence_switched_off() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let fixture = Fixture::new();
+    fixture
+        .set("alice", "api-token", "CANARY-edited-value")
+        .expect_success("the value being edited");
+
+    let spool = fixture.scratch("nvim-argv");
+    let nvim = fixture.scratch("nvim");
+    std::fs::write(
+        &nvim,
+        format!(
+            "#!/bin/sh\nset -eu\nfor argument in \"$@\"; do printf '%s\\n' \"$argument\"; done > {}\n\
+             for last in \"$@\"; do :; done\nprintf 'CANARY-replacement' > \"$last\"\n",
+            spool.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&nvim, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    fixture
+        .run_env(
+            &["edit", "alice", "api-token"],
+            None,
+            &[("EDITOR", &nvim.display().to_string())],
+        )
+        .expect_success("the edit under nvim");
+
+    let argv = std::fs::read_to_string(&spool).unwrap_or_default();
+    let lines: Vec<&str> = argv.lines().collect();
+    assert!(
+        !lines.is_empty(),
+        "the observing editor recorded nothing, so the assertion is vacuous"
+    );
+    assert_eq!(
+        lines.get(..3),
+        Some(&["-n", "--cmd", NVIM_OPTIONS][..]),
+        "nvim was not opened with its persistence switched off:\n{argv}"
+    );
+    assert!(
+        lines.last().is_some_and(|last| Path::new(last)
+            .file_name()
+            .is_some_and(|name| name == "api-token")),
+        "the staged path was not the last argument:\n{argv}"
+    );
+    assert!(
+        !argv.contains("CANARY-edited-value"),
+        "the value was in the editor's argv, where a process listing reads it:\n{argv}"
+    );
+}

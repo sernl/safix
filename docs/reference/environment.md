@@ -179,6 +179,7 @@ Removed from the child's environment where an operation must not inherit ambient
 The editor `safix edit` opens, `VISUAL` first. Neither set is a refusal naming
 both: the verb opens no editor of its own choosing. The value is split on
 whitespace and run directly rather than through a shell, so `code --wait` works.
+A program word whose last path component is `vim` or `nvim` is opened with the options that switch off its swap, undo, backup and history writes for the staged buffer, as the [`edit` section of the command reference](cli.md#edit) states.
 
 #### `PASSWORD_STORE_DIR`
 

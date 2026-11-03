@@ -22,9 +22,19 @@
 //! not the one file safix created.
 //!
 //! The limit that leaves is real and is stated rather than left to be
-//! discovered: an editor configured to write undo history, swap files or backups
-//! to a directory of its own has put plaintext where safix does not look.
+//! discovered. vim and nvim are opened with their swap, undo, backup and
+//! history writes switched off for the staged buffer — `-n`, then `--cmd` with
+//! an autocommand, both kept in the private `hardening` submodule — so neither
+//! puts the buffer in a directory of its own. What remains is every other
+//! editor configured to write undo history, swap files or backups to a
+//! directory of its own, and vim or nvim configuration or plugins that write or
+//! send the buffer's contents elsewhere, including an autocommand registered
+//! after safix's that switches an option back on. Those have put plaintext
+//! where safix does not look.
 
+mod hardening;
+
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 
@@ -61,7 +71,9 @@ pub struct Options {
 /// `EDITOR="code --wait"` works and `EDITOR="rm -rf /; vi"` is a program named
 /// `rm` with three arguments rather than two commands. The staged file's path is
 /// appended as the last argument: the *path* reaches argv, and the *value* does
-/// not.
+/// not. For vim and nvim, `-n`, `--cmd` and an autocommand switching off their
+/// swap, undo, backup and history writes are inserted after the operator's
+/// arguments and before the path.
 #[derive(Debug, Clone)]
 pub struct Editor {
     program: String,
@@ -103,6 +115,25 @@ impl Editor {
         })
     }
 
+    /// Everything the editor is run with after its program: the operator's
+    /// arguments, the options [`hardening`] adds for vim and nvim, and the
+    /// staged path last.
+    ///
+    /// One function so that the vector asserted is the vector executed.
+    fn argv(&self, path: &Path) -> Vec<OsString> {
+        self.arguments
+            .iter()
+            .map(OsString::from)
+            .chain(
+                hardening::options(&self.program)
+                    .into_iter()
+                    .flatten()
+                    .map(OsString::from),
+            )
+            .chain(std::iter::once(path.as_os_str().to_owned()))
+            .collect()
+    }
+
     /// Open the editor on a staged path, and wait for it.
     ///
     /// The three streams are inherited, because a terminal editor without a
@@ -113,8 +144,7 @@ impl Editor {
     /// [`Error::EditorFailed`] when it exits non-zero or cannot be run at all.
     fn open(&self, path: &Path) -> Result<()> {
         let status = Command::new(&self.program)
-            .args(&self.arguments)
-            .arg(path)
+            .args(self.argv(path))
             .status()
             .map_err(|_| Error::EditorFailed { status: 127 })?;
 

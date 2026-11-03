@@ -43,9 +43,13 @@
 //! Beyond those: what a generator script or an editor does with a value it has
 //! been handed is the author's to get right. This module removes the whole
 //! staging root, including whatever a script or an editor left beside the file
-//! it was given — but a script redirecting `$in/dep/file` elsewhere, or an
-//! editor configured to write undo history or backups to a directory of its own,
-//! has put plaintext where safix does not look.
+//! it was given — but a script redirecting `$in/dep/file` elsewhere has put
+//! plaintext where safix does not look. vim and nvim are opened with their swap,
+//! undo, backup and history writes switched off for the staged buffer; every
+//! other editor configured to write undo history or backups to a directory of
+//! its own, and vim or nvim configuration or plugins that write or send the
+//! buffer's contents elsewhere, have likewise put plaintext where safix does not
+//! look.
 
 use std::ffi::OsStr;
 use std::fs::{DirBuilder, File, OpenOptions};
