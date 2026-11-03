@@ -543,10 +543,9 @@ fn validate_deployment(
                     .reload_units
                     .as_ref()
                     .is_some_and(|units| !units.is_empty())
-                || deployment.needed_for_users == Some(true)
             {
                 return Err(refused(
-                    "agenix deployment does not support restartUnits, reloadUnits, or neededForUsers",
+                    "agenix deployment does not support restartUnits or reloadUnits",
                 ));
             }
         }
@@ -702,7 +701,9 @@ fn deployment_fields(
             }
         }
     }
-    if !matches!(target, DeploymentTarget::Agenix) {
+    if matches!(target, DeploymentTarget::Agenix) {
+        agenix_default_group(output, deployment)?;
+    } else {
         for (name, values) in [
             ("restartUnits", &deployment.restart_units),
             ("reloadUnits", &deployment.reload_units),
@@ -717,6 +718,36 @@ fn deployment_fields(
         }
     }
     Ok(())
+}
+
+/// The group an agenix entry names when the plan gives neither a group nor a
+/// gid, so that every agenix entry names one.
+///
+/// For an owner it is agenix 0.18.0's own default lifted into the declaration:
+/// agenix 0.16.0 and 0.17.0 dropped that default's `or "0"`, so an owner whose
+/// user has no group attribute, which is every nix-darwin user, fails to
+/// evaluate there.
+fn agenix_default_group(output: &mut String, deployment: &Deployment) -> Result<()> {
+    if deployment.group.is_some() || deployment.gid.is_some() {
+        return Ok(());
+    }
+    let uid_owner;
+    let owner = match (&deployment.owner, deployment.uid) {
+        (Some(owner), _) => owner.as_str(),
+        (None, Some(uid)) => {
+            uid_owner = uid.to_string();
+            uid_owner.as_str()
+        }
+        (None, None) => return string_field(output, "group", "0"),
+    };
+    std::fmt::Write::write_fmt(
+        output,
+        format_args!(
+            "      group = (builtins.head (builtins.filter (u: u.name == {}) (builtins.attrValues config.users.users) ++ [ {{ }} ])).group or \"0\";\n",
+            nix_string(owner)?
+        ),
+    )
+    .map_err(|_| refused("cannot render deployment ownership"))
 }
 
 fn template_parts(content: &str) -> Result<Vec<(bool, &str)>> {
@@ -1951,8 +1982,8 @@ pub fn abandon(plan_path: &Path, progress: &dyn Progress) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Format, Journal, JournalOutput, JournalWriter, OutputKind, Transaction,
-        private_directory, validate_recipients,
+        Format, Journal, JournalOutput, JournalWriter, OutputKind, Transaction, private_directory,
+        validate_recipients,
     };
     use crate::error::Error;
     use std::os::unix::fs::MetadataExt as _;

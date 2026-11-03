@@ -27,8 +27,9 @@
 //!
 //! # The contract this stands in for
 //!
-//! Read out of `bitwarden-cli` 2026.8.0, this flake's pin, on 2026-09-16 —
-//! out of the shipped bundle rather than out of its documentation:
+//! Read out of `bitwarden-cli` 2026.8.0 on 2026-09-16 — out of the shipped
+//! bundle rather than out of its documentation. This flake's pin is now
+//! 2026.10.1, and the reading was not repeated against it:
 //!
 //! - `bw --nointeraction status` prints one JSON object,
 //!   `{"serverUrl":…,"lastSync":…,"userEmail":…,"userId":…,"status":…}`, and

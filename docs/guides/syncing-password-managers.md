@@ -106,6 +106,10 @@ Nothing of its own. Every read and every write is clan's own command with the va
 
 safix reads, writes, encrypts, decrypts and parses none of clan's stored files, and a consumer without clan's command cannot reach clan's side at all.
 
+On a clan with `vars.settings.age.externalStore` set, clan reads its store from the directory `CLAN_AGE_STORE_DIR` names.
+safix passes its own environment to clan unchanged, so that variable has to be exported in the shell that runs `safix sync clan`.
+clan's commits then land in that store's repository, and nowhere when that directory is not a git repository.
+
 #### What it refuses
 
 Locally: one pair of endpoints declared both ways, and a mapping with no clan flake.

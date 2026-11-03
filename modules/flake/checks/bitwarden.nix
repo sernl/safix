@@ -87,7 +87,8 @@
 # nothing was measured — the exact failure ./integration.nix names.
 #
 # What would unblock it, and what was measured toward it on 2026-09-16 against
-# `bitwarden-cli` 2026.8.0, this flake's pin (task 9.4):
+# `bitwarden-cli` 2026.8.0 (task 9.4). This flake's pin is now 2026.10.1, and the
+# measurements below were not repeated against it:
 #
 #   - Measured, out of the shipped bundle at
 #     `lib/node_modules/@bitwarden/clients/build/bw.js`: the client does carry

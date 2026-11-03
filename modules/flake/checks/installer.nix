@@ -92,8 +92,10 @@
 # ── the identity the system scope derives ──
 # `safix-installer-identity` reads `ageSshKeyPaths` out of six built
 # manifests rather than out of the option that fed them. A clan-shaped host
-# whose keys lie under `/run/secrets` derives its ed25519 key and drops the
-# rsa one, whether it runs sshd or only generates its host keys; a host whose
+# whose keys lie where clan's age backend deploys an unshared generator's
+# files, `/run/secrets/per-machine/<machine>/<generator>/<file>`, derives its
+# ed25519 key and drops the rsa one, whether it runs sshd or only generates its
+# host keys; a host whose
 # keys lie inside safix's own store derives nothing; a named identity survives
 # both placements unchanged; and the switch turned off contributes nothing. A
 # host that neither runs sshd nor generates host keys derives nothing, read off
@@ -150,10 +152,12 @@
 # the node list ceasing to be the singleton. Restoring a second installer's
 # delivery turns the sole check red on the invocation scan, with both
 # installers visible at once; removing the copied refusal block turns its
-# refusal fixtures into the incidental failure the block pre-empts. Restoring
-# the `/run/secrets` prefix turns the identity check red on the clan-shaped
-# fixture, which derives nothing; dropping the exclusion entirely turns it red
-# on the safix-store fixture, which derives the key safix itself deploys.
+# refusal fixtures into the incidental failure the block pre-empts. Excluding
+# `/run/secrets` turns the identity check red on the clan-shaped fixture, whose
+# keys under `/run/secrets/per-machine/server/openssh/` then derive nothing, so
+# its manifest refuses at evaluation for want of an identity;
+# dropping the exclusion entirely turns it red on the safix-store fixture,
+# which derives the key safix itself deploys.
 # Removing the evaluation refusal turns the refusals check red on
 # `noIdentity.refuses` while every other check in this file stays green;
 # dropping one identity path from the script turns exactly
@@ -894,14 +898,16 @@
         };
 
       # A clan-shaped host: every host key inside a store safix does not own,
-      # with a non-ed25519 entry beside it that the type filter must drop.
+      # where clan's age backend deploys an unshared generator's files,
+      # `/run/secrets/per-machine/<machine>/<generator>/<file>`, with a
+      # non-ed25519 entry beside it that the type filter must drop.
       foreignHostKeys = [
         {
-          path = "/run/secrets/openssh/ssh.id_ed25519";
+          path = "/run/secrets/per-machine/server/openssh/ssh.id_ed25519";
           type = "ed25519";
         }
         {
-          path = "/run/secrets/openssh/ssh.id_rsa";
+          path = "/run/secrets/per-machine/server/openssh/ssh.id_rsa";
           type = "rsa";
           bits = 4096;
         }
@@ -950,11 +956,13 @@
           }).config.system.build.safix-manifest;
       };
 
-      neitherDerivedHostKeys = builtins.toJSON (identityFixture {
-        services.openssh.enable = lib.mkForce false;
-        services.openssh.generateHostKeys = false;
-        services.openssh.hostKeys = foreignHostKeys;
-      }).config.safix.identity.derivedHostKeys;
+      neitherDerivedHostKeys =
+        builtins.toJSON
+          (identityFixture {
+            services.openssh.enable = lib.mkForce false;
+            services.openssh.generateHostKeys = false;
+            services.openssh.hostKeys = foreignHostKeys;
+          }).config.safix.identity.derivedHostKeys;
 
       # ── the refusals ──
 
@@ -1620,7 +1628,7 @@
                 fi
               }
 
-              assertIdentity "$foreignKeys" '["/run/secrets/openssh/ssh.id_ed25519"]' \
+              assertIdentity "$foreignKeys" '["/run/secrets/per-machine/server/openssh/ssh.id_ed25519"]' \
                 "a host key another store deployed was not derived, or the type filter leaked"
               assertIdentity "$safixKeys" '[]' \
                 "a host key inside safix's own store was derived"
@@ -1630,7 +1638,7 @@
                 "a named identity did not survive safix-store host keys"
               assertIdentity "$derivationOff" '[]' \
                 "the derivation contributed with its switch off"
-              assertIdentity "$generatedOnly" '["/run/secrets/openssh/ssh.id_ed25519"]' \
+              assertIdentity "$generatedOnly" '["/run/secrets/per-machine/server/openssh/ssh.id_ed25519"]' \
                 "host keys generated without sshd were not derived"
               if ! diff -u <(echo '[]') <(echo "$neitherDerivedHostKeys" | jq -S .); then
                 echo ""

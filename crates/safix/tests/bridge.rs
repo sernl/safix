@@ -231,8 +231,8 @@ fn a_safix_to_clan_mapping_moves_a_safix_value_into_clan_through_clans_own_comma
 /// clan's write is unconditional and commits what it wrote, and its `age`
 /// backend re-encrypts an unchanged value into fresh ciphertext. Without the
 /// read-first comparison this count would rise by one per run, forever, each
-/// increment a commit in the clan repository whose diff decrypts to what it
-/// decrypted to before.
+/// increment a commit in clan's store repository whose diff decrypts to what
+/// it decrypted to before.
 #[test]
 fn a_second_run_does_not_ask_clan_to_write_again() {
     let fixture = with_mapping("safix-to-clan");

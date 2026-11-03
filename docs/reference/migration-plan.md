@@ -151,13 +151,21 @@ publishes a declaration that carries less than it says.
 
 `agenix` requires whole-document raw age destinations: the format must be `age`
 and the key must be empty. It supports no `restartUnits`, no `reloadUnits` and no
-`neededForUsers`, and it cannot carry templates at all — select `safix` or
-`sops-nix` to preserve them.
+templates — select `safix` or `sops-nix` to preserve them.
+A root-owned entry with `neededForUsers: true` is published without the field,
+because agenix installs every secret before users are created; the receipt
+still records it.
+Every agenix entry names a group: `group`, else `gid`, else the group agenix
+0.18.0 defaults to for the entry's owner, else `0` when no owner is given.
+The declarations are written for agenix 0.18.0 or later.
 
 `sops-nix` supports no raw age destination. A keyed destination additionally
 cannot carry a value that is not valid text, or an intentionally empty one:
 safix's keyed byte envelope is not something native sops-nix decodes, so those
 values need a whole binary destination.
+A JSON destination whose key is nested with `/` needs sops-nix at or after
+commit `311ef94` (2026-10-09); earlier sops-nix fails at activation with "does
+not refer to a dictionary".
 
 `safix` accepts every shape above. Its one extra rule is that an early-user
 secret's mode, where given, must grant owner-only permissions.

@@ -12,7 +12,7 @@ edition = "2024"
 # compiled. Cargo enforces this field itself, so the claim and its enforcement
 # are the same line. Lowering it means adding a check that builds against the
 # older toolchain, in the same commit.
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sernl/safix"
 homepage = "https://github.com/sernl/safix"

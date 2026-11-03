@@ -20,8 +20,11 @@
 //! unconditionally and commits what it wrote, and a re-encrypting backend — this
 //! fleet's is `age` — produces fresh ciphertext for an unchanged value. Without
 //! the read-first comparison every safix-to-clan write would produce a commit in
-//! the clan repository for every mapping, forever, each one a diff of ciphertext
-//! that decrypts to what it decrypted to before.
+//! clan's store repository for every mapping, forever, each one a diff of
+//! ciphertext that decrypts to what it decrypted to before. That repository is
+//! the flake, or `CLAN_AGE_STORE_DIR` when the clan sets
+//! `vars.settings.age.externalStore`, where clan commits nothing if that
+//! directory is not a git repository.
 //!
 //! # The four outcomes
 //!
@@ -513,8 +516,8 @@ fn one_export(
     };
 
     // The comparison that makes a run converge. See the module note: without it
-    // every run commits in the clan repository for every mapping, because clan's
-    // write is unconditional and its backend re-encrypts.
+    // every run commits in clan's store repository for every mapping, because
+    // clan's write is unconditional and its backend re-encrypts.
     if let Reading::Present(held) = addressing.read(mapping)?
         && held.equals(&outgoing)
     {
@@ -543,9 +546,12 @@ fn one_export(
     addressing.write(mapping, &outgoing)?;
 
     // No commit here, and that is not an omission. Nothing in this repository
-    // changed: the value went into clan's, and `clan vars set` committed it
-    // there — one invocation per mapping, so the single-intent discipline holds
-    // across the boundary rather than being restated on this side of it.
+    // changed: the value went into clan's store, and `clan vars set` committed
+    // it in clan's store repository: the flake, or `CLAN_AGE_STORE_DIR` when the
+    // clan sets `vars.settings.age.externalStore`, where clan commits nothing if
+    // that directory is not a git repository. One invocation per mapping, so the
+    // single-intent discipline holds across the boundary rather than being
+    // restated on this side of it.
     Ok(Outcome::Updated)
 }
 
@@ -667,10 +673,13 @@ pub fn commit_subject(mapping: &Mapping) -> String {
 /// a later target does not inherit a rule that was never about it: the
 /// stale-generator refusal, on both the one-way and the two-way push paths;
 /// [`Addressing`]'s shared-placement discovery of the machine a var is reached
-/// on; no commit on clan's side, because `clan vars set` commits in its own
-/// repository; [`Reading::AbsentAtSource`] as an ordinary absence rather than a
-/// failure; and the companion's agreement as its own, separately ordered
-/// commit. None of them is a question [`crate::endpoint::Endpoint`] asks.
+/// on; no commit on clan's side, because `clan vars set` commits in clan's
+/// store repository: the flake, or `CLAN_AGE_STORE_DIR` when the clan sets
+/// `vars.settings.age.externalStore`, where clan commits nothing if that
+/// directory is not a git repository; [`Reading::AbsentAtSource`] as an
+/// ordinary absence rather than a failure; and the companion's agreement as its
+/// own, separately ordered commit. None of them is a question
+/// [`crate::endpoint::Endpoint`] asks.
 ///
 /// See `openspec/changes/sync-clan-vars-two-way/design.md`'s D6\u{2013}D11 for
 /// why the agreement lives in a companion entry inside safix's own

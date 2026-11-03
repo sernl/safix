@@ -62,6 +62,9 @@ struct Entry {
     /// unless a test wants a candidate the target cannot open.
     recipient: String,
     destination_kind: DestinationKind,
+    /// The entry's deployment metadata, when a test gives it one of its own
+    /// rather than the fixture's root-owned `0400` default.
+    deployment: Option<Value>,
 }
 
 /// A migration's whole world: two isolated identities, sources encrypted to
@@ -77,6 +80,8 @@ struct Migration {
     receipt: PathBuf,
     journal: PathBuf,
     declarations: PathBuf,
+    /// The plan's `deploymentTarget`.
+    target: &'static str,
 }
 
 /// The key a SOPS YAML source or destination stores its value under.
@@ -136,6 +141,7 @@ impl Migration {
                     }),
                     recipient: target_recipient.clone(),
                     destination_kind: *destination_kind,
+                    deployment: None,
                 }
             })
             .collect();
@@ -151,6 +157,7 @@ impl Migration {
             target_identity,
             target_recipient,
             entries: built,
+            target: "safix",
         };
         migration.write_plan();
         migration
@@ -168,6 +175,23 @@ impl Migration {
             .find(|entry| entry.name == name)
             .expect("the plan names that entry");
         entry.recipient = recipient;
+        self.write_plan();
+    }
+
+    /// Point the plan at another deployment target.
+    fn retarget_deployment(&mut self, target: &'static str) {
+        self.target = target;
+        self.write_plan();
+    }
+
+    /// Give one entry a deployment of its own in place of the default.
+    fn deploy(&mut self, name: &str, deployment: Value) {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.name == name)
+            .expect("the plan names that entry");
+        entry.deployment = Some(deployment);
         self.write_plan();
     }
 
@@ -197,11 +221,11 @@ impl Migration {
                         "key": destination_key,
                     },
                     "recipients": [entry.recipient],
-                    "deployment": {
+                    "deployment": entry.deployment.clone().unwrap_or_else(|| json!({
                         "path": format!("/run/secrets/{}", entry.name),
                         "mode": "0400",
                         "owner": "root",
-                    },
+                    })),
                 })
             })
             .collect();
@@ -212,7 +236,7 @@ impl Migration {
             "entries": entries,
             "receipt": self.receipt,
             "deploymentOutput": self.declarations,
-            "deploymentTarget": "safix",
+            "deploymentTarget": self.target,
         });
         std::fs::write(&self.plan, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
     }
@@ -1011,10 +1035,13 @@ fn mint_hybrid_identity(path: &Path) {
 
 /// The plan's one entry, pointed at these recipients.
 fn retarget(migration: &Migration, recipients: &[&str]) {
-    let mut plan: Value =
-        serde_json::from_slice(&std::fs::read(&migration.plan).unwrap()).unwrap();
+    let mut plan: Value = serde_json::from_slice(&std::fs::read(&migration.plan).unwrap()).unwrap();
     plan["entries"][0]["recipients"] = json!(recipients);
-    std::fs::write(&migration.plan, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
+    std::fs::write(
+        &migration.plan,
+        serde_json::to_string_pretty(&plan).unwrap(),
+    )
+    .unwrap();
 }
 
 /// A raw age destination may be written to hybrid recipients alone; one that
@@ -1064,4 +1091,278 @@ fn a_raw_age_destination_is_written_to_hybrid_recipients_and_refused_a_mix() {
     );
     assert!(!mixed.receipt.exists(), "a refused plan wrote a receipt");
     assert!(!mixed.journal.exists(), "a refused plan left a journal");
+}
+
+/// agenix 0.18.0's default group for the owner `alice`, as the agenix target
+/// writes it for an owner the plan gives no group or gid.
+const ALICE_DEFAULT_GROUP: &str = "(builtins.head (builtins.filter (u: u.name == \"alice\") (builtins.attrValues config.users.users) ++ [ { } ])).group or \"0\"";
+
+/// One whole raw-age entry, `api-token`, planned for agenix with this
+/// deployment.
+fn agenix_migration(fixture: &Fixture, label: &str, deployment: Value) -> Migration {
+    let mut migration = Migration::new(fixture, label, &[("api-token", "CANARY-api-token")]);
+    migration.retarget_deployment("agenix");
+    migration.deploy("api-token", deployment);
+    migration
+}
+
+/// What the real `nix-instantiate` evaluates one expression to. The dummy store
+/// is what lets a sandbox evaluate it: the expression reads no path.
+fn nix_eval(expression: &str) -> String {
+    let output = Command::new("nix-instantiate")
+        .arg("--store")
+        .arg("dummy://")
+        .arg("--eval")
+        .arg("--strict")
+        .arg("--expr")
+        .arg(expression)
+        .output()
+        .expect("could not run nix-instantiate");
+    assert!(
+        output.status.success(),
+        "nix-instantiate could not evaluate {expression}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// Assert a refused plan published nothing.
+fn assert_nothing_published(migration: &Migration) {
+    assert!(
+        !migration.entry("api-token").destination.exists(),
+        "a refused plan wrote its destination"
+    );
+    assert!(
+        !migration.declarations.exists(),
+        "a refused plan wrote declarations"
+    );
+    assert!(
+        !migration.receipt.exists(),
+        "a refused plan wrote a receipt"
+    );
+    assert!(!migration.journal.exists(), "a refused plan left a journal");
+}
+
+/// A root-owned early-user entry migrates to agenix as an ordinary entry,
+/// because agenix installs every secret before user creation, and the receipt
+/// still records the request.
+///
+/// Drilled red by restoring `|| deployment.needed_for_users == Some(true)` in
+/// the agenix arm of `validate_deployment`, which refuses the plan.
+#[test]
+fn an_agenix_early_user_entry_is_published_without_the_flag() {
+    let fixture = Fixture::new();
+    let migration = agenix_migration(
+        &fixture,
+        "agenix-early-user",
+        json!({
+            "path": "/run/agenix/api-token",
+            "mode": "0400",
+            "owner": "root",
+            "neededForUsers": true,
+        }),
+    );
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_success("a root-owned early-user entry for agenix");
+
+    let declarations = std::fs::read_to_string(&migration.declarations).unwrap();
+    assert!(
+        declarations.contains("age.secrets = {"),
+        "the entry is not declared under age.secrets:\n{declarations}"
+    );
+    assert!(
+        !declarations.contains("neededForUsers"),
+        "the agenix declaration names an option agenix does not have:\n{declarations}"
+    );
+    let receipt: Value =
+        serde_json::from_slice(&std::fs::read(&migration.receipt).unwrap()).unwrap();
+    assert_eq!(
+        receipt["entries"][0]["deployment"]["neededForUsers"],
+        json!(true),
+        "the receipt does not record the early-user request"
+    );
+    assert_eq!(
+        migration.published_value("api-token"),
+        "CANARY-api-token",
+        "the destination does not hold its source's value"
+    );
+}
+
+/// An early-user entry a user owns is still refused for agenix, by the rule
+/// every target shares.
+///
+/// Drilled red by deleting the root-ownership block of `validate_deployment`,
+/// which lets the plan publish.
+#[test]
+fn an_agenix_early_user_entry_owned_by_a_user_is_refused() {
+    let fixture = Fixture::new();
+    let migration = agenix_migration(
+        &fixture,
+        "agenix-early-user-owned",
+        json!({
+            "path": "/run/agenix/api-token",
+            "owner": "alice",
+            "neededForUsers": true,
+        }),
+    );
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_refusal("a user-owned early-user entry for agenix")
+        .says("early-user secrets must be root-owned");
+    assert_nothing_published(&migration);
+}
+
+/// A restart unit is still something agenix cannot carry.
+#[test]
+fn an_agenix_restart_unit_is_still_refused() {
+    let fixture = Fixture::new();
+    let migration = agenix_migration(
+        &fixture,
+        "agenix-restart-unit",
+        json!({
+            "path": "/run/agenix/api-token",
+            "restartUnits": ["service.service"],
+        }),
+    );
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_refusal("a restart unit for agenix")
+        .says("agenix deployment does not support restartUnits or reloadUnits");
+    assert_nothing_published(&migration);
+}
+
+/// An owner with no group or gid gets agenix 0.18.0's own default group,
+/// written out, so agenix 0.16.0 and 0.17.0 evaluate it on nix-darwin too.
+///
+/// The expression is held three ways: as exact text, as part of a declaration
+/// the real parser accepts, and by its value over a NixOS-shaped user, whose
+/// primary group it finds by `name`, and a nix-darwin-shaped one, which has no
+/// group and gets `"0"`.
+///
+/// Drilled red twice: writing nothing in the owner branch fails the
+/// missing-line assertion, and looking the group up by attribute name
+/// (`config.users.users."alice".group or "0"`) fails the exact-text assertion.
+#[test]
+fn an_agenix_owner_without_a_group_names_the_agenix_default_group() {
+    let fixture = Fixture::new();
+    let migration = agenix_migration(
+        &fixture,
+        "agenix-owner-default-group",
+        json!({ "path": "/run/agenix/api-token", "owner": "alice" }),
+    );
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_success("an agenix owner without a group");
+
+    let declarations = std::fs::read_to_string(&migration.declarations).unwrap();
+    assert!(
+        declarations.contains("      group = "),
+        "the agenix entry names no group:\n{declarations}"
+    );
+    assert!(
+        declarations.contains(&format!("      group = {ALICE_DEFAULT_GROUP};\n")),
+        "the agenix entry does not name agenix 0.18.0's default group:\n{declarations}"
+    );
+    assert!(
+        Command::new("nix-instantiate")
+            .arg("--parse")
+            .arg(&migration.declarations)
+            .output()
+            .expect("could not run nix-instantiate")
+            .status
+            .success(),
+        "the generated declaration does not parse"
+    );
+    assert_eq!(
+        nix_eval(&format!(
+            "let config = {{ users.users = {{ a = {{ name = \"alice\"; group = \"staff\"; }}; }}; }}; in {ALICE_DEFAULT_GROUP}"
+        )),
+        "\"staff\"",
+        "the default group does not find the owner's primary group by name"
+    );
+    assert_eq!(
+        nix_eval(&format!(
+            "let config = {{ users.users = {{ a = {{ name = \"alice\"; }}; }}; }}; in {ALICE_DEFAULT_GROUP}"
+        )),
+        "\"0\"",
+        "the default group does not fall back to 0 for a user without a group"
+    );
+}
+
+/// A group or gid the plan gives is the group the agenix entry names.
+#[test]
+fn an_agenix_plan_group_is_kept() {
+    let fixture = Fixture::new();
+    for (label, deployment, line) in [
+        (
+            "agenix-group",
+            json!({ "path": "/run/agenix/api-token", "owner": "alice", "group": "wheel" }),
+            "      group = \"wheel\";\n",
+        ),
+        (
+            "agenix-gid",
+            json!({ "path": "/run/agenix/api-token", "owner": "alice", "gid": 3 }),
+            "      group = \"3\";\n",
+        ),
+    ] {
+        let migration = agenix_migration(&fixture, label, deployment);
+        fixture
+            .run(&["migrate", &migration.argument()])
+            .expect_success(label);
+        let declarations = std::fs::read_to_string(&migration.declarations).unwrap();
+        assert!(
+            declarations.contains(line),
+            "{label}: the plan's group is not the one declared:\n{declarations}"
+        );
+        assert_eq!(
+            declarations.matches("group = ").count(),
+            1,
+            "{label}: the entry names more than one group:\n{declarations}"
+        );
+    }
+}
+
+/// An entry with no owner, uid, group or gid names group `0`, which is what
+/// every agenix release defaults to for its default owner.
+///
+/// Drilled red by dropping the final `"0"` branch, which leaves the entry with
+/// no group at all.
+#[test]
+fn an_agenix_entry_with_no_owner_names_group_zero() {
+    let fixture = Fixture::new();
+    let migration = agenix_migration(
+        &fixture,
+        "agenix-no-owner",
+        json!({ "path": "/run/agenix/api-token" }),
+    );
+
+    fixture
+        .run(&["migrate", &migration.argument()])
+        .expect_success("an agenix entry with no owner");
+    let declarations = std::fs::read_to_string(&migration.declarations).unwrap();
+    assert!(
+        declarations.contains("      group = \"0\";\n"),
+        "the ownerless agenix entry does not name group 0:\n{declarations}"
+    );
+}
+
+/// The help states what the agenix target carries, and no longer claims agenix
+/// cannot carry an early-user entry.
+#[test]
+fn the_help_states_what_agenix_carries() {
+    let fixture = Fixture::new();
+    let run = fixture
+        .run(&["migrate", "--help"])
+        .expect_success("the migrate help");
+    run.says("Agenix cannot retain templates or\nservice hooks.");
+    run.says(
+        "An early-user entry is published as an ordinary agenix entry,\nbecause agenix installs every secret before user creation.",
+    );
+    run.says("The agenix target\nis written for agenix 0.18.0 or later.");
+    run.silent_about("early-user metadata");
 }

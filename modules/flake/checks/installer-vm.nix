@@ -203,7 +203,6 @@
                 { config, ... }:
                 {
                   imports = [ (machineFor "${fixture}/first.yaml") ];
-                  boot.initrd.systemd.enable = true;
                   services.userborn.enable = true;
                   users.mutableUsers = false;
                   virtualisation.fileSystems."/var/lib/safix-key" = {
