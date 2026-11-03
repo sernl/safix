@@ -209,6 +209,16 @@ pub enum Error {
         cause: Box<Error>,
     },
 
+    /// The bytes are not an age v1 header, binary or ASCII-armored.
+    ///
+    /// Raised by [`crate::age_header::stanzas`] and carried as the cause of
+    /// [`Error::RecipientsUnreadable`], which names the file.
+    #[error("the age header is not readable: {reason}")]
+    AgeHeaderUnreadable {
+        /// What the reader objected to.
+        reason: &'static str,
+    },
+
     /// The bytes are not a YAML document.
     #[error("the document is not readable as YAML: {cause}")]
     SopsDocumentUnreadable {

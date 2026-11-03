@@ -10,7 +10,7 @@
 //! `sha256("<namingKey>|<tag>|<root-relative readable path>")` over
 //! `modules/flake/checks/vault.nix`'s fixture naming key
 //! `fc84b416cd03fedc2c02116b068d75c543d327361f19e3d18d9e8aa3de0f4ad2`, with
-//! the five tags `secrets`, `key`, `public`, `state` and `stamps`. The
+//! the six tags `secrets`, `key`, `public`, `state`, `stamps` and `audience`. The
 //! stubbed `nix` computes none of them — it hands them over as data,
 //! exactly as the resolver does — but they are the resolver's real bytes,
 //! so a change to the hash input this suite's constants did not follow
@@ -369,6 +369,90 @@ fn a_vault_rollback_restores_the_readable_layout() {
             "{opaque} still exists in the vault after the rollback"
         );
     }
+}
+
+/// `secrets|users/alice/deploy-key.age`, with the format's own extension.
+const OPAQUE_AGE_FILE: &str =
+    "secrets/29ff9abd5aa52627328f16aedf670fe50eb470b8cd651951dcbe55ddcbe29f70.age";
+const LOGICAL_AGE_FILE: &str = "secrets/safix/users/alice/deploy-key.age";
+/// `audience|alice/deploy-key.audience`, the raw age entry's audience record.
+const OPAQUE_AUDIENCE: &str =
+    "state/9d13eaea351b34799df49b6f79d53a0b206847f483749b10e5d89059ca700429";
+const LOGICAL_AUDIENCE: &str = "state/safix/definitions/alice/deploy-key.audience";
+const AUDIENCE_TEXT: &str = "safix-age-audience-v1 \
+    3333333333333333333333333333333333333333333333333333333333333333 \
+    4444444444444444444444444444444444444444444444444444444444444444\n";
+
+/// A raw age entry's audience record moves with the entry: `check` reports
+/// the readable record as pending, `fix` copies it byte for byte to its opaque
+/// name and removes the readable one, and a rollback puts it back.
+///
+/// The raw age file itself is absent from this fixture, so the record is the
+/// only one of the entry's leaves that moves; what is asserted is that the
+/// record is enumerated and moved by the same machinery as the stamp beside
+/// it, gated on `logicalAudience`.
+#[test]
+fn a_raw_age_audience_record_relocates_with_its_value() {
+    let (mut fixture, vault) = populated_readable_fixture();
+    let extra = [("SAFIX_VAULT_ROOT", vault.to_str().expect("a utf-8 path"))];
+    fixture.seed_vault_placement(
+        "alice",
+        "deploy-key",
+        json!({
+            "file": OPAQUE_AGE_FILE, "format": "age", "key": "", "origin": "private",
+            "owner": "alice", "shared": false, "generator": null, "public": null,
+            "definitionRecord":
+                "state/cb1423c929f3855478f830c252947403e8c32285c29b70683efc5f6c9db420f5",
+            "logicalFile": LOGICAL_AGE_FILE, "logicalKey": "", "logicalPublic": null,
+            "logicalRecord": "state/safix/definitions/alice/deploy-key",
+            "stampRecord":
+                "state/c3bbc5ece09649004849a615a0ec45aaba4fd1401cae1adbc1fe22f0cae25e5e",
+            "logicalStamp": "state/safix/definitions/alice/deploy-key.stamps",
+            "audienceRecord": OPAQUE_AUDIENCE,
+            "logicalAudience": LOGICAL_AUDIENCE,
+            "rotation": null,
+        }),
+    );
+    fixture.write(LOGICAL_AUDIENCE, AUDIENCE_TEXT);
+
+    fixture.run_env(&["check"], None, &extra).says(&format!(
+        "{LOGICAL_AUDIENCE} is still at the declaration root, and a vault is declared"
+    ));
+
+    fixture
+        .run_env(&["fix", "--yes"], None, &extra)
+        .expect_success("migrating the readable layout into the vault");
+    assert_eq!(
+        fixture.vault_read(OPAQUE_AUDIENCE),
+        AUDIENCE_TEXT,
+        "the audience record's bytes did not survive the move"
+    );
+    assert!(
+        !fixture.exists(LOGICAL_AUDIENCE),
+        "the readable audience record still exists at the declaration root"
+    );
+    fixture
+        .run_env(&["check"], None, &extra)
+        .silent_about(LOGICAL_AUDIENCE);
+
+    fixture.vault_git(&["add", "--all"]);
+    fixture.vault_git(&[
+        "commit",
+        "-qm",
+        "Keep the verified migration before rollback",
+    ]);
+    fixture
+        .run_env(&["fix", "--vault-rollback"], None, &extra)
+        .expect_success("rolling the migration back");
+    assert_eq!(
+        fixture.read(LOGICAL_AUDIENCE),
+        AUDIENCE_TEXT,
+        "the audience record is not byte-identical after the round trip"
+    );
+    assert!(
+        !fixture.vault_exists(OPAQUE_AUDIENCE),
+        "the opaque audience record still exists in the vault after the rollback"
+    );
 }
 
 /// Task 11.5: interrupted mid-document, the destination is left absent and

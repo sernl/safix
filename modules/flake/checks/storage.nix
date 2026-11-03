@@ -70,6 +70,10 @@
 # (`stampsAreEmitted`), and `besideTheDefinitionRecord` is what holds the two
 # to one derivation: a stamp path spelled from anything but the record path
 # plus `.stamps` reddens that row alone.
+# The raw age audience record is emitted for the raw age entry alone
+# (`audienceIsEmittedForAgeOnly`): emitting it for every format turns that
+# row's two maps non-`null` for the four other entries. Observed against a
+# scratch copy.
 { lib, ... }:
 {
   perSystem =
@@ -171,6 +175,23 @@
       recordsOf = projection: lib.mapAttrs (_name: p: p.definitionRecord) projection.placements.alice;
 
       stampsOf = projection: lib.mapAttrs (_name: p: p.stampRecord) projection.placements.alice;
+
+      # The fleet with one raw age entry beside the rest: `format = "age"` is the
+      # one format whose placement carries an audience record, so the row below
+      # reads every other entry's as `null`.
+      withAge = {
+        users = fleet.users // {
+          alice = fleet.users.alice // {
+            private = fleet.users.alice.private // {
+              deploy-key.format = "age";
+            };
+          };
+        };
+      };
+      agedDefaults = projectionOf withAge;
+      agedRenamed = projectionOf (withAge // { storage = renamedStorage; });
+
+      audiencesOf = projection: lib.mapAttrs (_name: p: p.audienceRecord) projection.placements.alice;
 
       # ── the two refusals ──
       malformed = {
@@ -363,6 +384,21 @@
             ) (builtins.attrNames renamed.placements.alice);
           };
 
+          # ── the raw age audience record ──
+          # Emitted for the raw age entry alone, as its definition record path
+          # plus `.audience`, under both roots; `null` on every other entry, and
+          # no readable twin outside vault mode.
+          audienceIsEmittedForAgeOnly = {
+            underDefaultRoot = audiencesOf agedDefaults;
+            underRenamedRoot = audiencesOf agedRenamed;
+            besideTheDefinitionRecord =
+              agedRenamed.placements.alice.deploy-key.audienceRecord
+              == "${agedRenamed.placements.alice.deploy-key.definitionRecord}.audience";
+            noReadableTwinWithoutVault = lib.all (p: p.logicalAudience == null) (
+              lib.attrValues agedRenamed.placements.alice
+            );
+          };
+
           # ── 5.6: the committed header names the configured root ──
           renamedPolicyHeader = {
             sharedExample = lib.hasInfix "${renamedStorage.encrypted}/shared/<a>,<b>/" renamed.policyText;
@@ -545,6 +581,25 @@
               wg-public = "bookkeeping/alice/wg-public.stamps";
             };
             besideTheDefinitionRecord = true;
+          };
+
+          audienceIsEmittedForAgeOnly = {
+            underDefaultRoot = {
+              deploy-key = "state/safix/definitions/alice/deploy-key.audience";
+              solo-token = null;
+              team-secret = null;
+              wg-private = null;
+              wg-public = null;
+            };
+            underRenamedRoot = {
+              deploy-key = "bookkeeping/alice/deploy-key.audience";
+              solo-token = null;
+              team-secret = null;
+              wg-private = null;
+              wg-public = null;
+            };
+            besideTheDefinitionRecord = true;
+            noReadableTwinWithoutVault = true;
           };
 
           renamedPolicyHeader = {

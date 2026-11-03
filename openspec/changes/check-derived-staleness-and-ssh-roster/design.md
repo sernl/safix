@@ -28,6 +28,8 @@ The age facts below were read from age at `b74dce4` (`~/ghq/github.com/FiloSotti
   An X25519 stanza carries only an ephemeral share; a plugin stanza's tag scheme is the plugin's and is not read here.
 - An audience record for files named only through `extraGovernedFiles`: they have no placement, so no resolver-emitted path, and keep today's re-wrap-every-run behaviour.
 - Changing `set`, `edit`, `generate` or `sync` to write the audience record; see D9.
+- Relocating a raw age file itself into or out of a vault.
+  Document relocation still goes through sops in `relocate_document` (`crates/safix-core/src/fix.rs`), which reads keyed documents; only the raw age entry's audience record moves with `audience_leaves`, and the vault migration test fixtures the record alone.
 
 ## Decisions
 
@@ -192,3 +194,6 @@ Rolling back to an earlier safix leaves the records in the tree; an earlier `den
 - The staleness remedy names the dependent (D2).
 - An exact SSH tag match is a non-failing note, never a silent pass; mismatches fail; any non-SSH element keeps `RecipientRosterUnverifiable` (D6, D7).
 - The audience record format and `AgeAudienceChanged` are as D8 and D11 state.
+- A duplicated SSH stanza is named by the audience's own key when the audience declares exactly one key with that `(type, tag)`, and by `<type> <tag>` otherwise; an extra stanza keeps the D6 recovery over every declared key.
+- The base64 decoder refuses a final group whose unused bits are not zero, as well as every byte outside the standard alphabet, so each input it accepts encodes exactly one byte string.
+- The raw-age branch of `recipients` reports `UngovernableExtra` for a raw age file no audience or covering directory declares, as the SOPS branch does (D6), before its header is read.

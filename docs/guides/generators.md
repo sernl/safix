@@ -135,6 +135,14 @@ Otherwise a rotation would leave values derived from the value it replaced, and 
 
 The set is listed before anything runs and confirmed once, because each re-run commits as it goes. `--yes` answers that confirmation in advance. A generator nothing reads is not a cascade and asks nothing.
 
+A value written by `set`, `edit` or `sync` cascades nothing, because none of them runs a generator.
+`safix check` reports every generator that read such a value since it last ran, naming the dependency, and fails.
+The remedy regenerates the dependent entry rather than the dependency — `safix generate --regenerate <user> <entry>` — and that regeneration's own cascade re-runs everything derived from it in turn.
+
+The comparison reads the stamp records alone and decrypts nothing: a dependency is reported when its last write is dated strictly later than the earliest write among the values the generator wrote.
+The stamps are wall-clock seconds from whichever machine wrote them, so a skewed clock can report a derivation that is current or miss one that is not; regenerating clears a false report.
+An entry with no stamp record on either side is not reported.
+
 ## The sandbox
 
 A script and its validation fragments run confined. The staging root is the only writable path, the nix store is readable, and there is no network unless the declaration grants it.

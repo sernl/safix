@@ -47,6 +47,24 @@ fn the_fixture_stands_up_a_repository_with_real_backends() {
     assert_eq!(fixture.status(), "", "the fixture leaves a clean tree");
 }
 
+/// The raw age helpers mint distinct SSH keys and declare an entry the
+/// command reads as raw age.
+#[test]
+fn the_raw_age_helpers_mint_keys_and_place_an_age_entry() {
+    let mut fixture = Fixture::new();
+    let first = fixture.ssh_recipient();
+    let second = fixture.ssh_recipient();
+    assert!(first.starts_with("ssh-ed25519 AAAA"), "{first}");
+    assert!(second.starts_with("ssh-ed25519 AAAA"), "{second}");
+    assert_ne!(first, second, "each call mints a key of its own");
+
+    let file = fixture.place_raw_age("alice", "deploy-key");
+    assert_eq!(file, "secrets/safix/users/alice/deploy-key.age");
+    let listing = fixture.run(&["list", "alice"]).expect_success("list");
+    listing.says("deploy-key");
+    listing.says(&file);
+}
+
 /// The stub answers the attributes the runtime declares.
 #[test]
 fn the_evaluator_stub_answers_what_the_runtime_reads() {

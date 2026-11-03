@@ -39,7 +39,9 @@
 //! [`definition`] is the record a mint leaves of the declaration it minted
 //! under, which is what lets [`check`] report a value whose generator has
 //! changed since, and [`stamps`] is the record beside it of when a value was
-//! first written and when it last changed. [`delegation`] is who may perform
+//! first written and when it last changed. [`age_header`] is what a raw age
+//! file's header discloses without decryption, which is what lets [`check`]
+//! compare its SSH recipients by tag. [`delegation`] is who may perform
 //! a scaffold for whom, read
 //! off the declarations and matched against the identity the resulting commit
 //! would carry; it guards the cooperative path and is explicitly not
@@ -61,7 +63,10 @@
 //! `openspec/changes/rust-only-runtime/` for the retirement.
 
 pub mod adduser;
+mod age_audience;
+pub mod age_header;
 pub mod audit;
+mod base64;
 pub mod bitwarden;
 pub mod bridge;
 pub mod check;

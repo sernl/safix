@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
+use crate::age_audience;
 use crate::error::{Error, Result};
 use crate::nix::Attribute;
 use crate::progress::{Progress, log, note};
@@ -164,6 +165,14 @@ pub fn run(
     }
 }
 
+/// Re-wrap one raw age file to its declared audience, unless its audience
+/// record says it already is.
+///
+/// The record is read before `--yes` is asked for, because a file this skips
+/// replaces nothing and so needs no authorization. It is consulted only for a
+/// file a placement names: a file governed through `extraGovernedFiles` alone
+/// has no resolver-emitted record path, and is re-wrapped on every run as
+/// before. See [`crate::age_audience`] for why both digests are compared.
 fn rewrap_age(
     workspace: &Workspace,
     progress: &dyn Progress,
@@ -173,9 +182,6 @@ fn rewrap_age(
     let path = workspace.vault_absolute(relative);
     if !path.exists() {
         return Ok(());
-    }
-    if !assume_yes {
-        return Err(Error::DocumentOperation { operation: "rewrap age", path: relative.into(), cause: "raw age cannot show its old roster; pass --yes to replace its recipients with the declared audience".into() });
     }
     let audiences = workspace.audiences()?;
     let audience = audiences
@@ -189,6 +195,25 @@ fn rewrap_age(
         .ok_or_else(|| Error::NoAudienceForFile {
             file: relative.into(),
         })?;
+    let declared = age_audience::audience_digest(&audience.recipients);
+    let record = age_audience::record_for(workspace.placements()?, relative).map(str::to_owned);
+
+    if let Some(record) = &record
+        && already_wrapped(workspace, record, &path, &declared)?
+    {
+        log(
+            progress,
+            &format!("safix: {relative} is already wrapped to the declared audience; left alone."),
+        );
+        return Ok(());
+    }
+    if !assume_yes {
+        return Err(Error::DocumentOperation {
+            operation: "rewrap age",
+            path: relative.into(),
+            cause: "raw age shows its previous roster's SSH recipients by tag only and its other recipients not at all; pass --yes to replace its recipients with the declared audience".into(),
+        });
+    }
     let identities = crate::ciphertext::Identities::from_environment();
     let source = crate::ciphertext::Source {
         path: path.clone(),
@@ -217,17 +242,48 @@ fn rewrap_age(
             cause: "interrupted before publication".into(),
         });
     }
+    let wrapped = std::fs::read(&candidate).map_err(|cause| Error::FileUnreadable {
+        path: candidate.display().to_string(),
+        cause,
+    })?;
     std::fs::rename(&candidate, &path).map_err(|cause| Error::FileUnwritable {
         path: path.display().to_string(),
         cause,
     })?;
+    if let Some(record) = &record {
+        age_audience::write(workspace, record, &age_audience::line(&declared, &wrapped))?;
+    }
     log(
         progress,
         &format!(
-            "safix: re-encrypted {relative} to the declared audience; raw age still has no inspectable recipient roster"
+            "safix: re-encrypted {relative} to the declared audience; the roster it replaced could be shown only by its SSH recipients' tags"
         ),
     );
     Ok(())
+}
+
+/// Whether this record reads, names the declared audience and names the
+/// file's current bytes.
+fn already_wrapped(
+    workspace: &Workspace,
+    record: &str,
+    path: &Path,
+    declared: &str,
+) -> Result<bool> {
+    let Some(text) = workspace.read_vault_relative(record)? else {
+        return Ok(false);
+    };
+    let Some((audience, ciphertext)) = age_audience::recorded(&text) else {
+        return Ok(false);
+    };
+    if audience != declared {
+        return Ok(false);
+    }
+    let bytes = std::fs::read(path).map_err(|cause| Error::FileUnreadable {
+        path: path.display().to_string(),
+        cause,
+    })?;
+    Ok(ciphertext == age_audience::ciphertext_digest(&bytes))
 }
 
 /// Evaluate the policy into a file beside the one it replaces, then rename it
@@ -271,8 +327,8 @@ enum RelocateOutcome {
 ///
 /// A no-op when no vault is declared: `vault_root` equals `root` then, and
 /// [`relocation::secret_documents`]/`public_leaves`/`record_leaves`/
-/// `stamp_leaves` find nothing to group, since design V14's `logical_*` fields
-/// are `null` outside vault mode.
+/// `stamp_leaves`/`audience_leaves` find nothing to group, since design V14's
+/// `logical_*` fields are `null` outside vault mode.
 ///
 /// Forward (`rollback: false`, the default): for every document, output, or
 /// record still present at the declaration root and absent from the vault,
@@ -352,6 +408,9 @@ fn relocate(
         moved |= relocate_leaf(workspace, rollback, &leaf)?;
     }
     for leaf in relocation::stamp_leaves(placements) {
+        moved |= relocate_leaf(workspace, rollback, &leaf)?;
+    }
+    for leaf in relocation::audience_leaves(placements) {
         moved |= relocate_leaf(workspace, rollback, &leaf)?;
     }
 

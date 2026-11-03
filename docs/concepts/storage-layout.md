@@ -99,6 +99,16 @@ stamps beside it. A record carries a digest of the definition that minted the
 value and no value of its own, which is what lets `safix check` report a changed
 generator without decrypting anything.
 
+A raw age entry also has an audience record beside its stamps, at the same path
+with an `.audience` suffix. It holds one line,
+`safix-age-audience-v1 <audience digest> <ciphertext digest>`: a digest of the
+recipients the file was last wrapped to and the SHA-256 of the bytes that wrap
+produced, and nothing derived from the value. Only `safix fix` writes it, after
+each raw age re-wrap, and it is what lets the next `fix` leave a file alone
+whose audience and bytes have not moved. In vault mode it is one opaque name
+under the vault's `state/` bucket, and a migration or rollback moves it with
+the value.
+
 ## Ignore, backup and files safix did not place
 
 A file safix did not place is not in the set `safix fix` re-wraps, though it

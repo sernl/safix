@@ -78,6 +78,7 @@ refusal_codes! {
     NoDefaultUser => "safix::no_default_user",
     NoValueYet => "safix::no_value_yet",
     RecipientsUnreadable => "safix::recipients_unreadable",
+    AgeHeaderUnreadable => "safix::age_header_unreadable",
     SopsDocumentUnreadable => "safix::document_unreadable",
     SopsStanzaUnreadable => "safix::stanza_unreadable",
     SopsUnavailable => "safix::sops_unavailable",

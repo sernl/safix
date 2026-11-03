@@ -920,6 +920,13 @@ let
           # name can end in `.stamps` and no entry's definition record can
           # therefore collide with another entry's stamp record.
           logicalStamp = "${logicalRecord}.stamps";
+
+          # The raw age audience record sits beside the stamp, for the same
+          # reason, and only a raw age entry has one: it records the audience a
+          # file was last wrapped to, and a SOPS document names its own.
+          # `.audience` needs no injectivity argument, for the reason `.stamps`
+          # needs none.
+          logicalAudience = if format == "age" then "${logicalRecord}.audience" else null;
         in
         {
           inherit (src) origin owner;
@@ -981,6 +988,21 @@ let
             else
               logicalStamp;
           logicalStamp = if r.namingKey != null then logicalStamp else null;
+
+          # `audienceRecord` is the path `fix` writes after each raw age re-wrap
+          # and `check` reads, emitted for the reason `stampRecord` is: the
+          # resolver is the one implementation of the layout. `null` for every
+          # entry that is not raw age. Its own vault tag is `"audience"`, so it
+          # hashes to neither the definition record's nor the stamp's opaque
+          # name, and the hash input is root-relative like every other.
+          audienceRecord =
+            if logicalAudience == null then
+              null
+            else if r.namingKey != null then
+              "state/${opaqueOf r.namingKey "audience" (relativeTo r.storage.generatorRecords logicalAudience)}"
+            else
+              logicalAudience;
+          logicalAudience = if r.namingKey != null then logicalAudience else null;
 
           # The deadline's two inputs the runtime cannot derive: which policy
           # governs this value, and how long that policy's interval is in

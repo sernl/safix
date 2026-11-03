@@ -1,6 +1,6 @@
 //! What a vault migration moves: the opaque and readable name of every
-//! document, public output, definition record and stamp record a vault-mode
-//! fleet holds.
+//! document, public output, definition record, stamp record and raw age
+//! audience record a vault-mode fleet holds.
 //!
 //! Shared by [`crate::check`]'s pending-relocation finding and
 //! [`crate::fix`]'s relocate phase, so the two enumerate the same set rather
@@ -123,7 +123,24 @@ pub(crate) fn stamp_leaves(placements: &Placements) -> Vec<PlainLeaf> {
     })
 }
 
-/// The shape [`public_leaves`], [`record_leaves`] and [`stamp_leaves`] share:
+/// Every raw age audience record a vault-mode fleet holds, in opaque-path
+/// order.
+///
+/// Gated on `logical_audience` for the reason [`stamp_leaves`] is gated on
+/// `logical_stamp`. The record names the bytes of the file it sits beside, so
+/// a migration that moved the file and left the record behind would make the
+/// next `fix --yes` re-wrap a file whose audience never moved.
+pub(crate) fn audience_leaves(placements: &Placements) -> Vec<PlainLeaf> {
+    leaves_by(placements, |placement| {
+        Some((
+            placement.audience_record.clone()?,
+            placement.logical_audience.clone()?,
+        ))
+    })
+}
+
+/// The shape [`public_leaves`], [`record_leaves`], [`stamp_leaves`] and
+/// [`audience_leaves`] share:
 /// derive one `(opaque, logical)` pair per placement when `select` finds one,
 /// keyed and deduplicated by the opaque half.
 fn leaves_by(
@@ -148,7 +165,7 @@ fn leaves_by(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{public_leaves, record_leaves, secret_documents, stamp_leaves};
+    use super::{audience_leaves, public_leaves, record_leaves, secret_documents, stamp_leaves};
     use crate::model::Placements;
 
     fn placements(entries: Value) -> Placements {
@@ -235,6 +252,7 @@ mod tests {
         assert!(public_leaves(&held).is_empty());
         assert!(record_leaves(&held).is_empty());
         assert!(stamp_leaves(&held).is_empty());
+        assert!(audience_leaves(&held).is_empty());
     }
 
     /// A public output's opaque and readable paths pass through unmodified.
@@ -331,6 +349,59 @@ mod tests {
         assert_eq!(
             leaf.logical,
             "state/safix/definitions/shared/alice,bob/fleet-token.stamps"
+        );
+    }
+
+    /// This placement, declared raw age with these audience record names.
+    fn as_raw_age(mut entry: Value, record: &str, logical: Option<&str>) -> Value {
+        if let Some(fields) = entry.as_object_mut() {
+            fields.insert("format".into(), json!("age"));
+            fields.insert("audienceRecord".into(), json!(record));
+            fields.insert("logicalAudience".into(), json!(logical));
+        }
+        entry
+    }
+
+    /// No vault declared: a raw age entry's audience record is emitted and its
+    /// readable twin is not, so nothing relocates.
+    #[test]
+    fn audience_leaves_are_empty_without_a_vault() {
+        let entry = as_raw_age(
+            no_vault_secret("secrets/safix/users/alice/api-token.age", "", "alice"),
+            "state/safix/definitions/alice/api-token.audience",
+            None,
+        );
+        let held = placements(json!({ "alice": { "api-token": entry } }));
+        assert!(audience_leaves(&held).is_empty());
+    }
+
+    /// In vault mode a raw age entry's record carries its two names, and an
+    /// entry in another format carries none and contributes nothing.
+    #[test]
+    fn a_raw_age_entry_relocates_its_audience_record() {
+        let age = as_raw_age(
+            secret("secrets/opaque-age", "", "alice", false, ""),
+            "state/opaque-audience",
+            Some("state/safix/definitions/alice/api-token.audience"),
+        );
+        let yaml = secret(
+            "secrets/opaque1.yaml",
+            "opaque-key",
+            "alice",
+            false,
+            "mail-password",
+        );
+        let held = placements(json!({
+            "alice": { "api-token": age, "mail-password": yaml },
+        }));
+        let leaves = audience_leaves(&held);
+        let [leaf] = leaves.as_slice() else {
+            unreachable!("exactly one raw age record, got {leaves:?}");
+        };
+        assert_eq!(leaf.opaque, "state/opaque-audience");
+        assert_eq!(
+            leaf.logical,
+            "state/safix/definitions/alice/api-token.audience"
         );
     }
 }

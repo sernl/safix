@@ -5,12 +5,21 @@
 //! them, because the order is what the report reads as and a reader who has fixed
 //! the policy expects the recipient findings under it. The fifth is newer and sits
 //! last: whether a generated value was minted under the declaration that is there
-//! now, answered from the record `generate` leaves — see [`crate::definition`].
+//! now, and whether a value it read has been written since, answered from the
+//! records `generate` and every writer leave — see [`crate::definition`] and
+//! [`crate::stamps`].
 //!
 //! Nothing here writes, decrypts, or holds an identity: every question is
 //! answered from the declarations, from the structure of the ciphertext, and from
-//! one plaintext record about a declaration, which is what lets one machine judge
-//! files belonging to people whose keys it does not have.
+//! plaintext records about declarations and writes, which is what lets one
+//! machine judge files belonging to people whose keys it does not have.
+//!
+//! The structure of the ciphertext says different things per format. A SOPS
+//! document's metadata names every recipient in full. A raw age file's header
+//! names each SSH recipient by a four-byte tag of its key and every other
+//! recipient by nothing — see [`crate::age_header`] — so a raw age file's SSH
+//! recipients are compared by tag, a match is reported as a note that does not
+//! establish the keys, and any other recipient leaves the roster unverifiable.
 //!
 //! A finding is data. The prose the command prints for each one is the shell
 //! runtime's prose, and it lives in the command beside the other rendering, so
@@ -20,9 +29,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
+use crate::age_audience;
+use crate::age_header;
 use crate::definition;
 use crate::error::{Error, Result};
-use crate::model::{Holders, Placements};
+use crate::model::{Audiences, Holders, Placements, Recipients};
 use crate::sops::document::{self, KeyState};
 use crate::stamps::{self, Deadline};
 use crate::workspace::Workspace;
@@ -56,10 +67,67 @@ pub enum Finding {
         file: String,
     },
 
-    /// Raw age does not expose an auditable recipient roster.
+    /// A raw age file whose roster the header cannot establish: it carries a
+    /// stanza that names no recipient, or its audience declares a recipient
+    /// whose stanza would name none — X25519, plugin, `scrypt`.
     RecipientRosterUnverifiable {
         /// The repository-relative path of the native age file.
         file: String,
+    },
+
+    /// A raw age file's SSH stanzas disagree, by tag, with the SSH recipients
+    /// its audience declares.
+    ///
+    /// A disagreement in a 32-bit tag is a disagreement in the key: the tag is
+    /// a function of the key, so a stanza whose tag no declared key has was
+    /// written for some other key. The converse does not hold, which is why an
+    /// agreement is [`Finding::RecipientRosterTagMatched`] rather than silence.
+    RecipientTagDrift {
+        /// The repository-relative path of the raw age file.
+        file: String,
+        /// Declared SSH recipients with fewer stanzas carrying their tag than
+        /// the audience declares keys with it.
+        missing: Vec<String>,
+        /// Stanzas whose tag no declared SSH recipient of the audience has:
+        /// the full declared key when exactly one declared key anywhere has
+        /// that type and tag, and `<type> <tag>` otherwise.
+        extra: Vec<String>,
+        /// Stanzas beyond the number of distinct declared keys carrying their
+        /// type and tag: the audience's own key when it declares exactly one
+        /// with that type and tag, and `<type> <tag>` otherwise.
+        duplicate: Vec<String>,
+        /// Whose custody the extra keys recovered by tag are.
+        narrowed: Holders,
+        /// What mints a new value for each name the file holds.
+        mints: Vec<Mint>,
+    },
+
+    /// A raw age file whose every stanza is an SSH stanza matching, by tag, the
+    /// SSH recipients its audience declares, one for one.
+    ///
+    /// A note rather than a pass, and the one finding that does not fail the
+    /// run (see [`Finding::fails`]). A tag is thirty-two bits, so anybody able
+    /// to write the file can mint keys until one collides with a declared
+    /// key's tag and substitute that stanza; the match says the file is
+    /// consistent with the declaration and not that it is wrapped to it.
+    RecipientRosterTagMatched {
+        /// The repository-relative path of the raw age file.
+        file: String,
+        /// How many stanzas matched.
+        matched: usize,
+    },
+
+    /// A raw age file whose audience record names its current bytes and an
+    /// audience other than the one declared now.
+    ///
+    /// The one case in which a raw age file's non-SSH recipients are known to
+    /// disagree with the declarations: `fix` recorded who it wrapped these
+    /// exact bytes to, and that audience is no longer the declared one.
+    AgeAudienceChanged {
+        /// The repository-relative path of the raw age file.
+        file: String,
+        /// The path of the audience record.
+        record: String,
     },
 
     /// A governed file's stanzas disagree with the audience declared for it.
@@ -185,6 +253,23 @@ pub enum Finding {
         record: String,
     },
 
+    /// A generated value one of whose dependencies was written after it.
+    ///
+    /// Answered from the stamp records alone, so it carries no value and no
+    /// derivative of one. The remedy re-runs the dependent's generator, never
+    /// the dependency's: a dependency set by hand has no generator, and one
+    /// that has would discard the value the operator just wrote.
+    DerivedValueStale {
+        /// The user who holds the generator's entry.
+        user: String,
+        /// The entry the generator is declared on.
+        generator: String,
+        /// The dependency written after the generator last ran.
+        dependency: String,
+        /// The repository-relative path of the dependency's stamp record.
+        record: String,
+    },
+
     /// An entry whose rotation deadline has passed.
     ///
     /// Carries no value and no derivative of one: the two numbers it is
@@ -223,6 +308,17 @@ pub enum Finding {
         /// The declaration-root, repository-relative path still pending.
         file: String,
     },
+}
+
+impl Finding {
+    /// Whether this finding fails the run.
+    ///
+    /// Every finding does except [`Finding::RecipientRosterTagMatched`], which
+    /// qualifies a run that found no drift rather than reporting any.
+    #[must_use]
+    pub const fn fails(&self) -> bool {
+        !matches!(self, Self::RecipientRosterTagMatched { .. })
+    }
 }
 
 /// Every disagreement, in report order, for every user or for one.
@@ -271,8 +367,9 @@ fn vault_gitignore(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result
 /// so [`crate::relocation`]'s enumerations find nothing to group.
 ///
 /// One finding per distinct readable path — a ciphertext document, a public
-/// output, a definition record, or a stamp record — still present at the
-/// declaration root, deduplicated because a shared secret's readable file is
+/// output, a definition record, a stamp record, or a raw age audience record
+/// — still present at the declaration root, deduplicated because a shared
+/// secret's readable file is
 /// one path named by every carrier's placement.
 fn vault_relocation(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result<()> {
     if workspace.vault_root() == workspace.root() {
@@ -289,6 +386,7 @@ fn vault_relocation(workspace: &Workspace, findings: &mut Vec<Finding>) -> Resul
         .into_iter()
         .chain(crate::relocation::record_leaves(placements))
         .chain(crate::relocation::stamp_leaves(placements))
+        .chain(crate::relocation::audience_leaves(placements))
     {
         if workspace.absolute(&leaf.logical).exists() {
             pending.insert(leaf.logical);
@@ -337,6 +435,12 @@ fn policy(workspace: &Workspace, findings: &mut Vec<Finding>) -> Result<()> {
 /// has no audience — no declaration places a secret in it — so what holds it is
 /// the rule whose directory covers it, which is also what `fix` will re-wrap it
 /// to.
+///
+/// The two formats disclose different things, and each is judged by what it
+/// discloses. A SOPS document names every recipient, so its drift is exact. A
+/// raw age header names each SSH recipient by a four-byte tag of its key and
+/// every other recipient by nothing, so [`raw_age`] compares tags and says no
+/// more than a tag can.
 fn recipients(
     workspace: &Workspace,
     documents: &mut Documents,
@@ -348,9 +452,7 @@ fn recipients(
     for file in &workspace.governed_files()?.managed {
         if crate::ciphertext::Format::from_path(Path::new(file))? == crate::ciphertext::Format::Age
         {
-            if workspace.vault_absolute(file).exists() {
-                findings.push(Finding::RecipientRosterUnverifiable { file: file.clone() });
-            }
+            raw_age(workspace, audiences, holders, placements, file, findings)?;
             continue;
         }
         let Some(text) = documents.text(workspace, file)? else {
@@ -382,6 +484,237 @@ fn recipients(
         }
     }
     Ok(())
+}
+
+/// One raw age file's header, and its audience record, against the audience
+/// declared for it.
+///
+/// Nothing for a file that does not exist, as for a SOPS document. The header
+/// is read up to its MAC line and never decrypted; one that cannot be read
+/// refuses naming the file, as an unreadable SOPS document does. See
+/// [`judge_age`] for the comparison and [`audience_changed`] for the record.
+fn raw_age(
+    workspace: &Workspace,
+    audiences: &Audiences,
+    holders: &Recipients,
+    placements: &Placements,
+    file: &str,
+    findings: &mut Vec<Finding>,
+) -> Result<()> {
+    let path = workspace.vault_absolute(file);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(cause) => {
+            return Err(Error::FileUnreadable {
+                path: path.display().to_string(),
+                cause,
+            });
+        }
+    };
+    let held_to = audiences
+        .for_file(file)
+        .or_else(|| audiences.covering_dir(&parent_of(file)));
+    let Some(audience) = held_to else {
+        findings.push(Finding::UngovernableExtra {
+            file: file.to_owned(),
+        });
+        return Ok(());
+    };
+    let stanzas = age_header::stanzas(&bytes).map_err(|cause| Error::RecipientsUnreadable {
+        file: file.to_owned(),
+        cause: Box::new(cause),
+    })?;
+
+    findings.extend(judge_age(
+        file,
+        &stanzas,
+        &tagged(&audience.recipients),
+        &tagged(holders.0.values().flatten()),
+        holders,
+        || mints_in(placements, file),
+    ));
+
+    if let Some(record) = age_audience::record_for(placements, file) {
+        let text = workspace.read_vault_relative(record)?;
+        findings.extend(audience_changed(
+            file,
+            record,
+            text.as_deref(),
+            &bytes,
+            &age_audience::audience_digest(&audience.recipients),
+        ));
+    }
+    Ok(())
+}
+
+/// One declared recipient and its SSH tag, when it is an SSH recipient whose
+/// key decodes.
+#[derive(Debug, Clone)]
+struct Tagged {
+    key: String,
+    tag: Option<(String, String)>,
+}
+
+fn tagged<'a>(keys: impl IntoIterator<Item = &'a String>) -> Vec<Tagged> {
+    keys.into_iter()
+        .map(|key| Tagged {
+            key: key.clone(),
+            tag: age_header::ssh_tag(key),
+        })
+        .collect()
+}
+
+/// A raw age file's stanzas against its declared audience, by SSH tag.
+///
+/// Expected multiplicity is keyed by `(type, tag)` and counts distinct declared
+/// keys, so two declared keys whose tags collide expect two stanzas rather
+/// than reading as a duplicate. A stanza whose `(type, tag)` the audience does
+/// not declare is extra; stanzas beyond the expected count are duplicates; a
+/// declared key whose `(type, tag)` has fewer stanzas than expected is missing.
+///
+/// An extra stanza is named as the full declared key when exactly one
+/// declared key anywhere has its `(type, tag)` — the recovery agenix's
+/// `--check` makes — and as `<type> <tag>` otherwise, because a tag two keys
+/// share attributes to neither. A duplicate is named as the audience's own key
+/// when the audience declares exactly one with its `(type, tag)`.
+///
+/// Independently of drift, a non-SSH stanza or a declared recipient with no
+/// tag leaves the roster unverifiable; only a file with neither, and no drift,
+/// is a tag match.
+fn judge_age(
+    file: &str,
+    stanzas: &[age_header::Stanza],
+    declared: &[Tagged],
+    everywhere: &[Tagged],
+    holders: &Recipients,
+    mints: impl FnOnce() -> Vec<Mint>,
+) -> Vec<Finding> {
+    let mut unverifiable = declared.iter().any(|recipient| recipient.tag.is_none());
+    let expected = by_tag(declared);
+    let known = by_tag(everywhere);
+    let mut actual: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let mut matched: usize = 0;
+    for stanza in stanzas {
+        if !stanza.is_ssh() {
+            unverifiable = true;
+            continue;
+        }
+        let count = actual
+            .entry((
+                stanza.kind.as_str(),
+                stanza.first_argument.as_deref().unwrap_or(""),
+            ))
+            .or_default();
+        *count = count.saturating_add(1);
+        matched = matched.saturating_add(1);
+    }
+
+    let attributed = |key: &(&str, &str)| match known.get(key).map(BTreeSet::len) {
+        Some(1) => known
+            .get(key)
+            .and_then(|keys| keys.first())
+            .map(|&only| only.to_owned()),
+        _ => None,
+    };
+    let named =
+        |key: &(&str, &str)| attributed(key).unwrap_or_else(|| format!("{} {}", key.0, key.1));
+
+    let mut missing = Vec::new();
+    for (key, keys) in &expected {
+        if actual.get(key).copied().unwrap_or(0) < keys.len() {
+            missing.extend(keys.iter().map(|&declared| declared.to_owned()));
+        }
+    }
+    let mut extra = Vec::new();
+    let mut recovered = Vec::new();
+    let mut duplicate = Vec::new();
+    for (key, &count) in &actual {
+        match expected.get(key) {
+            None => {
+                for _ in 0..count {
+                    if let Some(holder) = attributed(key) {
+                        recovered.push(holder);
+                    }
+                    extra.push(named(key));
+                }
+            }
+            Some(keys) => {
+                // The audience declares this tag, so its own key names the
+                // surplus when it declares exactly one with it.
+                let declared = match (keys.len(), keys.first()) {
+                    (1, Some(&only)) => only.to_owned(),
+                    _ => named(key),
+                };
+                for _ in keys.len()..count {
+                    duplicate.push(declared.clone());
+                }
+            }
+        }
+    }
+
+    let mut findings = Vec::new();
+    let drifted = !(missing.is_empty() && extra.is_empty() && duplicate.is_empty());
+    if drifted {
+        recovered.dedup();
+        findings.push(Finding::RecipientTagDrift {
+            file: file.to_owned(),
+            missing,
+            extra,
+            duplicate,
+            narrowed: holders.holders_of(&recovered),
+            mints: mints(),
+        });
+    }
+    if unverifiable {
+        findings.push(Finding::RecipientRosterUnverifiable {
+            file: file.to_owned(),
+        });
+    } else if !drifted {
+        findings.push(Finding::RecipientRosterTagMatched {
+            file: file.to_owned(),
+            matched,
+        });
+    }
+    findings
+}
+
+/// The distinct keys carrying each `(type, tag)`, over the recipients that
+/// have one.
+fn by_tag(recipients: &[Tagged]) -> BTreeMap<(&str, &str), BTreeSet<&str>> {
+    let mut keys: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for recipient in recipients {
+        if let Some((kind, tag)) = &recipient.tag {
+            keys.entry((kind.as_str(), tag.as_str()))
+                .or_default()
+                .insert(recipient.key.as_str());
+        }
+    }
+    keys
+}
+
+/// What a raw age file's audience record says about the file as it is now.
+///
+/// Nothing for an absent record or one this version cannot read, because a
+/// record that cannot be read says nothing; nothing for a record naming other
+/// bytes, because it describes a file that is no longer there; and nothing
+/// when it names the declared audience. Only a record naming these exact bytes
+/// and another audience is a finding.
+fn audience_changed(
+    file: &str,
+    record: &str,
+    text: Option<&str>,
+    bytes: &[u8],
+    declared: &str,
+) -> Option<Finding> {
+    let (audience, ciphertext) = age_audience::recorded(text?)?;
+    if ciphertext != age_audience::ciphertext_digest(bytes) || audience == declared {
+        return None;
+    }
+    Some(Finding::AgeAudienceChanged {
+        file: file.to_owned(),
+        record: record.to_owned(),
+    })
 }
 
 /// What mints a new value for each name one file holds, in name order.
@@ -623,20 +956,23 @@ fn public_finding(
     })
 }
 
-/// The two questions asked of one entry at a time: whether a generated value's
-/// recorded definition is the declared one, and whether an opted-in value has
-/// outlived its rotation policy.
+/// The three questions asked of one entry at a time: whether a generated
+/// value's recorded definition is the declared one, whether a value it read
+/// has been written since it ran, and whether an opted-in value has outlived
+/// its rotation policy.
 ///
-/// Last, because neither is about a file's contents or its recipients: the four
+/// Last, because none is about a file's contents or its recipients: the four
 /// questions before this one read the tree the operator is converging, and
-/// these two read what a past run recorded about a declaration and about a
+/// these read what past runs recorded about a declaration and about a
 /// write. An operator who has just fixed the policy expects the recipient
 /// findings under it, and one who has just edited a generator expects this at
 /// the end.
 ///
-/// One walk rather than two. The deadline and the definition are two facts
-/// about one entry, read out of two records in one tree, and a second walk over
-/// the same placements would be a second order for the report to be read in.
+/// One walk rather than three. The deadline, the definition and the inputs'
+/// dates are facts about one entry, read out of records in one tree, and a
+/// second walk over the same placements would be a second order for the report
+/// to be read in. For each entry the order is its deadline, its definition,
+/// then — on the entry a generator is declared on — its inputs' dates.
 ///
 /// # Definition drift
 ///
@@ -651,6 +987,20 @@ fn public_finding(
 /// One finding per record rather than per carrier. A shared entry is one value
 /// under one record, and reporting it once per person who holds it would be three
 /// findings with one remedy between them.
+///
+/// # Derived values older than their inputs
+///
+/// Asked of each entry a generator is declared on, by [`stale`]. A value
+/// written by `set`, `edit` or `sync` runs no generator, so a generator that
+/// read it still holds a value derived from what it replaced — the state the
+/// rotation cascade exists to prevent, and one that reads exactly like a
+/// value derived after. The stamps date both writes, so the question is
+/// answered from them alone; an absent stamp on either side makes no claim,
+/// by the rule [`crate::stamps`] states for an absent record.
+///
+/// One finding per pair of stamp records, for the reason a definition record
+/// is reported once: a shared generator held by two carriers is one run with
+/// one remedy.
 ///
 /// # The deadline
 ///
@@ -669,6 +1019,7 @@ fn entry_records(
 ) -> Result<()> {
     let placements = workspace.placements()?;
     let mut reported: BTreeSet<String> = BTreeSet::new();
+    let mut stale_pairs: BTreeSet<(String, String)> = BTreeSet::new();
     let mut dated: BTreeSet<String> = BTreeSet::new();
     let now = stamps::now();
 
@@ -700,28 +1051,130 @@ fn entry_records(
             let Some((generator, declared)) = producer else {
                 continue;
             };
-            let record = definition::record_path(placement);
-            if !reported.insert(record.clone()) {
-                continue;
+            if let Some(drift) = definition_drift(
+                workspace,
+                user,
+                name,
+                placement,
+                generator,
+                declared,
+                &mut reported,
+            )? {
+                findings.push(drift);
             }
-            let Some(text) = workspace.read_vault_relative(&record)? else {
-                continue;
-            };
-            let Some(recorded) = definition::recorded(&text) else {
-                continue;
-            };
-            if recorded == definition::digest(declared) {
-                continue;
+            if placement.generator.is_some() {
+                findings.extend(stale(workspace, placements, user, name, &mut stale_pairs)?);
             }
-            findings.push(Finding::DefinitionDrift {
-                user: user.to_owned(),
-                name: name.clone(),
-                generator: generator.to_owned(),
-                record,
-            });
         }
     }
     Ok(())
+}
+
+/// Whether this entry's recorded definition is not the declared one; see
+/// [`entry_records`]'s note.
+fn definition_drift(
+    workspace: &Workspace,
+    user: &str,
+    name: &str,
+    placement: &crate::model::Placement,
+    generator: &str,
+    declared: &crate::model::Generator,
+    reported: &mut BTreeSet<String>,
+) -> Result<Option<Finding>> {
+    let record = definition::record_path(placement);
+    if !reported.insert(record.clone()) {
+        return Ok(None);
+    }
+    let Some(text) = workspace.read_vault_relative(&record)? else {
+        return Ok(None);
+    };
+    let Some(recorded) = definition::recorded(&text) else {
+        return Ok(None);
+    };
+    if recorded == definition::digest(declared) {
+        return Ok(None);
+    }
+    Ok(Some(Finding::DefinitionDrift {
+        user: user.to_owned(),
+        name: name.to_owned(),
+        generator: generator.to_owned(),
+        record,
+    }))
+}
+
+/// Every dependency of the generator declared on `entry` written after the
+/// values that generator wrote.
+///
+/// The reference is the earliest `updated` among the stamps of every value the
+/// generator writes — every held entry whose producer is this generator — that
+/// has one. The earliest, because an output re-set by hand moves its own stamp
+/// forward, and the oldest output still standing is the one derived from the
+/// oldest inputs. A dependency is stale when its own `updated` is strictly
+/// later: a cascade stamps the dependency and then the dependent from two
+/// readings of the clock that may fall in the same second.
+///
+/// `reported` holds the `(dependent stamp, dependency stamp)` pairs already
+/// reported in this walk.
+///
+/// # Errors
+///
+/// [`Error::StampRecordUnparsable`] and [`Error::FileUnreadable`] from
+/// [`stamps::read`].
+fn stale(
+    workspace: &Workspace,
+    placements: &Placements,
+    user: &str,
+    entry: &str,
+    reported: &mut BTreeSet<(String, String)>,
+) -> Result<Vec<Finding>> {
+    let mut found = Vec::new();
+    let Some(held) = placements.held_by(user) else {
+        return Ok(found);
+    };
+    let Some((placement, generator)) = held
+        .get(entry)
+        .and_then(|placement| Some((placement, placement.generator.as_ref()?)))
+    else {
+        return Ok(found);
+    };
+
+    let mut reference: Option<u64> = None;
+    for (name, output) in held {
+        if placements
+            .producer_of(user, name)
+            .map(|(producer, _)| producer)
+            != Some(entry)
+        {
+            continue;
+        }
+        if let Some(written) = stamps::read(workspace, output)? {
+            reference =
+                Some(reference.map_or(written.updated, |earliest| earliest.min(written.updated)));
+        }
+    }
+    let Some(reference) = reference else {
+        return Ok(found);
+    };
+
+    for dependency in &generator.dependencies {
+        let Some(input) = held.get(dependency) else {
+            continue;
+        };
+        let Some(written) = stamps::read(workspace, input)? else {
+            continue;
+        };
+        if written.updated > reference
+            && reported.insert((placement.stamp_record.clone(), input.stamp_record.clone()))
+        {
+            found.push(Finding::DerivedValueStale {
+                user: user.to_owned(),
+                generator: entry.to_owned(),
+                dependency: dependency.clone(),
+                record: input.stamp_record.clone(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 /// The governed files read during one report, each read once.
@@ -932,6 +1385,418 @@ mod tests {
                 file: String::from(PUBLIC),
                 generator: String::from("wg-private"),
             })
+        );
+    }
+
+    /// One placement of `name` for `user`, with its stamp under the default
+    /// root and, when given, a generator declared on it.
+    fn placed(user: &str, name: &str, generator: Option<&serde_json::Value>) -> serde_json::Value {
+        serde_json::json!({
+            "file": format!("secrets/safix/users/{user}/secrets.yaml"), "key": name,
+            "origin": "private", "owner": user, "shared": false,
+            "generator": generator, "public": null,
+            "definitionRecord": format!("state/safix/definitions/{user}/{name}"),
+            "logicalFile": null, "logicalKey": null, "logicalPublic": null,
+            "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/{user}/{name}.stamps"),
+            "logicalStamp": null, "rotation": null,
+        })
+    }
+
+    /// A generator reading `db-password` and writing `db-hash`, the entry it
+    /// is declared on, and `db-salt`.
+    fn hashing() -> serde_json::Value {
+        serde_json::json!({
+            "script": "true", "network": false, "runtimeInputs": [],
+            "prompts": {}, "dependencies": ["db-password"],
+            "files": { "db-salt": { "secret": true } },
+            "share": false, "validation": null, "description": null,
+        })
+    }
+
+    fn chain(user: &str) -> serde_json::Value {
+        serde_json::json!({
+            "db-password": placed(user, "db-password", None),
+            "db-hash": placed(user, "db-hash", Some(&hashing())),
+            "db-salt": placed(user, "db-salt", None),
+        })
+    }
+
+    fn alice_chain() -> Placements {
+        serde_json::from_value(serde_json::json!({ "alice": chain("alice") }))
+            .expect("the fixture is the shape the resolver emits")
+    }
+
+    impl Tree {
+        fn stamp(&self, user: &str, name: &str, updated: u64) {
+            self.mint(
+                &format!("state/safix/definitions/{user}/{name}.stamps"),
+                &format!("v1 created=1 updated={updated}\n"),
+            );
+        }
+
+        fn stale(&self, placements: &Placements, user: &str) -> Vec<Finding> {
+            stale(
+                &self.workspace(),
+                placements,
+                user,
+                "db-hash",
+                &mut BTreeSet::new(),
+            )
+            .expect("the stamps parse")
+        }
+    }
+
+    #[test]
+    fn a_dependency_updated_after_its_dependent_is_stale() {
+        let tree = Tree::new("stale");
+        tree.stamp("alice", "db-hash", 100);
+        tree.stamp("alice", "db-salt", 100);
+        tree.stamp("alice", "db-password", 101);
+        assert_eq!(
+            tree.stale(&alice_chain(), "alice"),
+            vec![Finding::DerivedValueStale {
+                user: "alice".into(),
+                generator: "db-hash".into(),
+                dependency: "db-password".into(),
+                record: "state/safix/definitions/alice/db-password.stamps".into(),
+            }]
+        );
+    }
+
+    /// A cascade stamps the dependency and then the dependent, and both may
+    /// fall in one second.
+    #[test]
+    fn equal_stamps_are_not_stale() {
+        let tree = Tree::new("equal");
+        tree.stamp("alice", "db-hash", 100);
+        tree.stamp("alice", "db-salt", 100);
+        tree.stamp("alice", "db-password", 100);
+        assert_eq!(tree.stale(&alice_chain(), "alice"), Vec::new());
+    }
+
+    #[test]
+    fn a_missing_stamp_on_either_side_makes_no_claim() {
+        let tree = Tree::new("missing-dependency");
+        tree.stamp("alice", "db-hash", 100);
+        tree.stamp("alice", "db-salt", 100);
+        assert_eq!(tree.stale(&alice_chain(), "alice"), Vec::new());
+
+        let tree = Tree::new("missing-outputs");
+        tree.stamp("alice", "db-password", 500);
+        assert_eq!(tree.stale(&alice_chain(), "alice"), Vec::new());
+    }
+
+    /// An output re-set by hand moves its own stamp forward; the oldest output
+    /// still standing is what the dependency is compared against.
+    #[test]
+    fn the_earliest_output_stamp_is_the_reference() {
+        let tree = Tree::new("earliest");
+        tree.stamp("alice", "db-hash", 300);
+        tree.stamp("alice", "db-salt", 100);
+        tree.stamp("alice", "db-password", 200);
+        assert_eq!(tree.stale(&alice_chain(), "alice").len(), 1);
+
+        let tree = Tree::new("only-one-output");
+        tree.stamp("alice", "db-hash", 300);
+        tree.stamp("alice", "db-password", 200);
+        assert_eq!(tree.stale(&alice_chain(), "alice"), Vec::new());
+    }
+
+    /// Two carriers resolving one generator's records to one set of paths are
+    /// one run, reported once.
+    #[test]
+    fn a_shared_generator_is_reported_once() {
+        let tree = Tree::new("shared");
+        tree.stamp("alice", "db-hash", 100);
+        tree.stamp("alice", "db-salt", 100);
+        tree.stamp("alice", "db-password", 200);
+        let both: Placements = serde_json::from_value(serde_json::json!({
+            "alice": chain("alice"),
+            "bob": chain("alice"),
+        }))
+        .expect("the fixture is the shape the resolver emits");
+        let workspace = tree.workspace();
+        let mut reported = BTreeSet::new();
+        let mut found = Vec::new();
+        for user in ["alice", "bob"] {
+            found.extend(
+                stale(&workspace, &both, user, "db-hash", &mut reported).expect("the stamps parse"),
+            );
+        }
+        assert_eq!(found.len(), 1, "{found:?}");
+    }
+
+    /// A declared key and the tag its stanza would carry.
+    fn key(name: &str, tag: &str) -> Tagged {
+        Tagged {
+            key: format!("ssh-ed25519 AAAA{name}"),
+            tag: Some(("ssh-ed25519".into(), tag.into())),
+        }
+    }
+
+    fn untagged(key: &str) -> Tagged {
+        Tagged {
+            key: key.into(),
+            tag: None,
+        }
+    }
+
+    fn stanza(kind: &str, tag: &str) -> age_header::Stanza {
+        age_header::Stanza {
+            kind: kind.into(),
+            first_argument: Some(tag.into()),
+        }
+    }
+
+    fn ssh(tag: &str) -> age_header::Stanza {
+        stanza("ssh-ed25519", tag)
+    }
+
+    fn nobody() -> Recipients {
+        Recipients(BTreeMap::new())
+    }
+
+    const FILE: &str = "secrets/safix/users/alice/token.age";
+
+    fn judged(stanzas: &[age_header::Stanza], declared: &[Tagged]) -> Vec<Finding> {
+        judge_age(FILE, stanzas, declared, declared, &nobody(), Vec::new)
+    }
+
+    fn no_holders() -> Holders {
+        Holders {
+            named: Vec::new(),
+            orphaned: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn extra_missing_and_duplicate_ssh_stanzas_are_drift() {
+        let declared = [key("alice", "AAAAAA"), key("bob", "BBBBBB")];
+        let findings = judged(&[ssh("AAAAAA"), ssh("CCCCCC"), ssh("AAAAAA")], &declared);
+        assert_eq!(
+            findings,
+            vec![Finding::RecipientTagDrift {
+                file: FILE.into(),
+                missing: vec!["ssh-ed25519 AAAAbob".into()],
+                extra: vec!["ssh-ed25519 CCCCCC".into()],
+                duplicate: vec!["ssh-ed25519 AAAAalice".into()],
+                narrowed: no_holders(),
+                mints: Vec::new(),
+            }]
+        );
+        assert!(findings.iter().all(Finding::fails));
+    }
+
+    /// Two declared keys sharing a tag expect two stanzas: two are a match,
+    /// and one leaves both keys missing because the tag cannot say which.
+    #[test]
+    fn colliding_declared_tags_expect_two_stanzas() {
+        let declared = [key("alice", "AAAAAA"), key("carol", "AAAAAA")];
+        assert_eq!(
+            judged(&[ssh("AAAAAA"), ssh("AAAAAA")], &declared),
+            vec![Finding::RecipientRosterTagMatched {
+                file: FILE.into(),
+                matched: 2,
+            }]
+        );
+        assert_eq!(
+            judged(&[ssh("AAAAAA")], &declared),
+            vec![Finding::RecipientTagDrift {
+                file: FILE.into(),
+                missing: vec![
+                    "ssh-ed25519 AAAAalice".into(),
+                    "ssh-ed25519 AAAAcarol".into()
+                ],
+                extra: Vec::new(),
+                duplicate: Vec::new(),
+                narrowed: no_holders(),
+                mints: Vec::new(),
+            }]
+        );
+    }
+
+    /// A stanza whose tag exactly one declared key anywhere has is named as
+    /// that key, and its holder is the narrowing; a tag two keys share is
+    /// named by type and tag.
+    #[test]
+    fn an_extra_tag_held_by_one_declared_subject_is_named() {
+        let alice = key("alice", "AAAAAA");
+        let bob = key("bob", "BBBBBB");
+        let holders = Recipients(BTreeMap::from([
+            ("alice".to_owned(), vec![alice.key.clone()]),
+            ("bob".to_owned(), vec![bob.key.clone()]),
+        ]));
+        let mint = || {
+            vec![Mint {
+                carrier: "alice".into(),
+                name: "token".into(),
+                generated: false,
+            }]
+        };
+        let everywhere = [alice.clone(), bob.clone()];
+        assert_eq!(
+            judge_age(
+                FILE,
+                &[ssh("AAAAAA"), ssh("BBBBBB")],
+                std::slice::from_ref(&alice),
+                &everywhere,
+                &holders,
+                mint,
+            ),
+            vec![Finding::RecipientTagDrift {
+                file: FILE.into(),
+                missing: Vec::new(),
+                extra: vec![bob.key.clone()],
+                duplicate: Vec::new(),
+                narrowed: Holders {
+                    named: vec!["bob".into()],
+                    orphaned: Vec::new(),
+                },
+                mints: mint(),
+            }]
+        );
+
+        let everywhere = [alice.clone(), bob, key("dave", "BBBBBB")];
+        let findings = judge_age(
+            FILE,
+            &[ssh("AAAAAA"), ssh("BBBBBB")],
+            std::slice::from_ref(&alice),
+            &everywhere,
+            &holders,
+            Vec::new,
+        );
+        let [
+            Finding::RecipientTagDrift {
+                extra, narrowed, ..
+            },
+        ] = findings.as_slice()
+        else {
+            unreachable!("one drift finding, got {findings:?}");
+        };
+        assert_eq!(extra, &vec![String::from("ssh-ed25519 BBBBBB")]);
+        assert_eq!(narrowed, &no_holders());
+    }
+
+    #[test]
+    fn a_non_ssh_stanza_keeps_the_file_unverifiable() {
+        let declared = [key("alice", "AAAAAA")];
+        assert_eq!(
+            judged(&[ssh("AAAAAA"), stanza("X25519", "c2hhcmU")], &declared),
+            vec![Finding::RecipientRosterUnverifiable { file: FILE.into() }]
+        );
+        assert_eq!(
+            judged(&[ssh("CCCCCC"), stanza("piv-p256", "dGFn")], &declared),
+            vec![
+                Finding::RecipientTagDrift {
+                    file: FILE.into(),
+                    missing: vec!["ssh-ed25519 AAAAalice".into()],
+                    extra: vec!["ssh-ed25519 CCCCCC".into()],
+                    duplicate: Vec::new(),
+                    narrowed: no_holders(),
+                    mints: Vec::new(),
+                },
+                Finding::RecipientRosterUnverifiable { file: FILE.into() },
+            ],
+            "an SSH disagreement in an unverifiable file is reported as well"
+        );
+    }
+
+    #[test]
+    fn a_non_ssh_declared_recipient_keeps_the_file_unverifiable() {
+        let declared = [key("alice", "AAAAAA"), untagged("age1someone")];
+        assert_eq!(
+            judged(&[ssh("AAAAAA")], &declared),
+            vec![Finding::RecipientRosterUnverifiable { file: FILE.into() }]
+        );
+    }
+
+    #[test]
+    fn an_exact_all_ssh_match_is_a_note_that_does_not_fail() {
+        let declared = [key("alice", "AAAAAA"), key("bob", "BBBBBB")];
+        let findings = judged(&[ssh("BBBBBB"), ssh("AAAAAA")], &declared);
+        assert_eq!(
+            findings,
+            vec![Finding::RecipientRosterTagMatched {
+                file: FILE.into(),
+                matched: 2,
+            }]
+        );
+        assert!(!findings.iter().any(Finding::fails));
+    }
+
+    const RECORD: &str = "state/safix/definitions/alice/token.audience";
+
+    fn digest_of(recipients: &[&str]) -> String {
+        age_audience::audience_digest(
+            &recipients
+                .iter()
+                .map(|recipient| (*recipient).to_owned())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// The file was rewritten after its record, so the record says nothing
+    /// about it — even naming an audience no longer declared.
+    #[test]
+    fn a_record_for_other_bytes_is_silent() {
+        let text = age_audience::line(&digest_of(&["age1alice", "age1bob"]), b"older bytes");
+        assert_eq!(
+            audience_changed(
+                FILE,
+                RECORD,
+                Some(&text),
+                b"newer bytes",
+                &digest_of(&["age1alice"])
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_absent_record_is_silent() {
+        assert_eq!(
+            audience_changed(FILE, RECORD, None, b"bytes", &digest_of(&["age1alice"])),
+            None
+        );
+        assert_eq!(
+            audience_changed(
+                FILE,
+                RECORD,
+                Some("safix-age-audience-v0 x y\n"),
+                b"bytes",
+                &digest_of(&["age1alice"])
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_recorded_audience_no_longer_declared_is_reported() {
+        let text = age_audience::line(&digest_of(&["age1alice", "age1bob"]), b"bytes");
+        assert_eq!(
+            audience_changed(
+                FILE,
+                RECORD,
+                Some(&text),
+                b"bytes",
+                &digest_of(&["age1alice"])
+            ),
+            Some(Finding::AgeAudienceChanged {
+                file: FILE.into(),
+                record: RECORD.into(),
+            })
+        );
+        assert_eq!(
+            audience_changed(
+                FILE,
+                RECORD,
+                Some(&text),
+                b"bytes",
+                &digest_of(&["age1bob", "age1alice"])
+            ),
+            None,
+            "the declared audience, in any order, is no finding"
         );
     }
 }

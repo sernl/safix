@@ -427,7 +427,7 @@ impl Bitwarden {
             fields,
             memory,
         )?;
-        let encoded = Zeroizing::new(base64(&payload));
+        let encoded = Zeroizing::new(crate::base64::encode(&payload));
 
         match identifier.as_deref() {
             Some(identifier) => self.invoke(&edit_arguments(identifier), Some(encoded.as_bytes())),
@@ -1146,31 +1146,6 @@ fn piece_of(field: &Field) -> Piece<'_> {
         Field::Literal(text) => Piece::Text(text.clone()),
         Field::Resolved(secret) => Piece::Secret(secret),
     }
-}
-
-/// The base64 of one payload, computed here rather than by a `bw encode`
-/// child.
-///
-/// The encoding is a pure function of bytes safix already holds, so a second
-/// process would only be a second process the plaintext passes through.
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut encoded = String::new();
-    for chunk in bytes.chunks(3) {
-        let first = chunk.first().copied().unwrap_or(0);
-        let second = chunk.get(1).copied().unwrap_or(0);
-        let third = chunk.get(2).copied().unwrap_or(0);
-        let triple = (u32::from(first) << 16) | (u32::from(second) << 8) | u32::from(third);
-        let sextet = |shift: u32| {
-            let at = usize::try_from((triple >> shift) & 0x3F).unwrap_or(0);
-            ALPHABET.get(at).copied().map_or('=', char::from)
-        };
-        encoded.push(sextet(18));
-        encoded.push(sextet(12));
-        encoded.push(if chunk.len() > 1 { sextet(6) } else { '=' });
-        encoded.push(if chunk.len() > 2 { sextet(0) } else { '=' });
-    }
-    encoded
 }
 
 /// One mapping's line in a run's report.
@@ -2055,19 +2030,6 @@ mod tests {
         assert_eq!(CAPABILITIES.channel(FieldName::Username), Channel::Stdin);
         assert_eq!(CAPABILITIES.channel(FieldName::Url), Channel::Stdin);
         assert_eq!(CAPABILITIES.channel(FieldName::Notes), Channel::Stdin);
-    }
-
-    /// The encoding the payload crosses as, against the published vectors —
-    /// which is the independent oracle a hand-written encoder needs.
-    #[test]
-    fn the_base64_vectors_come_out() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foob"), "Zm9vYg==");
-        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 
     #[test]

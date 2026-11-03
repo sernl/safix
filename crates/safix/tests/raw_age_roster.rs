@@ -111,7 +111,10 @@ fn age_writes_the_ssh_tag_safix_computes() {
 
     for armor in [false, true] {
         let bytes = encrypted(&[&key], armor);
-        assert_eq!(bytes.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----"), armor);
+        assert_eq!(
+            bytes.starts_with(b"-----BEGIN AGE ENCRYPTED FILE-----"),
+            armor
+        );
         let stanzas = safix_core::age_header::stanzas(&bytes).expect("age's header reads");
         assert_eq!(
             stanzas,
@@ -123,7 +126,12 @@ fn age_writes_the_ssh_tag_safix_computes() {
         commit(&fixture, &file, &bytes);
 
         let run = fixture.run(&["check"]);
-        assert_eq!(run.code, Some(0), "a tag match alone exits zero\n{}", run.combined());
+        assert_eq!(
+            run.code,
+            Some(0),
+            "a tag match alone exits zero\n{}",
+            run.combined()
+        );
         run.says(&format!("Recipient roster matched by tag only: {file}"))
             .says("Each of the 1 stanza(s) matches a declared SSH key by a four-byte tag")
             .says("does not establish which keys the file is wrapped to")
@@ -173,13 +181,15 @@ fn a_missing_ssh_recipient_is_drift() {
 
     let run = fixture.run(&["check"]);
     assert_eq!(run.code, Some(1), "{}", run.combined());
-    run.says(&format!("{file} is not encrypted to the SSH recipients declared for it"))
-        .says(&format!(
-            "is in its audience and has no stanza carrying its tag:\n    - {absent}\n"
-        ))
-        .says("    safix fix --yes\n")
-        .silent_about("matched by tag only")
-        .silent_about("CANARY");
+    run.says(&format!(
+        "{file} is not encrypted to the SSH recipients declared for it"
+    ))
+    .says(&format!(
+        "is in its audience and has no stanza carrying its tag:\n    - {absent}\n"
+    ))
+    .says("    safix fix --yes\n")
+    .silent_about("matched by tag only")
+    .silent_about("CANARY");
 }
 
 /// A header repeating one stanza carries more stanzas with that tag than the
@@ -240,7 +250,9 @@ fn an_unreadable_age_header_refuses_naming_the_file() {
     fixture.set_audience(&file, &["alice"], &[&key]);
     commit(&fixture, &file, b"not an age file\n");
 
-    let run = fixture.run_graphical(&["check"]).expect_refusal("an unreadable header");
+    let run = fixture
+        .run_graphical(&["check"])
+        .expect_refusal("an unreadable header");
     assert_eq!(run.code, Some(1), "{}", run.combined());
     assert_eq!(run.refusal_code(), "recipients_unreadable");
     // The cause is rendered under the refusal and wrapped at eighty columns,
@@ -271,7 +283,9 @@ fn fix_leaves_an_unchanged_raw_age_file_alone() {
     fixture
         .run(&["fix", "--yes"])
         .expect_success("the first re-wrap")
-        .says(&format!("safix: re-encrypted {file} to the declared audience"));
+        .says(&format!(
+            "safix: re-encrypted {file} to the declared audience"
+        ));
     let wrapped = bytes_of(&fixture, &file);
     let record = fixture.read(RECORD);
     assert!(record.starts_with("safix-age-audience-v1 "), "{record}");
@@ -284,7 +298,11 @@ fn fix_leaves_an_unchanged_raw_age_file_alone() {
             "safix: {file} is already wrapped to the declared audience; left alone."
         ))
         .silent_about(&format!("re-encrypted {file}"));
-    assert_eq!(bytes_of(&fixture, &file), wrapped, "the file was not rewritten");
+    assert_eq!(
+        bytes_of(&fixture, &file),
+        wrapped,
+        "the file was not rewritten"
+    );
     assert_eq!(fixture.read(RECORD), record, "the record was not rewritten");
 
     fixture
@@ -300,10 +318,16 @@ fn fix_leaves_an_unchanged_raw_age_file_alone() {
     fixture
         .run(&["fix", "--yes"])
         .expect_success("re-wrapping bytes the record does not describe")
-        .says(&format!("safix: re-encrypted {file} to the declared audience"));
+        .says(&format!(
+            "safix: re-encrypted {file} to the declared audience"
+        ));
     let rewrapped = bytes_of(&fixture, &file);
     assert_ne!(rewrapped, by_hand, "the hand-encrypted file was re-wrapped");
-    assert_ne!(fixture.read(RECORD), record, "the record names the new bytes");
+    assert_ne!(
+        fixture.read(RECORD),
+        record,
+        "the record names the new bytes"
+    );
     assert_eq!(
         safix_core::age_header::stanzas(&rewrapped).unwrap().len(),
         1,
@@ -321,7 +345,9 @@ fn fix_rewraps_and_records_when_the_audience_changes() {
     let bob = fixture.bob.clone();
     fixture.set_audience(&file, &["alice"], &[&alice]);
     commit(&fixture, &file, &encrypted(&[&alice], false));
-    fixture.run(&["fix", "--yes"]).expect_success("the first re-wrap");
+    fixture
+        .run(&["fix", "--yes"])
+        .expect_success("the first re-wrap");
     let record = fixture.read(RECORD);
     commit_all(&fixture, "fixture: the first re-wrap");
 
@@ -329,7 +355,9 @@ fn fix_rewraps_and_records_when_the_audience_changes() {
     fixture
         .run(&["fix", "--yes"])
         .expect_success("re-wrapping to the widened audience")
-        .says(&format!("safix: re-encrypted {file} to the declared audience"))
+        .says(&format!(
+            "safix: re-encrypted {file} to the declared audience"
+        ))
         .silent_about("left alone");
     let rewrapped = bytes_of(&fixture, &file);
     assert_eq!(
@@ -339,7 +367,11 @@ fn fix_rewraps_and_records_when_the_audience_changes() {
     );
     let now = fixture.read(RECORD);
     let audience = |line: &str| line.split(' ').nth(1).unwrap().to_owned();
-    assert_ne!(audience(&now), audience(&record), "the record names the new audience");
+    assert_ne!(
+        audience(&now),
+        audience(&record),
+        "the record names the new audience"
+    );
     assert_eq!(opened(&fixture, &file), VALUE);
 }
 
@@ -353,7 +385,9 @@ fn a_recorded_audience_that_is_no_longer_declared_is_reported() {
     let bob = fixture.bob.clone();
     fixture.set_audience(&file, &["alice", "bob"], &[&alice, &bob]);
     commit(&fixture, &file, &encrypted(&[&alice, &bob], false));
-    fixture.run(&["fix", "--yes"]).expect_success("the re-wrap that records");
+    fixture
+        .run(&["fix", "--yes"])
+        .expect_success("the re-wrap that records");
     commit_all(&fixture, "fixture: the re-wrap");
 
     fixture.set_audience(&file, &["alice"], &[&alice]);

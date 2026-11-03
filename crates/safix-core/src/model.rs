@@ -292,6 +292,24 @@ pub struct Placement {
     /// one stamp without this crate computing either hash.
     #[serde(rename = "logicalStamp")]
     pub logical_stamp: Option<String>,
+    /// Where this entry's audience record lives, or `null` for an entry whose
+    /// format is not raw age: repository-relative under
+    /// `flake.safix.storage.generatorRecords` with no vault declared,
+    /// vault-rooted-relative and opaque when one is.
+    ///
+    /// Emitted by the resolver for the reason [`Placement::stamp_record`] is,
+    /// and its readable form differs from the definition record's path by an
+    /// `.audience` suffix no declared name can carry. Only `fix` writes it.
+    #[serde(rename = "audienceRecord", default)]
+    pub audience_record: Option<String>,
+    /// The readable, unhashed relative path [`Placement::audience_record`]
+    /// would carry with no vault declared; `null` when no vault is declared or
+    /// the entry is not raw age.
+    ///
+    /// What gates the record's relocation, for the reason
+    /// [`Placement::logical_stamp`] gates a stamp's.
+    #[serde(rename = "logicalAudience", default)]
+    pub logical_audience: Option<String>,
     /// How long this value may live, or `null` for an entry naming no policy.
     ///
     /// Emitted on every placement by the resolver, for the reason

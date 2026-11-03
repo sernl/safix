@@ -98,6 +98,15 @@ command is split on whitespace and run directly rather than through a shell, so
 `EDITOR="code --wait"` works. The staged file's path is an argument; the value is
 not.
 
+For `vim` and `nvim`, named bare or by a path whose last component is that name, three arguments are inserted after the operator's own arguments and before the staged path: `-n`, `--cmd`, and an autocommand.
+For `nvim` the autocommand is `au BufRead * setlocal nobackup nomodeline noshelltemp noswapfile noundofile nowritebackup shadafile=NONE`.
+For `vim` it is `au BufRead * setlocal nobackup nomodeline noshelltemp noswapfile noundofile nowritebackup viminfo=""`.
+`-n` prevents the swap file nvim otherwise creates in its own state directory before the autocommand runs, a file that records the user, the host and the staged path.
+`vi` is not recognised: on many hosts it is nvi or busybox vi, neither of which accepts `--cmd`, so passing the options would make the edit fail rather than harden it.
+Any other program, including `vi`, `view` and `gvim`, receives its own arguments and the path and nothing else.
+There is no opt-out: the options reach only the buffer this command staged, and an operator who wants other behaviour names a different program.
+What remains outside the containment is every other editor that writes undo history, swap files or backups to a directory of its own, and vim or nvim configuration or plugins that write or send the buffer's contents elsewhere, including an autocommand registered after this one that switches an option back on.
+
 An entry that holds no value yet opens on an empty buffer, so this authors as
 well as amends.
 
@@ -226,23 +235,42 @@ available the run refuses. See [Generators](../guides/generators.md).
 safix check [<user>]
 ```
 
-Reports drift and changes nothing. It exits non-zero when there is any, and each
-finding prints the command that resolves it. Six classes of finding are
-reported:
+Reports drift and changes nothing. Each finding prints the command that
+resolves it, and the run exits non-zero when at least one finding fails. Every
+finding fails except one note, described below. These classes are reported:
 
 - the committed `.sops.yaml` against the policy the declarations imply
-- each governed file's recipients against the audience declared for it
+- each governed SOPS file's recipients against the audience declared for it
+- each governed raw age file's SSH stanzas against the SSH recipients its
+  audience declares, by the four-byte tag age writes into each: a missing,
+  extra or duplicated stanza is drift
+- a raw age file holding, or declared to hold, a recipient whose stanza names
+  nobody — X25519, plugin, `scrypt` — as a roster that cannot be audited
+- a raw age file whose audience record names its current bytes and an audience
+  that is no longer declared
 - declared names with no value, saying which have a generator
 - values in a governed file that no declaration claims
 - generated values minted under a generator that has changed since
+- generated values one of whose dependencies was written after them, by `set`,
+  `edit` or `sync`, naming `safix generate --regenerate <user> <entry>` for the
+  dependent entry
 - values past the deadline their rotation policy set
 
-`fix` handles the first two. The rest are decisions rather than convergences, so
-nothing here makes them for you.
+A raw age file whose stanzas are all SSH and match its declared SSH recipients
+one for one is reported as a note, `Recipient roster matched by tag only`: a
+four-byte tag can be collided with, so the match does not establish which keys
+the file is wrapped to. The note does not fail the run. The closing line counts
+failing findings only, and a report holding notes alone closes with
+`safix: no drift; the note(s) above qualify that.` and exits zero.
+
+`fix` handles the policy and the recipients. The rest are decisions rather than
+convergences, so nothing here makes them for you.
 
 It needs no identity for any file it examines: every question is answered from
-the document's structure and from the per-value record, and nothing on this path
-decrypts.
+the document's structure, from a raw age file's header, and from the per-value
+records, and nothing on this path decrypts. A raw age header that cannot be read
+refuses with `safix::recipients_unreadable`, caused by
+`safix::age_header_unreadable`.
 
 ## fix
 
@@ -259,9 +287,17 @@ interchangeable: re-wrapping first re-wraps to a policy that is about to change.
 --vault-rollback   move vault-rooted files back to the declaration root
 ```
 
-Raw age has no inspectable recipient roster, so `--yes` explicitly authorizes
-replacement with the declared audience there; decryption verifies bytes, not the
-previous roster.
+A raw age file names its SSH recipients only by tag and its other recipients
+not at all, so `--yes` explicitly authorizes replacement with the declared
+audience there; decryption verifies bytes, not the previous roster.
+
+After each raw age re-wrap, `fix` writes the entry's audience record: a digest
+of the declared audience and the SHA-256 of the new bytes. A later run leaves a
+raw age file alone when its record names the declared audience and the file's
+current bytes, and says so; that skip replaces nothing and needs no `--yes`. A
+content write by `set`, `edit`, `generate` or `sync` changes the bytes, so it
+costs one re-wrap on the next `fix --yes`. A raw age file named only in
+`extraGovernedFiles` has no record and is re-wrapped on every run.
 
 The governed set is the union of the files the declarations imply and the ones
 named in [`flake.safix.extraGovernedFiles`](declarations.md#flakesafixextragovernedfiles).

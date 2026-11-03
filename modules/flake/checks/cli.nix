@@ -547,6 +547,23 @@
           mode "safix-generate-network-drift" "generators"
             "a_generator_that_gains_the_network_reads_as_definition_drift";
 
+        # A derived value older than its input. A typed dependency `set` after
+        # the generator that read it is reported from the stamps alone, naming the
+        # dependent's regeneration as the one remedy and never the dependency's,
+        # with no value printed and a non-zero exit; the remedy clears it.
+        # Inverting the strict `>` of the comparison turns this red on the missing
+        # headline.
+        checks.safix-check-derived-staleness =
+          mode "safix-check-derived-staleness" "generators"
+            "a_dependency_set_after_its_dependent_reads_as_stale_and_a_regeneration_clears_it";
+
+        # A regeneration cascade re-runs everything derived from what it
+        # regenerates, so it leaves no derivation older than its input. Replacing
+        # the comparison with `true` turns this red on the unexpected finding.
+        checks.safix-check-cascade-not-stale =
+          mode "safix-check-cascade-not-stale" "generators"
+            "a_cascade_leaves_no_stale_derivation";
+
         # `edit`'s four outcomes: a non-zero exit and an emptied buffer write
         # nothing, an unchanged buffer commits nothing, and a changed one goes
         # through the same path `set` writes through. No staging root outlives any
@@ -568,6 +585,16 @@
         checks.safix-edit-argv =
           mode "safix-edit-argv" "editor"
             "the_editor_receives_the_path_and_never_the_value";
+
+        # A program named nvim, run by its absolute path, is opened with `-n`,
+        # `--cmd` and the autocommand switching off its swap, undo, backup and
+        # history writes, ahead of the staged path, and the value is not in its
+        # argument vector. Opening the editor with the operator's arguments and
+        # the path alone, bypassing the vector builder, turns this red on the
+        # missing `-n` while the builder's unit tests stay green.
+        checks.safix-edit-hardening =
+          mode "safix-edit-hardening" "editor"
+            "a_vim_or_nvim_editor_is_opened_with_its_persistence_switched_off";
 
         # The five picker entries below that drive a terminal need `setsid
         # --ctty`, which is why `./integration.nix` carries `util-linux` on linux
@@ -640,6 +667,65 @@
         checks.safix-governed-extras =
           mode "safix-governed-extras" "read_path"
             "a_governed_extra_is_held_to_its_rule_and_not_to_the_declarations";
+
+        # A raw age header names each SSH recipient by a four-byte tag of its key
+        # and every other recipient by nothing. The tag the real `age` writes, in
+        # the binary form and the armored one, is the tag safix computes from the
+        # declared key; an exact all-SSH match is a note that does not establish
+        # the keys and leaves `check` exiting zero. Hashing the whole recipient
+        # line rather than the decoded key turns this red, and so does a note
+        # that fails the run.
+        checks.safix-raw-age-tag-match =
+          mode "safix-raw-age-tag-match" "raw_age_roster"
+            "age_writes_the_ssh_tag_safix_computes";
+
+        # A stanza whose tag the audience does not declare is drift, named as the
+        # declared subject holding that key, with the not-revocation sentence,
+        # `safix fix --yes` and the mint that revokes, and a non-zero exit.
+        checks.safix-raw-age-tag-drift =
+          mode "safix-raw-age-tag-drift" "raw_age_roster"
+            "an_extra_ssh_stanza_is_drift_and_names_its_holder";
+
+        # A header repeating one stanza is drift: more stanzas carry one tag than
+        # the audience declares keys with it. Dropping the multiplicity count
+        # turns this red.
+        checks.safix-raw-age-tag-duplicate =
+          mode "safix-raw-age-tag-duplicate" "raw_age_roster"
+            "a_duplicated_ssh_stanza_is_drift";
+
+        # An X25519 stanza names nobody, so a file holding one keeps its roster
+        # unverifiable and the run failing, whatever its SSH stanzas say.
+        checks.safix-raw-age-unverifiable =
+          mode "safix-raw-age-unverifiable" "raw_age_roster"
+            "an_x25519_recipient_keeps_the_file_unverifiable";
+
+        # A governed raw age file that is not an age file refuses the run with
+        # `safix::recipients_unreadable`, naming the file and carrying why.
+        checks.safix-raw-age-header-unreadable =
+          mode "safix-raw-age-header-unreadable" "raw_age_roster"
+            "an_unreadable_age_header_refuses_naming_the_file";
+
+        # The audience record makes `fix` idempotent on raw age: a second run
+        # over an unchanged audience and unchanged bytes rewrites neither the
+        # file nor its record, says so, and needs no `--yes`; a file re-encrypted
+        # by hand to another roster is re-wrapped by the next run. Dropping the
+        # ciphertext digest from the skip turns this red on that last step.
+        checks.safix-raw-age-fix-idempotent =
+          mode "safix-raw-age-fix-idempotent" "raw_age_roster"
+            "fix_leaves_an_unchanged_raw_age_file_alone";
+
+        # A changed audience is re-wrapped and recorded. Making the skip
+        # unconditional turns this red.
+        checks.safix-raw-age-fix-rewraps-changed =
+          mode "safix-raw-age-fix-rewraps-changed" "raw_age_roster"
+            "fix_rewraps_and_records_when_the_audience_changes";
+
+        # A record naming the file's current bytes and an audience no longer
+        # declared is a failing finding, with the not-revocation sentence and no
+        # value.
+        checks.safix-raw-age-audience-changed =
+          mode "safix-raw-age-audience-changed" "raw_age_roster"
+            "a_recorded_audience_that_is_no_longer_declared_is_reported";
 
         # Declaring a person writes one custody record and commits exactly that
         # and the regenerated policy — not a bystander staged alongside it. The

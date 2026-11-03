@@ -888,6 +888,58 @@ impl Fixture {
         self.write_fixtures();
     }
 
+    /// Mint an ed25519 SSH key in this fixture's scratch directory and answer
+    /// its public line, comment included.
+    ///
+    /// The private half stays beside it, unread: the raw age checks judge a
+    /// header, which needs no identity. Each call mints a key of its own.
+    pub fn ssh_recipient(&self) -> String {
+        let mut nth = 0_u32;
+        let path = loop {
+            let candidate = self.work.join(format!("ssh-key-{nth}"));
+            if !candidate.exists() {
+                break candidate;
+            }
+            nth += 1;
+        };
+        run_to_success(
+            Command::new("ssh-keygen")
+                .args(["-q", "-t", "ed25519", "-N", "", "-C"])
+                .arg(format!("fixture-{nth}"))
+                .arg("-f")
+                .arg(&path),
+            "minting an SSH key",
+        );
+        let mut public = path.into_os_string();
+        public.push(".pub");
+        std::fs::read_to_string(public).unwrap().trim().to_owned()
+    }
+
+    /// Declare `name` for `user` as a raw age entry — `format = "age"`, one
+    /// file of its own, its audience record beside its stamp — and answer the
+    /// file's repository-relative path.
+    ///
+    /// The audience is not declared here: a test names who the file is held
+    /// to with [`Fixture::set_audience`], which is also what puts the file in
+    /// the governed set.
+    pub fn place_raw_age(&mut self, user: &str, name: &str) -> String {
+        let file = format!("secrets/safix/users/{user}/{name}.age");
+        self.placements[user][name] = json!({
+            "file": file, "format": "age", "key": "", "origin": "private",
+            "owner": user, "shared": false, "generator": null, "public": null,
+            "definitionRecord": format!("state/safix/definitions/{user}/{name}"),
+            "logicalFile": null, "logicalKey": null,
+            "logicalPublic": null, "logicalRecord": null,
+            "stampRecord": format!("state/safix/definitions/{user}/{name}.stamps"),
+            "logicalStamp": null,
+            "audienceRecord": format!("state/safix/definitions/{user}/{name}.audience"),
+            "logicalAudience": null,
+            "rotation": null,
+        });
+        self.write_fixtures();
+        file
+    }
+
     /// One group's declaration file, tracked, exactly as given.
     ///
     /// The text is the caller's because the shapes a declaration can be in are

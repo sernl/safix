@@ -73,6 +73,12 @@
 # leaving every other row — `stampIsNotTheRecord` included, since the `.stamps`
 # suffix still parts the two hash inputs — `true`. Observed against a scratch
 # copy.
+# The raw age audience record's tag is a sixth: replacing `"audience"` with
+# `"stamps"` in `placementsIn` turns `audience.audienceRecord` and
+# `audience.audienceIsNotTheStamp.tag` `false` and leaves
+# `audience.audienceIsNotTheStamp.name` `true`, because the `.audience` and
+# `.stamps` suffixes still part the two hash inputs. Observed against a
+# scratch copy.
 { lib, ... }:
 {
   perSystem =
@@ -199,6 +205,35 @@
         };
         storage = renamedStorage;
       };
+
+      # The fleet with one raw age entry beside the rest: the one format whose
+      # placement carries an audience record. Read apart from `names` so every
+      # other row keeps its four entries.
+      withAge = {
+        users = fleet.users // {
+          alice = fleet.users.alice // {
+            private = fleet.users.alice.private // {
+              deploy-key.format = "age";
+            };
+          };
+        };
+      };
+      agedNoVault = (projectionOf withAge).placements.alice.deploy-key;
+      agedVault =
+        (projectionOf (
+          withAge
+          // {
+            vault = {
+              root = vaultRootPath;
+              namingKey = namingKey;
+            };
+          }
+        )).placements.alice.deploy-key;
+
+      # The opaque name `tag` gives the readable audience record path.
+      audienceUnder =
+        tag:
+        "state/${resolve.opaqueOf namingKey tag (relative storage.generatorRecords agedNoVault.audienceRecord)}";
 
       # 1.6's own claim, over `sopsFile` itself rather than the
       # root-independent `placements.*.file` — `resolveSet` is what
@@ -458,6 +493,30 @@
           };
           leakedFragments = leakedFragments;
 
+          # The raw age audience record in vault mode: its opaque name is the
+          # `"audience"` tag over the readable path, which rides beside it as
+          # `logicalAudience`. It is neither the stamp nor the definition
+          # record, by name and by tag: the `*Tag` rows are what redden when the
+          # tag collapses onto `"stamps"` or `"state"`, because the suffixes
+          # alone would still part the names.
+          audience = {
+            readable = agedNoVault.audienceRecord == "${agedNoVault.definitionRecord}.audience";
+            audienceRecord = agedVault.audienceRecord == audienceUnder "audience";
+            logicalAudience = agedVault.logicalAudience == agedNoVault.audienceRecord;
+            audienceIsNotTheStamp = {
+              name = agedVault.audienceRecord != agedVault.stampRecord;
+              tag = agedVault.audienceRecord != audienceUnder "stamps";
+            };
+            audienceIsNotTheRecord = {
+              name = agedVault.audienceRecord != agedVault.definitionRecord;
+              tag = agedVault.audienceRecord != audienceUnder "state";
+            };
+            otherFormatsCarryNone = {
+              audienceRecord = withVault.placements.alice.solo-token.audienceRecord;
+              logicalAudience = withVault.placements.alice.solo-token.logicalAudience;
+            };
+          };
+
           # 4.7 — `placementsIn`'s key and `selectFor.forMachine`'s
           # independently recomputed `sopsKey` agree bit for bit for the
           # entry that resolves at both scopes: alice's own placement of
@@ -626,6 +685,23 @@
             logicalPublic = null;
           };
           leakedFragments = [ ];
+          audience = {
+            readable = true;
+            audienceRecord = true;
+            logicalAudience = true;
+            audienceIsNotTheStamp = {
+              name = true;
+              tag = true;
+            };
+            audienceIsNotTheRecord = {
+              name = true;
+              tag = true;
+            };
+            otherFormatsCarryNone = {
+              audienceRecord = null;
+              logicalAudience = null;
+            };
+          };
           machineKeyAgreement = true;
           consumptionResolves = {
             userScopeHasOpaqueKey = true;

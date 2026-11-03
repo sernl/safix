@@ -252,10 +252,7 @@ mod tests {
             refusal(b"age-encryption.org/v2\n--- bWFj\n"),
             "it does not begin with the age v1 intro line"
         );
-        assert_eq!(
-            refusal(b""),
-            "it does not begin with the age v1 intro line"
-        );
+        assert_eq!(refusal(b""), "it does not begin with the age v1 intro line");
     }
 
     #[test]

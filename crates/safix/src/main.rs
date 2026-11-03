@@ -647,10 +647,10 @@ fn check_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 
     let findings = check::run(&workspace, only.as_deref())?;
     eprint!("{}", render::report(&findings));
-    Ok(if findings.is_empty() {
-        ExitCode::SUCCESS
-    } else {
+    Ok(if findings.iter().any(check::Finding::fails) {
         ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     })
 }
 
@@ -1474,6 +1474,8 @@ mod tests {
             logical_public: None,
             logical_record: None,
             logical_stamp: None,
+            audience_record: None,
+            logical_audience: None,
             rotation: None,
             needed_for_users: false,
             restart_units: Vec::new(),

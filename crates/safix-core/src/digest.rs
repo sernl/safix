@@ -1,6 +1,6 @@
-//! SHA-256, and what each of its two callers may do with the result.
+//! SHA-256, and what each of its callers may do with the result.
 //!
-//! The one hash this crate computes, and it has two callers with different
+//! The one hash this crate computes, and it has four callers with different
 //! constraints.
 //!
 //! [`crate::definition`] hands over a declaration: a generator's definition is
@@ -14,6 +14,17 @@
 //! guess-confirmation oracle for anyone who holds it, so the one place it may
 //! land is inside the encrypted database, and `crate::sync`'s own note is where
 //! that constraint is stated and enforced. It must never reach this repository.
+//!
+//! [`crate::age_header::ssh_tag`] hands over an SSH public key, and keeps the
+//! first four bytes of the raw digest: the tag age writes into a stanza for
+//! that key. A public key is public, so the tag may be printed and compared
+//! freely; what it may not be is read as evidence of which key a file is
+//! wrapped to, because thirty-two bits can be collided with.
+//!
+//! [`crate::age_audience`] hands over recipient strings already in the
+//! declarations and ciphertext already committed, and writes both digests into
+//! a plaintext record beside the definition records. Neither input is a value
+//! or derived from one, which is what lets that record be committed too.
 //!
 //! # Why it is written out rather than depended on
 //!
@@ -125,24 +136,38 @@ const ROUND: [u32; 64] = [
 /// How many bytes one block is.
 const BLOCK: usize = 64;
 
-/// The SHA-256 of these bytes, as sixty-four lowercase hexadecimal digits.
+/// The SHA-256 of these bytes, as the thirty-two bytes the standard defines.
 ///
 /// Total: there is no input this refuses and no state it can fail in, which is
 /// why it returns the digest rather than a result. The length of the message is
 /// bounded by the address space, so the bit count cannot overflow the
 /// sixty-four-bit field the padding carries it in.
 #[must_use]
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut state = INITIAL;
     for block in padded(bytes).as_chunks::<BLOCK>().0 {
         compress(&mut state, block);
     }
-    state.iter().fold(String::new(), |mut out, word| {
-        // Writing to a `String` cannot fail; the `Result` is `fmt::Write`'s
-        // signature rather than a state this can be in.
-        let _ = write!(out, "{word:08x}");
-        out
-    })
+    let mut out = [0_u8; 32];
+    for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        *chunk = word.to_be_bytes();
+    }
+    out
+}
+
+/// The SHA-256 of these bytes, as sixty-four lowercase hexadecimal digits.
+///
+/// [`sha256`], spelled for a record a person may read.
+#[must_use]
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    sha256(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            // Writing to a `String` cannot fail; the `Result` is `fmt::Write`'s
+            // signature rather than a state this can be in.
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 /// The message, a `0x80` byte, zeroes up to eight short of a block boundary, and
@@ -273,7 +298,9 @@ const fn small_sigma1(x: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::sha256_hex;
+    use std::fmt::Write as _;
+
+    use super::{sha256, sha256_hex};
 
     /// The published vectors, which is the independent oracle this needs.
     ///
@@ -332,5 +359,30 @@ mod tests {
         assert_ne!(sha256_hex(b"abc"), sha256_hex(b"abd"));
         assert_ne!(sha256_hex(b"abc"), sha256_hex(b"abc "));
         assert_eq!(sha256_hex(b"abc").len(), 64);
+    }
+
+    /// The raw digest and the hex one are the same digest, over every vector
+    /// above, so the published values hold both functions to the standard.
+    #[test]
+    fn the_raw_digest_is_the_hex_digest() {
+        let vectors: [&[u8]; 6] = [
+            b"",
+            b"abc",
+            b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+            &[b'a'; 55],
+            &[b'a'; 56],
+            &[b'a'; 64],
+        ];
+        for vector in vectors {
+            let hex = sha256(vector).iter().fold(String::new(), |mut out, byte| {
+                let _ = write!(out, "{byte:02x}");
+                out
+            });
+            assert_eq!(hex, sha256_hex(vector));
+        }
+        assert_eq!(
+            sha256(b"abc").first_chunk::<4>(),
+            Some(&[0xba, 0x78, 0x16, 0xbf])
+        );
     }
 }

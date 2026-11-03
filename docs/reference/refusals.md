@@ -49,6 +49,7 @@ runtime's shape — see [Environment](environment.md#safix_error_format).
 | --- | --- | --- |
 | `safix::secret_unreadable` | A value could not be read from the stream it was being read from | Whatever had been read was zeroed first, so no partial value survives; retry the read |
 | `safix::recipients_unreadable` | A governed file's recipients could not be read | It names the file |
+| `safix::age_header_unreadable` | A raw age file does not begin with the age v1 header, its ASCII armor does not decode, or its header has no closing MAC line | It arrives as the cause of `safix::recipients_unreadable`, which names the file; nothing was decrypted |
 | `safix::sops_unavailable` | The encryption tool could not be run | Install it, or name the one to use in `SAFIX_SOPS` |
 | `safix::sops_pipe_missing` | The tool was started with a pipe that was not there to read | Retry; nothing was written |
 | `safix::sops_key_index` | A key name could not be rendered as the index the tool extracts by | It names the key and the parse failure |

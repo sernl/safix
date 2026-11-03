@@ -978,6 +978,135 @@ fn a_generator_that_gains_the_network_reads_as_definition_drift() {
         .silent_about("minted by the generator on");
 }
 
+/// Block until the clock the stamps read has moved past `since`, so the next
+/// write is dated strictly later than everything written before it.
+fn after(since: u64) {
+    while stamps_now() <= since {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A typed value read by a generator, which another generator reads in turn.
+fn typed_chain(fixture: &mut Fixture) {
+    fixture.seed_generator(
+        "derived",
+        ALICE_FILE,
+        &[],
+        &json!({
+            "script": "printf 'derived-%s' \"$(cat \"$in/api-token/api-token\")\" > \"$out/derived\"",
+            "network": false,
+            "runtimeInputs": ["coreutils"],
+            "prompts": {}, "dependencies": ["api-token"], "files": {},
+            "share": false, "validation": null, "description": null,
+        }),
+    );
+    fixture.seed_generator(
+        "leaf",
+        ALICE_FILE,
+        &[],
+        &json!({
+            "script": "printf 'leaf-%s' \"$(cat \"$in/derived/derived\")\" > \"$out/leaf\"",
+            "network": false,
+            "runtimeInputs": ["coreutils"],
+            "prompts": {}, "dependencies": ["derived"], "files": {},
+            "share": false, "validation": null, "description": null,
+        }),
+    );
+}
+
+/// A value written by `set` cascades nothing, so the generator that read it
+/// holds a value derived from what it replaced. `check` reports that from the
+/// stamps alone, names the dependent's regeneration as the one remedy and never
+/// the dependency's, prints no value, and fails; the remedy clears it.
+#[test]
+fn a_dependency_set_after_its_dependent_reads_as_stale_and_a_regeneration_clears_it() {
+    const HEADLINE: &str = "flake.safix.users.alice holds the values the generator on 'derived' \
+                            derived from 'api-token', and 'api-token' has been written since.";
+    const RETIRED: &str = "CANARY-the-first-token";
+    const CURRENT: &str = "CANARY-the-second-token";
+
+    let mut fixture = Fixture::new();
+    typed_chain(&mut fixture);
+    fixture
+        .set("alice", "api-token", RETIRED)
+        .expect_success("typing the first token");
+    fixture
+        .run(&["generate", "alice"])
+        .expect_success("deriving from it");
+    assert_eq!(
+        fixture.value(ALICE_FILE, "derived"),
+        format!("derived-{RETIRED}")
+    );
+    fixture
+        .run(&["check", "alice"])
+        .silent_about("has been written since");
+
+    after(stamps_now());
+    fixture
+        .set("alice", "api-token", CURRENT)
+        .expect_success("typing the second token");
+
+    let stale = fixture.run(&["check", "alice"]);
+    assert_eq!(stale.code, Some(1), "{}", stale.combined());
+    stale
+        .says(HEADLINE)
+        .says("state/safix/definitions/alice/api-token.stamps dates that write")
+        .says("reads exactly like one derived after")
+        .says("    safix generate --regenerate alice derived\n")
+        .silent_about("--regenerate alice api-token")
+        .silent_about("generator on 'leaf'")
+        .silent_about("CANARY");
+
+    fixture
+        .run(&["generate", "--regenerate", "--yes", "alice", "derived"])
+        .expect_success("the remedy");
+    assert_eq!(
+        fixture.value(ALICE_FILE, "leaf"),
+        format!("leaf-derived-{CURRENT}"),
+        "the remedy's cascade re-derived everything downstream"
+    );
+    fixture
+        .run(&["check", "alice"])
+        .silent_about("has been written since");
+}
+
+/// A regeneration cascade re-runs every generator derived from the value it
+/// regenerates, so it leaves no derivation older than its input.
+#[test]
+fn a_cascade_leaves_no_stale_derivation() {
+    let mut fixture = Fixture::new();
+    fixture.make_sops_file(ALICE_FILE, &["api-token"]);
+    fixture.seed_generator(
+        "base",
+        ALICE_FILE,
+        &[],
+        &plain("head -c 18 /dev/urandom | base64 | tr -d '\\n' > \"$out/base\""),
+    );
+    fixture.seed_generator(
+        "middle",
+        ALICE_FILE,
+        &[],
+        &json!({
+            "script": "printf 'mid-%s' \"$(cat \"$in/base/base\")\" > \"$out/middle\"",
+            "network": false,
+            "runtimeInputs": ["coreutils"],
+            "prompts": {}, "dependencies": ["base"], "files": {},
+            "share": false, "validation": null, "description": null,
+        }),
+    );
+    fixture
+        .run(&["generate", "alice"])
+        .expect_success("the first mint");
+
+    after(stamps_now());
+    fixture
+        .run(&["generate", "--regenerate", "--yes", "alice", "base"])
+        .expect_success("the cascade");
+    fixture
+        .run(&["check", "alice"])
+        .silent_about("has been written since");
+}
+
 /// clan's wireguard keypair, ported: one generator, a private half that is
 /// encrypted and a public half stored in the clear.
 ///

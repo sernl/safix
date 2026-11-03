@@ -8,9 +8,10 @@
 //!
 //! The shape is the shell's two functions. A finding is a blank line, then its
 //! headline; detail lines under it are indented two spaces, and the items they
-//! list four; every remedy is indented four. The whole report goes to standard
-//! error — `check` writes nothing to standard output, which is what lets it be
-//! run with output redirected and still be read.
+//! list four; every remedy is indented four. A note — a finding that does not
+//! fail the run — is printed the same way and is not counted. The whole report
+//! goes to standard error — `check` writes nothing to standard output, which is
+//! what lets it be run with output redirected and still be read.
 
 use safix_core::audit::{self, Disagreement, Side};
 use safix_core::check::{Finding, Mint};
@@ -21,20 +22,26 @@ use crate::reporter::PROGRAM;
 /// The whole report, findings in order, and the closing line.
 ///
 /// A report with no findings is one line and no blank line before it. A report
-/// with findings ends with a blank line and the count, and the caller exits
-/// non-zero.
+/// with findings ends with a blank line and the count of those that fail, and
+/// the caller exits non-zero. A report whose findings are all notes ends with a
+/// blank line and a closing that says there is no drift and that the notes
+/// qualify it, and the caller exits zero.
 #[must_use]
 pub fn report(findings: &[Finding]) -> String {
     let mut out = String::new();
     for finding in findings {
         push_finding(&mut out, finding);
     }
+    let failing = findings.iter().filter(|finding| finding.fails()).count();
     if findings.is_empty() {
         out.push_str(
             "safix: no drift. The policy, the recipients and the values all agree with the declarations.\n",
         );
+    } else if failing == 0 {
+        let closing = format!("\n{PROGRAM}: no drift; the note(s) above qualify that.\n");
+        out.push_str(&closing);
     } else {
-        let closing = format!("\n{PROGRAM}: {} finding(s).\n", findings.len());
+        let closing = format!("\n{PROGRAM}: {failing} finding(s).\n");
         out.push_str(&closing);
     }
     out
@@ -93,17 +100,10 @@ fn push_finding(out: &mut String, finding: &Finding) {
             push_policy(out, finding);
         }
         Finding::RecipientDrift { .. } => push_recipients(out, finding),
-        Finding::RecipientRosterUnverifiable { file } => {
-            headline(out, &format!("Recipient roster cannot be audited: {file}"));
-            detail(
-                out,
-                "Raw age files do not expose their recipient roster. Successful decryption proves access, not the absence of other recipients.",
-            );
-            remedy(
-                out,
-                "Use a SOPS container when inspectable recipient metadata is required.",
-            );
-        }
+        Finding::RecipientTagDrift { .. }
+        | Finding::RecipientRosterTagMatched { .. }
+        | Finding::RecipientRosterUnverifiable { .. }
+        | Finding::AgeAudienceChanged { .. } => push_raw_age(out, finding),
         Finding::SharedStrayMigration { .. } | Finding::SharedStrayRevocation { .. } => {
             push_shared(out, finding);
         }
@@ -111,6 +111,7 @@ fn push_finding(out: &mut String, finding: &Finding) {
         | Finding::ValuelessPublic { .. }
         | Finding::UnclaimedValue { .. } => push_values(out, finding),
         Finding::DefinitionDrift { .. } => push_definition(out, finding),
+        Finding::DerivedValueStale { .. } => push_stale(out, finding),
         Finding::RotationDue { .. } => push_rotation(out, finding),
         _ => {}
     }
@@ -239,6 +240,11 @@ fn push_narrowing(out: &mut String, narrowed: &Holders) {
             item(out, key);
         }
     }
+    push_not_revocation(out);
+}
+
+/// The four lines every narrowing ends with: what a re-wrap is not.
+fn push_not_revocation(out: &mut String) {
     detail(
         out,
         "A key the declared audience does not name is a narrowing — a grant dropped, a",
@@ -255,6 +261,126 @@ fn push_narrowing(out: &mut String, narrowed: &Holders) {
         out,
         "value in the file, and no re-wrap unreads it. Only a new value revokes.",
     );
+}
+
+/// What a raw age header says about a file's roster, and what its audience
+/// record says.
+///
+/// Each paragraph says how strong its evidence is, because the header's is
+/// uneven: an SSH stanza names its key by a four-byte tag, and every other
+/// stanza names nobody. A disagreement in a tag is a disagreement in the key;
+/// an agreement is a note, never a pass.
+fn push_raw_age(out: &mut String, finding: &Finding) {
+    match finding {
+        Finding::RecipientTagDrift {
+            file,
+            missing,
+            extra,
+            duplicate,
+            narrowed,
+            mints,
+        } => {
+            headline(
+                out,
+                &format!(
+                    "{file} is not encrypted to the SSH recipients declared for it, by the tags \
+                     age writes into its stanzas."
+                ),
+            );
+            if !extra.is_empty() {
+                detail(
+                    out,
+                    "carries a stanza whose tag no SSH recipient of its audience has:",
+                );
+                for key in extra {
+                    item(out, key);
+                }
+            }
+            if !missing.is_empty() {
+                detail(
+                    out,
+                    "is in its audience and has no stanza carrying its tag:",
+                );
+                for key in missing {
+                    item(out, key);
+                }
+            }
+            if !duplicate.is_empty() {
+                detail(
+                    out,
+                    "carries more stanzas with this tag than its audience declares keys with it:",
+                );
+                for key in duplicate {
+                    item(out, key);
+                }
+            }
+            push_narrowing(out, narrowed);
+            if narrowed.named.is_empty() && narrowed.orphaned.is_empty() && !extra.is_empty() {
+                push_not_revocation(out);
+            }
+            remedy(out, &format!("{PROGRAM} fix --yes"));
+            remedy(out, &format!("git diff -- {file}"));
+            if !extra.is_empty() && !mints.is_empty() {
+                remedy(out, "then, to revoke rather than align, mint new values:");
+                for mint in mints {
+                    remedy(out, &mint_command(mint));
+                }
+            }
+        }
+
+        Finding::RecipientRosterTagMatched { file, matched } => {
+            headline(
+                out,
+                &format!("Recipient roster matched by tag only: {file}"),
+            );
+            detail(
+                out,
+                &format!(
+                    "Each of the {matched} stanza(s) matches a declared SSH key by a four-byte tag, \
+                     which anyone can collide with, so the match does not establish which keys the \
+                     file is wrapped to."
+                ),
+            );
+            remedy(
+                out,
+                "Use a SOPS container when inspectable recipient metadata is required.",
+            );
+        }
+
+        Finding::RecipientRosterUnverifiable { file } => {
+            headline(out, &format!("Recipient roster cannot be audited: {file}"));
+            detail(
+                out,
+                "Raw age names an SSH recipient by a four-byte tag and every other recipient \
+                 not at all, and this file holds, or its audience declares, recipients whose \
+                 stanzas disclose no tag. Successful decryption proves access, not the absence \
+                 of other recipients.",
+            );
+            remedy(
+                out,
+                "Use a SOPS container when inspectable recipient metadata is required.",
+            );
+        }
+
+        Finding::AgeAudienceChanged { file, record } => {
+            headline(
+                out,
+                &format!("{file} is wrapped to an audience that is no longer declared for it."),
+            );
+            detail(
+                out,
+                &format!(
+                    "{record} records the audience `{PROGRAM} fix` wrapped these exact bytes to, \
+                     and the audience declared now is not that one."
+                ),
+            );
+            push_not_revocation(out);
+            remedy(out, &format!("{PROGRAM} fix --yes"));
+            remedy(out, &format!("git diff -- {file}"));
+        }
+
+        _ => {}
+    }
 }
 
 /// A shared name with a copy outside the file its audience reads.
@@ -491,6 +617,51 @@ fn push_definition(out: &mut String, finding: &Finding) {
         remedy(
             out,
             &format!("or adopt the value by reverting the edit to the '{generator}' generator"),
+        );
+    }
+}
+
+/// A generated value one of whose dependencies was written after it.
+///
+/// One remedy, naming the dependent: `generate --regenerate` on the entry the
+/// generator is declared on re-runs it against the dependency as it now
+/// stands, and its own cascade re-runs everything derived from it in turn.
+/// Naming the dependency instead would refuse for a typed value and discard a
+/// generated one the operator just wrote.
+///
+/// No value appears, and none could: the finding is a comparison of two
+/// plaintext timestamps, and `check` opened no ciphertext.
+fn push_stale(out: &mut String, finding: &Finding) {
+    if let Finding::DerivedValueStale {
+        user,
+        generator,
+        dependency,
+        record,
+    } = finding
+    {
+        headline(
+            out,
+            &format!(
+                "flake.safix.users.{user} holds the values the generator on '{generator}' \
+                 derived from '{dependency}', and '{dependency}' has been written since."
+            ),
+        );
+        detail(
+            out,
+            &format!("{record} dates that write after the generator's last run. A value"),
+        );
+        detail(
+            out,
+            "derived before the dependency changed reads exactly like one derived after,",
+        );
+        detail(out, "so nothing else in the tree shows this.");
+        remedy(
+            out,
+            "derive them again from the dependency as it now stands:",
+        );
+        remedy(
+            out,
+            &format!("    {PROGRAM} generate --regenerate {user} {generator}"),
         );
     }
 }
@@ -2595,5 +2766,143 @@ mod tests {
         assert_eq!(row.len(), listing_header().len());
         assert_eq!(listing_header().last().map(String::as_str), Some("ROTATES"));
         assert_eq!(row.last().map(String::as_str), Some("-"));
+    }
+
+    fn matched_note() -> Finding {
+        Finding::RecipientRosterTagMatched {
+            file: "secrets/safix/users/alice/token.age".into(),
+            matched: 2,
+        }
+    }
+
+    /// A report holding only notes prints them, counts nothing, and closes by
+    /// saying there is no drift and that the notes qualify it.
+    #[test]
+    fn a_report_of_notes_alone_closes_without_drift() {
+        let rendered = report(&[matched_note()]);
+        assert!(
+            rendered.contains(
+                "Recipient roster matched by tag only: secrets/safix/users/alice/token.age"
+            )
+        );
+        assert!(
+            rendered
+                .contains("Each of the 2 stanza(s) matches a declared SSH key by a four-byte tag")
+        );
+        assert!(rendered.contains("does not establish which keys the file is wrapped to"));
+        assert!(rendered.ends_with("\n\nsafix: no drift; the note(s) above qualify that.\n"));
+        assert!(!rendered.contains("finding(s)"));
+    }
+
+    /// A note beside a failing finding is printed and not counted.
+    #[test]
+    fn a_note_beside_a_failing_finding_is_not_counted() {
+        let rendered = report(&[matched_note(), Finding::PolicyMissing]);
+        assert!(rendered.contains("Recipient roster matched by tag only"));
+        assert!(rendered.ends_with("\nsafix: 1 finding(s).\n"));
+    }
+
+    /// The staleness paragraph names the holder, the generator's entry and the
+    /// dependency, and its one remedy regenerates the dependent.
+    #[test]
+    fn a_stale_derivation_names_the_dependent_as_its_remedy() {
+        let rendered = report(&[Finding::DerivedValueStale {
+            user: "alice".into(),
+            generator: "db-hash".into(),
+            dependency: "db-password".into(),
+            record: "state/safix/definitions/alice/db-password.stamps".into(),
+        }]);
+        assert!(rendered.contains(
+            "flake.safix.users.alice holds the values the generator on 'db-hash' derived from \
+             'db-password', and 'db-password' has been written since."
+        ));
+        assert!(rendered.contains("reads exactly like one derived after"));
+        assert!(rendered.contains("safix generate --regenerate alice db-hash"));
+        assert!(!rendered.contains("--regenerate alice db-password"));
+        assert!(rendered.ends_with("\nsafix: 1 finding(s).\n"));
+    }
+
+    /// Tag drift lists each disagreement, says a re-wrap is not revocation,
+    /// and names `fix --yes` and the mint commands.
+    #[test]
+    fn tag_drift_names_each_disagreement_and_the_mints() {
+        let rendered = report(&[Finding::RecipientTagDrift {
+            file: "secrets/safix/users/alice/token.age".into(),
+            missing: vec!["ssh-ed25519 AAAAmissing".into()],
+            extra: vec!["ssh-ed25519 AAAAbob".into(), "ssh-rsa +6Q5OA".into()],
+            duplicate: vec!["ssh-ed25519 AAAAalice".into()],
+            narrowed: Holders {
+                named: vec!["bob".into()],
+                orphaned: Vec::new(),
+            },
+            mints: vec![Mint {
+                carrier: "alice".into(),
+                name: "token".into(),
+                generated: false,
+            }],
+        }]);
+        for expected in [
+            "secrets/safix/users/alice/token.age is not encrypted to the SSH recipients declared for it",
+            "carries a stanza whose tag no SSH recipient of its audience has:\n    - ssh-ed25519 AAAAbob\n    - ssh-rsa +6Q5OA",
+            "is in its audience and has no stanza carrying its tag:\n    - ssh-ed25519 AAAAmissing",
+            "carries more stanzas with this tag than its audience declares keys with it:\n    - ssh-ed25519 AAAAalice",
+            "those keys are the custody of:\n    - bob",
+            "Only a new value revokes.",
+            "    safix fix --yes\n",
+            "    safix set alice token",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing {expected:?} in {rendered}"
+            );
+        }
+    }
+
+    /// An extra stanza attributed to nobody still carries the not-revocation
+    /// sentence.
+    #[test]
+    fn an_unattributed_extra_stanza_still_says_a_re_wrap_is_not_revocation() {
+        let rendered = report(&[Finding::RecipientTagDrift {
+            file: "secrets/safix/users/alice/token.age".into(),
+            missing: Vec::new(),
+            extra: vec!["ssh-ed25519 ySQJdg".into()],
+            duplicate: Vec::new(),
+            narrowed: Holders {
+                named: Vec::new(),
+                orphaned: Vec::new(),
+            },
+            mints: Vec::new(),
+        }]);
+        assert!(rendered.contains("Only a new value revokes."));
+    }
+
+    #[test]
+    fn a_changed_recorded_audience_names_the_record_and_fix_yes() {
+        let rendered = report(&[Finding::AgeAudienceChanged {
+            file: "secrets/safix/users/alice/token.age".into(),
+            record: "state/safix/definitions/alice/token.audience".into(),
+        }]);
+        assert!(rendered.contains(
+            "secrets/safix/users/alice/token.age is wrapped to an audience that is no longer declared for it."
+        ));
+        assert!(
+            rendered.contains("state/safix/definitions/alice/token.audience records the audience")
+        );
+        assert!(rendered.contains("Only a new value revokes."));
+        assert!(rendered.contains("    safix fix --yes\n"));
+    }
+
+    #[test]
+    fn an_unverifiable_roster_says_its_stanzas_disclose_no_tag() {
+        let rendered = report(&[Finding::RecipientRosterUnverifiable {
+            file: "secrets/safix/users/alice/token.age".into(),
+        }]);
+        assert!(
+            rendered.contains(
+                "Recipient roster cannot be audited: secrets/safix/users/alice/token.age"
+            )
+        );
+        assert!(rendered.contains("stanzas disclose no tag"));
+        assert!(rendered.ends_with("\nsafix: 1 finding(s).\n"));
     }
 }
