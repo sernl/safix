@@ -907,14 +907,23 @@ fn sync_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
 /// An age identity for a person who has none, or their own public recipient
 /// with `--show`.
 fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
-    const FORM: &str = "keygen [--for-someone-else] [<user>] | keygen --show | keygen --kind age | keygen --kind pgp --uid <identity> [--expires <2y>]";
+    const FORM: &str = "keygen [--for-someone-else] [<user>] | keygen --show | keygen --kind age [--hybrid] | keygen --kind pgp --uid <identity> [--expires <2y>]";
     if let [kind_flag, kind, rest @ ..] = arguments
         && kind_flag == "--kind"
     {
         match kind.as_str() {
-            "age" if rest.is_empty() => {
-                let recipient = safix_core::identity::generate_age()?;
+            "age" if rest.is_empty() || rest == ["--hybrid"] => {
+                let recipient = safix_core::identity::generate_age(!rest.is_empty())?;
                 Terminal.write(&format!("Public recipient: {recipient}\nPrivate identity: {}\nDeclare the public recipient for your safix user; keep an independently verified encrypted backup.\n", keygen::identity_file().display()));
+                if let Some(notice) = keygen::standalone_sops_notice(
+                    cfg!(target_os = "macos"),
+                    &keygen::identity_file(),
+                    std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+                    std::env::var_os("HOME").as_deref(),
+                    std::env::var_os("SOPS_AGE_KEY_FILE").as_deref(),
+                ) {
+                    Terminal.write(&notice);
+                }
             }
             "pgp" => {
                 let mut uid = None;
@@ -951,6 +960,10 @@ fn keygen_command(arguments: &[String]) -> Result<ExitCode, Refusal> {
         }
         keygen::show(&Terminal)?;
         return Ok(ExitCode::SUCCESS);
+    }
+
+    if arguments.iter().any(|argument| argument == "--hybrid") {
+        return Err(Refusal::Usage { form: FORM });
     }
 
     let (for_someone_else, rest) = match arguments.split_first() {

@@ -150,6 +150,14 @@ fn nonempty_environment(name: &str) -> Option<OsString> {
     std::env::var_os(name).filter(|value| !value.is_empty())
 }
 
+/// Deny the sops child every Vault server unless the operator named an allowlist,
+/// so a file's `vault_address` cannot receive the operator's token (GHSA-jgf3-f6rg-8x3h).
+pub(crate) fn deny_vault_servers_by_default(command: &mut Command) {
+    if nonempty_environment("SOPS_HC_VAULT_ALLOWLIST").is_none() {
+        command.env("SOPS_HC_VAULT_ALLOWLIST", "none");
+    }
+}
+
 fn document_error(operation: &'static str, path: &Path, cause: &'static str) -> crate::Error {
     crate::Error::DocumentOperation {
         operation,
@@ -250,6 +258,8 @@ fn sops_command(identities: &Identities) -> Command {
             "SSH_AUTH_SOCK",
             "GNUPGHOME",
             "GPG_AGENT_INFO",
+            "VAULT_TOKEN",
+            "VAULT_ADDR",
         ] {
             command.env_remove(variable);
         }
@@ -270,6 +280,7 @@ fn sops_command(identities: &Identities) -> Command {
     {
         command.env("SOPS_GPG_EXEC", program);
     }
+    deny_vault_servers_by_default(&mut command);
     command
 }
 
@@ -643,6 +654,12 @@ pub(crate) fn is_ssh_recipient(recipient: &str) -> bool {
         && !recipient.chars().any(char::is_control)
 }
 
+/// Hybrid X25519 + ML-KEM-768 recipients are `age1pq1` and bech32; age refuses
+/// to encrypt one file to such a recipient beside a classic one.
+pub(crate) fn is_hybrid_recipient(recipient: &str) -> bool {
+    recipient.starts_with("age1pq1")
+}
+
 fn recipient_sets<'a>(
     destination: &Source,
     recipients: &'a [String],
@@ -688,6 +705,16 @@ fn recipient_sets<'a>(
             }
             age.push(recipient.as_str());
         }
+    }
+    if destination.format == Format::Age
+        && age.iter().any(|recipient| is_hybrid_recipient(recipient))
+        && !age.iter().all(|recipient| is_hybrid_recipient(recipient))
+    {
+        return Err(document_error(
+            "encrypt",
+            &destination.path,
+            "native age cannot mix post-quantum and classic recipients",
+        ));
     }
     if age.is_empty() && pgp.is_empty() {
         return Err(document_error(
@@ -1050,4 +1077,96 @@ pub(crate) fn write(
         None,
     )?;
     atomic_replace(destination, ciphertext.as_slice())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Format, Source, is_hybrid_recipient, recipient_sets, require_local_recipients};
+    use std::path::PathBuf;
+
+    /// Synthetic throughout: shaped like the real thing, minted by nobody.
+    const CLASSIC: &str = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+
+    fn hybrid(filler: char) -> String {
+        format!("age1pq1{}", filler.to_string().repeat(1952))
+    }
+
+    fn destination(format: Format) -> Source {
+        Source {
+            path: PathBuf::from("/out/api-token"),
+            format,
+            key: String::new(),
+        }
+    }
+
+    fn refused_for_mixing(result: crate::Result<(Vec<&str>, Vec<&str>)>) -> bool {
+        matches!(
+            result,
+            Err(crate::Error::DocumentOperation { cause, .. })
+                if cause == "native age cannot mix post-quantum and classic recipients"
+        )
+    }
+
+    #[test]
+    fn a_hybrid_recipient_is_named_by_its_prefix_and_a_card_is_not() {
+        assert!(is_hybrid_recipient(&hybrid('q')));
+        for other in [
+            CLASSIC,
+            "age1yubikey1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "ssh-ed25519 AAAA",
+            "pgp:0123456789ABCDEF0123456789ABCDEF01234567",
+        ] {
+            assert!(!is_hybrid_recipient(other), "{other} named hybrid");
+        }
+    }
+
+    #[test]
+    fn a_native_age_set_that_mixes_hybrid_and_classic_is_refused() {
+        for classic in [CLASSIC, "ssh-ed25519 AAAA"] {
+            let recipients = [hybrid('q'), classic.to_owned()];
+            assert!(
+                refused_for_mixing(recipient_sets(&destination(Format::Age), &recipients)),
+                "a native age set mixing a hybrid recipient and {classic} was not refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_native_age_set_of_hybrid_recipients_is_accepted() {
+        let recipients = [hybrid('q'), hybrid('p')];
+        let (age, pgp) = recipient_sets(&destination(Format::Age), &recipients)
+            .expect("two hybrid recipients make one native age set");
+        assert_eq!(age.len(), 2);
+        assert_eq!(pgp, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_sops_set_may_mix_hybrid_and_classic() {
+        let recipients = [hybrid('q'), CLASSIC.to_owned(), "ssh-ed25519 AAAA".to_owned()];
+        let (age, _) = recipient_sets(&destination(Format::Yaml), &recipients)
+            .expect("sops wraps each recipient on its own");
+        assert_eq!(age.len(), 3);
+    }
+
+    #[test]
+    fn require_local_recipients_admits_a_hybrid_recipient() {
+        let recipient = hybrid('q');
+        assert_eq!(recipient.len(), 1959);
+        let path = std::env::temp_dir().join(format!(
+            "safix-ciphertext-hybrid-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            format!("a: ENC[AES256_GCM,data:Jg==,type:str]\nsops:\n    age:\n        - recipient: {recipient}\n          enc: x\n"),
+        )
+        .expect("a scratch document");
+        let admitted = require_local_recipients(&Source {
+            path: path.clone(),
+            format: Format::Yaml,
+            key: String::new(),
+        });
+        let _ = std::fs::remove_file(&path);
+        assert!(admitted.is_ok(), "{:?}", admitted.err().map(|error| error.to_string()));
+    }
 }

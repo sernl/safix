@@ -767,3 +767,53 @@ fn store_refuses_an_exhausted_counter_without_replacing_live_data() {
         b"retained"
     );
 }
+
+/// An installing run must not inherit ambient identity material, and Vault
+/// credentials are that: neither variable reaches sops, and sops is denied
+/// every Vault server besides. The allowlist is passed empty, which safix
+/// treats as unset, so an allowlist in the suite's own environment cannot
+/// decide the outcome.
+#[test]
+fn an_installing_run_hands_sops_no_vault_credentials() {
+    let store = Store::new("vault-isolation");
+    let path = store.write("vault-isolation", &store.manifest());
+    let spool = store.fixture.scratch("spy");
+    let sops = harness::real_sops();
+    let runtime = store.runtime.display().to_string();
+
+    store
+        .fixture
+        .run_env(
+            &["install", path.to_str().unwrap()],
+            None,
+            &[
+                ("XDG_RUNTIME_DIR", &runtime),
+                ("SAFIX_SOPS", harness::shim()),
+                ("SAFIX_SHIM_ROLE", "spy"),
+                ("SAFIX_SHIM_SOPS", &sops),
+                ("SAFIX_SHIM_SPY", spool.to_str().unwrap()),
+                ("VAULT_TOKEN", "CANARY-vault-token"),
+                ("VAULT_ADDR", "https://vault.example.invalid"),
+                ("SOPS_HC_VAULT_ALLOWLIST", ""),
+            ],
+        )
+        .expect_success("the install through the observed sops");
+
+    assert_eq!(
+        std::fs::read(store.store_root().join("alice-alone")).unwrap(),
+        b"a value"
+    );
+    let environ = std::fs::read_to_string(spool.join("environ")).unwrap_or_default();
+    assert!(
+        environ.contains("SOPS_HC_VAULT_ALLOWLIST=none\n"),
+        "the observed sops was not denied every Vault server, or never ran:\n{environ}"
+    );
+    assert!(
+        !environ.contains("VAULT_TOKEN="),
+        "the Vault token reached sops"
+    );
+    assert!(
+        !environ.contains("VAULT_ADDR="),
+        "the Vault address reached sops"
+    );
+}

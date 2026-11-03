@@ -21,7 +21,8 @@
 //! reads only the second, so the private half is never a string this process
 //! formats.
 
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::progress::{Progress, log, note};
@@ -85,9 +86,18 @@ pub fn run(
     }
 
     let keyfile = identity_file();
-    let public = crate::identity::generate_age()?;
+    let public = crate::identity::generate_age(false)?;
 
     progress.write(&epilogue(user, &keyfile.display().to_string(), &public));
+    if let Some(notice) = standalone_sops_notice(
+        cfg!(target_os = "macos"),
+        &keyfile,
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("SOPS_AGE_KEY_FILE").as_deref(),
+    ) {
+        progress.write(&notice);
+    }
     Ok(())
 }
 
@@ -179,6 +189,43 @@ pub fn append_to_identity_file(keyfile: &std::path::Path, text: &str) -> Result<
     crate::identity::append_age_identity(keyfile, text.as_bytes())
 }
 
+/// The `export SOPS_AGE_KEY_FILE=` line standalone sops and clan need to read
+/// `written`, or nothing where they already would.
+///
+/// On macOS standalone sops falls back to `$HOME/Library/Application Support`
+/// rather than `$HOME/.config` when `XDG_CONFIG_HOME` is unset or empty, while
+/// [`identity_file`] keeps `.config` on every platform. `macos` is the
+/// platform as an argument, so the macOS answer is testable off macOS.
+#[must_use]
+pub fn standalone_sops_notice(
+    macos: bool,
+    written: &Path,
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+    sops_age_key_file: Option<&OsStr>,
+) -> Option<String> {
+    if !macos {
+        return None;
+    }
+    if sops_age_key_file.is_some_and(|named| !named.is_empty() && Path::new(named) == written) {
+        return None;
+    }
+    let config = match xdg_config_home.filter(|value| !value.is_empty()) {
+        Some(xdg) => PathBuf::from(xdg),
+        None => Path::new(home.unwrap_or_default()).join("Library/Application Support"),
+    };
+    if config.join("sops/age/keys.txt") == written {
+        return None;
+    }
+    let quoted = written.to_string_lossy().replace('\'', "'\\''");
+    Some(format!(
+        "\nStandalone sops and clan on macOS read a different default identity file.\n\
+        To have them read this one:\n\
+        \n\
+        \x20   export SOPS_AGE_KEY_FILE='{quoted}'\n"
+    ))
+}
+
 /// What to do with the half that just left this process.
 fn epilogue(user: &str, keyfile: &str, public: &str) -> String {
     format!(
@@ -202,4 +249,80 @@ fn epilogue(user: &str, keyfile: &str, public: &str) -> String {
         ssh-to-age reads an ed25519 public key and prints the age recipient for\n\
         it, and safix.identity.sshKeyPaths names the private half.\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use super::standalone_sops_notice;
+
+    const HOME: &str = "/Users/alice";
+    const XDG_FALLBACK: &str = "/Users/alice/.config/sops/age/keys.txt";
+
+    fn notice(
+        macos: bool,
+        written: &str,
+        xdg: Option<&str>,
+        sops_age_key_file: Option<&str>,
+    ) -> Option<String> {
+        standalone_sops_notice(
+            macos,
+            Path::new(written),
+            xdg.map(OsStr::new),
+            Some(OsStr::new(HOME)),
+            sops_age_key_file.map(OsStr::new),
+        )
+    }
+
+    #[test]
+    fn the_notice_is_silent_off_macos() {
+        assert_eq!(notice(false, XDG_FALLBACK, None, None), None);
+    }
+
+    #[test]
+    fn the_notice_names_a_file_under_the_xdg_fallback() {
+        let printed = notice(true, XDG_FALLBACK, None, None).unwrap_or_default();
+        assert!(
+            printed.contains(&format!("export SOPS_AGE_KEY_FILE='{XDG_FALLBACK}'\n")),
+            "{printed}"
+        );
+        assert!(printed.contains("Standalone sops and clan"), "{printed}");
+    }
+
+    #[test]
+    fn the_notice_is_silent_where_standalone_sops_looks_under_xdg() {
+        assert_eq!(
+            notice(true, "/xdg/sops/age/keys.txt", Some("/xdg"), None),
+            None
+        );
+    }
+
+    #[test]
+    fn the_notice_is_silent_where_standalone_sops_looks_under_application_support() {
+        assert_eq!(
+            notice(
+                true,
+                "/Users/alice/Library/Application Support/sops/age/keys.txt",
+                Some(""),
+                None
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_notice_is_silent_when_sops_age_key_file_names_the_file() {
+        assert_eq!(notice(true, XDG_FALLBACK, None, Some(XDG_FALLBACK)), None);
+    }
+
+    #[test]
+    fn the_notice_quotes_a_path_with_a_space() {
+        let printed = notice(true, "/Users/alice/my keys/it's.txt", None, None).unwrap_or_default();
+        assert!(
+            printed.contains("export SOPS_AGE_KEY_FILE='/Users/alice/my keys/it'\\''s.txt'\n"),
+            "{printed}"
+        );
+    }
 }

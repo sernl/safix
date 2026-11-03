@@ -69,6 +69,16 @@
       };
 
       integration = import ./checks/integration.nix { inherit pkgs; };
+
+      # Appended after the operator's `PATH` rather than prefixed, so an
+      # operator's own plugin is found first and this one is the fallback. There
+      # is deliberately no `SAFIX_AGE_PLUGIN_YUBIKEY` default: sops finds the
+      # plugin on `PATH` only, and a default would let `enroll` generate a card
+      # identity with this plugin while sops wraps to it with the operator's.
+      # Without one, `enroll` and sops resolve the same binary.
+      plugins = pkgs.lib.optionals (pkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.age-plugin-yubikey) [
+        pkgs.age-plugin-yubikey
+      ];
     in
     {
       packages.safix = craneLib.buildPackage (
@@ -96,7 +106,8 @@
               --set-default SAFIX_SOPS ${pkgs.sops}/bin/sops \
               --set-default SAFIX_GPG ${gnupg}/bin/gpg \
               --set-default SAFIX_GPGCONF ${gnupg}/bin/gpgconf \
-              --set-default SAFIX_SSH_TO_AGE ${pkgs.ssh-to-age}/bin/ssh-to-age
+              --set-default SAFIX_SSH_TO_AGE ${pkgs.ssh-to-age}/bin/ssh-to-age \
+              ${pkgs.lib.optionalString (plugins != [ ]) "--suffix PATH : ${pkgs.lib.makeBinPath plugins}"}
           '';
 
           meta.description = "Declaration-driven secrets, protected identity custody and verified encrypted migration";
@@ -199,6 +210,55 @@
         safix-rs-deny = craneLib.cargoDeny common;
 
         safix-rs-audit = craneLib.cargoAudit (common // { inherit (inputs) advisory-db; });
+      }
+      // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+        # The search path the packaged command hands its children: the
+        # operator's entries, then the packaged card plugin, last. The wrapper is
+        # copied with its `exec` target replaced by `env`, so what is read is the
+        # environment the wrapper itself built. Linux only, because the copy is
+        # run in the build sandbox and the wrapper is the same text everywhere.
+        #
+        # Severity drill: deleting the `--suffix PATH` line turned this red on
+        # the containment assertion, and moving the plugin into the `--prefix`
+        # list turned it red on the ordering assertion.
+        safix-wrapper-path =
+          pkgs.runCommand "safix-wrapper-path"
+            {
+              wrapper = "${config.packages.safix}/bin/safix";
+              plugin = "${pkgs.age-plugin-yubikey}/bin";
+            }
+            ''
+              wrapped="$(grep -o '"[^"]*/bin/\.safix-wrapped"' "$wrapper" | tr -d '"')"
+              [ -n "$wrapped" ] || { echo "the wrapper names no exec target" >&2; exit 1; }
+              cp "$wrapper" ./safix
+              chmod u+w ./safix
+              # coreutils' `env` is a multi-call binary that dispatches on its
+              # argv[0], so the copy must not rename it with `exec -a`.
+              substituteInPlace ./safix \
+                --replace-fail "$wrapped" ${pkgs.coreutils}/bin/env \
+                --replace-fail 'exec -a "$0" ' 'exec '
+              environment="$(${pkgs.coreutils}/bin/env -i PATH=/operator-bin ${pkgs.bash}/bin/bash ./safix)"
+              path="$(printf '%s\n' "$environment" | sed -n 's/^PATH=//p')"
+              echo "PATH=$path"
+
+              case ":$path:" in
+                *":$plugin:"*) ;;
+                *) echo "the packaged plugin is not on PATH" >&2; exit 1 ;;
+              esac
+              case ":$path:" in
+                *":/operator-bin:"*"$plugin:"*) ;;
+                *) echo "the operator's PATH does not precede the packaged plugin" >&2; exit 1 ;;
+              esac
+              case "$path" in
+                *":$plugin") ;;
+                *) echo "the packaged plugin is not the last PATH entry" >&2; exit 1 ;;
+              esac
+              if printf '%s\n' "$environment" | grep -q '^SAFIX_AGE_PLUGIN_YUBIKEY='; then
+                echo "the wrapper sets SAFIX_AGE_PLUGIN_YUBIKEY" >&2
+                exit 1
+              fi
+              touch "$out"
+            '';
       };
     };
 }

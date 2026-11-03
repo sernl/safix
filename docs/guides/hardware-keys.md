@@ -30,6 +30,10 @@ The card is selected, then its PIV access is provisioned when it is factory-fres
 
 The identity block is appended to the same file `safix keygen` appends to. It holds no private key, because the key is on the card.
 
+Every later write whose audience includes the card's recipient runs `age-plugin-yubikey` from `PATH`.
+The packaged `safix` command appends its own plugin to the end of `PATH`, after the operator's entries, so an operator's own plugin is still the one found first.
+FIDO2 hmac-secret keys are not enrolled by `safix enroll`.
+
 Where a clan is declared through [`flake.safix.bridge.clanFlake`](../reference/declarations.md#flakesafixbridgeclanflake), the recipient is registered with clan through clan's own command. Then [`flake.safix.enrollHook`](../reference/declarations.md#flakesafixenrollhook) receives the person, the serial and the recipient.
 
 The generated PIN and PUK are stored as that person's own secret, named for the serial. `--no-store-pin` turns that off, and `--mirror-to-store` writes them to the password store as well.

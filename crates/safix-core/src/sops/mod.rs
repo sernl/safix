@@ -323,6 +323,7 @@ impl Sops {
         {
             command.env("SOPS_GPG_EXEC", program);
         }
+        crate::ciphertext::deny_vault_servers_by_default(&mut command);
         let identities = crate::ciphertext::Identities::from_environment();
         if let Some(home) = identities.gnupg_home {
             command.env("GNUPGHOME", home);

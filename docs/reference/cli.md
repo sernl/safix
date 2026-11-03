@@ -330,7 +330,7 @@ Per-target behaviour lives in
 ```text
 safix keygen [--for-someone-else] [<user>]
 safix keygen --show
-safix keygen --kind age
+safix keygen --kind age [--hybrid]
 safix keygen --kind pgp --uid <identity> [--expires 2y]
 ```
 
@@ -343,6 +343,7 @@ overwriting is how someone loses the key to everything they hold.
 --for-someone-else   mint an identity for a person who is not you
 --show               print the public recipient of the identity already minted here
 --kind age|pgp       which key profile to mint; age is the default
+--hybrid             after --kind age, mint a hybrid post-quantum identity
 --uid <identity>     the GnuPG user id, required by the pgp profile
 --expires 2y         the GnuPG primary's expiry
 ```
@@ -360,6 +361,13 @@ repository paths and Nix-store paths are refused.
 `--show` mints nothing at all, and is refused — naming plain `keygen` as the
 remedy — where no identity has been minted here yet. See
 [Backing up an identity](../guides/identity-backup.md).
+
+`--hybrid` mints a hybrid X25519 + ML-KEM-768 identity with `age-keygen -pq` and appends it to the same identity file; anywhere but after `--kind age` it is a usage error.
+Its recipient is `age1pq1` followed by 1952 bech32 characters, 1959 in all.
+Each hybrid recipient adds about 4.8 KB of metadata to every sops file wrapped to it, against about 0.57 KB for an X25519 recipient (measured with sops 3.13.3: a one-key document's `sops.age` list is 4,814 bytes for one hybrid recipient and 570 bytes for one X25519 recipient).
+Every reader of such a file needs sops 3.12.0 or later, or age 1.3.0 or later.
+
+On macOS, when the file written is not the one standalone sops reads by default and `SOPS_AGE_KEY_FILE` does not already name it, `keygen` and `keygen --kind age` also print an `export SOPS_AGE_KEY_FILE='<file>'` line for standalone sops and clan.
 
 ## migrate
 
@@ -433,10 +441,11 @@ hands the name and the recipient to
 `--host` is refused where no hook is configured, because attaching an account on
 a host is a property of a consumer's module tree and safix has none.
 
-The recipient is theirs: a native age recipient, an SSH public key, or
-`pgp:FULL_UPPERCASE_FINGERPRINT`. Only its shape is checked here. An SSH key
-with a comment must be passed as one quoted argument. A recipient that needs a
-physical interaction is refused for this field and belongs in that person's
+The recipient is theirs: a native age recipient (X25519 or hybrid
+post-quantum), an SSH public key, or `pgp:FULL_UPPERCASE_FINGERPRINT`. Only its
+shape is checked here. An SSH key with a comment must be passed as one quoted
+argument. A recipient that needs a physical interaction is refused for this
+field and belongs in that person's
 [`recoveryRecipients`](declarations.md#flakesafixusersnamerecoveryrecipients)
 instead, where it is additive.
 

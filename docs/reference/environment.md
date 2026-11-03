@@ -62,6 +62,10 @@ For the GnuPG keyring: `GNUPGHOME`, then `SAFIX_GNUPGHOME`, then
 `$XDG_DATA_HOME/safix/gnupg` — falling back to `$HOME/.local/share` — used only
 where that directory exists.
 
+Standalone sops and clan on macOS read `~/Library/Application Support/sops/age/keys.txt` by default where `XDG_CONFIG_HOME` is unset or empty.
+safix keeps `~/.config` on every platform, and passes the file it uses to its own sops children through `SOPS_AGE_KEY_FILE`.
+On macOS, when the file `safix keygen` or `safix keygen --kind age` appended to is not the one standalone sops reads and `SOPS_AGE_KEY_FILE` does not already name it, the command prints an `export SOPS_AGE_KEY_FILE=` line naming that file for the other tools.
+
 #### `SAFIX_AGE_KEY_FILE`
 
 The managed age identity file. It is the second source for discovery, behind
@@ -90,7 +94,7 @@ alone.
 | `SAFIX_SOPS` | `sops` |
 | `SAFIX_AGE` | `age` |
 | `SAFIX_AGE_KEYGEN` | `age-keygen` |
-| `SAFIX_AGE_PLUGIN_YUBIKEY` | the age plugin that generates a card identity |
+| `SAFIX_AGE_PLUGIN_YUBIKEY` | the age plugin `enroll` generates a card identity with |
 | `SAFIX_SSH_TO_AGE` | `ssh-to-age` |
 | `SAFIX_GPG` | `gpg` |
 | `SAFIX_GPGCONF` | `gpgconf` |
@@ -108,6 +112,8 @@ alone.
 | `SAFIX_SSH_KEYSCAN` | `ssh-keyscan` |
 | `SAFIX_TAR` | `tar` |
 | `SAFIX_SYSTEMCTL` | `systemctl` |
+
+sops runs `age-plugin-yubikey` from `PATH` to write to a card's recipient, and the packaged `safix` command appends one to the end of `PATH`, after the operator's own entries.
 
 ## How a run behaves
 
@@ -155,6 +161,18 @@ the child's environment.
 
 The GnuPG binary the encryption tool runs. safix sets it from `SAFIX_GPG` only
 where it is unset or empty, so a value an operator chose is left alone.
+
+#### `SOPS_HC_VAULT_ALLOWLIST`
+
+The Vault servers the encryption tool may contact.
+safix sets it to `none` for every sops child only where it is unset or empty, so a value an operator chose reaches sops unchanged.
+This defends against GHSA-jgf3-f6rg-8x3h, a decrypt that sends the operator's Vault token to whatever address a file's metadata names.
+safix supports no Vault recipients.
+sops's announced change of the default to `none` changes nothing for safix, which sets the value regardless of the default.
+
+#### `VAULT_TOKEN` and `VAULT_ADDR`
+
+Removed from the child's environment where an operation must not inherit ambient identity material, on the same terms as `SOPS_AGE_KEY`.
 
 #### `VISUAL` and `EDITOR`
 

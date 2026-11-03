@@ -132,6 +132,14 @@
 # commit whose message names only what safix did. Accepting `--host` with no hook
 # configured fails the same check, which then finds a hostname silently
 # discarded.
+# Setting the hybrid recipient's body length to 1951 fails `adduser-hybrid` on
+# its first refusal: a recipient one character short of what the pinned
+# `age-keygen -pq` prints is accepted. Observed during this change.
+# Dropping `-pq` from the `age-keygen` invocation fails `keygen-hybrid` on the
+# assertion that the appended identity is `AGE-SECRET-KEY-PQ-1`, and admitting
+# only `AGE-SECRET-KEY-1` lines to the identity reader fails it on the mint
+# itself, which reads back the line it just generated. Both observed during this
+# change.
 #
 # ── the enrollment drills, all observed red during this change ──
 # Sampling the pseudo-terminal's echo state only when the master has nothing to
@@ -656,6 +664,27 @@
         checks.safix-adduser-refusals =
           mode "safix-adduser-refusals" "custody"
             "adduser_refusals_leave_the_tree_as_they_found_it";
+
+        # A hybrid post-quantum recipient minted by the pinned `age-keygen -pq`:
+        # one character short it is refused naming the hybrid shape and leaves the
+        # tree as it was; whole, the scaffold and the regenerated policy carry all
+        # 1959 characters. A nixpkgs bump that changes the key size fails here.
+        checks.safix-adduser-hybrid =
+          mode "safix-adduser-hybrid" "custody"
+            "adduser_declares_a_hybrid_recipient_minted_by_the_pinned_age_keygen";
+
+        # `keygen --kind age --hybrid` appends one hybrid identity after an
+        # existing one without rewriting it, prints only the hybrid recipient, and
+        # `keygen --show` then names that recipient.
+        checks.safix-keygen-hybrid =
+          mode "safix-keygen-hybrid" "keygen"
+            "keygen_hybrid_appends_beside_an_existing_identity_and_prints_only_the_recipient";
+
+        # `--hybrid` anywhere but after `--kind age` is a usage error that mints
+        # nothing.
+        checks.safix-keygen-hybrid-usage =
+          mode "safix-keygen-hybrid-usage" "keygen"
+            "keygen_hybrid_outside_the_age_profile_is_a_usage_error";
 
         # Host attachment reaches a consumer through the hook or not at all.
         # `--host` with no hook configured is refused naming the hook and saying
@@ -1833,6 +1862,38 @@
                       touch "$out"
             '';
       }
+      # sops-environment-and-darwin-paths: the environment every sops child
+      # receives.
+      {
+        # A `set` that creates its file starts sops through both builders, and
+        # every invocation carries `SOPS_HC_VAULT_ALLOWLIST=none` where the
+        # operator left it unset (GHSA-jgf3-f6rg-8x3h).
+        #
+        # Severity drill: removing the helper call from `sops_command` turned
+        # this red on the per-invocation count (1 of 3), and removing it from
+        # `Sops::command` alone did too.
+        checks.safix-sops-vault-allowlist =
+          mode "safix-sops-vault-allowlist" "sops_environment"
+            "every_sops_child_is_denied_every_vault_server";
+
+        # An allowlist the operator set reaches every sops invocation unchanged,
+        # and `none` reaches none of them.
+        #
+        # Severity drill: setting `none` unconditionally turned this red.
+        checks.safix-sops-vault-operator =
+          mode "safix-sops-vault-operator" "sops_environment"
+            "an_operator_allowlist_reaches_sops_unchanged";
+
+        # An installing run hands sops neither `VAULT_TOKEN` nor `VAULT_ADDR`,
+        # and denies it every Vault server, while the value still installs.
+        #
+        # Severity drill: dropping `"VAULT_TOKEN"` from the isolated branch's
+        # removal list turned this red.
+        checks.safix-install-vault-isolation =
+          mode "safix-install-vault-isolation" "install"
+            "an_installing_run_hands_sops_no_vault_credentials";
+      }
+      # End sops-environment-and-darwin-paths.
       (lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
         checks.safix-pass-cli = withPass "safix-pass-cli" "pass_cli" "";
       })
